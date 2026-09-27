@@ -106,6 +106,10 @@ settles, so no key can sit live forever. Its `delivery_id` is
   belongs beside `graph_works_core.provenance`, the one module declared to run
   it. Until that function exists, a `reuse` dispatch runs end-to-end here and a
   `fork-child` one does not.
+- **It refuses `pin-detached` even with a supplied path.** This backend cannot
+  verify that the checkout is detached at the requested SHA in the right
+  repository, so `launch()` raises `WorktreeNotProvisioned` before starting a
+  subprocess.
 - **It does not decide what to dispatch.** That is a band-3 planner's, and it
   arrives here as a fully-resolved `PlannedDispatch`.
 - **It does not survive pid reuse.** Resumption probes a recorded pid; on a

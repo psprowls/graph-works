@@ -7,6 +7,9 @@ from pathlib import Path
 from types import SimpleNamespace
 from types import SimpleNamespace as ns
 
+from graph_works_core.orchestrate.dispatch import DispatchFailure, DispatchResult, ObservedPlacement
+from graph_works_core.orchestrate.dispatch_record import Overrides
+from graph_works_core.orchestrate.reroute import RerouteResult
 from graph_works_core.work.commands import DispatchExplanation, OpenDecision
 from graph_works_core.work.reconcile import CitedDecision, CommitRef, LandedSibling, ReconcileContext
 from graph_works_core.workspace.commits import CommitOutcome
@@ -24,6 +27,7 @@ from samples_work import (
     path_mutation,
     placement,
     regen,
+    status,
 )
 from work_tracker_okf.decisions import Decision
 
@@ -73,6 +77,156 @@ def test_placement_pending_commit_failure_warns_once() -> None:
     assert payload["warnings"] == ["workspace commit failed: hook-failed"]
 
 
+def test_worker_dispatch_payload_exact_success_shape() -> None:
+    result = DispatchResult(
+        status="dispatched",
+        key="work/a#execute",
+        run_id="run_1",
+        task_id="task_1",
+        task_title="Implement A",
+        display_name="A",
+        dispatch_id="ctx_1",
+        terminal="term_1",
+        placement=ObservedPlacement("create", "/wt", "feature/a", "A", "repo_1", "parent_1", True, ("created",)),
+        recorded="written",
+        probe="submitted-heartbeat",
+        record_path="/record.json",
+    )
+    payload = work.dispatch_payload(result)
+    assert set(payload) == {
+        "ok",
+        "status",
+        "key",
+        "task_id",
+        "task_title",
+        "display_name",
+        "dispatch_id",
+        "run_id",
+        "terminal",
+        "placement",
+        "recorded",
+        "probe",
+        "record_path",
+        "failure",
+    }
+    assert "error" not in payload
+    assert payload == {
+        "ok": True,
+        "status": "dispatched",
+        "key": "work/a#execute",
+        "task_id": "task_1",
+        "task_title": "Implement A",
+        "display_name": "A",
+        "dispatch_id": "ctx_1",
+        "run_id": "run_1",
+        "terminal": "term_1",
+        "placement": {
+            "action": "create",
+            "path": "/wt",
+            "branch": "feature/a",
+            "display_name": "A",
+            "repo_id": "repo_1",
+            "parent_worktree_id": "parent_1",
+            "lineage_set": True,
+            "notes": ["created"],
+            "start_sha": None,
+        },
+        "recorded": "written",
+        "probe": "submitted-heartbeat",
+        "record_path": "/record.json",
+        "failure": None,
+    }
+    assert json.loads(json.dumps(payload)) == payload
+
+
+def test_dispatch_resolution_keyword_remains_supported() -> None:
+    resolution = resolve_dispatch({"variant": "single"}, rules=())
+    assert work.dispatch_payload(resolution=resolution) == work.dispatch_payload(resolution)
+
+
+def test_worker_dispatch_payload_failure_shape() -> None:
+    result = DispatchResult(
+        status=None,
+        key="work/a#execute",
+        run_id="run_1",
+        failure=DispatchFailure("launch", "unsent", "worker did not launch", task_id="task_1", refusal="unavailable"),
+    )
+    payload = work.dispatch_payload(result)
+    assert payload["ok"] is False
+    assert payload["placement"] is None
+    assert payload["failure"] == {
+        "step": "launch",
+        "reason": "unsent",
+        "detail": "worker did not launch",
+        "task_id": "task_1",
+        "dispatch_id": None,
+        "refusal": "unavailable",
+    }
+    assert "error" not in payload
+    assert json.loads(json.dumps(payload)) == payload
+
+
+def test_reroute_payload_success_and_failure_shapes() -> None:
+    success = RerouteResult(
+        status="rerouted",
+        key="work/a#execute",
+        run_id="run_2",
+        reason="retry",
+        superseded_task_id="task_1",
+        superseded_dispatch_id="ctx_1",
+        overrides=Overrides(agent="codex", model="gpt-6-sol", effort="high"),
+        record_path="/record.json",
+    )
+    payload = work.reroute_payload(success)
+    assert set(payload) == {
+        "ok",
+        "status",
+        "key",
+        "run_id",
+        "reason",
+        "superseded_task_id",
+        "superseded_dispatch_id",
+        "overrides",
+        "record_path",
+        "failure",
+    }
+    assert payload == {
+        "ok": True,
+        "status": "rerouted",
+        "key": "work/a#execute",
+        "run_id": "run_2",
+        "reason": "retry",
+        "superseded_task_id": "task_1",
+        "superseded_dispatch_id": "ctx_1",
+        "overrides": {"agent": "codex", "model": "gpt-6-sol", "effort": "high"},
+        "record_path": "/record.json",
+        "failure": None,
+    }
+    assert "error" not in payload
+    assert json.loads(json.dumps(payload)) == payload
+
+    failure = RerouteResult(
+        status=None,
+        key="work/a#execute",
+        run_id="run_2",
+        reason="retry",
+        failure=DispatchFailure("reroute", "unsent", "task unavailable"),
+    )
+    failed = work.reroute_payload(failure)
+    assert failed["ok"] is False
+    assert failed["overrides"] is None
+    assert failed["failure"] == {
+        "step": "reroute",
+        "reason": "unsent",
+        "detail": "task unavailable",
+        "task_id": None,
+        "dispatch_id": None,
+        "refusal": None,
+    }
+    assert "error" not in failed
+    assert json.loads(json.dumps(failed)) == failed
+
+
 def test_archive_payload_wiki_block_empty_planned_applied() -> None:
     empty = work.archive_payload(archive_run(applied=False), dry_run=True)["wiki"]
     assert empty == {
@@ -101,6 +255,10 @@ def test_archive_payload_wiki_block_empty_planned_applied() -> None:
 def test_rollup_projects_open_paths() -> None:
     payload = work._rollup(SimpleNamespace(total=2, terminal=1, open_paths=("work/feature-a",)))
     assert payload == {"total": 2, "terminal": 1, "open_paths": ["work/feature-a"]}
+
+
+def test_status_payload_carries_not_started() -> None:
+    assert work.status_payload(status(resume=False))["not_started"] == 2
 
 
 def test_normalized_payload_is_path_keyed_and_uses_canonical_source_fields() -> None:
@@ -254,7 +412,13 @@ def test_complex_payloads_project_explicit_current_fields(tmp_path: Path) -> Non
     assert work.overturn_payload(overturn)["follow_up_filed"] is True
 
     worktree = SimpleNamespace(
-        action="create", path="/tmp/w", branch="b", base_branch="main", exists=False, parent_path="/tmp/parent"
+        action="create",
+        path="/tmp/w",
+        branch="b",
+        base_branch="main",
+        exists=False,
+        parent_path="/tmp/parent",
+        start_sha=None,
     )
     dispatch = SimpleNamespace(
         key="work/a#execute",
@@ -277,13 +441,17 @@ def test_complex_payloads_project_explicit_current_fields(tmp_path: Path) -> Non
         terminal=False,
         max_parallel=2,
         slots_free=1,
+        max_attend=1,
+        attend_slots_free=0,
         supervise_merges=False,
         live=("x",),
         dispatches=(dispatch,),
         dispatch_repos={dispatch.key: SimpleNamespace(name="code", path=Path("/code"), source="sole")},
         preparations=(),
         plan=SimpleNamespace(
-            finish_targets={}, dispatch_resolutions={dispatch.key: resolve_dispatch({"variant": "planned"}, rules=())}
+            finish_targets={},
+            dispatch_resolutions={dispatch.key: resolve_dispatch({"variant": "planned"}, rules=())},
+            human_checkpoints={},
         ),
         advances=(SimpleNamespace(path="work/b", reason="done", worktree="w", branch="b", mode="return"),),
         blocked=(SimpleNamespace(path="work/c", kind="dependency", reason="wait"),),
@@ -299,13 +467,31 @@ def test_complex_payloads_project_explicit_current_fields(tmp_path: Path) -> Non
         code_repo_source="sole",
     )
     orchestrate_result = work.orchestrate_payload(orchestration)
+    assert orchestrate_result["max_attend"] == 1
+    assert orchestrate_result["attend_slots_free"] == 0
+    assert list(orchestrate_result)[:6] == [
+        "path",
+        "terminal",
+        "max_parallel",
+        "slots_free",
+        "max_attend",
+        "attend_slots_free",
+    ]
     assert orchestrate_result["dispatches"][0]["path"] == "work/a"
     assert orchestrate_result["dispatches"][0]["auto_merge"] is True
+    assert orchestrate_result["dispatches"][0]["human_checkpoints"] is None
     assert orchestrate_result["dispatches"][0]["worktree"]["parent_path"] == "/tmp/parent"
     assert orchestrate_result["advances"][0]["mode"] == "return"
     assert orchestrate_result["supervise_merges"] is False
     assert orchestrate_result["holds"] == []
     assert orchestrate_result["repo"] == {"name": "code", "path": "/code", "source": "sole"}
+
+
+def test_orchestrate_dispatches_project_human_checkpoints_or_null() -> None:
+    from samples_work import WORK
+
+    busy = WORK["work.orchestrate_payload"][0]()
+    assert busy["dispatches"][0]["human_checkpoints"] == {"status": "declared", "items": ["Task 2: skim"]}
 
 
 def test_orchestrate_payload_carries_holds() -> None:
@@ -330,6 +516,8 @@ def test_orchestrate_payload_carries_holds() -> None:
         terminal=False,
         slots_free=0,
         max_parallel=1,
+        max_attend=1,
+        attend_slots_free=0,
         supervise_merges=False,
         live=(),
         dispatches=(),
@@ -511,8 +699,8 @@ def test_finish_target_projection_is_explicit_and_ordered() -> None:
 
     result = next_result(full=True)
     result.finish_targets = (
-        FinishTarget(ItemRepo("core", Path("/core"), "frontmatter"), "/core/epic", "epic/a", "main"),
-        FinishTarget(ItemRepo(None, None, "sole"), "/ui/epic", "epic/a", "trunk"),
+        FinishTarget(ItemRepo("core", Path("/core"), "frontmatter"), "/core/epic", "epic/a", "main", "/core"),
+        FinishTarget(ItemRepo(None, None, "sole"), "/ui/epic", "epic/a", "trunk", None),
     )
     result.state.phase = "finish"
     assert work.next_payload(result, bundle_root=BUNDLE)["finish_targets"] == [
@@ -521,12 +709,14 @@ def test_finish_target_projection_is_explicit_and_ordered() -> None:
             "worktree": "/core/epic",
             "source_branch": "epic/a",
             "target_branch": "main",
+            "target_worktree": "/core",
         },
         {
             "repo": {"name": None, "path": None, "source": "sole"},
             "worktree": "/ui/epic",
             "source_branch": "epic/a",
             "target_branch": "trunk",
+            "target_worktree": None,
         },
     ]
 
@@ -586,3 +776,100 @@ def test_archive_projects_non_null_wiki_commit() -> None:
         "paths": ["okf/concepts/old-page.md", "okf/archive/concepts/old-page.md"],
         "reason": None,
     }
+
+
+def test_ask_payload_shapes_success_and_refusal() -> None:
+    from samples_work import WORK
+
+    ok = WORK["work.ask_payload"][0]()
+    assert ok == {
+        "ok": True,
+        "applied": True,
+        "payload": {
+            "path": str(Path("/ws/okf/work/a/references/asks/plan-001-choice.json")),
+            "resource": "/work/a/references/asks/plan-001-choice.json",
+        },
+        "orca": {
+            "question": "Pick.\n\ngw-ask: /work/a/references/asks/plan-001-choice.json",
+            "options": "merge,hold",
+        },
+        "refusals": [],
+    }
+    refused = WORK["work.ask_payload"][1]()
+    assert refused["ok"] is False and refused["payload"] is None and refused["orca"] is None
+    assert refused["refusals"] == ["option-count"]
+
+
+def test_ask_answer_payload_shapes_success_and_refusal() -> None:
+    from samples_work import WORK
+
+    ok = WORK["work.ask_answer_payload"][0]()
+    assert ok["ok"] is True and ok["changed"] is True and ok["applied"] is True
+    assert ok["payload"]["resource"] == "/work/a/references/asks/plan-001-choice.json"
+    assert ok["reply_body"].startswith('{"ask": ')
+    refused = WORK["work.ask_answer_payload"][1]()
+    assert refused == {
+        "ok": False,
+        "applied": False,
+        "changed": False,
+        "payload": None,
+        "reply_body": None,
+        "refusals": ["payload-invalid"],
+    }
+
+
+def test_pin_detached_worktree_projection():
+    action = SimpleNamespace(
+        action="pin-detached",
+        path=None,
+        branch=None,
+        base_branch="epic/x",
+        exists=None,
+        parent_path="/epic",
+        start_sha="a" * 40,
+    )
+    assert work._worktree(action) == {
+        "action": "pin-detached",
+        "path": None,
+        "branch": None,
+        "base_branch": "epic/x",
+        "exists": None,
+        "parent_path": "/epic",
+        "start_sha": "a" * 40,
+    }
+
+
+def test_reader_receipt_payload_freezes_attempt_and_outcome_fields() -> None:
+    from graph_works_core.orchestrate.placement import ReaderRecord
+    from work_tracker_okf.placement import ReaderObservation, ReaderReceiptPlan
+
+    observation = ReaderObservation("task_1", "ctx_1", "key", "repo", "/reader", "a" * 40)
+    plan = ReaderReceiptPlan("work/a", "work/a", "design", "design", observation, None, "")
+    payload = work.reader_receipt_payload(ReaderRecord(plan, Path("/cache/ctx_1.json"), True, False))
+    assert payload == {
+        "path": "work/a",
+        "root": "work/a",
+        "expected_phase": "design",
+        "current_phase": "design",
+        "observation": {
+            "task_id": "task_1",
+            "dispatch_id": "ctx_1",
+            "dispatch_key": "key",
+            "repo": "repo",
+            "worktree": "/reader",
+            "start_sha": "a" * 40,
+        },
+        "receipt_path": str(Path("/cache/ctx_1.json")),
+        "written": True,
+        "replayed": False,
+        "conflict": None,
+        "refusal": None,
+    }
+    refused = ReaderReceiptPlan("work/a", "work/a", "design", None, observation, "unknown-path", "missing")
+    payload = work.reader_receipt_payload(ReaderRecord(refused, None, False, False))
+    assert payload["receipt_path"] is None and payload["current_phase"] is None
+    assert payload["refusal"] == {"reason": "unknown-path", "detail": "missing"}
+    payload = work.reader_receipt_payload(
+        ReaderRecord(plan, Path("/cache/ctx_1.json"), False, False, "attempt-mismatch")
+    )
+    assert payload["conflict"] == "attempt-mismatch"

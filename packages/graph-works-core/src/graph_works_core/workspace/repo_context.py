@@ -7,7 +7,7 @@ then receives plain values and never probes Git or the filesystem itself.
 from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from types import MappingProxyType
 
@@ -28,12 +28,15 @@ class RepositoryContext:
     identity_known: bool = True
     branches: frozenset[str] = frozenset()
     branches_known: bool = True
+    branch_tips: Mapping[str, str] = field(default_factory=lambda: MappingProxyType({}))
+    branch_tips_known: bool = True
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "branches", frozenset(self.branches))
         object.__setattr__(self, "inventory", MappingProxyType(dict(self.inventory)))
         object.__setattr__(self, "path_exists", MappingProxyType(dict(self.path_exists)))
         object.__setattr__(self, "checkout_usable_by_path", MappingProxyType(dict(self.checkout_usable_by_path)))
+        object.__setattr__(self, "branch_tips", MappingProxyType(dict(self.branch_tips)))
 
 
 def _canonical(path: Path) -> str:
@@ -53,6 +56,19 @@ def repository_identity(repo: Path) -> str | None:
     if common.returncode == 0 and common.stdout.strip():
         return _canonical(Path(common.stdout.strip()))
     return None
+
+
+def observe_branch_tips(repo: Path) -> Mapping[str, str] | None:
+    """Return local branch names and committed object IDs, or `None` when Git cannot answer."""
+    refs = probe_git(repo, "for-each-ref", "--format=%(refname:short)%00%(objectname)", "refs/heads/")
+    if refs.returncode != 0:
+        return None
+    tips: dict[str, str] = {}
+    for line in refs.stdout.splitlines():
+        name, _, oid = line.partition("\0")
+        if name and oid:
+            tips[name] = oid
+    return MappingProxyType(tips)
 
 
 def _inventory(output: str) -> Mapping[str, tuple[str, ...]]:
@@ -93,7 +109,7 @@ def observe_repository(
     listed = probe_git(repo, "worktree", "list", "--porcelain")
     known = listed.returncode == 0
     inventory = _inventory(listed.stdout) if known else MappingProxyType({})
-    refs = probe_git(repo, "for-each-ref", "--format=%(refname:short)", "refs/heads/")
+    tips = observe_branch_tips(repo)
     candidates = selected_checkouts | {_canonical(path) for path in paths}
     for members in inventory.values():
         candidates.update(members)
@@ -113,6 +129,8 @@ def observe_repository(
         inventory_known=known,
         checkout_usable_by_path=eligibility,
         identity_known=proven_identity is not None,
-        branches=frozenset(refs.stdout.splitlines()) if refs.returncode == 0 else frozenset(),
-        branches_known=refs.returncode == 0,
+        branches=frozenset(tips) if tips is not None else frozenset(),
+        branches_known=tips is not None,
+        branch_tips=tips or {},
+        branch_tips_known=tips is not None,
     )

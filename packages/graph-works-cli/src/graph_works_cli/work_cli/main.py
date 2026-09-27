@@ -12,14 +12,18 @@ or `on=` and never looks it up itself.
 
 from __future__ import annotations
 
+import json
+import sys
 from datetime import UTC, date, datetime
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, Never, cast
 
 import typer
 from graph_works_core.archive.commands import run_archive, stranded_warnings
 from graph_works_core.orchestrate.commands import run_orchestrate
-from graph_works_core.orchestrate.placement import run_record_placement
+from graph_works_core.orchestrate.dispatch import run_dispatch
+from graph_works_core.orchestrate.placement import ReaderObservation, run_record_placement, run_record_reader
+from graph_works_core.orchestrate.reroute import run_reroute
 from graph_works_core.orchestrate.stage_advance import ExpectedPhase, run_stage_advance
 from graph_works_core.work import commands as work
 from graph_works_core.workspace.config import WorkspaceConfig, load_workspace_config
@@ -31,18 +35,38 @@ from graph_works_wire import work as wire_work
 from graph_works_cli import exit_codes
 from graph_works_cli.provenance import warn_if_stale_routing
 from graph_works_cli.work_cli import rendering
+from graph_works_cli.work_cli.ask import ask, ask_answer
 from graph_works_cli.work_cli.decision import decision_app
+from graph_works_cli.work_cli.orca import orca_port
 from graph_works_cli.work_cli.reconcile import reconcile_context
 from graph_works_cli.workspace_resolution import resolve_workspace
 
 work_app = typer.Typer(name="work", help="Work-item pipeline verbs.", no_args_is_help=True)
 work_app.add_typer(decision_app, name="decision")
 work_app.command(name="reconcile-context")(reconcile_context)
+work_app.command(name="ask")(ask)
+work_app.command(name="ask-answer")(ask_answer)
 
 
 def _today() -> date:
     """One UTC date per invocation. Core never reads the clock (spec 6)."""
     return datetime.now(UTC).date()
+
+
+_VALIDATION_REASONS = frozenset(
+    {"plan-invalid", "key-not-in-plan", "override-invalid", "reason-missing", "record-invalid"}
+)
+
+
+def _step_failure(payload: dict[str, Any]) -> Never:
+    failure = payload["failure"]
+    code = exit_codes.SCHEMA_MISMATCH if failure["reason"] in _VALIDATION_REASONS else exit_codes.GENERIC
+    rendering.fail(
+        f"{payload['key']}: {failure['step']} failed ({failure['reason']}) — {failure['detail']}",
+        reason="refused",
+        code=code,
+        payload=payload,
+    )
 
 
 def _warn_refusals(refusals: object) -> None:
@@ -123,7 +147,9 @@ def file(
     title: str = typer.Option(..., "--title", help="Work item title."),
     kind: str = typer.Option(..., "--kind", help="Release | Epic | Feature | Bug | TechDebt | TestGap | Spike."),
     summary: str = typer.Option(..., "--summary", help="One-line summary for the index entry."),
-    affects: str = typer.Option("", "--affects", help="Comma-separated repo paths or package names."),
+    affects: str = typer.Option(
+        "", "--affects", help="Comma-separated repo paths or package names; gw:workspace for a workspace-only item."
+    ),
     effort: str = typer.Option("", "--effort", help="xtra-small|small|medium|large|xtra-large."),
     name: str = typer.Option("", "--name", help="Stable basename words. Defaults to the title."),
     parent_path: str = typer.Option("", "--parent-path", help="Canonical parent item path."),
@@ -256,6 +282,7 @@ def ingest_queue(
 
 @work_app.command()
 def lint(
+    path: str = typer.Argument("", help="Extensionless canonical item path; omit to lint the whole work lane."),
     strict: bool = typer.Option(False, "--strict", help="Promote every warning to an error."),
     workspace: str = typer.Option("", "--workspace", help="Workspace path."),
     json_output: bool = rendering.json_option("Emit the report as JSON."),
@@ -263,14 +290,19 @@ def lint(
     """Report work-lane conformance. Never writes.
 
     The fast, synchronous, LLM-free work-lane check -- a sibling of
-    `gw wiki lint`, not a subset of it.
+    `gw wiki lint`, not a subset of it. With PATH, report only that item's
+    findings (its page and owned directory).
     """
     layout = resolve_workspace(workspace)
     config = _config(layout)
     try:
-        report = work.run_lint(layout, config, repo_roots=resolve_repos(layout), strict=strict, today=_today())
+        report = work.run_lint(
+            layout, config, repo_roots=resolve_repos(layout), strict=strict, today=_today(), path=path or None
+        )
     except WorkspaceError as exc:
         rendering.fail(str(exc), reason="workspace", code=exit_codes.SCHEMA_MISMATCH, cause=exc)
+    except LookupError as exc:
+        rendering.fail(str(exc), reason="unresolved", code=exit_codes.AMBIGUOUS, cause=exc)
     except (OSError, ValueError) as exc:
         rendering.fail(str(exc), reason="io", cause=exc)
 
@@ -509,6 +541,57 @@ def record_placement(
     rendering.render_commit(payload["commit"])
 
 
+@work_app.command(name="record-reader")
+def record_reader(
+    path: str = typer.Argument(..., help="Extensionless bundle-relative canonical concept path."),
+    root: str = typer.Option(..., "--root", help="The orchestration subtree root this dispatch belongs to."),
+    phase: str = typer.Option(..., "--phase", help="The phase of the dispatch being recorded."),
+    task_id: str = typer.Option(..., "--task-id", help="The dispatched task identifier."),
+    dispatch_id: str = typer.Option(..., "--dispatch-id", help="The dispatch attempt identifier."),
+    dispatch_key: str = typer.Option(..., "--dispatch-key", help="The planner's dispatch key."),
+    repo: str = typer.Option(..., "--repo", help="The declared repository the reader observed."),
+    worktree: str = typer.Option(..., "--worktree", help="The observed absolute worktree path."),
+    start_sha: str = typer.Option(..., "--start-sha", help="The observed full detached commit OID."),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Print the plan instead of writing."),
+    workspace: str = typer.Option("", "--workspace", help="Workspace path."),
+    json_output: bool = rendering.json_option("Emit the reader receipt as JSON."),
+) -> None:
+    """Record the detached commit a design/plan dispatch actually launched on.
+
+    Writes one receipt under the workspace cache; never the item page, never a stamp.
+    """
+    layout = resolve_workspace(workspace)
+    try:
+        result = run_record_reader(
+            layout,
+            path,
+            root=root,
+            phase=phase,
+            observation=ReaderObservation(task_id, dispatch_id, dispatch_key, repo, worktree, start_sha),
+            dry_run=dry_run,
+        )
+    except WorkspaceError as exc:
+        rendering.fail(str(exc), reason="workspace", code=exit_codes.SCHEMA_MISMATCH, cause=exc)
+    except ValueError as exc:
+        rendering.fail(str(exc), reason="unresolved", code=exit_codes.AMBIGUOUS, cause=exc)
+    except OSError as exc:
+        rendering.fail(str(exc), reason="io", cause=exc)
+
+    payload = wire_work.reader_receipt_payload(result)
+    if payload["refusal"] is not None:
+        rendering.fail(
+            f"{path}: refused ({payload['refusal']['reason']}) — {payload['refusal']['detail']}",
+            reason="refused",
+            payload=payload,
+        )
+    if payload["conflict"] is not None:
+        rendering.fail(f"{path}: attempt-mismatch", reason="attempt-mismatch", payload=payload)
+    if json_output:
+        rendering.emit(payload)
+        return
+    rendering.render_reader_receipt(payload)
+
+
 @work_app.command(name="touch-active-work")
 def touch_active_work(
     path: str = typer.Argument(..., help="Extensionless bundle-relative canonical concept path."),
@@ -567,7 +650,7 @@ def orchestrate(
     several; without it such a workspace refuses rather than guess.
     """
     warn_if_stale_routing()
-    layout = resolve_workspace(workspace)
+    layout = resolve_workspace(workspace, json_mode=json_output, command="work orchestrate")
     try:
         result = run_orchestrate(layout, path, live=tuple(rendering.split_csv(live)), repo_name=repo_name or None)
     except WorkspaceError as exc:
@@ -584,6 +667,96 @@ def orchestrate(
             rendering.warn(warning)
     else:
         rendering.render_orchestrate(payload)
+
+
+@work_app.command()
+def dispatch(
+    key: str = typer.Argument(..., help="The dispatch key from this cycle's plan (dispatches[].key)."),
+    plan: str = typer.Option(..., "--plan", help="Saved `gw work orchestrate --json` output, or - for stdin."),
+    run: str = typer.Option(..., "--run", help="The Orca Run id."),
+    no_probe: bool = typer.Option(False, "--no-probe", help="Skip the submission probe."),
+    settle_seconds: float = typer.Option(10.0, "--settle-seconds", help="Probe settle interval."),
+    workspace: str = typer.Option("", "--workspace", help="Workspace path."),
+    json_output: bool = rendering.json_option("Emit the dispatch envelope as JSON."),
+) -> None:
+    """Dispatch one saved planned stage, resuming a journaled attempt by key."""
+    layout = resolve_workspace(workspace, json_mode=json_output, command="work dispatch")
+    try:
+        document = json.loads(sys.stdin.read() if plan == "-" else Path(plan).read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        rendering.fail(f"--plan {plan!r}: {exc}", reason="usage", cause=exc)
+    try:
+        result = run_dispatch(
+            layout,
+            key,
+            plan=document,
+            run_id=run,
+            port=orca_port(),
+            today=_today(),
+            clock=lambda: datetime.now(UTC),
+            probe=not no_probe,
+            settle_seconds=settle_seconds,
+        )
+    except WorkspaceError as exc:
+        rendering.fail(str(exc), reason="workspace", code=exit_codes.SCHEMA_MISMATCH, cause=exc)
+    except OSError as exc:
+        rendering.fail(str(exc), reason="io", cause=exc)
+    payload = wire_work.dispatch_payload(result)
+    if not payload["ok"]:
+        _step_failure(payload)
+    if json_output:
+        rendering.emit(payload)
+        return
+    if payload["placement"] is None:
+        typer.echo(f"{payload['status']} {payload['task_id']} for {key}; placement was not read back")
+        return
+    placement = payload["placement"]
+    if placement.get("branch") is None and placement.get("start_sha"):
+        typer.echo(
+            f"dispatched {key} -> {placement.get('path')} detached at {placement['start_sha']} ({payload['status']})"
+        )
+    else:
+        typer.echo(f"dispatched {key} -> {placement.get('path')} on {placement.get('branch')} ({payload['status']})")
+    for note in placement.get("notes", []):
+        typer.echo(f"note {key}: {note}")
+
+
+@work_app.command()
+def reroute(
+    key: str = typer.Argument(..., help="The dispatch key whose current Task has settled."),
+    run: str = typer.Option(..., "--run", help="The Orca Run id."),
+    reason: str = typer.Option(..., "--reason", help="Why the current Task is superseded."),
+    agent: str = typer.Option("", "--agent", help="Replacement agent."),
+    model: str = typer.Option("", "--model", help="Replacement model."),
+    effort: str = typer.Option("", "--effort", help="Replacement reasoning effort."),
+    workspace: str = typer.Option("", "--workspace", help="Workspace path."),
+    json_output: bool = rendering.json_option("Emit the reroute envelope as JSON."),
+) -> None:
+    """Supersede a settled Task and journal overrides for its next dispatch."""
+    layout = resolve_workspace(workspace, json_mode=json_output, command="work reroute")
+    try:
+        result = run_reroute(
+            layout,
+            key,
+            run_id=run,
+            reason=reason,
+            port=orca_port(),
+            clock=lambda: datetime.now(UTC),
+            agent=agent or None,
+            model=model or None,
+            effort=effort or None,
+        )
+    except WorkspaceError as exc:
+        rendering.fail(str(exc), reason="workspace", code=exit_codes.SCHEMA_MISMATCH, cause=exc)
+    except OSError as exc:
+        rendering.fail(str(exc), reason="io", cause=exc)
+    payload = wire_work.reroute_payload(result)
+    if not payload["ok"]:
+        _step_failure(payload)
+    if json_output:
+        rendering.emit(payload)
+        return
+    typer.echo(f"rerouted {key}: superseded {payload['superseded_task_id']} ({payload['status']})")
 
 
 @work_app.command(name="regen-index")

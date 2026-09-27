@@ -1326,6 +1326,261 @@ def test_item_conditions_are_kinded_pairs_for_parent_and_dependency_problems(tmp
     assert "work/bug-absent" in conditions[0][1]
 
 
+def test_the_item_adapter_and_the_shared_predicate_agree(tmp_path: Path) -> None:
+    """Baseline and postcondition kinds come from one implementation.
+
+    `_item_conditions` is the postcondition pass's adapter; the baseline calls
+    `_conditions_for` directly with a filesystem `exists`. Given the same
+    existence answers, the two must yield identical pairs for every item.
+    """
+    layout = _workspace(tmp_path)
+    edge = {"blocks": "execute", "needs": "resolved"}
+    _write_item(layout.bundle_dir, "work/rel", type="Release")
+    _write_item(
+        layout.bundle_dir,
+        "work/rel/children/kid",
+        type="Feature",
+        depends_on=({"path": "work/rel", **edge},),
+    )
+    _write_item(layout.bundle_dir, "work/gone/children/lost", type="Feature")
+    _write_item(
+        layout.bundle_dir,
+        "work/dangling",
+        type="Bug",
+        depends_on=({"path": "work/absent", **edge}, {"path": "not/canonical", **edge}),
+    )
+    items = load_items(load_bundle(layout.bundle_dir, ignore=IGNORE))
+    by_path = {item.path: item for item in items}
+
+    for item in items:
+        assert transactions._item_conditions(item, by_path) == transactions._conditions_for(
+            item.path,
+            item.parent_path,
+            item.dependency_edges,
+            item.dependency_issues,
+            lambda path: path in by_path,
+        ), item.path
+
+    kinds = {
+        path: {kind for kind, _message in transactions._item_conditions(by_path[path], by_path)}
+        for path in ("work/rel/children/kid", "work/gone/children/lost", "work/dangling")
+    }
+    assert kinds["work/rel/children/kid"] == set()
+    assert kinds["work/gone/children/lost"] == {"parent-missing"}
+    assert {"dependency-missing", "dependency-invalid-path"} <= kinds["work/dangling"]
+
+
+_EDGE = {"blocks": "execute", "needs": "resolved"}
+
+
+def _scoped_conditions(layout: WorkspaceLayout, plan: WorkMutationPlan) -> dict[tuple[str, str], int]:
+    root = transactions._open_root(layout.bundle_dir)
+    try:
+        return dict(transactions._scoped_baseline_conditions(plan, root))
+    finally:
+        root.close()
+
+
+def test_scoped_baseline_conditions_read_a_moved_items_source_page(tmp_path: Path) -> None:
+    layout = _workspace(tmp_path)
+    _write_item(layout.bundle_dir, "work/x", type="Bug", depends_on=({"path": "work/absent", **_EDGE},))
+    plan = _plan(layout, path_mapping={"work/x": "work/p/children/x"}, validate_paths=("work/p/children/x",))
+
+    assert _scoped_conditions(layout, plan) == {("work/p/children/x", "dependency-missing"): 1}
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "work/schema/children/p",
+        "work/sections/children/p",
+        "work/rel/children/schema/children/p",
+        "work/_archive/sections/children/p",
+        "work/log",
+        "work/rel/children/log",
+        "work/_archive/log",
+    ],
+)
+def test_scoped_baseline_conditions_exclude_nonmember_sources(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, source: str
+) -> None:
+    """Readable ignored pages and reserved logs cannot donate move allowances."""
+    layout = _workspace(tmp_path)
+    _write_item(layout.bundle_dir, source, type="Feature", depends_on=({"path": "work/absent", **_EDGE},))
+    assert source not in {item.path for item in load_items(load_bundle(layout.bundle_dir, ignore=IGNORE))}
+    destination = "work/_archive/p"
+    plan = _plan(layout, path_mapping={source: destination}, validate_paths=(destination,))
+
+    def forbidden(*_args, **_kwargs):  # type: ignore[no-untyped-def]
+        raise AssertionError("scoped conditions must not load the bundle or item corpus")
+
+    monkeypatch.setattr(transactions, "_load_bundle_through", forbidden)
+    monkeypatch.setattr(transactions, "load_items", forbidden)
+
+    assert _scoped_conditions(layout, plan) == {}
+
+
+@pytest.mark.parametrize("source", ["work/schema", "work/sections", "work/log/children/p"])
+def test_scoped_baseline_conditions_keep_admitted_sources(tmp_path: Path, source: str) -> None:
+    """Only ignored members and reserved pages are excluded, not similar names."""
+    layout = _workspace(tmp_path)
+    _write_item(layout.bundle_dir, source, type="Feature", depends_on=({"path": "work/absent", **_EDGE},))
+    assert source in {item.path for item in load_items(load_bundle(layout.bundle_dir, ignore=IGNORE))}
+    destination = "work/_archive/p"
+    plan = _plan(layout, path_mapping={source: destination}, validate_paths=(destination,))
+
+    expected = {(destination, "dependency-missing"): 1}
+    if source == "work/log/children/p":
+        expected[(destination, "parent-missing")] = 1
+    assert _scoped_conditions(layout, plan) == expected
+
+
+@pytest.mark.parametrize("source", ["work/schema/children/p", "work/sections/children/p", "work/log"])
+@pytest.mark.parametrize("reuse_bundle", [False, True])
+def test_archiving_a_nonmember_source_rolls_back(tmp_path: Path, source: str, reuse_bundle: bool) -> None:
+    """Archived items lack the findings dependency check: conditions must catch this."""
+    layout = _workspace(tmp_path)
+    _write_item(layout.bundle_dir, "work/schema", type="Release")
+    _write_item(layout.bundle_dir, "work/sections", type="Release")
+    _write_item(layout.bundle_dir, source, type="Feature", depends_on=({"path": "work/absent", **_EDGE},))
+    destination = "work/_archive/p"
+    (layout.bundle_dir / destination).mkdir(parents=True)
+    before = (layout.bundle_dir / f"{source}.md").read_bytes()
+    plan = replace(
+        _plan(
+            layout,
+            moves=(Move(f"{source}.md", f"{destination}.md", False),),
+            path_mapping={source: destination},
+            validate_paths=(destination,),
+        ),
+        operation="archive",
+    )
+    bundle = load_bundle(layout.bundle_dir, ignore=IGNORE) if reuse_bundle else None
+
+    result = apply_mutation(layout, plan, baseline_bundle=bundle, commit=None)
+
+    assert result.ok is False
+    assert result.rolled_back is True
+    assert result.failures == (
+        "validation failed: work/_archive/p: dependency target 'work/absent' is missing after mutation",
+    )
+    assert (layout.bundle_dir / f"{source}.md").read_bytes() == before
+    assert not (layout.bundle_dir / f"{destination}.md").exists()
+    assert _states(result.journal) == ["planned", "applying", "validating", "rolling-back", "rolled-back"]
+
+
+def test_scoped_baseline_conditions_see_the_parent_on_disk(tmp_path: Path) -> None:
+    layout = _workspace(tmp_path)
+    kid = "work/rel/children/kid"
+    _write_item(layout.bundle_dir, kid, type="Feature")
+    plan = _plan(layout, validate_paths=(kid,))
+
+    assert _scoped_conditions(layout, plan) == {(kid, "parent-missing"): 1}
+    _write_item(layout.bundle_dir, "work/rel", type="Release")
+    assert _scoped_conditions(layout, plan) == {}
+
+
+def test_scoped_baseline_conditions_skip_absent_and_non_utf8_pages(tmp_path: Path) -> None:
+    layout = _workspace(tmp_path)
+    (layout.bundle_dir / "work").mkdir(exist_ok=True)
+    (layout.bundle_dir / "work/garbled.md").write_bytes(b"---\ntype: \xff\n---\n")
+    plan = _plan(layout, validate_paths=("work/ghost", "work/garbled"))
+
+    assert _scoped_conditions(layout, plan) == {}
+
+
+def test_scoped_baseline_conditions_read_only_the_scoped_pages(monkeypatch, tmp_path: Path) -> None:
+    layout = _workspace(tmp_path)
+    _write_item(layout.bundle_dir, "work/a", type="Feature")
+    _write_item(layout.bundle_dir, "work/unrelated/children/orphan", type="Feature")
+    read: list[str] = []
+    real = transactions._read_bytes_at
+
+    def recording(root, member):  # type: ignore[no-untyped-def]
+        read.append(member)
+        return real(root, member)
+
+    monkeypatch.setattr(transactions, "_read_bytes_at", recording)
+
+    assert _scoped_conditions(layout, _plan(layout, validate_paths=("work/a",))) == {}
+    assert read == ["work/a.md"]
+
+
+def test_a_non_canonical_target_is_absent_without_a_filesystem_read(monkeypatch, tmp_path: Path) -> None:
+    layout = _workspace(tmp_path)
+
+    def forbidden(_root, member):  # type: ignore[no-untyped-def]
+        raise AssertionError(f"touched the filesystem for {member!r}")
+
+    monkeypatch.setattr(transactions, "_lexists_at", forbidden)
+    root = transactions._open_root(layout.bundle_dir)
+    try:
+        for path in ("", "../escape", "not/canonical", "work/x/grandchild"):
+            assert transactions._baseline_target_exists(root, path) is False, path
+    finally:
+        root.close()
+
+
+def test_a_target_under_a_file_ancestor_propagates_anchored_refusal(tmp_path: Path) -> None:
+    """The anchored wrapper cannot distinguish a file from a symlink ancestor."""
+    layout = _workspace(tmp_path)
+    (layout.bundle_dir / "work").mkdir(exist_ok=True)
+    (layout.bundle_dir / "work/f").write_bytes(b"not a directory")
+    root = transactions._open_root(layout.bundle_dir)
+    try:
+        with pytest.raises(ValueError, match="unsafe ancestor") as raised:
+            transactions._baseline_target_exists(root, "work/f/children/t")
+        assert isinstance(raised.value.__cause__, NotADirectoryError)
+    finally:
+        root.close()
+
+
+def test_a_target_under_a_symlink_ancestor_propagates_anchored_refusal(tmp_path: Path) -> None:
+    layout = _workspace(tmp_path)
+    (layout.bundle_dir / "work").mkdir(exist_ok=True)
+    external = tmp_path / "external"
+    (external / "children").mkdir(parents=True)
+    (layout.bundle_dir / "work/link").symlink_to(external, target_is_directory=True)
+    root = transactions._open_root(layout.bundle_dir)
+    try:
+        with pytest.raises(ValueError, match="unsafe ancestor") as raised:
+            transactions._baseline_target_exists(root, "work/link/children/t")
+        assert isinstance(raised.value.__cause__, NotADirectoryError)
+    finally:
+        root.close()
+
+
+def test_other_wrapped_target_errors_propagate(monkeypatch, tmp_path: Path) -> None:
+    layout = _workspace(tmp_path)
+
+    def denied(_root, _member):  # type: ignore[no-untyped-def]
+        try:
+            raise PermissionError("denied")
+        except PermissionError as exc:
+            raise ValueError("unsafe ancestor") from exc
+
+    monkeypatch.setattr(transactions, "_lexists_at", denied)
+    root = transactions._open_root(layout.bundle_dir)
+    try:
+        with pytest.raises(ValueError, match="unsafe ancestor") as raised:
+            transactions._baseline_target_exists(root, "work/x")
+        assert isinstance(raised.value.__cause__, PermissionError)
+    finally:
+        root.close()
+
+
+def test_a_scoped_read_failure_propagates(monkeypatch, tmp_path: Path) -> None:
+    layout = _workspace(tmp_path)
+    _write_item(layout.bundle_dir, "work/a", type="Feature")
+
+    def denied(_root, member):  # type: ignore[no-untyped-def]
+        raise PermissionError(f"denied: {member}")
+
+    monkeypatch.setattr(transactions, "_read_bytes_at", denied)
+    with pytest.raises(PermissionError):
+        _scoped_conditions(layout, _plan(layout, validate_paths=("work/a",)))
+
+
 def test_baseline_capture_counts_findings_under_their_post_move_paths(tmp_path: Path) -> None:
     layout = _workspace(tmp_path)
     repo = tmp_path / "repo"
@@ -3283,6 +3538,99 @@ def test_pre_existing_dangling_dependency_is_excused_by_the_structural_half(tmp_
     assert result.failures == ()
     assert any(
         "pre-existing" in warning and "dependency target 'work/bug-absent'" in warning for warning in result.warnings
+    )
+
+
+_EDGE = {"blocks": "execute", "needs": "resolved"}
+
+
+def _bump(layout: WorkspaceLayout, path: str) -> PlannedWrite:
+    page = layout.bundle_dir / f"{path}.md"
+    before = page.read_bytes()
+    return PlannedWrite(f"{path}.md", _digest(before), before.replace(b"updated: 2026-08-22", b"updated: 2026-08-23"))
+
+
+def test_an_unrelated_concurrent_edit_does_not_roll_back_a_reused_baseline(tmp_path: Path) -> None:
+    layout = _workspace(tmp_path)
+    _write_item(layout.bundle_dir, "work/rel", type="Release")
+    _write_item(layout.bundle_dir, "work/rel/children/kid", type="Feature")
+    _write_item(layout.bundle_dir, "work/feature", type="Feature")
+    (layout.bundle_dir / "work/feature").mkdir()
+    stale = load_bundle(layout.bundle_dir, ignore=IGNORE)
+    (layout.bundle_dir / "work/rel.md").unlink()
+    plan = _plan(layout, writes=(_bump(layout, "work/feature"),), validate_paths=("work/feature",))
+
+    result = apply_mutation(layout, plan, baseline_bundle=stale, commit=None)
+
+    assert result.ok is True, result.failures
+    assert result.rolled_back is False
+
+
+def test_removing_a_validate_paths_dependency_target_still_rolls_back(tmp_path: Path) -> None:
+    layout = _workspace(tmp_path)
+    _write_item(layout.bundle_dir, "work/dep", type="Feature")
+    _write_item(layout.bundle_dir, "work/p", type="Bug", depends_on=({"path": "work/dep", **_EDGE},))
+    (layout.bundle_dir / "work/p").mkdir()
+    plan = _plan(layout, deletes=("work/dep.md",), validate_paths=("work/p",))
+
+    result = apply_mutation(layout, plan, baseline_bundle=load_bundle(layout.bundle_dir, ignore=IGNORE), commit=None)
+
+    assert result.ok is False
+    assert result.rolled_back is True
+    assert "dependency target 'work/dep' is missing after mutation" in result.failures[0]
+    assert (layout.bundle_dir / "work/dep.md").exists()
+
+
+def test_removing_a_validate_paths_parent_still_rolls_back(tmp_path: Path) -> None:
+    layout = _workspace(tmp_path)
+    _write_item(layout.bundle_dir, "work/parent", type="Release")
+    _write_item(layout.bundle_dir, "work/parent/children/child", type="Feature")
+    plan = _plan(layout, deletes=("work/parent.md",), validate_paths=("work/parent/children/child",))
+
+    result = apply_mutation(layout, plan, baseline_bundle=load_bundle(layout.bundle_dir, ignore=IGNORE), commit=None)
+
+    assert result.ok is False
+    assert result.rolled_back is True
+    assert "parent" in result.failures[0]
+    assert (layout.bundle_dir / "work/parent.md").exists()
+
+
+def test_an_unloadable_dependency_target_withholds_the_baseline_allowance(tmp_path: Path) -> None:
+    layout = _workspace(tmp_path)
+    (layout.bundle_dir / "work").mkdir(exist_ok=True)
+    (layout.bundle_dir / "work/dep.md").write_bytes(b"---\ntype: \xff\n---\n")
+    _write_item(layout.bundle_dir, "work/p", type="Bug", depends_on=({"path": "work/dep", **_EDGE},))
+    (layout.bundle_dir / "work/p").mkdir()
+    plan = _plan(layout, writes=(_bump(layout, "work/p"),), validate_paths=("work/p",))
+
+    result = apply_mutation(layout, plan, commit=None)
+
+    assert result.ok is False
+    assert result.rolled_back is True
+    assert "dependency target 'work/dep' is missing after mutation" in result.failures[0]
+
+
+def test_a_baseline_read_failure_falls_back_to_the_absolute_gate(monkeypatch, tmp_path: Path) -> None:
+    layout = _workspace(tmp_path)
+    _write_item(layout.bundle_dir, "work/p", type="Feature")
+    (layout.bundle_dir / "work/p").mkdir()
+    real = transactions._read_bytes_at
+
+    def denied_for_p(root, member):  # type: ignore[no-untyped-def]
+        if member == "work/p.md":
+            raise PermissionError("denied")
+        return real(root, member)
+
+    monkeypatch.setattr(transactions, "_read_bytes_at", denied_for_p)
+    plan = _plan(layout, writes=(PlannedWrite("work/note.bin", None, b"note"),), validate_paths=("work/p",))
+
+    result = apply_mutation(layout, plan, commit=None)
+
+    assert result.ok is True, result.failures
+    assert any(
+        warning.startswith("baseline capture failed, falling back to absolute postcondition gate")
+        and "denied" in warning
+        for warning in result.warnings
     )
 
 

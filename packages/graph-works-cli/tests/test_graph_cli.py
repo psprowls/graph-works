@@ -65,18 +65,6 @@ def test_emit_prints_nothing_for_empty_strings(capsys) -> None:
     assert captured.err == ""
 
 
-def test_normalize_error_restyles_cores_lowercase_prefix() -> None:
-    assert graph_main._normalize_error("error: no graph") == "Error: no graph"
-
-
-def test_normalize_error_leaves_an_unprefixed_message_alone() -> None:
-    assert graph_main._normalize_error("no graph") == "no graph"
-
-
-def test_normalize_error_does_not_touch_a_later_occurrence() -> None:
-    assert graph_main._normalize_error("error: parse error: line 3") == "Error: parse error: line 3"
-
-
 def test_run_emits_then_exits_with_the_results_code(capsys) -> None:
     with pytest.raises(typer.Exit) as excinfo:
         graph_main._run(GraphResult(exit_codes.SCHEMA_MISMATCH, "", "error: stale"))

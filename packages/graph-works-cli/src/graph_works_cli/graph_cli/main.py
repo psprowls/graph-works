@@ -6,11 +6,7 @@ resolves `--workspace` into a `GraphTarget`, calls the matching core function,
 routes `output`/`error` to stdout/stderr, and exits `result.exit_code`. There is
 no behavior here beyond routing (ADR 2026-08-13-command-modules rule 5).
 
-The one thing it does not pass through verbatim is the error *prefix*. Core
-spells its failures `error: <exc>`; every other `gw` sub-app writes
-`Error: <exc>`. D-026 settles that on the capitalized form — the text is part of
-the command surface C6 freezes, and after the freeze changing it is breaking.
-`_emit` restyles the prefix and nothing else.
+Error prefixes are restyled by `errors.echo_error` at the CLI boundary (D-026).
 """
 
 from __future__ import annotations
@@ -27,19 +23,10 @@ from graph_works_core.graph.commands import find as core_find
 from graph_works_core.workspace.errors import WorkspaceConfigError
 
 from graph_works_cli import exit_codes
+from graph_works_cli.errors import echo_error, exit_error
 from graph_works_cli.workspace_resolution import resolve_workspace
 
 graph_app = typer.Typer(name="graph", help="Code-graph queries.", no_args_is_help=True)
-
-#: Core's own failure prefix, restyled onto the CLI's `Error:` by `_emit` (D-026).
-_CORE_ERROR_PREFIX = "error: "
-
-
-def _normalize_error(message: str) -> str:
-    """Restyle core's lowercase `error:` prefix onto the CLI's `Error:` (D-026)."""
-    if message.startswith(_CORE_ERROR_PREFIX):
-        return f"Error: {message[len(_CORE_ERROR_PREFIX) :]}"
-    return message
 
 
 def _emit(result: GraphResult) -> None:
@@ -47,7 +34,7 @@ def _emit(result: GraphResult) -> None:
     if result.output:
         typer.echo(result.output)
     if result.error:
-        typer.echo(_normalize_error(result.error), err=True)
+        echo_error(result.error)
 
 
 def _run(result: GraphResult) -> Never:
@@ -56,20 +43,13 @@ def _run(result: GraphResult) -> Never:
     raise typer.Exit(code=result.exit_code)
 
 
-def _exit_usage_error(message: str) -> Never:
-    """Report a CLI-band usage error with Click's usage exit code."""
-    typer.echo(f"Error: {message}", err=True)
-    raise typer.Exit(code=2)
-
-
 def _resolve_target(workspace: str) -> GraphTarget:
     """`--workspace` -> `WorkspaceLayout` -> `GraphTarget`, or exit saying why not."""
     layout = resolve_workspace(workspace)
     try:
         return graph_target(layout)
     except WorkspaceConfigError as exc:
-        typer.echo(f"Error: {exc}", err=True)
-        raise typer.Exit(code=exit_codes.GENERIC) from exc
+        exit_error(str(exc), code=exit_codes.GENERIC, cause=exc)
 
 
 @graph_app.command("build")
@@ -116,7 +96,8 @@ def find(
 ) -> None:
     """Find graph nodes by name, kind and/or containing package."""
     if not (name or kind or in_package):
-        _exit_usage_error("at least one of --name, --kind, --in-package required")
+        # Click's usage code, deliberately not exit_codes.STALE.
+        exit_error("at least one of --name, --kind, --in-package required", code=2)
     target = _resolve_target(workspace)
     _run(
         core_find(

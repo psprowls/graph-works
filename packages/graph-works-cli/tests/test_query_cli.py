@@ -297,3 +297,121 @@ def test_query_reports_provider_access_denial_without_stdout_or_traceback(
     assert result.stdout == ""
     assert result.stderr == f"Error: {message}\n"
     assert "Traceback" not in result.stderr
+
+
+@pytest.mark.parametrize("backend", ["claude_code", "bedrock"])
+def test_query_exhausted_embedding_limit_uses_shared_error(monkeypatch, initialized_workspace, backend):
+    """Real retrieval overflow must reach the CLI error route on either backend."""
+    from botocore.exceptions import ClientError
+    from graph_works_core.query import commands as q
+
+    class Provider:
+        def embed_query(self, text):
+            raise ClientError(
+                {
+                    "Error": {
+                        "Code": "ValidationException",
+                        "Message": ("Too many input tokens. Max input tokens: 8192, request input token count: 12273"),
+                    }
+                },
+                "InvokeModel",
+            )
+
+    (initialized_workspace / "okf" / "large.md").write_text("---\ntitle: Large\n---\n" + "x" * 50_000, encoding="utf-8")
+    monkeypatch.setattr(q, "make_bedrock_embeddings", lambda *a, **kw: Provider())
+    result = runner.invoke(
+        app, ["query", "--query", "why", "--backend", backend, "--workspace", str(initialized_workspace)]
+    )
+    assert result.exit_code == 1
+    assert isinstance(result.exception, SystemExit)
+    assert result.stdout == ""
+    assert "Error: " in result.stderr
+    assert "amazon.titan" in result.stderr
+    assert "large" in result.stderr
+    assert "Traceback" not in result.stderr
+
+
+def test_query_large_page_returns_normal_brief_json(monkeypatch, initialized_workspace):
+    from graph_works_core.query import commands as q
+
+    class Provider:
+        def embed_query(self, text):
+            assert len(text) <= 32_000
+            return [1.0, 0.5]
+
+    (initialized_workspace / "okf" / "large.md").write_text(
+        "---\ntitle: Large\n---\n" + "word " * 11_000 + " uniquetailterm", encoding="utf-8"
+    )
+    monkeypatch.setattr(q, "make_bedrock_embeddings", lambda *a, **kw: Provider())
+    result = runner.invoke(
+        app, ["query", "--query", "uniquetailterm", "--json", "--workspace", str(initialized_workspace)]
+    )
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.stdout)
+    assert set(payload) == {"query", "top_pages"}
+    page = next(p for p in payload["top_pages"] if p["path"] == "large")
+    assert set(page) == {"path", "excerpt", "search_scores"}
+    assert page["search_scores"]["bm25"] > 0
+
+
+@pytest.mark.parametrize("backend,persistent", [("claude_code", True), ("bedrock", True), ("claude_code", False)])
+def test_query_real_bedrock_adapter_logs_rejections_without_uncaught_error(
+    monkeypatch, initialized_workspace, backend, persistent
+):
+    """Provider logging may contain a traceback even when the CLI handles recovery."""
+    import io
+    import logging
+    import sys
+
+    from botocore.exceptions import ClientError
+    from graph_works_core.query import commands as q
+    from langchain_aws import BedrockEmbeddings
+
+    calls = []
+
+    class Transport:
+        def invoke_model(self, **kwargs):
+            text = json.loads(kwargs["body"])["inputText"]
+            calls.append(text)
+            if persistent or len(text) > 16_000:
+                raise ClientError(
+                    {
+                        "Error": {
+                            "Code": "ValidationException",
+                            "Message": (
+                                "Too many input tokens. Max input tokens: 8192, request input token count: 12273"
+                            ),
+                        }
+                    },
+                    "InvokeModel",
+                )
+            return {"body": io.BytesIO(b'{"embedding": [1.0, 0.5]}')}
+
+    def make_provider(model_id, *, region):
+        # Install stderr logging inside CliRunner's capture, with test-local state.
+        provider_logger = logging.getLogger("langchain_aws.embeddings.bedrock")
+        monkeypatch.setattr(provider_logger, "handlers", [logging.StreamHandler(sys.stderr)])
+        monkeypatch.setattr(provider_logger, "propagate", False)
+        return BedrockEmbeddings(client=Transport(), model_id=model_id, region_name=region)
+
+    (initialized_workspace / "okf" / "large.md").write_text(
+        "---\ntitle: Large\n---\n" + "word " * 11_000, encoding="utf-8"
+    )
+    monkeypatch.setattr(q, "make_bedrock_embeddings", make_provider)
+    result = runner.invoke(
+        app, ["query", "--query", "word", "--backend", backend, "--json", "--workspace", str(initialized_workspace)]
+    )
+    assert "Error raised by inference endpoint" in result.stderr
+    assert "Traceback" in result.stderr  # Logged by the provider, not an uncaught CLI exception.
+    assert len(calls[0]) == 32_000
+    if persistent:
+        assert result.exit_code == 1
+        assert isinstance(result.exception, SystemExit)
+        assert result.stdout == ""
+        assert "Error: Page large: Embedding input token limit" in result.stderr
+        assert len(calls) == 15 and len(calls[-1]) == 1
+    else:
+        assert result.exit_code == 0, result.output
+        assert result.exception is None
+        assert json.loads(result.stdout)["top_pages"][0]["path"] == "large"
+        assert [len(t) for t in calls] == [32_000, 16_000, 4]

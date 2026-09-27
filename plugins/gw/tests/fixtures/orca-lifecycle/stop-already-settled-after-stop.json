@@ -1,0 +1,17 @@
+{
+  "id": "bcc9344b-6072-46d3-a672-131fc7de938a",
+  "ok": true,
+  "result": {
+    "dispatchId": "ctx_4ff1c34d57d0",
+    "state": "stopped",
+    "alreadySettled": true,
+    "processAction": "none",
+    "mutation": {
+      "requestId": "43eb9749-6d44-43e7-9f80-f801d2a4671c",
+      "replayed": false
+    }
+  },
+  "_meta": {
+    "runtimeId": "0993159f-bfb9-4f5f-aacc-28ffe30280e1"
+  }
+}

@@ -132,6 +132,8 @@ class DecodeSpecCommandTests(unittest.TestCase):
             "agent": agent,
             "model": model,
             "reasoning_effort": reasoning_effort,
+            "mode": "attend",
+            "worktree": {"path": "/repo/item"},
             "prompt": prompt,
         }
         with tempfile.TemporaryDirectory() as directory:
@@ -203,6 +205,8 @@ class ResumeSpecCommandTests(unittest.TestCase):
             "agent": agent,
             "model": model,
             "reasoning_effort": reasoning_effort,
+            "mode": "attend",
+            "worktree": {"path": "/repo/item"},
             "prompt": prompt,
         }
         with tempfile.TemporaryDirectory() as directory:
@@ -301,6 +305,8 @@ class LaunchRetryOfTests(unittest.TestCase):
             "agent": agent,
             "model": model,
             "reasoning_effort": reasoning_effort,
+            "mode": "attend",
+            "worktree": {"path": "/repo/item"},
             "prompt": prompt,
         }
         with tempfile.TemporaryDirectory() as directory:
@@ -609,7 +615,8 @@ class RecoveryFixture(unittest.TestCase):
         return path
 
     def classify(
-        self, records: list[str] | None = None, checkpoints: list[str] | None = None
+        self, records: list[str] | None = None, checkpoints: list[str] | None = None,
+        dispatch_records: list[str] | None = None,
     ) -> dict[str, dict[str, object]]:
         tasks = self.root / "tasks.json"
         workers = self.root / "workers.json"
@@ -624,6 +631,7 @@ class RecoveryFixture(unittest.TestCase):
                 workers=str(workers),
                 recovery_record=paths,
                 checkpoint=checkpoints or [],
+                dispatch_record=dispatch_records or [],
             )
         )
         return {row["task_id"]: row for row in rows}
@@ -651,6 +659,199 @@ class RecoveryFixture(unittest.TestCase):
             newline="\n",
         )
         return str(path)
+
+    def dispatch_record(self, *, superseded: str = TASK, reason: str = "claude kept stalling") -> str:
+        path = self.root / "references" / "orca-dispatch" / f"{KEY}.json"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps({
+            "schema": "gw-orca-dispatch", "version": 1, "key": KEY,
+            "work_path": "work/example", "phase": "execute", "run_id": RUN,
+            "attempts": [],
+            "reroutes": [{"at": "2026-09-26T10:00:00Z", "reason": reason,
+                          "superseded_task_id": superseded, "superseded_dispatch_id": DISPATCH,
+                          "overrides": {"agent": "codex", "model": None, "effort": None}}],
+        }), encoding="utf-8", newline="\n")
+        return str(path)
+
+
+class RerouteClassificationTests(RecoveryFixture):
+    def test_rows_carry_task_title_and_display_name(self):
+        row = self.classify(records=[])[TASK]
+        self.assertEqual(row["task_title"], KEY)
+        self.assertEqual(row["display_name"], "work/example · execute")
+
+    def test_a_superseded_blocked_task_is_rerouted_not_a_deliberate_skip(self):
+        self.settle(1)
+        row = self.classify(records=[], dispatch_records=[self.dispatch_record()])[TASK]
+        self.assertEqual(row["action"], "rerouted")
+        self.assertEqual(row["reroute"], {"reason": "claude kept stalling", "at": "2026-09-26T10:00:00Z"})
+
+    def test_rerouted_takes_precedence_over_parked(self):
+        self.settle(1)
+        rows = self.classify(records=[], checkpoints=[self.checkpoint()],
+                             dispatch_records=[self.dispatch_record()])
+        self.assertEqual(rows[TASK]["action"], "rerouted")
+
+    def test_a_superseded_successful_task_is_rerouted_after_task_update(self):
+        # Reroute changes even a completed Task to blocked; the verified
+        # succeeded worker still proves that this is a settled old Task.
+        self.orca.worker_state = "succeeded"
+        self.orca.dispatch_status = "completed"
+        self.orca.task_status = "blocked"
+        self.assertEqual(self.classify(records=[])[TASK]["action"], "settled")
+
+        row = self.classify(records=[], dispatch_records=[self.dispatch_record()])[TASK]
+        self.assertEqual(row["action"], "rerouted")
+        self.assertEqual(row["reroute"], {
+            "reason": "claude kept stalling", "at": "2026-09-26T10:00:00Z"
+        })
+
+    def test_a_superseded_success_with_live_recovery_evidence_stays_inspection(self):
+        self.orca.worker_state = "succeeded"
+        self.orca.dispatch_status = "completed"
+        self.orca.task_status = "blocked"
+        record = self.place(self.record())
+        row = self.classify(records=[str(record)], dispatch_records=[self.dispatch_record()])[TASK]
+        self.assertEqual(row["action"], "recovery-inspection")
+        self.assertEqual(row["recovery"], {"checkpoint": None, "reason": "rerouted-but-live"})
+
+    def test_completed_recovery_then_blocked_reroute_preserves_verified_checkpoint(self):
+        for state, status in (("stopped", "failed"), ("succeeded", "completed")):
+            with self.subTest(worker_state=state):
+                self.reset()
+                self.progress("completed-verified")
+                before = self.target.read_bytes()
+                self.orca.task_status = "blocked"
+                self.orca.worker_state, self.orca.dispatch_status = state, status
+                row = self.classify(dispatch_records=[self.dispatch_record()])[TASK]
+                self.assertEqual(row["action"], "rerouted")
+                self.assertEqual(row["recovery"], {
+                    "checkpoint": "completed-verified", "reason": "verified"
+                })
+                self.assertEqual(row["reroute"]["reason"], "claude kept stalling")
+                self.assertEqual(self.target.read_bytes(), before)
+                self.assertEqual(self.orca.mutations(), [])
+
+    def test_completed_reroute_still_requires_recovery_proof(self):
+        cases = (
+            ({"liveness": {"verdict": "live"}}, "rerouted-but-live"),
+            ({"liveness": {"verdict": "unverifiable"}}, "liveness-unverifiable"),
+            ({"worker_state": "outcome_unknown"}, "outcome-unknown"),
+            ({"dispatch_status": "outcome_unknown"}, "outcome-unknown"),
+            ({"terminal_state": "active"}, "terminal-not-released"),
+            ({"release_state": "release_unknown"}, "terminal-not-released"),
+            ({"spec": SPEC + "changed"}, "spec-mismatch"),
+            ({"spec_truncated": True}, "spec-mismatch"),
+            ({"worker_run": "run_other"}, "run-mismatch"),
+            ({"show_ok": False}, "launch-proof-unverified"),
+            ({"commits": set()}, "evidence[1] commit missing"),
+        )
+        for changes, reason in cases:
+            with self.subTest(reason=reason, changes=changes):
+                self.reset()
+                self.progress("completed-verified")
+                self.orca.task_status = "blocked"
+                vars(self.orca).update(changes)
+                row = self.classify(dispatch_records=[self.dispatch_record()])[TASK]
+                self.assertEqual(row["action"], "recovery-inspection")
+                self.assertEqual(row["recovery"]["reason"], reason)
+                self.assertNotIn("reroute", row)
+
+    def test_reroute_keeps_incomplete_unresolved_and_changed_evidence_in_inspection(self):
+        for problem in ("incomplete", "unresolved", "file-changed", "request-unknown"):
+            with self.subTest(problem=problem):
+                self.reset()
+                self.progress("completed-verified")
+                self.orca.task_status = "blocked"
+                record = self.record("completed-verified")
+                if problem == "incomplete":
+                    record = self.record("completion-requested")
+                    reason = "recovery-incomplete"
+                elif problem == "unresolved":
+                    record["unresolved"] = reason = "receipt still uncertain"
+                elif problem == "file-changed":
+                    self.artifact.write_text("changed\n", encoding="utf-8", newline="\n")
+                    reason = "evidence[0] file changed"
+                else:
+                    record["mutations"][-1]["request_id"] = None
+                    reason = "original request identity unknown"
+                self.place(record)
+                row = self.classify(dispatch_records=[self.dispatch_record()])[TASK]
+                self.assertEqual(row["action"], "recovery-inspection")
+                self.assertIn(reason, row["recovery"]["reason"])
+                self.assertNotIn("reroute", row)
+
+    def test_blocked_completed_checkpoint_requires_matching_durable_reroute(self):
+        for field in (None, "run_id", "key", "work_path", "phase", "superseded_dispatch_id"):
+            with self.subTest(field=field):
+                self.reset()
+                self.progress("completed-verified")
+                self.orca.task_status = "blocked"
+                paths = []
+                if field is not None:
+                    path = Path(self.dispatch_record())
+                    record = json.loads(path.read_text(encoding="utf-8"))
+                    target = record["reroutes"][0] if field == "superseded_dispatch_id" else record
+                    target[field] = "other"
+                    path.write_text(json.dumps(record), encoding="utf-8", newline="\n")
+                    paths = [str(path)]
+                row = self.classify(dispatch_records=paths)[TASK]
+                self.assertEqual(row["action"], "recovery-inspection")
+                self.assertEqual(row["recovery"]["reason"], "task-not-completed")
+                self.assertNotIn("reroute", row)
+
+    def test_a_superseded_task_with_a_live_worker_is_inspection(self):
+        row = self.classify(records=[], dispatch_records=[self.dispatch_record()])[TASK]
+        self.assertEqual(row["action"], "recovery-inspection")
+        self.assertEqual(row["recovery"], {"checkpoint": None, "reason": "rerouted-but-live"})
+
+    def test_a_live_superseded_worker_stays_inspection_with_a_recovery_record(self):
+        record = self.place(self.record())
+        row = self.classify(
+            records=[str(record)], dispatch_records=[self.dispatch_record()]
+        )[TASK]
+        self.assertEqual(row["action"], "recovery-inspection")
+        self.assertEqual(row["recovery"], {"checkpoint": None, "reason": "rerouted-but-live"})
+
+    def test_outcome_unknown_evidence_wins_over_reroute(self):
+        self.orca.worker_state = "outcome_unknown"
+        row = self.classify(records=[], dispatch_records=[self.dispatch_record()])[TASK]
+        self.assertEqual(row["action"], "recovery-inspection")
+        self.assertNotIn("reroute", row)
+
+    def test_reroute_needs_a_complete_advertised_worker_snapshot(self):
+        self.settle(1)
+        self.orca.worker_page_has_more[0] = True
+        self.orca.worker_cursors[0] = "cursor-1"
+        self.orca.worker_page_totals[0] = 2
+        with self.assertRaises(SystemExit):
+            self.classify(records=[], dispatch_records=[self.dispatch_record()])
+
+    def test_a_record_for_another_task_changes_nothing(self):
+        self.settle(1)
+        row = self.classify(records=[], dispatch_records=[self.dispatch_record(superseded="task_other")])[TASK]
+        self.assertEqual(row["action"], "deliberate-skip")
+
+    def test_a_malformed_dispatch_record_is_refused(self):
+        bad = self.root / "bad.json"
+        bad.write_text(json.dumps({"schema": "nope"}), encoding="utf-8", newline="\n")
+        with self.assertRaises(SystemExit):
+            self.classify(records=[], dispatch_records=[str(bad)])
+
+    def test_boolean_dispatch_record_version_is_refused(self):
+        path = Path(self.dispatch_record())
+        value = json.loads(path.read_text(encoding="utf-8"))
+        value["version"] = True
+        path.write_text(json.dumps(value), encoding="utf-8", newline="\n")
+        with self.assertRaises(SystemExit):
+            self.classify(records=[], dispatch_records=[str(path)])
+
+    def test_parser_accepts_repeatable_dispatch_records(self):
+        args = HELPER["parser"]().parse_args([
+            "classify-restart", "--tasks", "tasks.json", "--workers", "workers.json",
+            "--dispatch-record", "first.json", "--dispatch-record", "second.json",
+        ])
+        self.assertEqual(args.dispatch_record, ["first.json", "second.json"])
 
 
 class RecordWriteTests(RecoveryFixture):
@@ -991,6 +1192,8 @@ class RestartTests(RecoveryFixture):
                     self.classify()[TASK],
                     {
                         "task_id": TASK,
+                        "task_title": KEY,
+                        "display_name": "work/example · execute",
                         "dispatch_id": DISPATCH,
                         "action": action,
                         "recovery": {"checkpoint": checkpoint, "reason": reason},
@@ -1012,7 +1215,8 @@ class RestartTests(RecoveryFixture):
         self.retried_twice()
         self.assertEqual(
             self.classify(records=[])[TASK],
-            {"task_id": TASK, "dispatch_id": "ctx_retry", "action": "live"},
+            {"task_id": TASK, "task_title": KEY, "display_name": "work/example · execute",
+             "dispatch_id": "ctx_retry", "action": "live"},
         )
 
     def test_the_retry_chain_breaks_a_created_at_tie(self):
@@ -1028,6 +1232,8 @@ class RestartTests(RecoveryFixture):
             self.classify(records=[])[TASK],
             {
                 "task_id": TASK,
+                "task_title": KEY,
+                "display_name": "work/example · execute",
                 "dispatch_id": "ctx_retry",
                 "action": "recovery-inspection",
                 "recovery": {"checkpoint": None, "reason": "latest-attempt-ambiguous"},
@@ -1126,6 +1332,8 @@ class RestartTests(RecoveryFixture):
             self.classify(records=[])[TASK],
             {
                 "task_id": TASK,
+                "task_title": KEY,
+                "display_name": "work/example · execute",
                 "dispatch_id": DISPATCH,
                 "action": "recovery-inspection",
             },
@@ -1137,6 +1345,8 @@ class RestartTests(RecoveryFixture):
             self.classify()[TASK],
             {
                 "task_id": TASK,
+                "task_title": KEY,
+                "display_name": "work/example · execute",
                 "dispatch_id": DISPATCH,
                 "action": "recovered-settled",
                 "recovery": {"checkpoint": "completed-verified", "reason": "verified"},
@@ -1177,6 +1387,8 @@ class RestartTests(RecoveryFixture):
             self.classify()[TASK],
             {
                 "task_id": TASK,
+                "task_title": KEY,
+                "display_name": "work/example · execute",
                 "dispatch_id": "ctx_retry",
                 "action": "live",
                 "recovery": {"checkpoint": None, "reason": "current-evidence-wins"},
@@ -1217,6 +1429,8 @@ class RestartTests(RecoveryFixture):
             rows["task_gone"],
             {
                 "task_id": "task_gone",
+                "task_title": None,
+                "display_name": None,
                 "dispatch_id": DISPATCH,
                 "action": "recovery-inspection",
                 "recovery": {"checkpoint": None, "reason": "record-task-not-in-run"},
@@ -1252,6 +1466,8 @@ class RestartTests(RecoveryFixture):
             self.classify(records=[])[TASK],
             {
                 "task_id": TASK,
+                "task_title": KEY,
+                "display_name": "work/example · execute",
                 "dispatch_id": DISPATCH,
                 "action": "recovery-inspection",
             },
@@ -1455,6 +1671,64 @@ class FinalReviewTests(RecoveryFixture):
                 recovered["checkpoint"] = recovered["history"][-1]["checkpoint"] = verified
                 self.write(recovered)
                 self.assertEqual(self.orca.mutations(), [])
+
+    def test_abandon_and_close_journals_preserve_unknown_identity_until_receipt(self):
+        for action, previous, requested, verified, level in (
+            ("worker-abandon", "inspection", "stop-requested", "stopped-verified", 1),
+            ("terminal-close", "stopped-verified", "release-requested", "released-verified", 2),
+        ):
+            with self.subTest(action=action):
+                self.reset()
+                self.progress(previous)
+                intent = self.annotate(json.loads(self.target.read_text(encoding="utf-8")),
+                                       "original request identity unknown: " + action)
+                intent["checkpoint"] = intent["history"][-1]["checkpoint"] = requested
+                intent["mutations"].append({
+                    "action": action, "request_id": None,
+                    "receipt": "sanitized intent output", "at": "2026-09-27T07:00:00Z",
+                })
+                self.write(intent)
+                self.settle(level)
+                self.assertEqual(json.loads(self.target.read_text(encoding="utf-8")), intent)
+                self.assertEqual(self.classify()[TASK]["action"], "recovery-inspection")
+                self.refused(self.annotate(intent, None), "request identity")
+                advanced = self.annotate(intent, "identity still unknown")
+                advanced["checkpoint"] = advanced["history"][-1]["checkpoint"] = verified
+                self.refused(advanced, "request identity")
+                recovered = self.annotate(intent, "outcome still unresolved")
+                recovered["mutations"].append({
+                    "action": action, "request_id": "original-" + action,
+                    "receipt": "sanitized original receipt", "at": "2026-09-27T07:00:01Z",
+                })
+                self.orca.liveness = {"verdict": "unverifiable"}
+                self.write(recovered)
+                self.assertEqual(json.loads(self.target.read_text(encoding="utf-8")), recovered)
+                self.assertEqual(self.classify()[TASK]["action"], "recovery-inspection")
+                self.assertEqual(self.orca.mutations(), [])
+
+    def test_close_receipt_cannot_replace_released_resource_or_exit_proof(self):
+        for missing in ("terminal-state", "resource-state", "exit-proof"):
+            with self.subTest(missing=missing):
+                self.reset()
+                self.progress("release-requested")
+                record = self.annotate(json.loads(self.target.read_text(encoding="utf-8")),
+                                       "close confirmed; resource verification pending")
+                record["mutations"].append({
+                    "action": "terminal-close", "request_id": "original-close",
+                    "receipt": "positive exact-handle close receipt", "at": "2026-09-27T07:00:01Z",
+                })
+                self.write(record)
+                self.settle(2)
+                if missing == "terminal-state":
+                    self.orca.terminal_state = "retained"
+                elif missing == "resource-state":
+                    self.orca.release_state = "retained"
+                else:
+                    self.orca.liveness = {"verdict": "unverifiable"}
+                advanced = self.annotate(record, None)
+                advanced["checkpoint"] = advanced["history"][-1]["checkpoint"] = "released-verified"
+                self.refused(advanced, "not verified")
+                self.assertEqual(json.loads(self.target.read_text(encoding="utf-8")), record)
 
     def test_restart_rejects_malformed_page_and_nonboolean_has_more(self):
         self.progress("completed-verified")

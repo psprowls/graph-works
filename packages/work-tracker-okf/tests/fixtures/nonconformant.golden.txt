@@ -15,6 +15,7 @@ warn	decisions.hold-phase-stale	work/epic-ledger-at-finish.md	work_tracker_okf._
 error	decisions.open-at-finish	work/epic-ledger-at-finish.md	work_tracker_okf._rules.decisions	`phase: finish` with 2 open decision(s): D-002, D-006
 error	decisions.supersedes-invalid	work/epic-ledger-at-finish.md	work_tracker_okf._rules.decisions	decision D-004 supersedes 'D-009', which does not exist in the ledger
 error	decisions.cite-missing	work/epic-ledger-at-finish/children/feature-ledger-citation.md	work_tracker_okf._rules.decisions	design spec cites 'D-011', which is not in owner 'work/epic-ledger-at-finish/children/feature-ledger-citation''s ledger
+warn	targets.affects-empty	work/epic-ledger-at-finish/children/feature-ledger-citation.md	work_tracker_okf._rules.targets	no `affects` declared: this item will serialize against every write in its repository; declare the paths it changes, or `gw:workspace` if it only changes the workspace
 warn	decisions.ledger-missing	work/epic-stalled-decomposition.md	work_tracker_okf._rules.decisions	`type: Epic` at `phase: execute` has no decisions ledger at `work/epic-stalled-decomposition/references/00-decisions.md`
 warn	graph.epic-without-children	work/epic-stalled-decomposition.md	work_tracker_okf._rules.graph	`type: Epic` at `phase: execute` has no children
 warn	plan.table-malformed	work/epic-stalled-decomposition.md	work_tracker_okf._rules.plan	`## Plan` is present but carries no table matching its declared columns

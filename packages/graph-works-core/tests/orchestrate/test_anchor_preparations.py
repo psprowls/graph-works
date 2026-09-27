@@ -56,12 +56,16 @@ def test_dependencies_prevent_preparation():
     assert not result.dispatches
 
 
-def test_read_only_foreign_children_need_no_integration_stamp():
+def test_read_only_foreign_children_refuse_without_integration_stamp():
     items, repos, contexts = fixture(phase="plan")
+    contexts["git-code"] = replace(contexts["git-code"], branch_tips={"trunk": "0" * 40})
     result = _plan(items, ROOT, item_repos=repos, repo_contexts=contexts)
     assert not result.preparations
-    assert len(result.dispatches) == 2
-    assert all(d.worktree.path == "/code" for d in result.dispatches)
+    assert not result.dispatches
+    assert {(b.path, b.kind) for b in result.blocked} == {
+        (CHILD, "worktree-unprovable"),
+        (SIBLING, "worktree-unprovable"),
+    }
     assert not items[0].repo_stamps
 
 
@@ -217,3 +221,40 @@ def test_missing_cleanliness_evidence_refuses_adoption_and_stamped_anchor():
         result = _plan((owner, *items[1:]), ROOT, item_repos=repos, repo_contexts=contexts)
         assert not result.preparations and not result.dispatches
         assert all(b.kind == "worktree-unprovable" for b in result.blocked)
+
+
+def test_reader_invalid_scalar_policy_does_not_change_code_anchor_preparation():
+    from graph_works_core.orchestrate.anchors import AnchorPreparation, AnchorRefusal, reader_anchor, select_anchor
+
+    items, repos, contexts = fixture()
+    owner = replace(items[0], invalid_optional_fields=("worktree", "branch"))
+    repos[ROOT] = repos[CHILD]
+    context = contexts["git-code"]
+    reader = reader_anchor(owner, repos=repos, repo=repos[CHILD], context=context)
+    assert isinstance(reader, AnchorRefusal)
+    assert reader.kind == "worktree-unprovable"
+    code = select_anchor(
+        owner, items={owner.path: owner}, repos=repos, repo=repos[CHILD], context=context, prepare=True
+    )
+    assert isinstance(code, AnchorPreparation)
+    assert (code.worktree.action, code.base_branch) == ("create-top-level", "trunk")
+
+
+def test_dirty_verified_anchor_is_reader_provenance_but_not_code_placement():
+    from graph_works_core.orchestrate.anchors import Anchor, AnchorRefusal, reader_anchor, select_anchor
+
+    items, repos, contexts = fixture()
+    owner = replace(items[0], repo_stamps={"code": Stamp("/anchor", "epic/a")})
+    context = replace(
+        contexts["git-code"],
+        inventory={"epic/a": ("/anchor",)},
+        path_exists={"/anchor": True},
+        checkout_usable_by_path={"/anchor": False},
+    )
+    assert reader_anchor(owner, repos=repos, repo=repos[CHILD], context=context) == Anchor("/anchor", "epic/a")
+    code = select_anchor(
+        owner, items={owner.path: owner}, repos=repos, repo=repos[CHILD], context=context, prepare=True
+    )
+    assert isinstance(code, AnchorRefusal)
+    assert code.kind == "worktree-unprovable"
+    assert "dirty or unreadable" in code.reason

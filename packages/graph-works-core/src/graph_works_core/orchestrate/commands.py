@@ -4,13 +4,17 @@
 identical inputs produce an identical `OrchestratePlan`, and every config read,
 `stat` and `git` call sits in `run_orchestrate` above it. Nothing here launches
 a worker -- `subagents-io` ships the dispatch value types and no execution
-backend, and choosing one is a separate work item.
+backend, and choosing one is a separate work item. Design/plan stages read
+dedicated detached checkouts pinned to committed branch tips; they never
+reserve a mutable integration worktree.
 
 The frontier walk generalizes `hierarchy.descend()` from pick-one-leaf to
 collect-all, **reusing** its `child_gated` predicate, `PICK_ORDER` and
-`WALK_DEPTH_CAP` rather than restating them. `--descend` and auto-drive
-disagreeing about the same item is exactly the failure that reuse prevents, and
-`test_orchestrate_plan.py` pins the agreement as a property.
+`WALK_DEPTH_CAP` rather than restating them. Admission order then puts
+dependency rank (`orchestrate.rank`) ahead of `PICK_ORDER`; that is an
+ordering difference between the two, never an eligibility one. `--descend`
+and auto-drive disagreeing about the same item is exactly the failure that
+reuse prevents, and `test_orchestrate_plan.py` pins the agreement as a property.
 
 Nothing Orca-shaped appears in this module. The four prompt lines are
 vendor-neutral; the one place a vendor command may appear is a variant's
@@ -20,24 +24,29 @@ vendor-neutral; the one place a vendor command may appear is a variant's
 from __future__ import annotations
 
 import hashlib
+import itertools
+import re
 from collections.abc import Iterable, Mapping, Sequence
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from pathlib import Path, PurePosixPath
 from types import MappingProxyType
-from typing import Literal
+from typing import Literal, cast
 
 from okf_io import load_bundle
 from subagents_io.dispatch import PlannedDispatch, WorktreeAction
 from work_tracker_okf import decisions as _decisions
+from work_tracker_okf.affects import code_affects, touches_workspace
+from work_tracker_okf.asks import plan_checkpoints
 from work_tracker_okf.decisions import HoldFact
 from work_tracker_okf.hierarchy import PICK_ORDER, active_nonterminal_descendants, child_gated, decision_owner
 from work_tracker_okf.items import IGNORE, WorkItem, load_items
 from work_tracker_okf.vocabulary import (
     PHASES,
+    PLAN_SOURCE_ID,
     SLUG_PREFIXES,
     TERMINAL_STATUSES,
 )
-from work_tracker_okf.workflow import RouteResult, route, state_for
+from work_tracker_okf.workflow import VARIANTS_BY_STAGE, Dispatch, RouteResult, Stage, route, state_for
 
 from graph_works_core.orchestrate.anchors import (
     Anchor,
@@ -45,8 +54,19 @@ from graph_works_core.orchestrate.anchors import (
     AnchorRefusal,
     enclosing_owner,
     integration_branch,
+    reader_anchor,
     select_anchor,
 )
+from graph_works_core.orchestrate.claims import (
+    CODE_WRITE_PHASES,
+    Claim,
+    CodeScope,
+    WorktreeScope,
+    claims_for,
+    first_conflicts,
+    paths_overlap,
+)
+from graph_works_core.orchestrate.rank import dependent_counts
 from graph_works_core.workspace.decision_owner import HoldReport, holds_by_path, open_holds
 from graph_works_core.workspace.dispatch import (
     DispatchProfileError,
@@ -61,8 +81,14 @@ from graph_works_core.workspace.errors import WorkspaceError
 from graph_works_core.workspace.finish import FinishPlan, FinishTarget, resolve_finish_targets
 from graph_works_core.workspace.layout import WorkspaceLayout
 from graph_works_core.workspace.manifest import checked_bool, checked_int
+from graph_works_core.workspace.pipeline import ASK_LINE, FINDINGS_LINE
 from graph_works_core.workspace.provenance import default_base, run_git
-from graph_works_core.workspace.repo_context import RepositoryContext, observe_repository, repository_identity
+from graph_works_core.workspace.repo_context import (
+    RepositoryContext,
+    observe_branch_tips,
+    observe_repository,
+    repository_identity,
+)
 from graph_works_core.workspace.repos import ItemRepo, resolve_item_repo
 
 WALK_DEPTH_CAP = 10_000
@@ -127,6 +153,27 @@ class BlockedItem:
 
 
 @dataclass(frozen=True, slots=True)
+class HumanCheckpoints:
+    """An execute plan's checkpoint reading; only `declared` has a known count."""
+
+    status: str
+    items: tuple[str, ...] = ()
+
+
+def read_human_checkpoints(bundle_root: Path, item: WorkItem) -> HumanCheckpoints:
+    """Read an item's plan source; missing sources and unreadable files stay distinct."""
+    source = next((s for s in item.sources if s.id == PLAN_SOURCE_ID and s.resource), None)
+    if source is None or source.resource is None:
+        return HumanCheckpoints("no-plan")
+    try:
+        text = (bundle_root / source.resource.removeprefix("/")).read_bytes().decode("utf-8")
+    except (OSError, UnicodeDecodeError):
+        return HumanCheckpoints("unreadable")
+    parsed = plan_checkpoints(text)
+    return HumanCheckpoints(parsed.status, parsed.items)
+
+
+@dataclass(frozen=True, slots=True)
 class _Refusal:
     """`_resolve_worktree` declining to place a dispatch, rather than guessing.
 
@@ -156,6 +203,9 @@ class OrchestratePlan:
     dispatch_repos: Mapping[str, ItemRepo] = MappingProxyType({})
     preparations: tuple[AnchorPreparation, ...] = ()
     finish_targets: Mapping[str, tuple[FinishTarget, ...]] = MappingProxyType({})
+    human_checkpoints: Mapping[str, HumanCheckpoints] = field(default_factory=lambda: MappingProxyType({}))
+    max_attend: int = 1
+    attend_slots_free: int = 0
 
 
 #: The character budget for a session name. Orca renders it in a task row and
@@ -364,10 +414,20 @@ def _frontier(
     return candidates, advances, blocked
 
 
-def _sorted(candidates: list[tuple[WorkItem, RouteResult]]) -> list[tuple[WorkItem, RouteResult]]:
+def _sorted(
+    candidates: list[tuple[WorkItem, RouteResult]], ranks: Mapping[str, int]
+) -> list[tuple[WorkItem, RouteResult]]:
+    """Admission order: most transitive dependents first (D-003), then the
+    status/opened/path order `hierarchy.descend()` also uses. Order only --
+    every gate below still runs for every candidate."""
     return sorted(
         candidates,
-        key=lambda pair: (PICK_ORDER.get(pair[0].work_status, 99), pair[0].opened, pair[0].path),
+        key=lambda pair: (
+            -ranks.get(pair[0].path, 0),
+            PICK_ORDER.get(pair[0].work_status, 99),
+            pair[0].opened,
+            pair[0].path,
+        ),
     )
 
 
@@ -478,7 +538,7 @@ def _adopt(item: WorkItem, *, inventory: Mapping[str, str]) -> tuple[str, str] |
 
 
 #: The phases whose stages write only into the vault. A stage in this set
-#: cannot produce a commit, so it must not acquire the placement stamp that
+#: gets READER_ACTION and cannot produce a commit or acquire the placement stamp that
 #: decides where later commits land -- the governing invariant of this
 #: module's placement policy. Deliberately spelled out here rather than
 #: imported as the complement of `stage_advance.RESULTS_PHASES`: the two
@@ -486,6 +546,72 @@ def _adopt(item: WorkItem, *, inventory: Mapping[str, str]) -> tuple[str, str] |
 #: and `test_the_read_only_and_results_phases_are_complements` pins them
 #: against each other instead.
 READ_ONLY_PHASES: frozenset[str] = frozenset({"design", "plan"})
+
+
+#: A dedicated checkout detached by the launcher at the observed committed tip.
+READER_ACTION = "pin-detached"
+READER_BASELINE_LINE = (
+    "Reader baseline: this stage reads a detached checkout of {branch} at {sha}; "
+    "cite that commit in the stage artifact and do not commit in this checkout."
+)
+
+
+def _reader_source(
+    item: WorkItem,
+    *,
+    root: str,
+    by_path: Mapping[str, WorkItem],
+    item_repo: ItemRepo | None,
+    item_repos: Mapping[str, ItemRepo] | None,
+    context: RepositoryContext | None,
+    inventory: Mapping[str, str],
+    exists: Mapping[str, bool | None],
+    default_base: str,
+) -> tuple[str | None, str] | _Refusal:
+    """Select the nearest owner's verified ref, or an unanchored root's base.
+
+    Old descendant stamps never supply integration provenance. A dirty anchor
+    is a valid source: the reader uses its committed ref, never its checkout.
+    """
+    if context is not None and (not context.identity_known or not context.inventory_known):
+        return _Refusal("worktree-unprovable", "repository Git identity or inventory is unavailable")
+    owner = enclosing_owner(item, by_path)
+    if owner is None and (item.path != root or item.parent_path is not None):
+        return _Refusal("worktree-unprovable", "cannot prove the reader's integration owner")
+    source = owner if owner is not None else item
+    if context is not None:
+        assert item_repos is not None and item_repo is not None
+        selected = reader_anchor(source, repos=item_repos, repo=item_repo, context=context)
+        if isinstance(selected, AnchorRefusal):
+            return _Refusal(selected.kind, selected.reason)
+        if selected is not None:
+            return selected.worktree, selected.branch
+    else:
+        path, branch = source.worktree, source.branch
+        if bool(path) != bool(branch) or {"worktree", "branch"}.intersection(source.invalid_optional_fields):
+            return _Refusal("worktree-unprovable", f"repair invalid integration stamp on {source.path}")
+        if path and branch:
+            if inventory.get(branch) != path or exists.get(path) is not True:
+                return _Refusal("worktree-unprovable", "integration stamp is not verified in this repository")
+            return path, branch
+    if owner is not None:
+        return _Refusal("worktree-unprovable", f"integration owner {owner.path} requires an explicit anchor stamp")
+    return None, context.default_base if context is not None else default_base
+
+
+def _pin_reader(
+    source: tuple[str | None, str], *, sha: str | None, trunk_checkout: str | None, where: str
+) -> WorktreeAction | _Refusal:
+    path, branch = source
+    if sha is None or re.fullmatch(r"(?:[0-9a-fA-F]{40}|[0-9a-fA-F]{64})", sha) is None:
+        return _Refusal(
+            "worktree-unprovable",
+            f"cannot resolve {branch!r} to a full commit object ID in {where}; "
+            "a reader is never placed in a mutable checkout",
+        )
+    return WorktreeAction(
+        READER_ACTION, None, None, branch, None, None if path is None or path == trunk_checkout else path, sha
+    )
 
 
 def _code_work_may_exist(item: WorkItem, phase: str) -> bool:
@@ -524,10 +650,9 @@ def _resolve_worktree(
     child branch off it; else mint the epic worktree -- which only the subtree
     root may do.
 
-    Rule 2's entitlement is `is_root or phase in READ_ONLY_PHASES`. A stage
-    that writes no code may share the anchor because it cannot collide there;
-    a descendant that *does* commit gets its own fork instead, so it has a
-    branch of its own to review and merge. There is no opportunistic
+    Rule 2's entitlement belongs only to the root. Read-only stages never
+    reach this function (see `READER_ACTION`); code-writing descendants get
+    their own fork to review and merge. There is no opportunistic
     main-checkout placement at any phase: `default_base` is trunk.
 
     Returns `(action, claims_the_epic_slot)`. `action` is `None` only for the
@@ -575,11 +700,10 @@ def _resolve_worktree(
     """
 
     def _occupied(path: str) -> bool:
-        # Exclude this item's own contribution. `_frontier` does not filter the
-        # live set out of the candidates, so an item is routinely re-proposed
-        # while genuinely still live -- many on_dispatch transitions are no-ops
-        # between a dispatch and its own advance. Its own stamp must never read
-        # as "held by someone else", or it forks off itself.
+        # Retain defensive owner exclusion: if this item ever reaches placement
+        # despite its own live contribution, its stamp must not read as "held by
+        # someone else" and make it fork off itself. In the normal `plan()` live
+        # path, the earlier candidate guard excludes live paths before placement.
         return bool(live_worktree_owners.get(path, set()) - {item.path}) or path in accepted_worktrees
 
     def _fork_parent(source: str) -> str | None:
@@ -611,6 +735,7 @@ def _resolve_worktree(
                     base_branch=branch,
                     exists=None,
                     parent_path=_fork_parent(path),
+                    start_sha=None,
                 ),
                 False,
             )
@@ -623,6 +748,7 @@ def _resolve_worktree(
                 base_branch=None,
                 exists=worktree_exists.get(path, True),
                 parent_path=None,
+                start_sha=None,
             ),
             is_main,
         )
@@ -647,6 +773,7 @@ def _resolve_worktree(
                         base_branch=None,
                         exists=worktree_exists.get(item.worktree),
                         parent_path=None,
+                        start_sha=None,
                     ),
                     False,
                 )
@@ -661,6 +788,7 @@ def _resolve_worktree(
                     base_branch=default_base,
                     exists=None,
                     parent_path=None,
+                    start_sha=None,
                 ),
                 False,
             )
@@ -681,6 +809,7 @@ def _resolve_worktree(
                     base_branch=None,
                     exists=worktree_exists.get(item.worktree),
                     parent_path=None,
+                    start_sha=None,
                 ),
                 False,
             )
@@ -698,17 +827,17 @@ def _resolve_worktree(
                 base_branch=item.branch,
                 exists=None,
                 parent_path=_fork_parent(item.worktree),
+                start_sha=None,
             ),
             False,
         )
     if epic_worktree_path is not None:
-        # The epic anchor is a *read* context for a descendant's vault-only
-        # stage and a *work* context for the root. A descendant at a code
-        # phase must not land in it: two workers committing in one directory
+        # The epic anchor is the root's work context. Code-writing
+        # descendants must not land in it: two workers committing in one directory
         # is the hazard rule 3 exists for, and a child that commits on the
         # epic branch leaves nothing of its own to review or merge. It falls
         # through to the fork below instead.
-        reuses_anchor = is_root or phase in READ_ONLY_PHASES
+        reuses_anchor = is_root
         if reuses_anchor and not _occupied(epic_worktree_path):
             if worktree_exists.get(epic_worktree_path) is False:
                 # The epic anchor can be stale for the same reason a stamp can.
@@ -728,6 +857,7 @@ def _resolve_worktree(
                     base_branch=None,
                     exists=worktree_exists.get(epic_worktree_path),
                     parent_path=None,
+                    start_sha=None,
                 ),
                 False,
             )
@@ -739,6 +869,7 @@ def _resolve_worktree(
                 base_branch=epic_branch,
                 exists=None,
                 parent_path=_fork_parent(epic_worktree_path),
+                start_sha=None,
             ),
             False,
         )
@@ -774,10 +905,10 @@ def _resolve_worktree(
             return _adopted_action(cold_reason)
         # Every stage so far was vault-only -- typically an attended
         # `/gw:workflow` design or plan, which never allocates a worktree.
-        # There is no code work to lose. Still search first, so a dispatched
-        # read-only stage whose stamp was lost is reunited with its worktree
-        # instead of being given a second one; an ambiguous search still
-        # refuses. Finding nothing falls through to the cold-start tail.
+        # There is no code work to lose. Still adopt an existing branch
+        # worktree if one can be proved; ambiguous matches refuse. Readers
+        # never reach this ladder or supply branch stamps. Finding nothing
+        # falls through to the cold-start tail.
         found = _adopt(item, inventory=inventory)
         if isinstance(found, _Refusal):
             return found, False
@@ -804,6 +935,7 @@ def _resolve_worktree(
             base_branch=default_base,
             exists=None,
             parent_path=None,
+            start_sha=None,
         ),
         True,
     )
@@ -828,8 +960,10 @@ def _prompt(
     workspace: str,
     merge_target: str,
     tail: str | None,
+    mode: str,
+    reader: tuple[str, str] | None = None,
 ) -> str:
-    """Four vendor-neutral lines, the variant's tail, then the placement line.
+    """Five vendor-neutral lines, the ask line off attend, the tail, reader baseline, then placement.
 
     The tail is substituted with `str.replace` over a fixed placeholder set
     rather than `str.format`: a tail is workspace-authored text that may
@@ -851,7 +985,10 @@ def _prompt(
         f"{WORKSPACE_VAR}={workspace}",
         f"Dispatch key: {key}",
         "Send worker_done when the stage artifact is written and the item advanced.",
+        FINDINGS_LINE,
     ]
+    if mode != "attend":
+        lines.append(ASK_LINE)
     if tail:
         for placeholder, value in (
             ("{path}", path),
@@ -862,8 +999,60 @@ def _prompt(
         ):
             tail = tail.replace(placeholder, value)
         lines.append(tail)
+    if reader is not None:
+        lines.append(READER_BASELINE_LINE.format(branch=reader[0], sha=reader[1]))
     lines.append(WORKER_PLACEMENT_LINE)
     return "\n".join(lines)
+
+
+def _scope_label(claim: Claim) -> str:
+    scope = claim.scope
+    if isinstance(scope, WorktreeScope):
+        return scope.path
+    if isinstance(scope, CodeScope):
+        return scope.path if scope.path is not None else f"{scope.repo} (whole repository)"
+    return "workspace"
+
+
+def _uncertain_members(affects: Sequence[str]) -> tuple[str | None, ...]:
+    """Code members a live item could overlap when its repository is unknown."""
+    paths = code_affects(affects)
+    if paths:
+        return paths
+    return () if touches_workspace(affects) else (None,)
+
+
+def _finish_worktrees(target: FinishTarget) -> tuple[str, ...]:
+    """Every worktree a finish writes: its source and the checkout it merges into."""
+    return tuple(dict.fromkeys(path for path in (target.worktree, target.target_worktree) if path))
+
+
+def _live_is_attend(
+    items: Sequence[WorkItem],
+    item: WorkItem,
+    live_phase: str,
+    key: str,
+    *,
+    holds: Mapping[str, HoldFact],
+    rules: tuple[DispatchRule, ...],
+    warnings: list[str],
+) -> bool:
+    """Whether a live key counts against `max_attend` (see `plan`'s docstring)."""
+    try:
+        state = state_for(items, item.path, hold=holds.get(item.path))
+        if state is None:
+            raise WorkspaceError(f"no route state for {item.path!r}")
+        stage = cast(Stage, live_phase)
+        for variant in VARIANTS_BY_STAGE[stage]:
+            current = dispatch_attributes(state, Dispatch(stage, variant))
+            for has_spec, has_plan in itertools.product((False, True), repeat=2):
+                attributes = {**current, "has_spec": has_spec, "has_plan": has_plan}
+                if resolve_dispatch(attributes, rules=rules).profile.mode == "attend":
+                    return True
+        return False
+    except WorkspaceError:  # DispatchProfileError is a WorkspaceError
+        warnings.append(f"live key {key}: dispatch profile unresolvable; counted against max_attend")
+        return True
 
 
 def plan(
@@ -872,6 +1061,7 @@ def plan(
     *,
     dispatch_rules: tuple[DispatchRule, ...],
     max_parallel: int,
+    max_attend: int = 1,
     supervise_merges: bool = False,
     live: tuple[str, ...] = (),
     worktree_exists: Mapping[str, bool | None] | None = None,
@@ -881,12 +1071,14 @@ def plan(
     default_base: str,
     repo_path: str | None = None,
     worktree_inventory: Mapping[str, str] | None = None,
+    branch_tips: Mapping[str, str] | None = None,
     repo_known: bool = True,
     code_repo: str | None = None,
     repo_refusals: Mapping[str, BlockedItem] = MappingProxyType({}),
     item_repos: Mapping[str, ItemRepo] | None = None,
     repo_contexts: Mapping[str, RepositoryContext] | None = None,
     finish_plans: Mapping[str, FinishPlan] = MappingProxyType({}),
+    checkpoints: Mapping[str, HumanCheckpoints] = MappingProxyType({}),
 ) -> OrchestratePlan:
     """The whole dispatch plan for *root*'s subtree. Mutates nothing, reads nothing.
 
@@ -921,6 +1113,11 @@ def plan(
     refuse instead, which is still an improvement on naming a directory that
     holds nothing, but adoption is the point.
 
+    `branch_tips` carries full committed branch IDs for the legacy path;
+    `None` means unknown and refuses readers. Repository contexts carry their
+    own tips. Design/plan dispatches always pin dedicated detached checkouts,
+    reserving no mutable worktree or accepted claims.
+
     `repo_known` says whether the caller resolved the code repository at all
     (independently of whether its checkout is withheld as `repo_path`). A
     creation -- an action with no `path` -- names its repository only through
@@ -945,6 +1142,24 @@ def plan(
     identity; the singular arguments above remain the compatibility path.
     A candidate without its own evidence refuses locally. Affects reservations
     include repository identity, while capacity and holds remain global.
+
+    `checkpoints` maps execute-phase item paths to their plan readings, collected
+    by `run_orchestrate`. Accepted execute dispatches carry those readings in
+    `OrchestratePlan.human_checkpoints`, keyed by dispatch key.
+
+    A path named by a `live` key is never a dispatch candidate: it is in
+    `plan.live`, holds its claims against every other candidate, and appears
+    in neither `dispatches` nor `blocked` merely because its stage is still
+    routable.
+
+    `max_attend` is the separate pool for dispatches whose resolved profile
+    has `mode == "attend"`; `max_parallel` covers every other mode. A live
+    key is attend-classified when any variant of its stage resolves to
+    `attend` against the item's current non-artifact attributes and either
+    value of both artifact flags. This is conservative because a live key
+    retains neither its launched variant nor the artifact flags at launch;
+    writing a spec or plan may change both during a run. An unresolvable
+    live profile counts as attend, with a warning.
     """
     exists = worktree_exists or {}
     inventory = worktree_inventory or {}
@@ -974,22 +1189,17 @@ def plan(
             advances=(),
             blocked=(),
             warnings=tuple(warnings),
+            max_attend=max_attend,
+            attend_slots_free=0,
         )
 
     candidates, advances, blocked = _frontier(items, root, holds=holds)
-    candidates = _sorted(candidates)
-    slots_free = max(0, max_parallel - len(live))
+    candidates = _sorted(candidates, dependent_counts(items, root))
 
-    # `live_worktree_owners` is an owner map, not a bare set, for the reason
-    # `_resolve_worktree` needs one: `_frontier` does not filter the live set
-    # out of the candidates, so an item is routinely re-proposed as its own
-    # candidate while still live, and a bare set can't tell "claimed by
-    # someone else" from "claimed by the very candidate being checked". The
-    # affects gate below is deliberately NOT given the same treatment here --
-    # its self-collision when a live item is re-proposed is pre-existing,
-    # unrelated behaviour this task does not touch (see
-    # `test_worktree_rule_3_forks_a_child_branch_when_the_epic_worktree_is_live`,
-    # which pins the self-blocking as-is).
+    # `live_worktree_owners` stays an owner map for `_resolve_worktree`'s
+    # placement rules. Admission -- code affects and finish-target occupancy --
+    # goes through claims (`orchestrate.claims`), whose owner self-exclusion
+    # covers the same "held by the very candidate" case.
     contexts_by_path = {
         path: context
         for context in (repo_contexts or {}).values()
@@ -1002,20 +1212,35 @@ def plan(
         item_repo = item_repos.get(item.path)
         return item_repo, contexts_by_path.get(str(item_repo.path)) if item_repo and item_repo.path else None
 
-    live_affects: set[tuple[str, str]] = set()
-    uncertain_live_affects: set[str] = set()
+    live_claims: list[Claim] = []
+    # `(owner, member)` for a live item whose repository is unknown; a None
+    # member is the whole repository. A candidate overlapping one of these
+    # in any identity refuses as `worktree-unprovable` (fail closed).
+    uncertain_live: list[tuple[str, str | None]] = []
     live_worktree_owners: dict[str, set[str]] = {}
+    uncertain_finish_owners: set[str] = set()
+    live_attend = 0
     for key in live:
         item = by_session[key]
+        live_phase = next(phase for phase in DISPATCH_PHASES if session_name(item.path, item.type, phase) == key)
+        if _live_is_attend(items, item, live_phase, key, holds=holds, rules=dispatch_rules, warnings=warnings):
+            live_attend += 1
+        mutable_worker = live_phase not in READ_ONLY_PHASES
         _, context = evidence(item)
-        if item_repos is not None and context is None:
-            uncertain_live_affects.update(item.affects)
+        # Only code-writing stages hold affects claims. A live reader with an
+        # unknown repository cannot hide a code claim either.
+        code_writer = live_phase in CODE_WRITE_PHASES
+        if item_repos is not None and context is None and code_writer:
+            uncertain_live.extend((item.path, member) for member in _uncertain_members(item.affects))
         identity = context.identity if context is not None else "<legacy>"
-        live_affects.update((identity, member) for member in item.affects)
+        live_claims.extend(claims_for(item.path, live_phase, identity, item.affects))
         # Live occupancy outlives fresh admission checks. In particular a
         # dirty enclosing target must not release a still-running source.
+        # Readers hold no affects claims, and their old stamps describe no
+        # mutable occupancy. The live key, not an advanced item, owns phase.
         for live_stamp in item.repo_stamps.values():
-            live_worktree_owners.setdefault(live_stamp.worktree, set()).add(item.path)
+            if mutable_worker:
+                live_worktree_owners.setdefault(live_stamp.worktree, set()).add(item.path)
             stamp_context = next(
                 (
                     c
@@ -1025,17 +1250,49 @@ def plan(
                 None,
             )
             if stamp_context is None:
-                uncertain_live_affects.update(item.affects)
+                if code_writer:
+                    uncertain_live.extend((item.path, member) for member in _uncertain_members(item.affects))
             else:
-                live_affects.update((stamp_context.identity, member) for member in item.affects)
+                live_claims.extend(claims_for(item.path, live_phase, stamp_context.identity, item.affects))
         live_finish = finish_plans.get(item.path)
         for target in live_finish.targets if live_finish is not None else ():
             target_context = contexts_by_path.get(str(target.repo.path))
             target_identity = target_context.identity if target_context else str(target.repo.path)
-            live_affects.update((target_identity, member) for member in item.affects)
-            live_worktree_owners.setdefault(target.worktree, set()).add(item.path)
-        if item.worktree:
+            live_claims.extend(claims_for(item.path, live_phase, target_identity, item.affects))
+            if mutable_worker:
+                for path in _finish_worktrees(target):
+                    live_worktree_owners.setdefault(path, set()).add(item.path)
+        if live_phase == "finish":
+            if live_finish is not None and live_finish.occupancy is not None:
+                for occupied_path in live_finish.occupancy.worktrees:
+                    live_worktree_owners.setdefault(occupied_path, set()).add(item.path)
+                if not live_finish.occupancy.complete:
+                    uncertain_finish_owners.add(item.path)
+            elif (
+                live_finish is None
+                or not live_finish.targets
+                or live_finish.blockers
+                or any(target.target_worktree is None for target in live_finish.targets)
+            ):
+                uncertain_finish_owners.add(item.path)
+        if live_finish is not None and (not live_finish.targets or live_finish.blockers) and live_phase == "finish":
+            owner = enclosing_owner(item, by_path)
+            if owner is not None:
+                for known in (owner.worktree, *(stamp.worktree for stamp in owner.repo_stamps.values())):
+                    if known:
+                        live_worktree_owners.setdefault(known, set()).add(item.path)
+        if mutable_worker and item.worktree:
             live_worktree_owners.setdefault(item.worktree, set()).add(item.path)
+    # A live item already consumes a slot and holds its claims. Re-proposing
+    # it would either dispatch a duplicate (owner self-exclusion lets its own
+    # claims through) or report it blocked by itself; it is neither.
+    live_paths = frozenset(by_session[key].path for key in live)
+    slots_free = max(0, max_parallel - (len(live) - live_attend))
+    attend_slots_free = max(0, max_attend - live_attend)
+    # Every observed live worktree is a write claim by each of its owners.
+    live_claims.extend(
+        Claim(WorktreeScope(path), "write", owner) for path, owners in live_worktree_owners.items() for owner in owners
+    )
 
     stamp = None
     if root_item is not None:
@@ -1062,15 +1319,72 @@ def plan(
     # call actually emits, never a candidate still on its way through the
     # gates: reserving for a candidate that a later gate refuses starves every
     # overlapping sibling behind it, identically on each cycle.
-    accepted_affects: set[tuple[str, str]] = set()
+    accepted_claims: list[Claim] = []
     accepted_worktrees: set[str] = set()
     epic_worktree_claimed: set[str] = set()
     dispatches: list[PlannedDispatch] = []
     resolutions: dict[str, DispatchResolution] = {}
     dispatch_repos: dict[str, ItemRepo] = {}
     finish_targets: dict[str, tuple[FinishTarget, ...]] = {}
+    human_checkpoints: dict[str, HumanCheckpoints] = {}
     preparations: dict[tuple[str, str], AnchorPreparation] = {}
+
+    def _emit(
+        item: WorkItem,
+        phase: str,
+        resolution: DispatchResolution,
+        action: WorktreeAction,
+        merge_target: str,
+        item_repo: ItemRepo | None,
+        *,
+        auto_merge: bool = False,
+        targets: tuple[FinishTarget, ...] = (),
+        claims: Sequence[Claim] = (),
+        reader: tuple[str, str] | None = None,
+    ) -> None:
+        entry = resolution.profile
+        key = session_name(item.path, item.type, phase)
+        resolutions[key] = resolution
+        finish_targets[key] = targets
+        if phase == "execute" and item.path in checkpoints:
+            human_checkpoints[key] = checkpoints[item.path]
+        accepted_worktrees.update(path for target in targets for path in _finish_worktrees(target))
+        if item_repo is not None:
+            dispatch_repos[key] = item_repo
+        dispatches.append(
+            PlannedDispatch(
+                key=key,
+                slug=item.path,
+                phase=phase,
+                kind=item.type,
+                effort=item.effort,
+                skill=entry.skill,
+                mode=entry.mode,
+                agent=entry.agent,
+                model=entry.model,
+                reasoning_effort=entry.reasoning_effort,
+                worktree=action,
+                merge_target=merge_target,
+                auto_merge=auto_merge,
+                prompt=_prompt(
+                    path=item.path,
+                    key=key,
+                    phase=phase,
+                    workspace=workspace,
+                    merge_target=merge_target,
+                    tail=entry.prompt_tail,
+                    mode=entry.mode,
+                    reader=reader,
+                ),
+            )
+        )
+        accepted_claims.extend(claims)
+        if action.path:
+            accepted_worktrees.add(action.path)
+
     for item, result in candidates:
+        if item.path in live_paths:
+            continue
         repo_refusal = repo_refusals.get(item.path)
         if repo_refusal is not None:
             blocked.append(repo_refusal)
@@ -1080,54 +1394,81 @@ def plan(
             blocked.append(BlockedItem(item.path, "worktree-unprovable", "; ".join(finish.blockers)))
             continue
         targets = finish.targets if finish is not None else ()
-        if any(t.worktree in accepted_worktrees or t.worktree in live_worktree_owners for t in targets):
-            blocked.append(BlockedItem(item.path, "worktree-pending", "a finish target is occupied by another worker"))
+        target_claims = tuple(
+            Claim(WorktreeScope(path), "write", item.path) for target in targets for path in _finish_worktrees(target)
+        )
+        held = first_conflicts(target_claims, (*live_claims, *accepted_claims))
+        if held:
+            blocked.append(
+                BlockedItem(
+                    item.path,
+                    "worktree-pending",
+                    "a finish target is occupied by another worker: "
+                    + "; ".join(sorted({f"{_scope_label(mine)} held by {theirs.owner}" for mine, theirs in held})),
+                )
+            )
             continue
         item_repo, context = evidence(item)
         if item_repos is not None and (item_repo is None or (item_repo.path is not None and context is None)):
             blocked.append(BlockedItem(item.path, "invalid", "repository evidence unavailable for this item"))
             continue
+        # The stage decides which affects claims this candidate would hold.
+        assert result.dispatch is not None, "every candidate carries a dispatch (see _frontier)"
+        on_dispatch_phase = result.on_dispatch.phase if result.on_dispatch else None
+        phase = item.phase or on_dispatch_phase or result.dispatch.stage
         identity = context.identity if context is not None else "<legacy>"
-        affects = {(identity, member) for member in item.affects}
+        identities = [identity]
         for target in targets:
             target_context = next(
                 (c for c in (repo_contexts or {}).values() if str(target.repo.path) in c.checkout_usable_by_path), None
             )
-            target_identity = target_context.identity if target_context else str(target.repo.path)
-            affects.update((target_identity, member) for member in item.affects)
-        if not affects:
-            blocked.append(
-                BlockedItem(
-                    path=item.path,
-                    kind="affects-overlap",
-                    reason="declare affects to allow parallel dispatch",
-                )
-            )
-            continue
-        if any(member in uncertain_live_affects for _, member in affects):
+            identities.append(target_context.identity if target_context else str(target.repo.path))
+        # Empty affects claims each repository identity as a whole. Duplicate
+        # identity and workspace claims collapse to one value. A design/plan
+        # candidate holds none (`claims_for`).
+        candidate_claims = tuple(
+            dict.fromkeys(claim for ident in identities for claim in claims_for(item.path, phase, ident, item.affects))
+        )
+        if phase in CODE_WRITE_PHASES and any(
+            owner != item.path and paths_overlap(member, held_member)
+            for member in _uncertain_members(item.affects)
+            for owner, held_member in uncertain_live
+        ):
             blocked.append(
                 BlockedItem(item.path, "worktree-unprovable", "live item's repository is unavailable for affects check")
             )
             continue
-        overlap = affects & (live_affects | accepted_affects)
-        if overlap:
+        held = first_conflicts(candidate_claims, (*live_claims, *accepted_claims))
+        if held:
             blocked.append(
                 BlockedItem(
                     path=item.path,
                     kind="affects-overlap",
                     reason=(
                         "affects overlap with a live or already-planned dispatch: "
-                        + ", ".join(sorted(member for _, member in overlap))
+                        + "; ".join(
+                            sorted(
+                                {
+                                    f"{_scope_label(mine)} (held by {theirs.owner} as {_scope_label(theirs)})"
+                                    for mine, theirs in held
+                                }
+                            )
+                        )
                     ),
                 )
             )
             continue
-        if len(dispatches) >= slots_free:
-            blocked.append(BlockedItem(path=item.path, kind="capacity", reason="ready, but no worker slot free"))
+        # Missing live target evidence is an admission-evidence refusal, not
+        # an alternative conflict predicate. Proven claims take precedence.
+        if uncertain_finish_owners and phase not in READ_ONLY_PHASES:
+            blocked.append(
+                BlockedItem(
+                    item.path,
+                    "worktree-unprovable",
+                    "live finish target occupancy is unavailable for: " + ", ".join(sorted(uncertain_finish_owners)),
+                )
+            )
             continue
-        assert result.dispatch is not None, "every candidate carries a dispatch (see _frontier)"
-        on_dispatch_phase = result.on_dispatch.phase if result.on_dispatch else None
-        phase = item.phase or on_dispatch_phase or result.dispatch.stage
 
         # Ahead of `_resolve_worktree` deliberately: an item that cannot
         # dispatch should not claim the epic worktree slot or add to
@@ -1150,6 +1491,81 @@ def plan(
             )
             continue
         entry = resolution.profile
+
+        # Capacity is per pool and keyed on the resolved mode. Refused
+        # candidates never enter dispatches and consume no slot.
+        if entry.mode == "attend":
+            accepted_attend = sum(1 for dispatch in dispatches if dispatch.mode == "attend")
+            if accepted_attend >= attend_slots_free:
+                blocked.append(
+                    BlockedItem(
+                        path=item.path,
+                        kind="capacity",
+                        reason=(
+                            f"ready, but no attend slot free "
+                            f"({live_attend} live + {accepted_attend} planned of max_attend={max_attend})"
+                        ),
+                    )
+                )
+                continue
+        elif sum(1 for dispatch in dispatches if dispatch.mode != "attend") >= slots_free:
+            blocked.append(BlockedItem(path=item.path, kind="capacity", reason="ready, but no worker slot free"))
+            continue
+
+        if phase in READ_ONLY_PHASES:
+            source = _reader_source(
+                item,
+                root=root,
+                by_path=by_path,
+                item_repo=item_repo,
+                item_repos=item_repos,
+                context=context,
+                inventory=inventory,
+                exists=exists,
+                default_base=default_base,
+            )
+            if isinstance(source, _Refusal):
+                blocked.append(BlockedItem(item.path, source.kind, source.reason))
+                continue
+            tips = (context.branch_tips if context.branch_tips_known else None) if context else branch_tips
+            reader_action = _pin_reader(
+                source,
+                sha=tips.get(source[1]) if tips is not None else None,
+                trunk_checkout=(str(item_repo.path) if item_repo and item_repo.path else None)
+                if context
+                else (code_repo or repo_path),
+                where=context.identity if context else (code_repo or "the code repository"),
+            )
+            if isinstance(reader_action, _Refusal):
+                blocked.append(BlockedItem(item.path, reader_action.kind, reader_action.reason))
+                continue
+            if not provisions_worktrees:
+                blocked.append(
+                    BlockedItem(
+                        item.path,
+                        "worktree-unsupported",
+                        "a pinned reader needs a backend that prepares detached checkouts",
+                    )
+                )
+                continue
+            if context is None and not repo_known:
+                blocked.append(
+                    BlockedItem(item.path, "worktree-unprovable", "a pinned reader needs a resolved code repository")
+                )
+                continue
+            assert reader_action.start_sha is not None
+            owner = enclosing_owner(item, by_path)
+            merge_target = source[1] if owner is not None else (context.default_base if context else default_base)
+            _emit(
+                item,
+                phase,
+                resolution,
+                reader_action,
+                merge_target,
+                item_repo,
+                reader=(source[1], reader_action.start_sha),
+            )
+            continue
 
         local_exists = exists
         local_inventory = inventory
@@ -1211,7 +1627,7 @@ def plan(
                     repos=item_repos,
                     repo=item_repo,
                     context=context,
-                    prepare=phase not in READ_ONLY_PHASES,
+                    prepare=True,
                 )
                 if isinstance(selected, AnchorRefusal):
                     blocked.append(BlockedItem(item.path, selected.kind, selected.reason))
@@ -1233,12 +1649,6 @@ def plan(
                     continue
                 if isinstance(selected, Anchor):
                     local_epic_path, local_epic_branch = selected.worktree, selected.branch
-                elif phase in READ_ONLY_PHASES:
-                    # Vault-only work needs a reading checkout, not a new owner stamp.
-                    local_epic_path = local_repo_path
-                    local_epic_branch = next(
-                        (branch for branch, paths in context.inventory.items() if local_repo_path in paths), local_base
-                    )
             if local_epic_path is not None:
                 anchor_paths = context.inventory.get(local_epic_branch, ())
                 if len(anchor_paths) != 1 or local_epic_path != anchor_paths[0]:
@@ -1252,11 +1662,6 @@ def plan(
 
         is_root = item.path == root
         placement_item = item
-        placement_root = is_root
-        if context is not None and phase in READ_ONLY_PHASES and local_epic_path is None and not item.worktree:
-            placement_item = replace(item, phase=None)
-            placement_root = True
-            local_epic_branch = branch_name(item.path, item.type)
         if targets:
             first = targets[0]
             item_repo = first.repo
@@ -1276,7 +1681,7 @@ def plan(
             worktree_exists=local_exists,
             default_base=local_base,
             phase=phase,
-            is_root=placement_root,
+            is_root=is_root,
             repo_path=local_repo_path,
             inventory=local_inventory,
             code_repo=local_code_repo,
@@ -1321,20 +1726,6 @@ def plan(
             continue
         if claimed_now:
             epic_worktree_claimed.add(identity)
-        # Same entitlement as `_resolve_worktree`'s rule 2: a read-only
-        # descendant (design/plan) inheriting the *epic anchor* writes no
-        # code, so its `reuse` has nothing to protect and must not occupy the
-        # slot for anyone else -- doing so was the bug that forced a second
-        # read-only dispatch off the shared anchor into a needless fork. An
-        # item reusing its *own* recorded stamp (rule 1) always claims,
-        # regardless of phase: that path is the specific hazard rule 1's own
-        # occupancy check exists to serialize (two items provenance-stamped
-        # onto the same directory), unrelated to the epic-anchor-sharing
-        # exemption. The root always claims too.
-        own_stamp = bool(item.worktree and item.branch)
-        if action.path and (own_stamp or is_root or phase not in READ_ONLY_PHASES):
-            accepted_worktrees.add(action.path)
-
         has_integration_owner = enclosing_owner(item, by_path) is not None if context is not None else not is_root
         merge_target = local_epic_branch if has_integration_owner else local_base
         # Verdict for the coordinator's finish-relay question: only a non-root
@@ -1348,38 +1739,20 @@ def plan(
             and has_integration_owner
             and not is_root
         )
-        key = session_name(item.path, item.type, phase)
-        resolutions[key] = resolution
-        finish_targets[key] = targets
-        accepted_worktrees.update(t.worktree for t in targets)
-        if item_repo is not None:
-            dispatch_repos[key] = item_repo
-        dispatches.append(
-            PlannedDispatch(
-                key=key,
-                slug=item.path,
-                phase=phase,
-                kind=item.type,
-                effort=item.effort,
-                skill=entry.skill,
-                mode=entry.mode,
-                agent=entry.agent,
-                model=entry.model,
-                reasoning_effort=entry.reasoning_effort,
-                worktree=action,
-                merge_target=merge_target,
-                auto_merge=auto_merge,
-                prompt=_prompt(
-                    path=item.path,
-                    key=key,
-                    phase=phase,
-                    workspace=workspace,
-                    merge_target=merge_target,
-                    tail=entry.prompt_tail,
-                ),
-            )
+        claims = (*candidate_claims, *target_claims)
+        if action.path:
+            claims += (Claim(WorktreeScope(action.path), "write", item.path),)
+        _emit(
+            item,
+            phase,
+            resolution,
+            action,
+            merge_target,
+            item_repo,
+            auto_merge=auto_merge,
+            targets=targets,
+            claims=claims,
         )
-        accepted_affects |= affects
 
     return OrchestratePlan(
         path=root,
@@ -1396,6 +1769,9 @@ def plan(
         dispatch_repos=MappingProxyType(dispatch_repos),
         preparations=tuple(preparations.values()),
         finish_targets=MappingProxyType(finish_targets),
+        human_checkpoints=MappingProxyType(human_checkpoints),
+        max_attend=max_attend,
+        attend_slots_free=attend_slots_free,
     )
 
 
@@ -1452,6 +1828,14 @@ class OrchestrateResult:
         return self.plan.slots_free
 
     @property
+    def max_attend(self) -> int:
+        return self.plan.max_attend
+
+    @property
+    def attend_slots_free(self) -> int:
+        return self.plan.attend_slots_free
+
+    @property
     def live(self) -> tuple[str, ...]:
         return self.plan.live
 
@@ -1470,6 +1854,10 @@ class OrchestrateResult:
     @property
     def finish_targets(self) -> Mapping[str, tuple[FinishTarget, ...]]:
         return self.plan.finish_targets
+
+    @property
+    def human_checkpoints(self) -> Mapping[str, HumanCheckpoints]:
+        return self.plan.human_checkpoints
 
     @property
     def preparations(self) -> tuple[AnchorPreparation, ...]:
@@ -1522,8 +1910,8 @@ def _worktree_inventory(repo: Path | None) -> dict[str, str]:
 
     The key is the branch with its `refs/heads/` prefix stripped, so it is
     comparable to a `branch_name()` result. Detached and bare entries carry no
-    branch and are omitted -- an entry the planner cannot name is an entry it
-    cannot adopt.
+    branch and are omitted. Duplicate branch observations are also omitted:
+    this legacy projection cannot prove which checkout is the anchor.
 
     A `prunable <reason>` line means the worktree's directory is gone but
     `git worktree prune` hasn't run yet -- porcelain keeps listing it anyway.
@@ -1540,6 +1928,8 @@ def _worktree_inventory(repo: Path | None) -> dict[str, str]:
     if not out:
         return {}
     inventory: dict[str, str] = {}
+    seen: set[str] = set()
+    ambiguous: set[str] = set()
     current: str | None = None
     current_branch: str | None = None
     for line in out.splitlines():
@@ -1550,6 +1940,9 @@ def _worktree_inventory(repo: Path | None) -> dict[str, str]:
             ref = line[len("branch ") :].strip()
             branch = ref[len("refs/heads/") :] if ref.startswith("refs/heads/") else ref
             if branch:
+                if branch in seen:
+                    ambiguous.add(branch)
+                seen.add(branch)
                 inventory[branch] = current
                 current_branch = branch
         elif line.startswith("prunable") and current_branch is not None:
@@ -1558,7 +1951,7 @@ def _worktree_inventory(repo: Path | None) -> dict[str, str]:
         elif not line:
             current = None
             current_branch = None
-    return inventory
+    return {branch: path for branch, path in inventory.items() if branch not in ambiguous}
 
 
 @dataclass(frozen=True, slots=True)
@@ -1665,9 +2058,16 @@ def run_orchestrate(
     # indistinguishable from a deliberate `2`. Dispatch configuration is
     # independently validated above.
     max_parallel = checked_int(layout, "workflow.auto_drive.max_parallel")
+    max_attend = checked_int(layout, "workflow.auto_drive.max_attend")
     supervise_merges = checked_bool(layout, "workflow.auto_drive.supervise_merges")
 
     by_path = {item.path: item for item in items}
+    by_session, _ = session_index(items)
+    live_finishes = {
+        by_session[key].path
+        for key in live
+        if key in by_session and key == session_name(by_session[key].path, by_session[key].type, "finish")
+    }
     repo_refusals: dict[str, BlockedItem] = {}
     descendant_repo_notes: tuple[str, ...] = ()
     item_repos: dict[str, ItemRepo] | None = None
@@ -1677,6 +2077,18 @@ def run_orchestrate(
     else:
         root_repo = resolve_item_repo(layout, by_path.get(path), by_path, repo_name=repo_name)
         repo_refusals, descendant_repo_notes, item_repos = _repo_refusals(layout, items, path, root_repo)
+        # Live keys describe active work even after its page advances or when
+        # the caller requests a different subtree. Never inherit that caller's
+        # repository fallback for an unrelated live finish or its owners.
+        for live_path in sorted(live_finishes):
+            for member in (live_path, *by_path[live_path].ancestor_paths):
+                if member in item_repos or member not in by_path:
+                    continue
+                try:
+                    item_repos[member] = resolve_item_repo(layout, by_path[member], by_path)
+                except WorkspaceError:
+                    # The finish resolver retains this as incomplete evidence.
+                    continue
         repo_contexts = {}
         canonical_repos: dict[str, ItemRepo] = {}
         for item_path, selected in item_repos.items():
@@ -1749,7 +2161,12 @@ def run_orchestrate(
             repo_contexts=repo_contexts or {},
         )
         for item in items
-        if item.path in subtree_paths and item.phase == "finish"
+        if (item.path in subtree_paths and item.phase == "finish") or item.path in live_finishes
+    }
+    checkpoints = {
+        item.path: read_human_checkpoints(bundle.root, item)
+        for item in items
+        if item.path in subtree_paths and item.phase == "execute"
     }
 
     computed = plan(
@@ -1757,6 +2174,7 @@ def run_orchestrate(
         path,
         dispatch_rules=config.rules,
         max_parallel=max_parallel,
+        max_attend=max_attend,
         supervise_merges=supervise_merges,
         live=live,
         worktree_exists=root_context.path_exists if root_context is not None else _stat_worktrees(items, repo_path),
@@ -1770,12 +2188,14 @@ def run_orchestrate(
             if root_context is not None
             else _worktree_inventory(resolved_repo)
         ),
+        branch_tips=observe_branch_tips(resolved_repo) if repo is not None and resolved_repo is not None else None,
         repo_known=code_repo is not None,
         code_repo=code_repo,
         repo_refusals=repo_refusals,
         item_repos=item_repos,
         repo_contexts=repo_contexts,
         finish_plans=finish_plans,
+        checkpoints=checkpoints,
     )
 
     if repo is not None:
@@ -1808,16 +2228,19 @@ __all__ = [
     "BLOCKED_KINDS",
     "DISPATCH_COMMAND",
     "DISPATCH_PHASES",
+    "READER_ACTION",
     "WORKER_PLACEMENT_LINE",
     "WORKSPACE_VAR",
     "AnchorPreparation",
     "BlockedItem",
     "HoldReport",
+    "HumanCheckpoints",
     "OrchestratePlan",
     "OrchestrateResult",
     "PlannedAdvance",
     "branch_name",
     "integration_branch",
     "plan",
+    "read_human_checkpoints",
     "run_orchestrate",
 ]

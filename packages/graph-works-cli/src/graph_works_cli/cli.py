@@ -13,6 +13,7 @@ import typer
 
 from graph_works_cli.agent_config_cli.main import agent_config_app
 from graph_works_cli.config_cli.main import config_app
+from graph_works_cli.errors import exit_error
 from graph_works_cli.graph_cli.main import graph_app
 from graph_works_cli.introspection import TyperCommand, command_to_help_entry, json_safe_default
 from graph_works_cli.logging_config import configure_verbose_logging
@@ -100,8 +101,8 @@ def help_command(
     try:
         payload = _json_help_payload(command_path)
     except click.ClickException as exc:
-        typer.echo(f"Error: {exc.message}", err=True)
-        raise typer.Exit(code=2) from exc
+        # Click's usage code, deliberately not exit_codes.STALE.
+        exit_error(exc.message, code=2, cause=exc)
 
     typer.echo(f"Usage: {payload['name']} {' '.join(payload['usage'])}".rstrip())
     if payload["help"]:

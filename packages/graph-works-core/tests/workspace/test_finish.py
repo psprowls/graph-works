@@ -9,7 +9,7 @@ from okf_io import load_bundle
 from work_tracker_okf.items import load_items
 
 
-def setup(tmp_path, monkeypatch, *, scalar=True, nested=False):
+def setup(tmp_path, monkeypatch, *, scalar=True, nested=False, base_checkout=False):
     layout = layout_for(tmp_path)
     layout.manifest_path.write_text(
         "version: 1\nworkflow: {dispatch_rules: dispatch.yaml}\n"
@@ -42,13 +42,16 @@ def setup(tmp_path, monkeypatch, *, scalar=True, nested=False):
 
     def observe(repo, **kwargs):
         prefix = str(repo)
+        inventory = {"epic/a": (prefix + "/epic",), "epic/parent": (prefix + "/parent",)}
+        if base_checkout:
+            inventory["main" if prefix == "/core" else "trunk"] = (prefix,)
         return RepositoryContext(
             prefix,
             prefix,
             "main" if prefix == "/core" else "trunk",
             True,
-            {"epic/a": (prefix + "/epic",), "epic/parent": (prefix + "/parent",)},
-            {prefix + "/epic": True, prefix + "/parent": True},
+            inventory,
+            {prefix + "/epic": True, prefix + "/parent": True, **({prefix: True} if base_checkout else {})},
             True,
             {prefix: True, prefix + "/epic": True, prefix + "/parent": True},
             branches=frozenset({"main", "trunk", "epic/a", "epic/parent"}),
@@ -72,6 +75,26 @@ def test_finish_targets(tmp_path, monkeypatch, scalar, nested, expected):
     assert result.blockers == ()
     assert [(t.repo.name, t.target_branch) for t in result.targets] == expected
     assert all(t.source_branch == "epic/a" for t in result.targets)
+
+
+def test_trunk_target_worktree_is_the_checkout_holding_default_base(tmp_path, monkeypatch):
+    layout, items, path = setup(tmp_path, monkeypatch, base_checkout=True)
+    result = resolve_finish_targets(layout, items, path)
+    assert result.blockers == ()
+    assert {target.repo.name: target.target_worktree for target in result.targets} == {
+        "core": "/core",
+        "ui": "/ui",
+    }
+
+
+def test_nested_owner_target_worktree_is_the_anchor(tmp_path, monkeypatch):
+    layout, items, path = setup(tmp_path, monkeypatch, nested=True)
+    result = resolve_finish_targets(layout, items, path)
+    assert result.blockers == ()
+    assert {target.repo.name: target.target_worktree for target in result.targets} == {
+        "core": "/core/parent",
+        "ui": "/ui/parent",
+    }
 
 
 @pytest.mark.parametrize("fault", ["unknown", "wrong-branch", "missing-anchor"])

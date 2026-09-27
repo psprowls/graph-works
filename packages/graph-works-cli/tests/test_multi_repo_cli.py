@@ -69,6 +69,40 @@ def test_work_file_still_refuses_a_path_under_no_declared_repo(two_repos: tuple[
     assert "targets.affects-missing" in result.output
 
 
+def test_work_file_unknown_repo_refuses_with_the_listing(two_repos: tuple[Path, Path, Path]) -> None:
+    root, code, ui = two_repos
+    args = ["work", "file", "--title", "Unknown", "--kind", "Feature", "--summary", "d", "--affects", "apps/ui"]
+    result = runner.invoke(app, [*args, "--repo", "nope", "--workspace", str(root), "--json"])
+    assert result.exit_code != 0
+    envelope = json.loads(result.stdout)["error"]
+    assert envelope["reason"] == "refused"
+    assert envelope["payload"]["refusal"] == "unknown-repo"
+    assert f"code → {code}, ui → {ui}" in envelope["payload"]["detail"]
+
+
+def test_work_file_without_repo_warns_but_files(two_repos: tuple[Path, Path, Path]) -> None:
+    root, _code, _ui = two_repos
+    args = ["work", "file", "--title", "Unassigned", "--kind", "Epic", "--summary", "d", "--affects", "apps/ui"]
+    result = runner.invoke(app, [*args, "--dry-run", "--workspace", str(root), "--json"])
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.stdout)
+    assert any(item.startswith("repo unresolved:") for item in payload["warnings"])
+    assert "repo unresolved:" in result.stderr
+
+
+def test_work_file_child_of_a_tagged_epic_does_not_warn(two_repos: tuple[Path, Path, Path]) -> None:
+    root, _code, _ui = two_repos
+    base = ["--summary", "d", "--affects", "apps/ui", "--workspace", str(root), "--json"]
+    epic = runner.invoke(app, ["work", "file", "--title", "Tagged epic", "--kind", "Epic", "--repo", "ui", *base])
+    assert epic.exit_code == 0, epic.output
+    epic_path = json.loads(epic.stdout)["path"]
+    child = runner.invoke(
+        app, ["work", "file", "--title", "Inherited", "--kind", "Feature", "--parent-path", epic_path, *base]
+    )
+    assert child.exit_code == 0, child.output
+    assert not any(item.startswith("repo unresolved:") for item in json.loads(child.stdout)["warnings"])
+
+
 def test_work_lint_checks_affects_against_every_declared_repo(two_repos: tuple[Path, Path, Path]) -> None:
     root, _code, _ui = two_repos
     _file(root, "Spans both", "packages/core", "apps/ui")
@@ -399,6 +433,22 @@ def test_root_repo_flag_does_not_override_foreign_child_assignment(two_repos: tu
     owner = root / "okf/work/epic-root.md"
     owner.parent.mkdir(parents=True, exist_ok=True)
     owner.write_text("---\ntype: Epic\nphase: execute\nwork_status: in-progress\n---\n", encoding="utf-8")
+    anchor = root.parent / "ui-anchor"
+    subprocess.run(
+        ["git", "-C", str(ui), "worktree", "add", "-b", "epic/root", str(anchor)],
+        check=True,
+        capture_output=True,
+    )
+    sha = subprocess.run(
+        ["git", "-C", str(ui), "rev-parse", "epic/root^{commit}"],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    assert len(sha) == 40
+    document = load(owner)
+    document.set("repo_stamps", {"ui": {"worktree": str(anchor.resolve()), "branch": "epic/root"}})
+    document.save()
     child = root / "okf/work/epic-root/children/feature-ui.md"
     child.parent.mkdir(parents=True)
     child.write_text(
@@ -413,5 +463,13 @@ def test_root_repo_flag_does_not_override_foreign_child_assignment(two_repos: tu
     assert payload["repo"] == {"name": "code", "path": str(code.resolve()), "source": "flag"}
     [dispatch] = payload["dispatches"]
     assert dispatch["repo"] == {"name": "ui", "path": str(ui.resolve()), "source": "frontmatter"}
-    assert dispatch["worktree"]["path"] == str(ui.resolve())
+    assert dispatch["worktree"] == {
+        "action": "pin-detached",
+        "path": None,
+        "branch": None,
+        "base_branch": "epic/root",
+        "exists": None,
+        "parent_path": str(anchor.resolve()),
+        "start_sha": sha,
+    }
     assert payload["preparations"] == []

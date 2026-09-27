@@ -1,0 +1,7 @@
+{
+  "id": "hand-authored-repo-list",
+  "ok": true,
+  "result": {
+    "repos": [{"id": "repo_1", "path": "/repo"}]
+  }
+}

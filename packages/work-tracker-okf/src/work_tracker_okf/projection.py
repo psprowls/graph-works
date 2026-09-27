@@ -24,6 +24,7 @@ class Rollup:
     by_type: Mapping[str, int]
     by_phase: Mapping[str, int]
     children: Mapping[str, ChildRollup]
+    not_started: int
 
 
 @dataclass(frozen=True, slots=True)
@@ -58,6 +59,7 @@ def rollup(items: Sequence[WorkItem]) -> Rollup:
         by_type=_counts(item.type for item in active),
         by_phase=_counts(item.phase for item in active if item.phase is not None),
         children=MappingProxyType(children),
+        not_started=sum(1 for item in active if item.phase is None),
     )
 
 

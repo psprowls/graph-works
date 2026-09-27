@@ -491,3 +491,37 @@ def test_scan_reports_a_failed_run_instead_of_a_traceback(
 
     assert result.exit_code == exit_codes.GENERIC
     assert "Error: repository walk failed" in result.stderr
+
+
+@pytest.mark.parametrize("mode", [[], ["--no-narrate"], ["--json"], ["--emit-worklist"]])
+@pytest.mark.parametrize("has_error", [False, True])
+def test_retention_warnings_are_visible_without_changing_exit_status(
+    monkeypatch: pytest.MonkeyPatch,
+    initialized_workspace: Path,
+    mode: list[str],
+    has_error: bool,
+) -> None:
+    warnings = ("old: retained entity: prose-edited", "old/index.md: retained index: authored")
+    structural = StructuralSummary(
+        warnings=warnings,
+        entities=SyncSummary(catalog_declined=(("broken.md", "parse-error"),) if has_error else ()),
+    )
+
+    async def run(*args: object, **kwargs: object) -> ScanResult:
+        return ScanResult(structural=structural, worklist=ScanWorklist(short_head="abc123"), errors=structural.errors)
+
+    async def build(*args: object, **kwargs: object) -> tuple[ScanWorklist, StructuralSummary]:
+        return ScanWorklist(short_head="abc123"), structural
+
+    monkeypatch.setattr(scan_module, "run_scan", run)
+    monkeypatch.setattr(scan_module, "build_scan_worklist", build)
+    result = runner.invoke(app, ["scan", *mode, "--workspace", str(initialized_workspace)])
+    assert result.exit_code == (1 if has_error else 0)
+    if "--json" in mode or "--emit-worklist" in mode:
+        assert json.loads(result.stdout)["warnings"] == list(warnings)
+        assert "retained" not in result.stderr
+    else:
+        assert result.stdout == ""
+        assert [line for line in result.stderr.splitlines() if line.startswith("Warning:")] == [
+            f"Warning: {warning}" for warning in warnings
+        ]

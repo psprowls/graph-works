@@ -43,6 +43,56 @@ def integration_branch(owner_path: str, owner_type: str) -> str:
     return branch_name(owner_path, owner_type)
 
 
+def _verified_stamp(
+    owner: WorkItem,
+    *,
+    repos: Mapping[str, ItemRepo],
+    repo: ItemRepo,
+    context: RepositoryContext,
+    strict_scalar_fields: bool,
+) -> Anchor | AnchorRefusal | None:
+    """Select the exact repository stamp and prove its inventory/path provenance."""
+    own_repo = repos.get(owner.path)
+    if own_repo is None:
+        return AnchorRefusal("worktree-unprovable", f"resolve repository for integration owner {owner.path}")
+    own = own_repo.name == repo.name
+    stamp = owner.repo_stamps.get(repo.name) if repo.name is not None and not own else None
+    path, branch = (
+        (owner.worktree, owner.branch) if own else ((stamp.worktree, stamp.branch) if stamp else (None, None))
+    )
+    if "repo_stamps" in owner.invalid_optional_fields or (
+        own
+        and (
+            bool(path) != bool(branch)
+            or (strict_scalar_fields and {"worktree", "branch"}.intersection(owner.invalid_optional_fields))
+        )
+    ):
+        return AnchorRefusal("worktree-unprovable", f"repair invalid integration stamp on {owner.path}")
+    anchor = None
+    if path and branch:
+        matches = context.inventory.get(branch, ())
+        if len(matches) > 1:
+            return AnchorRefusal("worktree-ambiguous", f"repair ambiguous integration stamp on {owner.path}")
+        if matches != (path,) or context.path_exists.get(path) is not True:
+            return AnchorRefusal(
+                "worktree-unprovable",
+                f"repair integration stamp on {owner.path}: path and branch are not verified in this repository",
+            )
+        anchor = Anchor(path, branch)
+    return anchor
+
+
+def reader_anchor(
+    owner: WorkItem,
+    *,
+    repos: Mapping[str, ItemRepo],
+    repo: ItemRepo,
+    context: RepositoryContext,
+) -> Anchor | AnchorRefusal | None:
+    """Verify reader provenance, rejecting invalid scalar fields but allowing dirtiness."""
+    return _verified_stamp(owner, repos=repos, repo=repo, context=context, strict_scalar_fields=True)
+
+
 def select_anchor(
     owner: WorkItem,
     *,
@@ -57,32 +107,14 @@ def select_anchor(
     A preparation (including adoption) must be recorded before it can become
     a child fork target. Descendant feature stamps never supply an anchor.
     """
-    own_repo = repos.get(owner.path)
-    if own_repo is None:
-        return AnchorRefusal("worktree-unprovable", f"resolve repository for integration owner {owner.path}")
-    own = own_repo.name == repo.name
-    stamp = owner.repo_stamps.get(repo.name) if repo.name is not None and not own else None
-    path, branch = (
-        (owner.worktree, owner.branch) if own else ((stamp.worktree, stamp.branch) if stamp else (None, None))
-    )
-    if "repo_stamps" in owner.invalid_optional_fields or (own and bool(path) != bool(branch)):
-        return AnchorRefusal("worktree-unprovable", f"repair invalid integration stamp on {owner.path}")
-    anchor = None
-    if path and branch:
-        matches = context.inventory.get(branch, ())
-        if len(matches) > 1:
-            return AnchorRefusal("worktree-ambiguous", f"repair ambiguous integration stamp on {owner.path}")
-        if matches != (path,) or context.path_exists.get(path) is not True:
-            return AnchorRefusal(
-                "worktree-unprovable",
-                f"repair integration stamp on {owner.path}: path and branch are not verified in this repository",
-            )
-        if context.checkout_usable_by_path.get(path) is not True:
-            return AnchorRefusal(
-                "worktree-unprovable",
-                f"repair integration anchor on {owner.path}: selected checkout is dirty or unreadable",
-            )
-        anchor = Anchor(path, branch)
+    anchor = _verified_stamp(owner, repos=repos, repo=repo, context=context, strict_scalar_fields=False)
+    if isinstance(anchor, AnchorRefusal):
+        return anchor
+    if anchor is not None and context.checkout_usable_by_path.get(anchor.worktree) is not True:
+        return AnchorRefusal(
+            "worktree-unprovable",
+            f"repair integration anchor on {owner.path}: selected checkout is dirty or unreadable",
+        )
     if not prepare:
         return anchor
     outer = enclosing_owner(owner, items)
@@ -105,7 +137,7 @@ def select_anchor(
             return AnchorRefusal("worktree-unprovable", f"repair missing integration worktree for {branch!r}")
         if context.checkout_usable_by_path.get(path) is not True:
             return AnchorRefusal("worktree-unprovable", f"repair dirty or unreadable integration checkout {path!r}")
-        action = WorktreeAction("reuse", path, branch, None, True, None)
+        action = WorktreeAction("reuse", path, branch, None, True, None, None)
     else:
         if not context.branches_known or branch in context.branches:
             return AnchorRefusal(
@@ -122,5 +154,6 @@ def select_anchor(
             base,
             None,
             parent.worktree if parent else None,
+            None,
         )
     return AnchorPreparation(owner.path, owner.phase, repo, branch, base, action)

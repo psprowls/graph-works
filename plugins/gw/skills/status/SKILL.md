@@ -17,7 +17,7 @@ $status                      # Codex
 ## What happens
 
 1. Run `gw work status --json`.
-2. Present `total`, `by_work_status`, `by_type`, `by_phase`, and the `resume.primary.path` plus alternatives.
+2. Present `total`, `by_work_status`, `by_type`, `by_phase`, `not_started` (active items with no `phase:` — filed, never dispatched), and the `resume.primary.path` plus alternatives.
 
 ## Reference
 

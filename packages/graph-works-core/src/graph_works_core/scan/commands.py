@@ -909,11 +909,18 @@ class StructuralSummary:
 
     entities: SyncSummary = field(default_factory=SyncSummary)
     mirror: MirrorSummary = field(default_factory=MirrorSummary)
+    warnings: tuple[str, ...] = ()
 
     @classmethod
     def from_sync_result(cls, result: SyncResult) -> StructuralSummary:
         """Adapt the domain composite without exposing it to scan callers."""
-        return cls(entities=result.entities, mirror=result.mirror)
+        warnings = tuple(
+            sorted(
+                [f"{path}: retained entity: {reason}" for path, reason in result.entities.declined]
+                + [f"{path}: retained index: {reason}" for path, reason in result.indexes.declined]
+            )
+        )
+        return cls(entities=result.entities, mirror=result.mirror, warnings=warnings)
 
     @property
     def errors(self) -> tuple[str, ...]:

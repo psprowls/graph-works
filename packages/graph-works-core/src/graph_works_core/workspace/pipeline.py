@@ -9,19 +9,42 @@ from types import MappingProxyType
 
 from graph_works_core.workspace.errors import WorkspaceError
 
-#: The vendor-neutral tail an `attend` worker carries. It is a packaged default
-#: rather than config because it names no vendor: it tells a human-in-the-room
-#: worker to ask its questions the ordinary way. The `relay` tail is the
-#: opposite case -- it is a value the workspace owns -- so it stays `None` in
-#: the packaged table and is seeded into a new workspace's dispatch file instead
-#: (`RELAY_TAIL_SEED`, below).
-_ATTEND_BASE = "The user may join this session to answer this stage's questions; ask normally."
+#: A fixed prompt line so tail-less variants and workspace-owned tail overrides
+#: receive the same findings reporting obligation.
+FINDINGS_LINE = (
+    "If you filed, or found already filed, work items for findings outside this item's scope, "
+    "name each canonical path in your worker_done --body."
+)
 
-#: Shared by every dispatch mode whose worker may block on an
-#: `orca orchestration ask` a human might not answer before its grace period
-#: (design item bug-relayed-answer-arrives-after-ask-timeout, D-004). One
-#: constant so `ATTEND_TAIL` and `RELAY_TAIL_SEED` can never drift apart on
-#: what "giving up" means -- both fold it in below rather than duplicating it.
+#: The vendor-neutral tail an `attend` worker carries (design
+#: feature-structured-worker-ask §4.4, the attend-ask decision). An attended
+#: stage has one channel: the human answers in the worker's own terminal. The
+#: tail says so *after* Orca's preamble, which tells every worker to use
+#: `orca orchestration ask`, and names that contradiction outright so the
+#: later instruction wins. The single `escalation` ping is what tells the
+#: coordinator a human is wanted there -- `escalation` because auto-drive's
+#: wait (§2.7) already delivers that type, and adding `status` would start
+#: delivering park messages too. `{path}` / `{phase}` are substituted by
+#: `orchestrate._prompt`. A packaged default rather than config: it names no
+#: vendor. The `relay` tail is the opposite case -- a value the workspace owns
+#: -- so it stays `None` in the packaged table and is seeded into a new
+#: workspace's dispatch file instead (`RELAY_TAIL_SEED`, below). The
+#: workspace commit line is appended below, once `WORKSPACE_COMMIT_TAIL` exists.
+_ATTEND_BASE = (
+    "This is an attended stage: the human answers its questions in this terminal. Ask them here, "
+    "the ordinary way, even where your Orca preamble says to use `orca orchestration ask` -- do "
+    "not route this stage's questions through the coordinator, and do not use `gw work ask`. "
+    "Before your first question, send exactly one notice: `orca orchestration send --from "
+    '<your --from> --dispatch-capability <yours> --type escalation --subject "Needs you at '
+    '<your --from handle>" --body "{path} {phase}: waiting for the human in this terminal." '
+    "--task-id <yours> --dispatch-id <yours>`."
+)
+
+#: The obligation of every dispatch mode whose worker may block on an
+#: `orca orchestration ask` that a human might not answer before its grace
+#: period (design item bug-relayed-answer-arrives-after-ask-timeout, D-004).
+#: Only `RELAY_TAIL_SEED` folds it in now: an attend worker asks in its own
+#: terminal (`ATTEND_TAIL`), so no Orca ask of its can time out.
 #:
 #: The protocol doc is named **plugin-relatively, never by filesystem path**.
 #: It ships inside the `gw` Claude Code plugin, not inside the workspace and
@@ -52,7 +75,18 @@ WORKSPACE_COMMIT_TAIL = (
     "Never `git commit` in the graph-works workspace at {workspace}; gw verbs commit their own workspace writes."
 )
 
-ATTEND_TAIL = f"{_ATTEND_BASE}\n{GRACE_PERIOD_TAIL}\n{WORKSPACE_COMMIT_TAIL}"
+ATTEND_TAIL = f"{_ATTEND_BASE}\n{WORKSPACE_COMMIT_TAIL}"
+
+#: Every non-attend dispatch's fixed line for reaching a human (design
+#: feature-structured-worker-ask §4.3). `orchestrate._prompt` appends it after
+#: `FINDINGS_LINE` unless the mode is `attend`, whose worker asks in its own
+#: terminal instead. Fixed, like `FINDINGS_LINE`: it needs no substitution.
+ASK_LINE = (
+    "If you need a human decision, prepare it with `gw work ask <work-path> --kind "
+    "spec-review|choice|free` and pass the `orca.question` and `orca.options` it prints to "
+    "`orca orchestration ask` unchanged (omit `--options` when `orca.options` is null); never "
+    "hand-write `--options`. The reply body is JSON; read `choice`, `effort` and `notes` from it."
+)
 
 #: The obligation both execute variants carry. A packaged default rather than
 #: config for `ATTEND_TAIL`'s reason -- it names no vendor. It is *reported,
@@ -163,8 +197,10 @@ def check_skill_name(value: object, *, key: str, source: Path) -> None:
 
 
 __all__ = [
+    "ASK_LINE",
     "ATTEND_TAIL",
     "EXECUTE_TAIL",
+    "FINDINGS_LINE",
     "PACKAGED_PIPELINE",
     "RELAY_TAIL_SEED",
     "WORKSPACE_COMMIT_TAIL",

@@ -1,7 +1,7 @@
 # Fixtures
 
-JSON captured verbatim from the live `orca` CLI on 2026-08-14, with ids and
-paths left exactly as returned. Nothing re-captures these automatically — a
+Most JSON was captured verbatim from the live `orca` CLI on 2026-08-14, with ids and
+paths left exactly as returned; hand-authored exceptions are named below. Nothing re-captures these automatically — a
 change to Orca's JSON surfaces at the next live run, not at `just check`
 (the accepted risk in the design spec's §7).
 
@@ -24,8 +24,13 @@ Re-capture with these commands, replacing the ids with live ones:
 | `check_timeout.json` | as above, with no traffic on the Run |
 | `worker_show_created.json` | `orca orchestration worker-show --dispatch <ctx that provisioned a worktree> --json` |
 | `worktree_show_renamed.json` | `orca worktree show --worktree id:<repoId>::<path> --json` (note: **not** an `orchestration` subcommand) |
+| `repo_list.json` | `orca repo list --json` (hand-authored) |
+| `worktree_list.json` | `orca worktree list --repo id:<repoId> --json` (hand-authored, trimmed: the 2026-09-27 live shape is `worktrees[]`, `totalCount`, `truncated`, `hostScope.omittedHostIds`, with `comment` on every row) |
+| `worktree_create.json` | `orca worktree create --name <n> --repo id:<repoId> --base-branch <ref> --no-parent --setup skip --comment <marker> --json` (hand-authored from `worktree_show_renamed.json`'s row shape plus `comment`) |
+| `terminal_send.json` | `orca terminal send --terminal <term> --text "" --enter --json` (hand-authored) |
+| `worker_start_effects.json` | `orca orchestration worker-start --task <task> --agent claude --run <run> --json` (hand-authored from `worker_start.json` with `effects` and launch receipt, omitting `agentTerminalHandle` to exercise the live fallback) |
 
-**`check_batch.json` is the one file not captured verbatim.** A `check` batch
+**`check_batch.json`, `repo_list.json`, `terminal_send.json`, `worker_start_effects.json`, `worktree_list.json`, and `worktree_create.json` are hand-authored, not captured verbatim.** A `check` batch
 requires the capturing terminal to be the Run's bound coordinator with live
 traffic, which the plan author did not have. It is hand-authored from two
 verified sources: the flag vocabulary of `orca orchestration send --help`

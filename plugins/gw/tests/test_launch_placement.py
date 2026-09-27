@@ -33,6 +33,71 @@ KEY = "gw-execute-bug-child-0123abcd"
 LOCATIONS = {"primary": CODE, "wiki": WIKI, "epic": EPIC}
 
 
+class EnvelopeVersionTests(unittest.TestCase):
+    V1 = {"version": 1, "dispatch_key": "k", "agent": "claude", "model": None,
+          "reasoning_effort": None, "placement_argv": []}
+    V2 = {**V1, "version": 2, "mode": "attend", "worktree_path": "/tmp/w"}
+
+    def test_both_versions_validate(self):
+        for envelope in (self.V1, self.V2):
+            with self.subTest(version=envelope["version"]):
+                self.assertEqual(HELPER["validate_envelope"](dict(envelope)), envelope)
+
+    def test_each_version_keeps_its_exact_key_set(self):
+        for bad in ({**self.V1, "mode": "attend"}, {**self.V2, "extra": 1},
+                    {k: v for k, v in self.V2.items() if k != "worktree_path"},
+                    {**self.V2, "mode": ""}):
+            with self.subTest(bad=bad), self.assertRaises(SystemExit):
+                HELPER["validate_envelope"](bad)
+
+    def test_encode_writes_v2(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            dispatch = root / "d.json"
+            placement = root / "p.json"
+            dispatch.write_text(json.dumps({
+                "key": "k", "agent": "claude", "model": None, "reasoning_effort": None,
+                "mode": "attend", "worktree": {"path": "/tmp/w"}, "prompt": "go"}),
+                encoding="utf-8", newline="\n")
+            placement.write_text("[]", encoding="utf-8", newline="\n")
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out):
+                HELPER["encode"](argparse.Namespace(dispatch=str(dispatch), placement=str(placement)))
+        first, _, prompt = out.getvalue().partition("\n")
+        self.assertEqual(json.loads(first.removeprefix("GW_LAUNCH_V1 "))["version"], 2)
+        self.assertEqual(json.loads(first.removeprefix("GW_LAUNCH_V1 "))["mode"], "attend")
+        self.assertEqual(prompt, "go")
+
+
+class PrepareRepoNameTests(unittest.TestCase):
+    def test_prepare_forwards_repo_name_to_orchestrate(self):
+        refreshes: list[list[str]] = []
+
+        def fake_json(argv, label):
+            if argv[0] == "adapter":
+                return {"guard": "g"}
+            refreshes.append(list(argv))
+            raise SystemExit("stop after the refresh call")
+
+        plan = {"path": "work/epic", "live": ["gw-execute-a-1"], "preparations": []}
+        with tempfile.TemporaryDirectory() as directory:
+            plan_file = Path(directory) / "plan.json"
+            plan_file.write_text(json.dumps(plan), encoding="utf-8", newline="\n")
+            with patch.dict(HELPER["prepare"].__globals__, {
+                "selected_preparation": lambda *_a: {"repo": {"path": "/r"}},
+                "preparation_runtime": lambda: ["adapter"],
+                "preparation_json": fake_json,
+            }):
+                with self.assertRaises(SystemExit):
+                    HELPER["prepare"](argparse.Namespace(
+                        orca="orca", plan_file=str(plan_file), owner="work/epic",
+                        repo_name="graph-works", workspace="/ws"))
+        [refresh] = refreshes
+        self.assertEqual(refresh[:4], ["gw", "work", "orchestrate", "work/epic"])
+        self.assertEqual(refresh[refresh.index("--repo-name") + 1], "graph-works")
+        self.assertEqual(refresh[refresh.index("--live") + 1], "gw-execute-a-1")
+
+
 def fork(parent_path=EPIC, action="fork-child"):
     return {
         "key": KEY,

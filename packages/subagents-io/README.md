@@ -158,6 +158,19 @@ an attribute you did not supply never matches, and a match key outside your
 vocabularies is reported rather than silently dead. Adding a fourth dimension
 needs no change here.
 
+`pin-detached` carries a required full lowercase 40- or 64-hex commit ID in `start_sha`,
+`path=None`, `branch=None`, `exists=None`, `base_branch=<source branch>`, and
+`parent_path=<source anchor worktree or None>`. Exactly this action has a
+non-None `start_sha`; every other action has `start_sha=None` and a non-None
+`branch`. The launcher prepares one dedicated detached checkout per reader
+dispatch and verifies repository identity, exact SHA, detached state and
+cleanliness before starting the worker. `parent_path` identifies the source
+anchor; it does not request shared-checkout reuse or parent linkage. Detached
+state is never a branch named `HEAD` or an empty string. Both `workflow-local`
+and `workflow-orca` refuse this action, even with a supplied path; Graph Works
+auto-drive uses its launcher helper to prepare and verify readers. These
+are planner/backend invariants, not validation in the inert value type.
+
 ## The run context
 
 `RunContext` is generic over its reader, bounded only by `Closeable`:

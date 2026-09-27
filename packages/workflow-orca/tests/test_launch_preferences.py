@@ -37,7 +37,7 @@ def dispatch():
         agent="claude",
         model=None,
         reasoning_effort=None,
-        worktree=WorktreeAction("reuse", "/tmp/example", "feature/example", None, True, None),
+        worktree=WorktreeAction("reuse", "/tmp/example", "feature/example", None, True, None, None),
         merge_target="main",
         auto_merge=False,
         prompt="Perform the test task.",
@@ -64,13 +64,49 @@ def test_envelope_freezes_request_and_exact_placement_before_prompt(dispatch):
     assert spec.startswith(LAUNCH_SPEC_PREFIX)
     assert spec.split("\n", 1)[1] == dispatch.prompt
     assert decode_launch_spec(spec) == {
-        "version": 1,
+        "version": 2,
         "dispatch_key": dispatch.key,
         "agent": "claude",
         "model": None,
         "reasoning_effort": None,
         "placement_argv": argv,
+        "mode": dispatch.mode,
+        "worktree_path": dispatch.worktree.path,
     }
+
+
+V1 = {
+    "version": 1,
+    "dispatch_key": "k",
+    "agent": "claude",
+    "model": None,
+    "reasoning_effort": None,
+    "placement_argv": [],
+}
+V2 = {**V1, "version": 2, "mode": "autonomous", "worktree_path": None}
+
+
+@pytest.mark.parametrize("envelope", [V1, V2], ids=["v1", "v2"])
+def test_both_versions_decode(envelope):
+    spec = LAUNCH_SPEC_PREFIX + json.dumps(envelope, separators=(",", ":")) + "\nprompt"
+    assert decode_launch_spec(spec) == envelope
+
+
+@pytest.mark.parametrize(
+    "envelope",
+    [
+        {**V1, "mode": "autonomous"},
+        {k: v for k, v in V2.items() if k != "mode"},
+        {**V2, "extra": 1},
+        {**V2, "version": 3},
+        {**V2, "mode": ""},
+        {**V2, "worktree_path": 7},
+    ],
+)
+def test_each_version_has_its_own_exact_key_set(envelope):
+    spec = LAUNCH_SPEC_PREFIX + json.dumps(envelope) + "\nprompt"
+    with pytest.raises(BackendError, match="launch envelope"):
+        decode_launch_spec(spec)
 
 
 @pytest.mark.parametrize(
@@ -336,7 +372,7 @@ def test_current_runtime_worktree_id_readback(dispatch):
 
     cli = CurrentContractCLI()
     session = OrcaBackend(run=cli, repo_selector="name:repo").open_session("test")
-    action = WorktreeAction("fork-child", None, "planned", "main", None, None)
+    action = WorktreeAction("fork-child", None, "planned", "main", None, None, None)
     record = session.launch(replace(dispatch, worktree=action))
     assert record.worktree_path == "/actual/path"
     assert record.worktree_branch == "actual"
@@ -501,6 +537,8 @@ def test_plugin_and_backend_share_exact_envelope(dispatch, plugin_recipe, tmp_pa
                 "agent": agent,
                 "model": model,
                 "reasoning_effort": effort,
+                "mode": selected.mode,
+                "worktree": {"path": selected.worktree.path},
                 "prompt": selected.prompt,
             }
         ),

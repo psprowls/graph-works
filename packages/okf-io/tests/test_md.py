@@ -360,3 +360,27 @@ def test_paragraphs_exclude_list_item_and_blockquote_prose():
     body = "# H\n\ntop level\n\n- item\n\n  item's own second paragraph\n\n> quoted\n"
     index = _md.parse_body(body)
     assert [p.line for p in _md.paragraphs_under(index, "h")] == [3]
+
+
+@pytest.mark.parametrize("newline", ["\n", "\r\n"])
+@pytest.mark.parametrize("indent", ["", " ", "  ", "   "])
+@pytest.mark.parametrize("used", [False, True])
+def test_bare_footnote_is_prose_not_a_shortcut_link(newline, indent, used):
+    body = ("Claim.[^MiXeD]\n\n" if used else "") + indent + "[^MiXeD]: /target.md\n"
+    index = _md.parse_body(body.replace("\n", newline))
+    assert index.links == ()
+    assert index.footnote_labels == {"MiXeD"}
+    assert index.footnote_defs == {"MiXeD"}
+
+
+@pytest.mark.parametrize("label", ["Title", "Two words", "/target.md"])
+@pytest.mark.parametrize("prefix", ["", "> ", "- ", "  - "])
+def test_footnote_inline_link_survives_block_parsing(label, prefix):
+    body = f"Claim.[^s]\n\n{prefix}[^s]: [{label}](/target.md)\n\n[Ordinary]: /other.md\n\n[Ordinary]\n"
+    assert [link.raw for link in _md.parse_body(body).links] == ["/target.md", "/other.md"]
+
+
+@pytest.mark.parametrize("label", ["^two words", "^", "a^b"])
+def test_non_footnote_reference_labels_keep_commonmark_semantics(label):
+    body = f"[{label}]\n\n[{label}]: /ordinary.md\n"
+    assert [link.raw for link in _md.parse_body(body).links] == ["/ordinary.md"]

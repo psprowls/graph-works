@@ -15,6 +15,7 @@ def test_the_reason_vocabulary_is_closed() -> None:
                 "refused",
                 "incomplete-apply",
                 "conflict",
+                "attempt-mismatch",
                 "incomplete",
                 "usage",
                 "workspace",

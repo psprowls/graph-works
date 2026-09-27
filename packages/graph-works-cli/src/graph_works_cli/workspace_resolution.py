@@ -10,13 +10,12 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-import typer
 from graph_works_core.workspace import discovery
 from graph_works_core.workspace.errors import WorkspaceNotFound
 from graph_works_core.workspace.layout import WorkspaceLayout
 
 from graph_works_cli import exit_codes
-from graph_works_cli.errors import fail
+from graph_works_cli.errors import exit_error, fail
 
 
 def resolve_workspace(workspace: str, *, json_mode: bool = False, command: str = "") -> WorkspaceLayout:
@@ -39,5 +38,4 @@ def resolve_workspace(workspace: str, *, json_mode: bool = False, command: str =
                 code=exit_codes.NOT_INITIALIZED,
                 cause=exc,
             )
-        typer.echo(f"Error: {exc}", err=True)
-        raise typer.Exit(code=exit_codes.NOT_INITIALIZED) from exc
+        exit_error(str(exc), code=exit_codes.NOT_INITIALIZED, cause=exc)

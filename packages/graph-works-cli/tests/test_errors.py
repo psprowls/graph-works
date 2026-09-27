@@ -65,3 +65,64 @@ def test_fail_in_human_mode_writes_only_stderr(capsys: pytest.CaptureFixture[str
 def test_fail_rejects_a_reason_outside_the_vocabulary() -> None:
     with pytest.raises(ValueError):
         fail("nope", reason="made-up", json_mode=True, command="archive")
+
+
+@pytest.mark.parametrize(
+    ("message", "expected"),
+    [
+        ("error: no graph", "Error: no graph\n"),
+        ("no graph", "Error: no graph\n"),
+        ("error: parse error: line 3", "Error: parse error: line 3\n"),
+    ],
+)
+def test_echo_error_normalizes_only_the_leading_core_prefix(message, expected, capsys) -> None:
+    errors.echo_error(message)
+    captured = capsys.readouterr()
+    assert captured.err == expected
+    assert captured.out == ""
+
+
+def test_exit_error_restyles_a_core_prefixed_message(capsys) -> None:
+    with pytest.raises(typer.Exit) as caught:
+        errors.exit_error("error: no graph")
+    assert caught.value.exit_code == exit_codes.GENERIC
+    captured = capsys.readouterr()
+    assert captured.err == "Error: no graph\n"
+    assert captured.out == ""
+
+
+@pytest.mark.parametrize("json_mode", [False, True])
+def test_work_fail_restyles_stderr_preserving_envelope_code_and_cause(json_mode, capsys) -> None:
+    from graph_works_cli.work_cli import rendering
+
+    mode_token = rendering._JSON_MODE.set(json_mode)
+    command_token = rendering._COMMAND_NAME.set("work archive")
+    cause = ValueError("underlying")
+    try:
+        with pytest.raises(typer.Exit) as caught:
+            rendering.fail(
+                "error: no graph",
+                reason="refused",
+                code=exit_codes.NOT_INITIALIZED,
+                cause=cause,
+                payload={"ok": False},
+            )
+    finally:
+        rendering._JSON_MODE.reset(mode_token)
+        rendering._COMMAND_NAME.reset(command_token)
+    assert caught.value.exit_code == exit_codes.NOT_INITIALIZED
+    assert caught.value.__cause__ is cause
+    captured = capsys.readouterr()
+    assert captured.err == "Error: no graph\n"
+    if json_mode:
+        assert json.loads(captured.out) == {
+            "error": {
+                "command": "work archive",
+                "reason": "refused",
+                "message": "error: no graph",
+                "exit_code": exit_codes.NOT_INITIALIZED,
+                "payload": {"ok": False},
+            }
+        }
+    else:
+        assert captured.out == ""

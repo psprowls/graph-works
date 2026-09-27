@@ -157,6 +157,7 @@ def scan_normal_payload(result: ScanResult) -> dict[str, object]:
         "sections_filled": result.applied.sections_filled,
         "stamped": result.applied.stamped,
         "entity_errors": list(result.errors),
+        "warnings": list(result.structural.warnings),
         **_mirror_keys(result.structural),
     }
 
@@ -180,6 +181,7 @@ def scan_emit_payload(
         "entities_updated": list(structural.entities.updated),
         "entities_deleted": list(structural.entities.deleted),
         "entity_errors": list(structural.errors),
+        "warnings": list(structural.warnings),
         **_mirror_keys(structural),
     }
 

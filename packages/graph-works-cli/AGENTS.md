@@ -51,6 +51,11 @@ change that moved it, never as an incidental side effect.
   next`'s own callback object rather than a copy (see `util_cli/main.py`'s `work_next_callback()`),
   so the two can never drift.
 
+  `gw work orchestrate` produces a saved plan; `gw work dispatch KEY --plan FILE|- --run RUN`
+  executes one selected entry through core's journal and the `work_cli/orca.py` adapter.
+  `gw work reroute KEY --run RUN --reason TEXT` supersedes a settled Task and journals
+  optional `--agent`, `--model`, and `--effort` overrides for the next dispatch.
+
   `gw work next` has one blocker source the routing table cannot see: a malformed
   configured stage skill. `entry_for()` is called under a `WorkspaceError` guard
   and its message is appended to `blockers[]` with `action` nulled, rather than
@@ -89,15 +94,14 @@ its own typed result onto the closest-fitting code here rather than inventing a 
 missing workspace -> `NOT_INITIALIZED`, unresolved slug/entity match -> `AMBIGUOUS`, stale routing
 checkout -> `STALE`, uncaught error -> `GENERIC`.
 
-### Error-message convention — capitalized `Error:`, and one live inconsistency (D-026)
+### Error-message convention — one shared writer (D-026)
 
-The CLI-wide convention is `Error: <message>` on stderr (`errors.py`'s `exit_error()`). Core spells
-its own failures `error: <exc>` (lowercase); `graph_cli/main.py`'s `_emit()`/`_normalize_error()`
-restyles that prefix on the way out because `gw graph`'s error text is part of the frozen command
-surface. `wiki_cli/errors.py` and `workspace_resolution.py` each still hand-spell `Error: {exc}`
-independently rather than calling `errors.exit_error()` — widening the normalization to those two
-sites is deliberately deferred (tracked as D-026), not an oversight to "fix" incidentally while
-touching either file.
+The CLI-wide convention is `Error: <message>` on stderr. `errors.echo_error()` owns the
+prefix and restyles core's leading lowercase `error: `; `errors.exit_error()` adds the exit
+code and optional exception cause. `graph_cli._emit()` uses the writer alone because its
+result owns the exit code. All other human error exits delegate to `exit_error()`, including
+`work_cli.rendering.fail()` after its context-aware JSON refusal envelope is emitted.
+`wiki_cli/errors.py` remains a re-export shim. JSON messages retain their original text.
 
 ### The `--json` refusal envelope — explicit-mode commands (D-004/D-007)
 

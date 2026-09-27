@@ -145,10 +145,35 @@ def test_the_execute_tail_names_the_artifact_and_its_placeholders():
     assert "## Acceptance" in pipeline.EXECUTE_TAIL
 
 
-def test_attend_and_relay_tails_both_carry_the_grace_period_pointer():
-    assert pipeline.GRACE_PERIOD_TAIL in pipeline.ATTEND_TAIL
+def test_only_the_relay_tail_carries_the_grace_period_pointer() -> None:
+    # An attend worker asks in its own terminal (the attend-ask decision), so
+    # no Orca ask of its can time out; the protocol is relay-only now.
+    assert pipeline.GRACE_PERIOD_TAIL not in pipeline.ATTEND_TAIL
+    assert "grace-period" not in pipeline.ATTEND_TAIL
     assert pipeline.GRACE_PERIOD_TAIL in pipeline.RELAY_TAIL_SEED
     assert "grace-period-protocol.md" in pipeline.GRACE_PERIOD_TAIL
+
+
+def test_the_attend_tail_keeps_questions_in_the_terminal_and_pings_once() -> None:
+    tail = pipeline.ATTEND_TAIL
+    assert "in this terminal" in tail
+    assert "even where your Orca preamble says to use `orca orchestration ask`" in tail
+    assert "do not use `gw work ask`" in tail
+    assert "--type escalation" in tail
+    assert '--subject "Needs you at <your --from handle>"' in tail
+    assert '--body "{path} {phase}: waiting for the human in this terminal."' in tail
+    assert "exactly one notice" in tail
+
+
+def test_the_ask_line_names_the_verb_and_forbids_hand_written_options() -> None:
+    assert "ASK_LINE" in pipeline.__all__
+    line = pipeline.ASK_LINE
+    assert "gw work ask" in line
+    assert "orca.question" in line and "orca.options" in line
+    assert "never hand-write `--options`" in line
+    assert "`choice`, `effort` and `notes`" in line
+    assert "\n" not in line
+    assert not re.search(r"\{[^}]*\}", line)
 
 
 def test_the_grace_period_pointer_names_the_plugin_skill_not_a_repo_path():
@@ -181,3 +206,12 @@ def test_relay_tail_seed_still_leads_with_the_auto_drive_context_line():
     first_line = pipeline.RELAY_TAIL_SEED.splitlines()[0]
     assert first_line.startswith("Auto-drive context:")
     assert "{merge_target}" in first_line
+
+
+def test_findings_line_is_public_and_needs_no_substitution():
+    assert "FINDINGS_LINE" in pipeline.__all__
+    line = pipeline.FINDINGS_LINE
+    assert "worker_done" in line
+    assert "--body" in line
+    assert "canonical path" in line
+    assert not re.search(r"\{[^}]*\}", line)

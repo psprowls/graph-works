@@ -26,10 +26,10 @@ is nothing to edit.
 (`ab906786`). Material is copied into `sources/references/` by `plan_ingest`,
 never moved.
 
-**No text extraction from binary material.** A PDF or an image is copied into
-`sources/references/` byte-for-byte and its page is composed content-blind. Real
-extraction means a new runtime dependency and its own ADR, and is a named
-hand-off, not an omission.
+**Unreadable material is recorded content-blind.** Strict Unicode decoding
+accepts UTF-8 and BOM-declared UTF-8/16/32. Unsupported or invalid encodings
+and binary data yield no extracted text. Source copies always preserve bytes;
+PDF and image extraction remain a separate dependency and policy decision.
 
 **No `_resolve_wikilinks`.** Deleting unresolvable `[[wikilinks]]` -- which
 `okf_io.LinkGraph` cannot see anyway -- would silence a broken link instead of
@@ -488,13 +488,13 @@ async def run_ingest_source(
     agrees with the heading -- which is the common case, and is why the entity
     match re-runs only when it does not.
 
-    **Binary material is recorded, not summarized.** A file that does not decode
-    as UTF-8 is copied byte-for-byte and its brief goes content-blind: the
-    ingestor is told the material is binary, with filename, type and size, and
-    is told not to summarize what it cannot see. The suggest phase is skipped
-    for the same reason -- there is no source text to reason over. Real PDF and
-    image text extraction is a separate item; until it lands, the page body is
-    the section skeleton plus the model's classification.
+    **Unreadable material is recorded, not summarized.** When strict UTF-8 or
+    BOM-declared UTF-8/16/32 decoding fails, the brief goes content-blind: the
+    ingestor receives filename, type and size, plus an explanation that the
+    material may be binary or use an unsupported or invalid encoding. It must
+    not summarize unseen content. Suggestions skip blank extracted text.
+    Every reference copy preserves the original bytes, independently of the
+    encoding or format-specific extraction. PDF and image extraction is separate.
 
     The three seams are all defaulted:
 
@@ -540,7 +540,7 @@ async def run_ingest_source(
         )
 
     # Sits above the prompt as well as above `plan_ingest` and the preflight:
-    # the binary brief names it, and the line the ingestor reads, the line the
+    # the content-blind brief names it, and the line the ingestor reads, the line the
     # reasoner reads, and the value the page's frontmatter carries must all be
     # the one value.
     resolved_origin = origin or str(brief.source_path.resolve())
@@ -563,11 +563,9 @@ async def run_ingest_source(
             refusals=tuple(f"{refusal.path}: {refusal.kind}: {refusal.detail}" for refusal in preflight.refusals),
         )
 
-    # Read after the preflight, so a refusal costs no read of a large PDF.
-    # `brief.binary` is `False` only when `reading.extract` already decoded this
-    # file strictly as UTF-8, so this decode cannot fail for content reasons.
+    # Re-read after preflight for the copy payload. Keep encoding signatures,
+    # markup and newlines byte-exact, independently of the extracted model text.
     data = brief.source_path.read_bytes()
-    payload: str | bytes = data if brief.binary else data.decode("utf-8")
 
     system = build_ingestor_system(
         layout=layout, kinds=kinds, schema_set=schema_set, project_context=render_project_context(layout)
@@ -582,15 +580,15 @@ async def run_ingest_source(
     if brief.binary:
         human = (
             f"{header}"
-            f"--- Binary material ---\n"
-            f"This material is binary. It has not been text-extracted, and no part of its "
-            f"content is available to you.\n"
+            f"--- Unextracted material ---\n"
+            f"This material has not been text-extracted. It may be binary or use an "
+            f"unsupported or invalid encoding; no part of its content is available to you.\n"
             f"Filename: {brief.source_path.name}\n"
             f"File type: {brief.source_path.suffix.lower() or '(none)'}\n"
             f"Size: {len(data)} bytes\n"
             f"Classify it from the filename, the file type, the caller's hint and the origin. "
             f"Do not summarize contents you cannot see: say plainly in the TL;DR that the "
-            f"material is binary and has not been text-extracted.\n"
+            f"material has not been text-extracted.\n"
             f"--- End source ---\n"
         )
     else:
@@ -654,7 +652,7 @@ async def run_ingest_source(
         schema_set,
         section_set,
         brief.source_path,
-        content=payload,
+        content=data,
         title=title,
         description=str(frontmatter.get("description") or "").strip() or title,
         source_kind=validated,

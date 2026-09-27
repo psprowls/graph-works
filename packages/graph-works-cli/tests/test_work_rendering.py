@@ -129,11 +129,14 @@ def test_render_status_uses_path_keyed_resume(capsys: pytest.CaptureFixture[str]
             "by_work_status": {"open": 1},
             "by_type": {"Feature": 1},
             "by_phase": {},
+            "not_started": 2,
             "children": {},
             "resume": {"primary": {"path": "work/feature-a", "title": "A"}, "alternatives": []},
         }
     )
-    assert "resume: work/feature-a" in capsys.readouterr().out
+    output = capsys.readouterr().out
+    assert "  by phase: -\n  not started: 2\n" in output
+    assert "resume: work/feature-a" in output
 
 
 def test_render_decision_names_owner_and_request(capsys: pytest.CaptureFixture[str]) -> None:
@@ -187,6 +190,7 @@ def test_dense_human_renderers_cover_every_optional_group(capsys: pytest.Capture
             "by_work_status": {"open": 2},
             "by_type": {"Feature": 2},
             "by_phase": {"design": 2},
+            "not_started": 2,
             "children": {"work/e": {"terminal": 1, "total": 2}},
             "resume": {
                 "primary": {"path": "work/a", "title": "A"},
@@ -228,6 +232,8 @@ def test_dense_human_renderers_cover_every_optional_group(capsys: pytest.Capture
             "terminal": False,
             "slots_free": 1,
             "max_parallel": 2,
+            "max_attend": 1,
+            "attend_slots_free": 0,
             "supervise_merges": False,
             "dispatches": [
                 {
@@ -267,6 +273,8 @@ def test_dense_human_renderers_cover_every_optional_group(capsys: pytest.Capture
         }
     )
     captured = capsys.readouterr()
+    header = next(line for line in captured.out.splitlines() if line.startswith("work/e: terminal="))
+    assert "slots_free=1/2 attend_slots_free=0/1" in header
     assert "CONTRADICTION" in captured.out
     assert "partial" in captured.err
     assert "  guidance: 1 entries, 2,870 tokens → /tmp/guidance-design.md\n" in captured.out
@@ -289,6 +297,8 @@ def test_render_orchestrate_prints_supervise_merges_only_when_true(
         "terminal": False,
         "slots_free": 1,
         "max_parallel": 2,
+        "max_attend": 1,
+        "attend_slots_free": 0,
         "supervise_merges": False,
         "dispatches": [],
         "advances": [],
@@ -326,6 +336,8 @@ def test_render_orchestrate_prints_holds(capsys: pytest.CaptureFixture[str]) -> 
         terminal=False,
         slots_free=0,
         max_parallel=1,
+        max_attend=1,
+        attend_slots_free=0,
         supervise_merges=False,
         live=(),
         dispatches=(),

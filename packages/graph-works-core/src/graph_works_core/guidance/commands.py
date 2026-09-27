@@ -21,6 +21,7 @@ from typing import Literal
 
 from code_graph_io import GraphNotInitializedError, SchemaMismatchError, open_reader
 from okf_io import load_bundle
+from work_tracker_okf.affects import code_affects
 from work_tracker_okf.hierarchy import declared_repo
 from work_tracker_okf.items import IGNORE, WorkItem, item_index, load_items, unreadable_detail
 
@@ -112,7 +113,7 @@ def run_claims_closure(layout: WorkspaceLayout, path: str, *, include_superseded
         refusal: Literal["unknown-item", "unreadable"] = "unreadable" if detail is not None else "unknown-item"
         return ClaimsClosureRun(path, None, (), Closure((), ()), (), 0, refusal, detail)
     repo, warning = _item_repo(layout, item, items)
-    closure = open_closure(layout, repo=repo, affects=item.affects)
+    closure = open_closure(layout, repo=repo, affects=code_affects(item.affects))
     if warning is not None:
         closure = Closure(closure.entries, (warning, *closure.warnings))
     matched = match_claims(read_claims(bundle, layout.cache_dir), closure, include_superseded=include_superseded)

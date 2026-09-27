@@ -207,7 +207,16 @@ CATALOG: tuple[ConfigEntry, ...] = (
         key="workflow.auto_drive.max_parallel",
         type="int",
         default=2,
-        description="How many workers auto-drive may have in flight at once.",
+        description="How many autonomous or relay workers auto-drive may have in flight at once.",
+    ),
+    ConfigEntry(
+        key="workflow.auto_drive.max_attend",
+        type="int",
+        default=1,
+        description=(
+            "How many human-attended (mode: attend) workers auto-drive may have in flight "
+            "at once, counted separately from max_parallel."
+        ),
     ),
     ConfigEntry(
         key="workflow.auto_drive.supervise_merges",

@@ -11,6 +11,7 @@ from pathlib import Path
 
 import pytest
 from graph_works_core.orchestrate.commands import WORKER_PLACEMENT_LINE
+from subagents_io.dispatch import WORKTREE_ACTIONS
 from work_tracker_okf.placement import PLACEMENT_REFUSALS
 
 
@@ -22,13 +23,16 @@ def _find(relative: str) -> Path | None:
     return None
 
 
-def test_every_placement_refusal_is_handled_in_dispatch_mechanics() -> None:
+def test_every_placement_refusal_is_explained_in_legacy_dispatch_checks() -> None:
     skill = _find("plugins/gw/skills/auto-drive/SKILL.md")
-    if skill is None:
-        pytest.skip("auto-drive SKILL.md is not present in this checkout")
-    section = re.search(r"## 3\. Dispatch mechanics\n(.*?)\n## 4\. ", skill.read_text(encoding="utf-8"), re.DOTALL)
-    assert section is not None
-    refused = section.group(1).split("**Refused.**", 1)[-1].split("**Application failed", 1)[0]
+    checks = _find("plugins/gw/skills/auto-drive/references/dispatch-checks.md")
+    if skill is None or checks is None:
+        pytest.skip("auto-drive dispatch guidance is not present in this checkout")
+    active = skill.read_text(encoding="utf-8")
+    assert "references/dispatch-checks.md" in active
+    assert "`placement-unrecorded`" in active
+    refused = checks.read_text(encoding="utf-8").split("**Refused.**", 1)[1]
+    refused = refused.split("**Application failed", 1)[0]
     missing = sorted(kind for kind in PLACEMENT_REFUSALS if f"`{kind}`" not in refused)
     assert missing == []
 
@@ -142,14 +146,182 @@ def test_the_worker_placement_flag_is_what_the_workflow_skill_tells_workers(step
     ],
 )
 def test_placement_inspection_paths_are_explicit(start: str, end: str, required: tuple[str, ...]) -> None:
-    skill = _find("plugins/gw/skills/auto-drive/SKILL.md")
-    if skill is None:
-        pytest.skip("auto-drive SKILL.md is not present in this checkout")
-    mechanics = skill.read_text(encoding="utf-8").split("## 3. Dispatch mechanics\n", 1)[1]
-    mechanics = mechanics.split("\n## 4. ", 1)[0]
+    checks = _find("plugins/gw/skills/auto-drive/references/dispatch-checks.md")
+    if checks is None:
+        pytest.skip("auto-drive dispatch checks are not present in this checkout")
+    mechanics = checks.read_text(encoding="utf-8").split("**Record the observed placement**", 1)[1]
     assert start in mechanics
     section = mechanics.split(start, 1)[1]
     assert end in section
     section = " ".join(section.split(end, 1)[0].split())
     for phrase in required:
         assert phrase in section
+
+
+def test_worktree_actions_match_the_dispatch_shape_and_assertion_table() -> None:
+    """The plan shape lives in the skill; the legacy assertion table in the checks reference."""
+    skill = _find("plugins/gw/skills/auto-drive/SKILL.md")
+    checks = _find("plugins/gw/skills/auto-drive/references/dispatch-checks.md")
+    if skill is None or checks is None:
+        pytest.skip("auto-drive SKILL.md is not present in this checkout")
+    text = skill.read_text(encoding="utf-8")
+    shape = text.split("`worktree` (`action`: ", 1)[1].split(",", 1)[0]
+    assert set(re.findall(r"`([a-z-]+)`", shape)) == WORKTREE_ACTIONS
+    fields = " ".join(text.split("`worktree` (`action`: ", 1)[1].split("`auto_merge`", 1)[0].split())
+    assert "`start_sha`, a full 40- or 64-character lowercase hex commit object ID for `pin-detached`" in fields
+    assert '`null` otherwise; `branch` is `null` for `pin-detached`, never `HEAD` or `""`' in fields
+    table = checks.read_text(encoding="utf-8").split("| Planned `worktree.action` | Assertion |", 1)[1]
+    table = table.split("\n\n", 1)[0]
+    actions = set()
+    for row in table.splitlines()[1:]:
+        actions.update(re.findall(r"`([a-z-]+)`", row.split("|", 2)[1]))
+    assert actions == WORKTREE_ACTIONS
+
+
+#: Helper-recipe sections that moved to `references/dispatch-checks.md` with the legacy recipe.
+LEGACY_RECIPE_SECTIONS = frozenset(
+    {"**Reader preparation (`pin-detached`).**", "**Verify the branch.**", "**Record, or skip.**"}
+)
+
+
+@pytest.mark.parametrize(
+    ("start", "end", "required"),
+    [
+        (
+            "**Reader preparation (`pin-detached`).**",
+            "Then encode the immutable task spec",
+            (
+                "fresh random UUID for every new dispatch attempt",
+                "durably save it before preparation",
+                "distinct from the later Orca `dispatchId`",
+                "--attempt-id <preparation-attempt-id>",
+                "--out-placement <fresh-placement-json>",
+                "> <workspace>/okf/<dispatch path>/references/orca-placement/<key>.json",
+                "fresh output path for every invocation, including recovery",
+                "Require exit 0 before encode, task-create or launch",
+                "File existence alone never authorizes launch",
+                "same conclusively unlaunched allocation",
+                "authoritative Orca request/dispatch state",
+                "Never share a previously launched checkout",
+                "never re-detach",
+                "PREPARATION REFUSED <key>",
+                "Before task-create, use only §4.2.1's pre-task decision flow",
+                "When a Task already exists (resume/retry), use the existing-Task failure question (§4.2)",
+                "exact prepared path",
+                "attempt_id",
+            ),
+        ),
+        (
+            "**Verify the branch.**",
+            "**Record, or skip.**",
+            ("For non-reader actions", "For `pin-detached`", "detached HEAD", "`start_sha`"),
+        ),
+        (
+            "**Record, or skip.**",
+            "**Check.**",
+            (
+                "A `pin-detached` dispatch — root or descendant — records a reader receipt",
+                "gw work record-reader <slug> --root <work-path> --phase <dispatch phase>",
+                "--task-id <task_id> --dispatch-id <dispatch_id> --dispatch-key <key>",
+                "--repo <dispatch repo.name> --worktree <observed path> --start-sha <start_sha> --json",
+                "actual task/dispatch IDs",
+                "Success is exit 0 with `written` or `replayed` true",
+                "`receipt_path` and `start_sha`",
+                "`refusal`/`attempt-mismatch`",
+                "PLACEMENT UNRECORDED <key>",
+                "Never call `record-placement` for a `pin-detached` dispatch",
+                "root's placement is recorded only at `execute`/`finish`",
+            ),
+        ),
+        (
+            "**Resuming a previously-parked item.**",
+            "### 2.6.1",
+            (
+                "For `pin-detached`",
+                "fresh preparation identity",
+                "never reuse the parked reader's checkout",
+                "original saved reader dispatch input and preparation evidence",
+                "`start_sha` matches the baseline in the frozen Task prompt",
+                "Missing, malformed or mismatched original evidence refuses resume",
+                "Never substitute this cycle's planner baseline",
+                "Use that original dispatch JSON for `prepare-reader`",
+                "`settle-placement --dispatch <original-saved-reader-dispatch-json>`",
+                "this resume attempt's successful preparation result",
+                "Record the reader receipt with the original `start_sha`",
+            ),
+        ),
+        (
+            "### 4.2.1 Reader preparation failure before Task creation",
+            "### 4.3",
+            (
+                "exactly two options — *retry preparation* / *stop the run*",
+                "Do not offer Skip",
+                "never call `task-update` or invent task/dispatch IDs",
+                "Save the question and answer in the preparation attempt's evidence",
+                "Preserve the saved dispatch input, identity and result",
+                "leave any allocated checkout visible",
+                "`placement-refused` at step `place` with `task_id: null`",
+                "re-derives this attempt's marker",
+                "conclusively unlaunched allocation",
+                "never re-detaches, resets or removes a checkout",
+                "a missing response or receipt is not proof of no launch",
+                "exit the coordinator loop",
+                "Do not return to planning and automatically re-propose this key",
+            ),
+        ),
+        (
+            "### Failure question",
+            "- **Skip**:",
+            (
+                "This question requires an existing Task",
+                "task-create goes to §4.2.1 instead",
+                "For `pin-detached`",
+                "fresh preparation identity",
+                "never reuse a previously launched reader checkout",
+                "authoritative Orca request/dispatch state",
+                "same conclusively unlaunched allocation",
+                "fresh output path",
+            ),
+        ),
+    ],
+    ids=[
+        "reader-preparation",
+        "detached-verification",
+        "reader-receipt",
+        "reader-resume",
+        "reader-pre-task-failure",
+        "reader-retry",
+    ],
+)
+def test_reader_procedure_contract_is_explicit(start: str, end: str, required: tuple[str, ...]) -> None:
+    """Helper-recipe sections live in dispatch-checks.md; the verb's flow stays in the skill."""
+    relative = "references/dispatch-checks.md" if start in LEGACY_RECIPE_SECTIONS else "SKILL.md"
+    skill = _find(f"plugins/gw/skills/auto-drive/{relative}")
+    if skill is None:
+        pytest.skip("auto-drive dispatch guidance is not present in this checkout")
+    text = skill.read_text(encoding="utf-8")
+    assert start in text
+    section = text.split(start, 1)[1]
+    assert end in section
+    section = " ".join(section.split(end, 1)[0].split())
+    for phrase in required:
+        assert phrase in section
+
+
+def test_readers_are_settled_and_reported_at_the_prepared_commit() -> None:
+    skill = _find("plugins/gw/skills/auto-drive/SKILL.md")
+    checks = _find("plugins/gw/skills/auto-drive/references/dispatch-checks.md")
+    if skill is None or checks is None:
+        pytest.skip("auto-drive SKILL.md is not present in this checkout")
+    text = skill.read_text(encoding="utf-8")
+    legacy = checks.read_text(encoding="utf-8")
+    reader_row = next(line for line in legacy.splitlines() if line.startswith("   | `pin-detached` |"))
+    for phrase in ("settle-placement", "prepared path", "HEAD", "start_sha", "detached", "clean"):
+        assert phrase in reader_row
+    for document in (text, legacy):
+        assert "dispatched <key> -> <observed path> detached at <start_sha>" in document
+    # The verb settles a reader by content and records a receipt, never a stamp.
+    assert "Never call `record-placement` for a `pin-detached` dispatch" in text
+    assert "a branch name is never consulted" in text
+    assert "reads from the shared epic worktree" not in text
+    assert "read-only descendant that records nothing" not in text

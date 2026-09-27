@@ -267,11 +267,71 @@ hand. `today` is always injected; nothing in this package reads the clock.
   conflicting *bundle content* file during init is never an exception; it's
   a `WriteFailure`/`InstallResult` entry in the plan's result.
 
-- **`orchestrate.commands` walks the whole vault on every `plan()` call**
-  (hold scan via `workspace.decision_owner.holds_by_path`) and reads the owning epic's decisions ledger *twice*
-  per plan (once for the routing gate, once for the plan's own decision
-  fields) — not one atomic snapshot. Both are known, accepted limits
-  documented in the README rather than bugs to fix reflexively.
+- **`orchestrate.commands.plan()` is pure**: no filesystem, Git or clock.
+  `run_orchestrate()` gathers repository and branch-tip observations, finish
+  plans and decision holds before calling it. The shell's hold scan walks the
+  whole vault and reads the owning epic's decisions ledger twice (routing and
+  plan fields); those reads are not one atomic snapshot.
+
+- **Orchestrate admission is one claim gate** (`orchestrate/claims.py`).
+  `affects` overlap is segment containment (`packages/a` holds
+  `packages/a/src`, not `packages/ab`), checked against live and
+  already-accepted claims alike through `claims.conflicts()`/`first_conflicts()`.
+  Which stages hold `affects` claims is one policy, `claims.claims_for()`:
+  only `CODE_WRITE_PHASES` (execute, finish) do; design and plan hold none
+  (no code, no workspace claim) and skip the unknown-repository fail-closed
+  check (epic D-002).
+  Finish claims include each source checkout and `FinishTarget.target_worktree`,
+  including the checkout holding the default base for a root finish and every
+  foreign-repository target. Same-target finishes serialize; independent targets
+  can proceed. Authoritative live finish keys gather evidence outside the
+  requested subtree and after page phase changes. `FinishPlan.occupancy`
+  records target inventory independently of source/target admission checks,
+  retaining root/default-base and foreign targets after revalidation failures.
+  Incomplete live target evidence refuses mutable admission; it never releases
+  a target for reuse or changes pinned-reader placement. Known target claims
+  still use the shared conflict predicate and take diagnostic precedence.
+  Only emitted dispatches reserve claims; refused or capacity-dropped candidates
+  reserve nothing. Live items are never re-proposed or reported blocked against
+  themselves. Placement bookkeeping does not introduce another conflict policy.
+
+- **Admission order is dependency rank first** (`orchestrate/rank.py`).
+  `plan()` sorts candidates by `(-transitive dependents, PICK_ORDER,
+  opened, path)` (epic D-003). The graph is the run root plus every active
+  nonterminal descendant -- blocked, held and live included, since routing
+  has already dropped the dependents that make an upstream matter -- with
+  in-run `depends_on` edges only; each dependent counts once, terminal and
+  out-of-run items neither count nor bridge, and the walk is cycle-safe.
+  Rank is order only: it gates nothing and reserves nothing. Manual
+  `--descend` keeps plain `PICK_ORDER`; there is no `--prefer` -- human
+  priority is expressed by editing `depends_on`.
+
+- **`READER_ACTION = "pin-detached"`** for `design` and `plan`, including roots
+  with historical stamps. `RepositoryContext.branch_tips` supplies the full
+  committed `start_sha`; the action has `path=None`, `branch=None` and
+  `exists=None`. The nearest owner's verified repository-local anchor supplies
+  the source branch; only an unanchored root can use the default base. Missing
+  or ambiguous repository/ref evidence is `worktree-unprovable`; inability to
+  provision is `worktree-unsupported`, never mutable-anchor reuse. Dirty anchors
+  are valid sources of committed refs: pinning promises stability, not freshness.
+  The launcher prepares one dedicated detached checkout per dispatch before
+  injection: `gw work dispatch` (`dispatch._prepare_reader`) creates it
+  through the Orca port with an attempt-derived marker comment, detaches
+  only that new checkout at `start_sha`, verifies it by content at settle
+  time, and records a reader receipt (`_record_reader`) instead of a
+  placement stamp. Readers claim no mutable checkout, including historical
+  stamps, and hold no `affects` claims (`claims_for`).
+
+- **Reader receipts are observations, not placement stamps.**
+  `orchestrate.placement.run_record_reader` backs `gw work record-reader` and
+  writes under `layout.cache_dir / "reader-receipts"`, keyed by item digest and
+  dispatch ID. It never changes phase, `updated`, scalar placement or
+  `repo_stamps`, and never stores preambles or dispatch capabilities. Live calls
+  revalidate under the decision-owner lock shared with advance. Current-phase
+  refusal precedes replay; identical eligible evidence replays without writing,
+  while changed evidence for the same attempt returns `attempt-mismatch`.
+  Receipt recording trusts the caller's verified Git observation; it does not
+  itself prove repository identity, detachment or the checkout's SHA.
 
 - Multi-repository orchestration resolves assignments and observations in the
   shell, then uses one frontier and global worker budget. Affects reservations

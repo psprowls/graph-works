@@ -49,6 +49,23 @@ settled design or plan is genuinely sufficient.
 File dependency-free and earlier children first so later children can use the
 real `path` returned by `--json`:
 
+**Size every child.** Pass `--effort` on every `gw work file` call, using the
+scale in `gw:file`'s "Effort scale" (`xtra-small` · `small` · `medium` ·
+`large` · `xtra-large`). A child filed without one stalls its first stage on
+"effort required" and costs a human round-trip.
+
+**Resolve the repository once, before the first child.** Run the first child's
+`gw work file` with `--dry-run --json` added. If its `warnings` contain an entry
+starting `repo unresolved:`, ask the human once which repository the children
+live in — offer the `name → path` pairs that warning lists — and pass
+`--repo <name>` on every child. No warning means one repository is declared or
+the parent chain already sets `repo:`; do not ask. A child whose code lives in a
+different repository from its siblings takes its own `--repo`. An
+`unknown-repo` refusal: report it verbatim and ask again.
+
+Do not add `phase:` — an absent phase is the "not started" entry state the
+dispatch transition moves out of.
+
 ```bash
 gw work file --json \
   --title "<child title>" \
@@ -57,6 +74,8 @@ gw work file --json \
   --name "<stable basename words>" \
   --parent-path "<work-path>" \
   --affects "<repo paths or packages>" \
+  --effort <size> \
+  [--repo <name>] \
   --dep "path=<earlier-child-path>,blocks=execute,needs=resolved"
 ```
 
@@ -79,7 +98,9 @@ default to:
 
 Include:
 
-- each child’s canonical `path`, type, summary, and affects;
+- each child’s canonical `path`, type, summary, affects, and effort;
+- the repository the children resolve to (and how: parent `repo:`, or the
+  `--repo` the human chose);
 - every complete dependency edge and its rationale;
 - which children are independent and may run concurrently;
 - any child that could not be filed and the exact CLI error.

@@ -16,7 +16,9 @@ TASK_MARKER = re.compile(r"^=== TASK ===(?:\r?\n|$)", re.MULTILINE)
 PASTE = re.compile(r'<pasted_content id="([^"\r\n]+)">\r?\n(.*?)\r?\n</pasted_content id="\1">(?:\r?\n)?', re.DOTALL)
 TASK_ID = re.compile(r"^Your task ID is: (task_[A-Za-z0-9_-]+)\r?\n", re.MULTILINE)
 COMMAND = re.compile(r'^[ \t]*(?:"[^"\r\n]+"|[^ \t\r\n]+)[ \t]+orchestration[ \t]+(?:send|ask)[ \t]+[^\r\n]*', re.MULTILINE)
-ENVELOPE_FIELDS = {"version", "dispatch_key", "agent", "model", "reasoning_effort", "placement_argv"}
+V1_FIELDS = {"version", "dispatch_key", "agent", "model", "reasoning_effort", "placement_argv"}
+
+V2_FIELDS = V1_FIELDS | {"mode", "worktree_path"}
 
 
 class Unverified(Exception):
@@ -73,7 +75,7 @@ def worker_identity(before):
 
 
 def validate_envelope(task):
-    # Keep in step with workflow_orca._launch.decode_launch_spec's six-field
+    # Keep in step with workflow_orca._launch.decode_launch_spec's versioned
     # wire contract, without importing workspace packages into a plugin hook.
     line, separator, body = task.partition("\n")
     require(separator and line.startswith("GW_LAUNCH_V1 "), "missing GW launch envelope")
@@ -81,8 +83,14 @@ def validate_envelope(task):
         value = json.loads(line[len("GW_LAUNCH_V1 "):])
     except ValueError:
         raise Unverified("invalid GW launch envelope") from None
-    require(isinstance(value, dict) and set(value) == ENVELOPE_FIELDS, "invalid GW launch fields")
-    require(type(value["version"]) is int and value["version"] == 1, "unsupported GW launch version")
+    require(isinstance(value, dict), "invalid GW launch fields")
+    version = value.get("version")
+    require(type(version) is int and version in (1, 2), "unsupported GW launch version")
+    require(set(value) == (V1_FIELDS if version == 1 else V2_FIELDS), "invalid GW launch fields")
+    if version == 2:
+        require(isinstance(value["mode"], str) and value["mode"].strip(), "invalid GW launch mode")
+        require(value["worktree_path"] is None or isinstance(value["worktree_path"], str),
+                "invalid GW launch worktree path")
     require(all(isinstance(value[k], str) and value[k].strip() for k in ("dispatch_key", "agent")),
             "invalid GW launch identity")
     require(all(value[k] is None or isinstance(value[k], str) and value[k].strip()

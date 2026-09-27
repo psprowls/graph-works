@@ -107,6 +107,22 @@ def test_closure_without_a_graph_warns_and_matches_nothing(layout: WorkspaceLayo
     assert (run.matched, run.total_tokens) == ((), 0)
 
 
+def test_claims_closure_reads_only_code_affects_and_reports_authored_affects(
+    layout: WorkspaceLayout, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _write(layout, "work/feature-t", ITEM.replace("affects: [README.md]", "affects: [gw:workspace, README.md]"))
+    seen: list[tuple[str, ...]] = []
+
+    def capture(layout, *, repo, affects):
+        seen.append(tuple(affects))
+        return cl.Closure((), ())
+
+    monkeypatch.setattr(gc, "open_closure", capture)
+    run = gc.run_claims_closure(layout, "work/feature-t")
+    assert seen == [("README.md",)]
+    assert run.affects == ("gw:workspace", "README.md")
+
+
 def test_closure_with_a_graph_matches_repo_claims(layout: WorkspaceLayout) -> None:
     _graph(
         layout,

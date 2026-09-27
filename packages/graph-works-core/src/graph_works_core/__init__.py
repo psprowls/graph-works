@@ -126,7 +126,7 @@ and the rest of the shared `prompts`.
 
 from __future__ import annotations
 
-__version__ = "0.6.2"
+__version__ = "0.6.3"
 
 from graph_works_core.agent_substrate.agent_loop import ToolLoopResult, coerce_tool_name, run_tool_loop
 from graph_works_core.agent_substrate.agent_tools import (
@@ -171,7 +171,14 @@ from graph_works_core.orchestrate.commands import (
     run_orchestrate,
 )
 from graph_works_core.orchestrate.commands import plan as orchestrate_plan
-from graph_works_core.orchestrate.placement import PlacementRecord, run_record_placement
+from graph_works_core.orchestrate.placement import (
+    PlacementRecord,
+    ReaderRecord,
+    read_reader_receipt,
+    reader_receipt_path,
+    run_record_placement,
+    run_record_reader,
+)
 from graph_works_core.orchestrate.stage_advance import StageAdvance, run_stage_advance
 from graph_works_core.query.adapters import LOOP_REGISTRY, REGISTRY
 from graph_works_core.scan.commands import (
@@ -268,6 +275,7 @@ __all__ = [
     "ProseRefreshResult",
     "ProseRefreshTask",
     "QueryError",
+    "ReaderRecord",
     "ScanError",
     "ScanResult",
     "ScanWorklist",
@@ -308,6 +316,8 @@ __all__ = [
     "propagation_candidates",
     "read_anchors",
     "read_bounded_page",
+    "read_reader_receipt",
+    "reader_receipt_path",
     "resolve",
     "role_binding",
     "role_spec",
@@ -320,6 +330,7 @@ __all__ = [
     "run_orchestrate",
     "run_propagate_drift",
     "run_record_placement",
+    "run_record_reader",
     "run_scan",
     "run_stage_advance",
     "run_tokens_update",

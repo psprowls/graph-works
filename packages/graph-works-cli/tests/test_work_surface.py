@@ -21,6 +21,7 @@ VERBS = [
     ["work", "next"],
     ["work", "advance"],
     ["work", "record-placement"],
+    ["work", "record-reader"],
     ["work", "touch-active-work"],
     ["work", "status"],
     ["work", "lint"],
@@ -29,7 +30,11 @@ VERBS = [
     ["work", "reparent"],
     ["work", "adopt"],
     ["work", "orchestrate"],
+    ["work", "dispatch"],
+    ["work", "reroute"],
     ["work", "reconcile-context"],
+    ["work", "ask"],
+    ["work", "ask-answer"],
     ["work", "decision", "add"],
     ["work", "decision", "answer"],
     ["work", "decision", "list"],
@@ -38,8 +43,8 @@ VERBS = [
 ]
 
 
-def test_the_surface_is_exactly_eighteen_verbs() -> None:
-    assert len(VERBS) == 18
+def test_the_surface_is_exactly_twenty_three_verbs() -> None:
+    assert len(VERBS) == 23
 
 
 @pytest.mark.parametrize("verb", VERBS, ids=lambda verb: " ".join(verb))
@@ -66,6 +71,7 @@ def test_next_declares_descend_and_json() -> None:
         ["work", "adopt"],
         ["work", "orchestrate"],
         ["work", "reconcile-context"],
+        ["work", "ask"],
         ["work", "decision", "add"],
         ["work", "decision", "answer"],
         ["work", "decision", "list"],
@@ -128,13 +134,24 @@ def test_work_cli_imports_domain_behavior_only_through_graph_works_core() -> Non
     standard library. Every domain/config/schema dependency must arrive through
     ``graph_works_core`` rather than a lower-level sibling package.
     """
-    allowed = {*sys.stdlib_module_names, "graph_works_cli", "graph_works_core", "graph_works_wire", "typer"}
+    # D-002: only work_cli/orca.py builds the Orca adapter needed by core's port.
+    allowed = {
+        *sys.stdlib_module_names,
+        "graph_works_cli",
+        "graph_works_core",
+        "graph_works_wire",
+        "typer",
+        "workflow_orca",
+    }
     offenders = {
         str(path.relative_to(SRC)): sorted(_imported_roots(path) - allowed)
         for path in WORK_CLI.rglob("*.py")
         if _imported_roots(path) - allowed
     }
     assert offenders == {}
+    assert {
+        str(path.relative_to(WORK_CLI)) for path in WORK_CLI.rglob("*.py") if "workflow_orca" in _imported_roots(path)
+    } == {"orca.py"}
 
 
 def test_exactly_three_verbs_guard_against_stale_routing() -> None:

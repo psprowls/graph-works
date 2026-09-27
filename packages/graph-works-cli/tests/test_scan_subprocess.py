@@ -124,7 +124,9 @@ def test_scan_emit_and_apply_round_trip_across_processes_and_refuse_unsafe_hando
         "mirror_stranded",
         "mirror_skipped_repos",
         "mirror_errors",
+        "warnings",
     }
+    assert emitted["warnings"] == []
     scan_cache = (workspace / DEFAULT_CONFIG_DIR / CACHE_DIRNAME / "scan").resolve()
     worklist_path = Path(emitted["worklist_path"]).resolve()
     briefs_dir = Path(emitted["briefs_dir"]).resolve()

@@ -184,6 +184,16 @@ another stage, same as the stock skill it replaces.
 
   Omit this block entirely when `guidance_file` is null (nothing admitted,
   `--file ""`, or the write failed). Surface any `guidance_warnings` to the user as plain notes.
+- **Out-of-scope findings.** For every stage, regardless of `action.skill`, add:
+  "A defect, debt or test gap outside this item's scope is not fixed in this
+  stage and is not left as a follow-up in prose. File it with
+  `gw work file --kind Bug|TechDebt|TestGap --title … --summary … --repo <this item's repo> --affects …`;
+  choose the matching kind and add `--effort` only when obvious. File at the
+  top level. Never pass `--parent-path` naming this item or any ancestor:
+  a new child reopens the parent's execute gate (waiting on children), blocking
+  otherwise finished work. If an existing open item already covers the finding,
+  name its canonical path instead of filing a duplicate. Keep a list of every
+  path filed or named this session for the step 6 hand-off."
 - **Execute-stage coverage (step 3).** When the stage just dispatched is
   `execute` — keyed on the stage, not on `action.skill`, which is used verbatim
   and may be any configured skill — add: "Before you advance, write
@@ -297,10 +307,14 @@ If the advance lands the item at `phase: done` and `work_status: resolved`, run
 
 ### 6. Hand off
 
+Before the phase line, list the filed or named finding paths, or say there were none.
+A dispatched worker also names every path in its `worker_done --body`.
+
 End with: "Phase advanced to `<phase>`. Clear context (`/clear`) and run
 `/gw:workflow <work-path>` to continue."
 
-**Held-item hand-off.** For any no-advance finish outcome, attended or relay,
+**Held-item hand-off.** Include the same findings list (or say there were none).
+For any no-advance finish outcome, attended or relay,
 say instead: "`<work-path>` stays at `phase: finish`
 (outcome: `<pr|keep|hold|discard|none>`; merge target: `<merge target>`).
 Once the work is integrated into `<merge target>` — for a PR, after it merges —
@@ -319,6 +333,9 @@ vault-recorded PR URL is required.
 below, not this hand-off.)
 
 ### Terminal handling
+
+Include the same findings list (or say there were none) in the terminal hand-off
+and, for a dispatched worker, in its `worker_done --body`.
 
 Run this when an item has reached a terminal state — either `gw work advance`
 just landed it at `phase: done` / `work_status: resolved` (step 5), or `gw work next`

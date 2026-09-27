@@ -8,8 +8,7 @@ phase: design
 effort: medium
 opened: 2026-07-14
 updated: 2026-08-01
-affects:
-  - packages/example
+affects: []
 sources:
   - id: design
     resource: /work/epic-ledger-at-finish/children/feature-ledger-citation/references/01-design.md

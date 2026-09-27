@@ -1,13 +1,15 @@
 """One file in, text plus a title guess plus a binary flag out.
 
 Supported formats: `.md` `.txt` `.html` `.htm` `.json` `.csv`. Anything else
-that decodes as UTF-8 is returned verbatim with no title. Anything that does
-not decode is reported as binary with no text at all -- never as replacement
-characters.
+that decodes as supported Unicode is returned verbatim with no title. Supported
+encodings are UTF-8 and BOM-declared UTF-8/16/32. The binary flag means strict
+decoding failed: binary data, unsupported text encodings, and malformed input
+all return no text -- never replacement characters.
 """
 
 from __future__ import annotations
 
+import codecs
 import contextlib
 import html.parser
 import json
@@ -57,8 +59,10 @@ class _HTMLTextExtractor(html.parser.HTMLParser):
 def extract(path: Path) -> tuple[str, str | None, bool]:
     """One file in, `(text, title, binary)` out.
 
-    *binary* is `True` for material that does not decode strictly as UTF-8. Its
-    text is `""` in that case, never a string of replacement characters:
+    *binary* is `True` when strict decoding as UTF-8 or BOM-declared UTF-8/16/32
+    fails, not proof of a binary file format. Unsupported or malformed text
+    encodings also produce this flag. Its text is `""` in that case, never
+    a string of replacement characters:
     manufacturing text that was never there is how a page gets composed from
     noise, and an empty extract is the truthful answer a caller can branch on.
     The strict decode runs before the format dispatch, so a PDF named `.md` is
@@ -66,8 +70,18 @@ def extract(path: Path) -> tuple[str, str | None, bool]:
     """
     ext = path.suffix.lower()
     data = path.read_bytes()
+    # UTF-32 LE shares UTF-16 LE's prefix; the longest signature wins.
+    # A recognized BOM selects one strict codec, with no fallback on failure.
+    if data.startswith((codecs.BOM_UTF32_LE, codecs.BOM_UTF32_BE)):
+        encoding = "utf-32"
+    elif data.startswith((codecs.BOM_UTF16_LE, codecs.BOM_UTF16_BE)):
+        encoding = "utf-16"
+    elif data.startswith(codecs.BOM_UTF8):
+        encoding = "utf-8-sig"
+    else:
+        encoding = "utf-8"
     try:
-        text = data.decode("utf-8")
+        text = data.decode(encoding)
     except UnicodeDecodeError:
         return "", None, True
     if ext in {".md", ".txt"}:

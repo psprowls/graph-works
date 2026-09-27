@@ -262,6 +262,106 @@ def test_no_vault_root_skips_root_absolute_checking(tmp_path: Path) -> None:
     assert lane_report(vault, today=TODAY, repo_root=_repo(tmp_path)).by_code("plan.action-target-missing") == ()
 
 
+@pytest.mark.parametrize("token", ["UTF-16/32", "input/output", "and/or", "(UTF-16/32),", "foo/bar"])
+def test_ambiguous_slash_prose_is_not_a_missing_target(tmp_path: Path, token: str) -> None:
+    vault = tmp_path / "vault"
+    write_item(vault, "bug-x", "type: Bug\nwork_status: open\n", body=OK_TABLE.replace("Ship it", f"Handle {token}"))
+
+    assert (
+        lane_report(vault, today=TODAY, repo_root=_repo(tmp_path), vault_root=vault).by_code(
+            "plan.action-target-missing"
+        )
+        == ()
+    )
+
+
+@pytest.mark.parametrize("token", ["missing/file.py", "missing/deep/file", "/missing/file"])
+def test_explicit_path_evidence_reports_missing_targets_without_a_first_directory(tmp_path: Path, token: str) -> None:
+    vault = tmp_path / "vault"
+    write_item(vault, "bug-x", "type: Bug\nwork_status: open\n", body=OK_TABLE.replace("Ship it", f"Edit {token}"))
+
+    findings = lane_report(vault, today=TODAY, repo_root=_repo(tmp_path), vault_root=vault).by_code(
+        "plan.action-target-missing"
+    )
+    assert len(findings) == 1
+    assert findings[0].severity == "error"
+    assert f"`{token}`" in findings[0].message
+
+
+@pytest.mark.parametrize("root_name", ["repo", "other", "vault"])
+@pytest.mark.parametrize("is_directory", [True, False])
+def test_extensionless_target_requires_a_directory_under_any_injected_root(
+    tmp_path: Path, root_name: str, is_directory: bool
+) -> None:
+    from okf_io import load_bundle, validate
+    from work_tracker_okf.items import IGNORE
+    from work_tracker_okf.rules import lane_rules
+
+    vault = tmp_path / "vault"
+    repo = _repo(tmp_path)
+    other = tmp_path / "other"
+    other.mkdir()
+    write_item(vault, "bug-x", "type: Bug\nwork_status: open\n", body=OK_TABLE.replace("Ship it", "Edit src/missing"))
+    first_component = tmp_path / root_name / "src"
+    if is_directory:
+        first_component.mkdir()
+    else:
+        first_component.write_text("a regular file\n", encoding="utf-8", newline="")
+
+    report = validate(
+        load_bundle(vault, ignore=IGNORE),
+        today=TODAY,
+        extra_rules=lane_rules(repo_roots=(repo, other), vault_root=vault),
+    )
+    findings = report.by_code("plan.action-target-missing")
+    if is_directory:
+        assert len(findings) == 1
+        assert findings[0].severity == "error"
+        assert "`src/missing`" in findings[0].message
+    else:
+        assert findings == ()
+
+
+@pytest.mark.parametrize("root_name", ["repo", "other", "vault"])
+def test_classified_bare_target_existing_under_any_root_is_silent(tmp_path: Path, root_name: str) -> None:
+    from okf_io import load_bundle, validate
+    from work_tracker_okf.items import IGNORE
+    from work_tracker_okf.rules import lane_rules
+
+    vault = tmp_path / "vault"
+    repo = _repo(tmp_path)
+    other = tmp_path / "other"
+    other.mkdir()
+    write_item(vault, "bug-x", "type: Bug\nwork_status: open\n", body=OK_TABLE.replace("Ship it", "Edit src/present"))
+    target = tmp_path / root_name / "src" / "present"
+    target.parent.mkdir()
+    target.write_text("present\n", encoding="utf-8", newline="")
+
+    report = validate(
+        load_bundle(vault, ignore=IGNORE),
+        today=TODAY,
+        extra_rules=lane_rules(repo_roots=(repo, other), vault_root=vault),
+    )
+    assert report.by_code("plan.action-target-missing") == ()
+
+
+def test_prose_does_not_hide_a_real_missing_target_in_the_same_action(tmp_path: Path) -> None:
+    vault = tmp_path / "vault"
+    write_item(
+        vault,
+        "bug-x",
+        "type: Bug\nwork_status: open\n",
+        body=OK_TABLE.replace("Ship it", "Handle UTF-16/32 input/output and/or edit missing/file.py"),
+    )
+
+    findings = lane_report(vault, today=TODAY, repo_root=_repo(tmp_path), vault_root=vault).by_code(
+        "plan.action-target-missing"
+    )
+    assert len(findings) == 1
+    assert findings[0].severity == "error"
+    assert "`missing/file.py`" in findings[0].message
+
+
 # --- the module's shape -----------------------------------------------------
 
 

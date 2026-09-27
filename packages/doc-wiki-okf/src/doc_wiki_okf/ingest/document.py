@@ -50,6 +50,8 @@ class DocumentBrief:
     source_kind: str
     slug: str
     text: str
+    #: Strict decoding failed for UTF-8 or BOM-declared UTF-8/16/32: binary
+    #: data, an unsupported text encoding, or malformed input; not a format test.
     binary: bool
     preview: str
     word_count: int

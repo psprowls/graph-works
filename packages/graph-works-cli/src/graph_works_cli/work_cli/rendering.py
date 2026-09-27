@@ -25,6 +25,7 @@ from graph_works_core.workspace.commits import NOTE_REASONS
 from graph_works_wire.errors import REASONS, error_envelope
 
 from graph_works_cli import exit_codes
+from graph_works_cli.errors import exit_error
 from graph_works_cli.json_output import encode
 
 # ---------------------------------------------------------------------------
@@ -110,10 +111,7 @@ def fail(
     assert mode is not None, "gw work command reached fail() without declaring --json via json_option()"
     if mode:
         emit(_envelope(reason=reason, message=message, code=code, payload=payload))
-    typer.echo(f"Error: {message}", err=True)
-    if cause is None:
-        raise typer.Exit(code=code)
-    raise typer.Exit(code=code) from cause
+    exit_error(message, code=code, cause=cause)
 
 
 def warn(message: str) -> None:
@@ -252,6 +250,22 @@ def render_placement(payload: dict[str, Any]) -> None:
 
 
 # ---------------------------------------------------------------------------
+# record-reader
+# ---------------------------------------------------------------------------
+
+
+def render_reader_receipt(payload: dict[str, Any]) -> None:
+    verb = "recorded" if payload["written"] else "replayed" if payload["replayed"] else "would record"
+    observation = payload["observation"]
+    typer.echo(
+        f"[ok] {payload['path']}: {verb} reader worktree={observation['worktree']} "
+        f"start_sha={observation['start_sha']} "
+        f"(phase={payload['expected_phase']}, root={payload['root']})"
+    )
+    typer.echo(f"  receipt: {payload['receipt_path']}")
+
+
+# ---------------------------------------------------------------------------
 # file
 # ---------------------------------------------------------------------------
 
@@ -270,6 +284,7 @@ def render_status(payload: dict[str, Any]) -> None:
     ):
         rendered = ", ".join(f"{name} {count}" for name, count in payload[key].items())
         typer.echo(f"  by {label}: {rendered or '-'}")
+    typer.echo(f"  not started: {payload['not_started']}")
     for path, rolled in payload["children"].items():
         typer.echo(f"  children {path}: {rolled['terminal']}/{rolled['total']} terminal")
     resume = payload["resume"]
@@ -348,7 +363,10 @@ def render_decision_list(payload: dict[str, Any]) -> None:
 def render_orchestrate(payload: dict[str, Any]) -> None:
     free = payload["slots_free"]
     max_p = payload["max_parallel"]
-    header = f"{payload['path']}: terminal={payload['terminal']} slots_free={free}/{max_p}"
+    header = (
+        f"{payload['path']}: terminal={payload['terminal']} slots_free={free}/{max_p}"
+        f" attend_slots_free={payload['attend_slots_free']}/{payload['max_attend']}"
+    )
     if payload["supervise_merges"]:
         header += " supervise_merges=True"
     typer.echo(header)

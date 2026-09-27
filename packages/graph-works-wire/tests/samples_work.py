@@ -9,10 +9,16 @@ from pathlib import Path
 from types import MappingProxyType
 from types import SimpleNamespace as ns
 
+from graph_works_core.orchestrate.asks import AskAnswerResult, AskResult
+from graph_works_core.orchestrate.dispatch import DispatchFailure, DispatchResult, ObservedPlacement
+from graph_works_core.orchestrate.dispatch_record import Overrides
+from graph_works_core.orchestrate.placement import ReaderRecord
+from graph_works_core.orchestrate.reroute import RerouteResult
 from graph_works_core.work.commands import DispatchExplanation, ItemRead, ItemSource
 from graph_works_core.work.reconcile import CitedDecision, CommitRef, LandedSibling, ReconcileContext
 from graph_works_core.workspace.dispatch import packaged_rule, resolve_dispatch
 from graph_works_wire import work
+from work_tracker_okf.placement import ReaderObservation, ReaderReceiptPlan
 
 BUNDLE = Path("/ws/okf")
 RESOLUTION = resolve_dispatch({"variant": "planned"}, rules=())
@@ -164,6 +170,7 @@ def status(*, resume: bool) -> object:
         by_work_status={"open": 3},
         by_type={"Feature": 3},
         by_phase={"design": 1},
+        not_started=2,
         children={"work/e": ROLLUP},
     )
     primary = ns(path="work/a", title="A")
@@ -259,7 +266,9 @@ def overturn(*, applied: bool) -> object:
 
 
 def orchestrate(*, busy: bool) -> object:
-    worktree = ns(action="create", path="/wt", branch="b", base_branch="main", exists=False, parent_path="/p")
+    worktree = ns(
+        action="create", path="/wt", branch="b", base_branch="main", exists=False, parent_path="/p", start_sha=None
+    )
     dispatch = ns(
         key="work/a#execute",
         slug="work/a",
@@ -282,10 +291,16 @@ def orchestrate(*, busy: bool) -> object:
         terminal=not busy,
         max_parallel=2,
         slots_free=1,
+        max_attend=1,
+        attend_slots_free=1,
         supervise_merges=busy,
         live=("x",) if busy else (),
         dispatches=(dispatch,) if busy else (),
-        plan=ns(finish_targets={}, dispatch_resolutions={dispatch.key: RESOLUTION}),
+        plan=ns(
+            finish_targets={},
+            dispatch_resolutions={dispatch.key: RESOLUTION},
+            human_checkpoints={dispatch.key: ns(status="declared", items=("Task 2: skim",))},
+        ),
         dispatch_repos={dispatch.key: ns(name="ui", path=Path("/ui"), source="item")},
         preparations=(
             ns(
@@ -360,7 +375,56 @@ WORK: dict[str, tuple[Callable[[], object], ...]] = {
         lambda: work.descent_payload(next_result(full=True)),
         lambda: work.descent_payload(bare_next()),
     ),
-    "work.dispatch_payload": (lambda: work.dispatch_payload(RESOLUTION),),
+    "work.dispatch_payload": (
+        lambda: work.dispatch_payload(RESOLUTION),
+        lambda: work.dispatch_payload(
+            DispatchResult(
+                status="dispatched",
+                key="work/a#execute",
+                run_id="run_1",
+                task_id="task_1",
+                placement=ObservedPlacement(
+                    "create",
+                    "/wt",
+                    "b",
+                    "A",
+                    "repo_1",
+                    None,
+                    True,
+                    ("created",),
+                ),
+            )
+        ),
+        lambda: work.dispatch_payload(
+            DispatchResult(
+                status=None,
+                key="work/a#execute",
+                run_id="run_1",
+                failure=DispatchFailure("launch", "unsent", "worker unavailable"),
+            )
+        ),
+    ),
+    "work.reroute_payload": (
+        lambda: work.reroute_payload(
+            RerouteResult(
+                status="rerouted",
+                key="work/a#execute",
+                run_id="run_2",
+                reason="retry",
+                superseded_task_id="task_1",
+                overrides=Overrides(agent="codex"),
+            )
+        ),
+        lambda: work.reroute_payload(
+            RerouteResult(
+                status=None,
+                key="work/a#execute",
+                run_id="run_2",
+                reason="retry",
+                failure=DispatchFailure("reroute", "unsent", "worker unavailable"),
+            )
+        ),
+    ),
     "work.dispatch_explain_payload": (
         lambda: work.dispatch_explain_payload(
             DispatchExplanation(
@@ -386,6 +450,25 @@ WORK: dict[str, tuple[Callable[[], object], ...]] = {
     "work.advance_payload": (
         lambda: work.advance_payload(advance(applied=True), "work/a"),
         lambda: work.advance_payload(advance(applied=False), "work/a"),
+    ),
+    "work.reader_receipt_payload": tuple(
+        lambda refusal=refusal: work.reader_receipt_payload(
+            ReaderRecord(
+                ReaderReceiptPlan(
+                    "work/a",
+                    "work/a",
+                    "design",
+                    None if refusal else "design",
+                    ReaderObservation("task_1", "ctx_1", "key", "repo", "/reader", "a" * 40),
+                    refusal,
+                    "missing" if refusal else "",
+                ),
+                None if refusal else Path("/cache/ctx_1.json"),
+                not refusal,
+                False,
+            )
+        )
+        for refusal in (None, "unknown-path")
     ),
     "work.placement_payload": (
         lambda: work.placement_payload(placement(applied=True)),
@@ -420,6 +503,35 @@ WORK: dict[str, tuple[Callable[[], object], ...]] = {
     "work.archive_payload": (
         lambda: work.archive_payload(archive_run(applied=True, wiki=True), dry_run=False),
         lambda: work.archive_payload(archive_run(applied=False), dry_run=True),
+    ),
+    "work.ask_payload": (
+        lambda: work.ask_payload(
+            AskResult(
+                (),
+                Path("/ws/okf/work/a/references/asks/plan-001-choice.json"),
+                "/work/a/references/asks/plan-001-choice.json",
+                "Pick.\n\ngw-ask: /work/a/references/asks/plan-001-choice.json",
+                "merge,hold",
+                True,
+            )
+        ),
+        lambda: work.ask_payload(AskResult(("option-count",), None, None, None, None, False)),
+    ),
+    "work.ask_answer_payload": (
+        lambda: work.ask_answer_payload(
+            AskAnswerResult(
+                (),
+                Path("/ws/okf/work/a/references/asks/plan-001-choice.json"),
+                "/work/a/references/asks/plan-001-choice.json",
+                (
+                    '{"ask": "/work/a/references/asks/plan-001-choice.json", '
+                    '"choice": "merge", "effort": null, "notes": null}'
+                ),
+                True,
+                True,
+            )
+        ),
+        lambda: work.ask_answer_payload(AskAnswerResult(("payload-invalid",), None, None, None, False, False)),
     ),
     "work.path_mutation_payload": (
         lambda: work.path_mutation_payload(path_mutation(applied=True)),

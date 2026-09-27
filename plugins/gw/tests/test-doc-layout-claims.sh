@@ -232,7 +232,7 @@ assert_contains "skills/auto-drive/SKILL.md" 'Never launch workers from an error
     "auto-drive stops on repository resolution errors"
 assert_contains "skills/auto-drive/SKILL.md" 'For a prelaunch refusal, use a coordinator `AskUserQuestion`' \
     "auto-drive asks for a repository choice before any worker exists"
-assert_contains "skills/auto-drive/SKILL.md" 'A placement preview validates repository selection too.' \
+assert_contains "skills/auto-drive/references/dispatch-checks.md" 'A placement preview validates repository selection too.' \
     "auto-drive explains placement preview parity"
 
 # Only executable examples are forbidden from passing a manual repository
@@ -501,6 +501,104 @@ assert_not_matches "skills/workflow/SKILL.md" "archives the source and repoints"
     "workflow no longer claims the ingestor archives the source"
 assert_contains "skills/workflow/SKILL.md" "drain sweep" \
     "workflow says drained sources are archived by the sweep"
+
+# Findings are a workflow obligation shared by stock and gw-owned stages.
+assert_contains "skills/workflow/SKILL.md" "**Out-of-scope findings.**" \
+    "workflow step 3 carries the universal findings instruction"
+assert_contains "skills/workflow/SKILL.md" 'Never pass `--parent-path` naming this item or any ancestor' \
+    "findings cannot reopen the current ancestor gate"
+assert_contains "skills/workflow/SKILL.md" "list the filed or named finding paths, or say there were none" \
+    "workflow hand-off accounts for findings"
+
+# --- structured worker asks (work/epic-coordinator-dispatch-and-relay-protocol/
+# children/feature-structured-worker-ask) ---------------------------------
+# Orchestrate parses a plan's `## Human checkpoints` section to warn before an
+# execute dispatch that will stop for a human; the rider is the only thing
+# that makes plans carry it. The STOP literal is pinned byte-for-byte because
+# the paragraph lands directly above it.
+assert_contains "skills/workflow/references/brief-riders.md" \
+    '> The plan must contain a `## Human checkpoints` section' \
+    "writing-plans rider requires a Human checkpoints section"
+assert_contains "skills/workflow/references/brief-riders.md" \
+    "> STOP after writing the plan — do not run the Execution Handoff. This is a" \
+    "writing-plans rider STOP literal is unchanged (line 1)"
+assert_contains "skills/workflow/references/brief-riders.md" \
+    "> single pipeline stage; the workflow skill advances the item." \
+    "writing-plans rider STOP literal is unchanged (line 2)"
+
+# Task 10: typed asks, attend pings, execute checkpoint notices, and the
+# shared grace-period protocol must describe the same dispatch behavior.
+assert_contains "skills/auto-drive/SKILL.md" "### 4.3 \`question\`" \
+    "auto-drive §4.3 is the general question handler"
+assert_contains "skills/auto-drive/SKILL.md" 'starts with `gw-ask: `' \
+    "auto-drive §4.3 keys typed asks on the gw-ask: marker"
+assert_contains "skills/auto-drive/SKILL.md" "**verbatim**. Never summarize, condense or truncate it." \
+    "auto-drive §4.3 prints the payload question verbatim"
+assert_contains "skills/auto-drive/SKILL.md" "gw work ask-answer <resource>" \
+    "auto-drive §4.3 records answers through gw work ask-answer"
+assert_contains "skills/auto-drive/SKILL.md" "untyped ask from <key>" \
+    "auto-drive §4.3 marks untyped asks"
+assert_contains "skills/auto-drive/SKILL.md" "--by policy:auto-merge" \
+    "auto-drive step 0 records the auto-merge answerer on a typed ask"
+assert_contains "skills/auto-drive/SKILL.md" 'successful exit, `ok: true`, and a nonempty string `reply_body`' \
+    "auto-drive gates a typed auto-answer on a usable recording result"
+assert_contains "skills/auto-drive/SKILL.md" 'On refusal or an unusable `reply_body`, show the result to the human' \
+    "auto-drive sends a typed auto-answer refusal to human handling"
+assert_contains "skills/auto-drive/SKILL.md" 'Only after that check, print the `auto-merged` notice' \
+    "auto-drive announces a typed auto-merge only after recording succeeds"
+assert_contains "skills/auto-drive/SKILL.md" 'starts with `Needs you at `' \
+    "auto-drive §4.4 recognises the attend ping"
+assert_contains "skills/auto-drive/SKILL.md" "needs-you <work-path> <phase> at <terminal handle>" \
+    "auto-drive §4.4 prints the needs-you line"
+assert_contains "skills/auto-drive/SKILL.md" "will stop for a human <N> time(s)" \
+    "auto-drive §3 warns before an execute with declared checkpoints"
+assert_contains "skills/auto-drive/SKILL.md" "human checkpoints unknown (<status>)" \
+    "auto-drive §3 reports unknown checkpoints as unknown, never zero"
+assert_not_matches "skills/auto-drive/references/grace-period-protocol.md" "folded into both" \
+    "grace-period protocol no longer claims ATTEND_TAIL folds it in"
+assert_contains "skills/auto-drive/references/grace-period-protocol.md" "Attend workers do not use this protocol" \
+    "grace-period protocol says attend workers ask in their own terminal"
+assert_contains "skills/auto-drive/references/grace-period-protocol.md" "its \`gw-ask:\` payload resource" \
+    "grace-period checkpoint records the typed ask's payload resource"
+
+# Finishing-relay's three asks are typed; hand-written --options produced
+# comma-split and invented-grammar asks. Typed replies have a strict JSON body.
+assert_contains "skills/finishing-relay/SKILL.md" "gw work ask <work-path> --kind choice" \
+    "finishing-relay R3 prepares a typed choice ask"
+assert_contains "skills/finishing-relay/SKILL.md" '--summary "Confirm discard of' \
+    "finishing-relay discard confirmation is a typed free ask"
+assert_contains "skills/finishing-relay/SKILL.md" '--summary "Release date for' \
+    "finishing-relay release-date ask is a typed free ask"
+assert_contains "skills/finishing-relay/SKILL.md" 'read `choice` from the JSON reply' \
+    "finishing-relay reads the choice from the JSON reply body"
+assert_not_matches "skills/finishing-relay/SKILL.md" '--options "<merge,pr,hold,discard' \
+    "finishing-relay no longer hand-writes --options"
+assert_contains "skills/finishing-relay/SKILL.md" 'A reply that is not JSON, including a bare option token, is treated as `hold`.' \
+    "finishing-relay holds on every non-JSON typed reply"
+
+# Reader preparation and evidence use distinct durable artifacts, not an epic
+# stamp. The legacy recipe carries the helper contract; the skill carries the
+# verb's.
+for contract in \
+    'launch-worker.py prepare-reader --dispatch <dispatch-json>' \
+    '--attempt-id <preparation-attempt-id> --out-placement <fresh-placement-json>' \
+    'Require exit 0 before encode, task-create or launch' \
+    'File existence alone never authorizes launch' \
+    'gw work record-reader <slug> --root <work-path> --phase <dispatch phase>' \
+    'dispatched <key> -> <observed path> detached at <start_sha>' \
+    'layout.cache_dir / "reader-receipts"'; do
+    assert_contains "skills/auto-drive/references/dispatch-checks.md" "$contract" "dispatch checks document reader contract: $contract"
+done
+for contract in \
+    'dispatched <key> -> <observed path> detached at <start_sha>' \
+    'layout.cache_dir / "reader-receipts"' \
+    'references/orca-placement/<key>.dispatch.json' \
+    '### 4.2.1 Reader preparation failure before Task creation'; do
+    assert_contains "skills/auto-drive/SKILL.md" "$contract" "auto-drive documents reader contract: $contract"
+done
+assert_not_matches "skills/auto-drive/SKILL.md" \
+    'reads from the shared epic worktree|read-only descendant that records nothing' \
+    "auto-drive retires shared-reader placement and receipt skipping"
 
 if [[ "$FAILURES" -gt 0 ]]; then
     echo "STATUS: FAILED ($FAILURES failure(s))"

@@ -104,6 +104,28 @@ class GuardTest(unittest.TestCase):
         self.assertNotIn(HEADER, context)
         self.assertNotIn("GW_LAUNCH_V1", context)
 
+    def test_new_encoder_output_is_silent_when_complete_and_recovers_when_cut(self):
+        import argparse
+        import runpy
+        import io
+        from contextlib import redirect_stdout
+        helper = runpy.run_path(str(PLUGIN / "skills/auto-drive/references/launch-worker.py"))
+        dispatch = self.root / "dispatch.json"
+        placement = self.root / "placement.json"
+        dispatch.write_text(json.dumps({"key": "example", "agent": "claude", "model": None,
+            "reasoning_effort": None, "mode": "attend", "worktree": {"path": "/a path"},
+            "prompt": "Return café and the exact result.\n"}), encoding="utf-8", newline="\n")
+        placement.write_text(json.dumps(["--worktree", "path:/a path"]), encoding="utf-8", newline="\n")
+        encoded = io.StringIO()
+        with redirect_stdout(encoded):
+            helper["encode"](argparse.Namespace(dispatch=str(dispatch), placement=str(placement)))
+        full = PREAMBLE + encoded.getvalue()
+        self.data["result"]["preamble"] = full
+        self.assertIsNone(self.run_guard(full))
+        for fragment in (full[:1016], full[:-10]):
+            self.assert_recovery(self.run_guard(fragment), full)
+        self.assert_calls(3)
+
     def test_early_and_mid_preamble_cuts_restore_once(self):
         for fragment in (FULL[:1016], FULL[:len(PREAMBLE)-15], PREAMBLE + "GW_L"):
             with self.subTest(fragment_length=len(fragment)):
@@ -253,6 +275,21 @@ class GuardTest(unittest.TestCase):
             self.data["result"]["preamble"] = PREAMBLE + suffix
             self.assert_declined(self.run_guard(FULL[:1016]))
             self.assert_calls(1)
+
+    def test_v2_requires_exact_fields_and_typed_metadata(self):
+        envelope = {**json.loads(ENVELOPE.removeprefix("GW_LAUNCH_V1 ")),
+                    "version": 2, "mode": "autonomous", "worktree_path": None}
+        invalid = [{k: v for k, v in envelope.items() if k != missing} for missing in envelope]
+        invalid += [{**envelope, "extra": True}]
+        invalid += [{**envelope, key: value} for key, value in (
+            ("version", True), ("version", 3), ("mode", None), ("mode", " "),
+            ("mode", []), ("worktree_path", 3), ("worktree_path", []))]
+        for value in invalid:
+            with self.subTest(envelope=value):
+                full = PREAMBLE + "GW_LAUNCH_V1 " + json.dumps(value) + "\nBody"
+                self.data["result"]["preamble"] = full
+                self.assert_declined(self.run_guard(full[:1016]))
+                self.assert_calls(1)
 
     def test_conflicting_task_or_internal_whitespace_is_not_overwritten(self):
         for delivered in (FULL.replace("exact result", "different result"),

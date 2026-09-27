@@ -379,19 +379,19 @@ refuses on sight. Raw HTML anchors are the related case: `okf_io._md` yields no
 token for them and they are not edges, so a document containing one still
 repairs — the reconciliation cannot count what the graph cannot see.
 
-A footnote definition (`[^id]: dest`) is one instance of this, not a
-separate case — markdown-it's core reference-definition grammar doesn't
-distinguish a `^`-prefixed label from any other, so a *bare-destination*
-footnote definition parses as the same `[label]: dest` shape and inherits the
-same refusal, `RefDef.href`/`.line` computed but never rewritten. It only
-bites the bare form, though: `[^id]: [Title](dest)` — the shape
-`okf_io.migrate` itself emits (`migrate.py:405`, §5.6) — isn't a valid
-reference-definition destination at all (CommonMark requires a bare URL
-there), so markdown-it leaves it as ordinary prose containing an inline link,
-which the locator already finds and the rebase path already rewrites
-correctly. A `sources[].id` cited via `provenance.footnote_join`
-(`okf_io/_rules/provenance.py`) should use that bracketed-link style for
-exactly this reason. Tracked as `work/bug-moves-refuses-footnote-definitions`.
+**Footnote definitions are prose, not reference-style links.** OKF §5.1
+joins `[^id]` labels to `sources[].id`; it does not resolve attribution from
+footnote text. Moves leave bare text such as `[^id]: /old/path.md` unchanged,
+while rebasing `sources[].resource` and actual inline links such as
+`[^id]: [Title](/old/path.md)`. The graph counts only those actual links,
+regardless of title spacing. Ordinary `[ref]: dest` reference-style links
+remain unsupported as described above.
+
+`okf_io.migrate` emits bracketed links in new footnote definitions, using the
+resource as the visible label when a legacy source has no title. Existing bare
+footnote prose is not normalized. A definition alone still satisfies
+`provenance.footnote_join`; this is a tooling join, not a promise that GFM
+renderers display an unreferenced definition.
 
 **Reserved files have no count to reconcile against.** `links.build()` iterates
 `bundle.concepts` only, so `index.md` and `log.md` are not link sources. Their

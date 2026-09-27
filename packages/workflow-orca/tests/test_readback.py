@@ -44,7 +44,13 @@ def planned(**overrides):
         model=None,
         reasoning_effort=None,
         worktree=WorktreeAction(
-            action="reuse", path="/tmp/wt", branch="psprowls/my-slug", base_branch=None, exists=True, parent_path=None
+            action="reuse",
+            path="/tmp/wt",
+            branch="psprowls/my-slug",
+            base_branch=None,
+            exists=True,
+            parent_path=None,
+            start_sha=None,
         ),
         merge_target="main",
         auto_merge=False,
@@ -78,7 +84,13 @@ CHILD_ID = "a5d7cb85-fc68-4596-bffd-ecf75466124a::/Users/pat/orca/workspaces/gra
 
 
 FORK_CHILD = WorktreeAction(
-    action="fork-child", path=None, branch="bug/child", base_branch="epic/x", exists=None, parent_path=None
+    action="fork-child",
+    path=None,
+    branch="bug/child",
+    base_branch="epic/x",
+    exists=None,
+    parent_path=None,
+    start_sha=None,
 )
 
 
@@ -154,7 +166,13 @@ def test_the_worktree_is_resolved_by_id_from_the_worker_payload():
 
 
 TOP_LEVEL = WorktreeAction(
-    action="create-top-level", path=None, branch="bug/top", base_branch="main", exists=None, parent_path=None
+    action="create-top-level",
+    path=None,
+    branch="bug/top",
+    base_branch="main",
+    exists=None,
+    parent_path=None,
+    start_sha=None,
 )
 
 
@@ -181,7 +199,9 @@ def test_reuse_reports_its_given_path_and_makes_no_extra_call():
 
 def test_main_reports_its_given_path_and_makes_no_extra_call():
     sess, runner = session()
-    action = WorktreeAction(action="main", path="/repo", branch="main", base_branch=None, exists=True, parent_path=None)
+    action = WorktreeAction(
+        action="main", path="/repo", branch="main", base_branch=None, exists=True, parent_path=None, start_sha=None
+    )
     record = sess.launch(planned(worktree=action))
     assert record.worktree_path == "/repo"
     assert record.worktree_branch is None

@@ -31,6 +31,7 @@ from dataclasses import dataclass
 from functools import lru_cache
 
 from markdown_it import MarkdownIt
+from markdown_it.rules_block import StateBlock, reference
 from markdown_it.token import Token
 
 #: One shared parser. `commonmark` deliberately: no linkify, so a bare URL in
@@ -51,6 +52,20 @@ _INLINE_CODE_RE = re.compile(r"`[^`]*`")
 #: `crypto_bitcoin` dialect, with CommonMark's 0-3 space indent allowance.
 #: Deliberately not matching `[^1]`: a footnote definition is not a citation.
 _NUMBERED_RE = re.compile(r"^ {0,3}\[(\d+)\][ \t]*")
+
+
+# OKF footnote labels join to sources; their text is prose, not a
+# CommonMark reference destination. Guard at the parser's content offset
+# so blockquotes/lists retain their own indentation and code-block rules.
+def _reference(state: StateBlock, start_line: int, end_line: int, silent: bool) -> bool:
+    position = state.bMarks[start_line] + state.tShift[start_line]
+    if _FOOTNOTE_DEF_RE.match(state.src[position : state.eMarks[start_line]]):
+        return False
+    return reference(state, start_line, end_line, silent)
+
+
+# The commonmark reference rule has no alternate chains; retain that setup.
+_MD.block.ruler.at("reference", _reference)
 
 
 @dataclass(frozen=True, slots=True)

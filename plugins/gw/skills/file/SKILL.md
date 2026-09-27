@@ -25,8 +25,13 @@ Gathers required fields conversationally, then invokes `gw work file`.
 5. **Estimate effort** — based on the title, kind, and summary, propose an effort value (`xtra-small|small|medium|large|xtra-large`) with a one-line rationale. Present it to the user: "I'd estimate this as **medium** — multiple files across packages, likely one PR. Does that sound right?" The user can accept or name a different size.
 6. **Propose a stable name** — pick concise intelligible words from the title and present them alongside the effort estimate. The CLI normalizes them and prefixes the item kind.
 7. Optionally prompt for: parent path, complete dependency edges, `blast-radius` (file|package|domain|system), version, target date, owner, and tags.
-8. Auto-sets `work_status: open` and `opened: <today>`.
-9. Invoke:
+8. **Resolve the repository.** Run the assembled command once with `--dry-run --json`.
+   If `warnings` contains an entry starting `repo unresolved:`, ask the user which
+   repository the item's code lives in, offering the `name → path` pairs from that
+   warning, and add `--repo <name>`. No such warning: do not ask. An `unknown-repo`
+   refusal: show it verbatim and ask again.
+9. Auto-sets `work_status: open` and `opened: <today>`.
+10. Invoke:
 
 ```bash
 gw work file \
@@ -37,13 +42,14 @@ gw work file \
   --effort "..." \
   --name "..." \
   [--parent-path <work-path>] \
+  [--repo <name>] \
   [--dep "path=<work-path>,blocks=execute,needs=resolved"] \
   [--blast-radius ...] [--version ...] [--target-date YYYY-MM-DD] \
   [--owner ...] [--tags ...] \
   --json
 ```
 
-10. Read `path` from the JSON result and report that canonical path.
+11. Read `path` from the JSON result and report that canonical path.
 
 ## Effort scale
 
@@ -95,6 +101,9 @@ On confirm:
 gw work file --json --title "<title>" --kind <Kind> --summary "<summary>" \
   --name "<stable words>" --affects "<paths or packages>" --effort <effort>
 ```
+
+Run it with `--dry-run` first; on a `repo unresolved:` warning, ask for the
+repository in the same confirm and add `--repo <name>`.
 
 Read `path` from the JSON result and announce: *"Auto-filed as `<work-path>`."*
 Then continue the ordinary brainstorming flow — clarifying questions, approaches,

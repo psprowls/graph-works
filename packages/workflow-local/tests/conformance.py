@@ -97,7 +97,13 @@ def make_dispatch(
         model=None,
         reasoning_effort=None,
         worktree=WorktreeAction(
-            action="reuse", path=worktree_path, branch="b", base_branch=None, exists=True, parent_path=None
+            action="reuse",
+            path=worktree_path,
+            branch="b",
+            base_branch=None,
+            exists=True,
+            parent_path=None,
+            start_sha=None,
         ),
         merge_target="main",
         auto_merge=False,

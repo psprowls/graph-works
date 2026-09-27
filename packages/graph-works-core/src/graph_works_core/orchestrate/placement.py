@@ -14,21 +14,38 @@ is how the race is made visible.
 
 Nothing here runs git or reads Orca. The pair is the caller's verified
 observation; this module proves only that the item is entitled to it now.
+`run_record_reader` is the reader counterpart: it writes a receipt in
+workspace coordination storage, never the page.
 """
 
 from __future__ import annotations
 
 import hashlib
+import json
+import os
+import re
+import sys
+import tempfile
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date
+from pathlib import Path
 from types import MappingProxyType
 
 from okf_io import Bundle, load_bundle, parse
 from work_tracker_okf.items import IGNORE, WorkItem, load_items
 from work_tracker_okf.mutation import PlannedWrite, WorkMutationPlan
 from work_tracker_okf.paths import item_page
-from work_tracker_okf.placement import PlacementPlan, apply_placement, plan_placement
+from work_tracker_okf.placement import (
+    PlacementPlan,
+    ReaderReceiptPlan,
+    apply_placement,
+    plan_placement,
+    plan_reader_receipt,
+)
+from work_tracker_okf.placement import (
+    ReaderObservation as ReaderObservation,
+)
 
 from graph_works_core.workspace.commits import (
     COMMIT_FAILED_PREFIX,
@@ -42,6 +59,149 @@ from graph_works_core.workspace.errors import WorkspaceError
 from graph_works_core.workspace.layout import WorkspaceLayout
 from graph_works_core.workspace.repos import ItemRepo, declared_repositories, resolve_item_repo, resolve_repos
 from graph_works_core.workspace.transactions import MutationApplication, apply_mutation, commit_pending
+
+READER_RECEIPT_SCHEMA = "gw-reader-receipt"
+
+
+@dataclass(frozen=True, slots=True)
+class ReaderRecord:
+    """An attempt's receipt outcome; only an unknown item has no receipt path."""
+
+    plan: ReaderReceiptPlan
+    receipt_path: Path | None
+    written: bool
+    replayed: bool
+    conflict: str | None = None
+
+
+def _reject_capabilities(value: str) -> None:
+    if "dcap_" in value or "--dispatch-capability" in value:
+        raise WorkspaceError("dispatch capabilities are never recorded")
+
+
+def reader_receipt_path(layout: WorkspaceLayout, path: str, dispatch_id: str) -> Path:
+    """Locate an attempt, rejecting unsafe identifiers before constructing paths."""
+    _reject_capabilities(dispatch_id)
+    if re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]*", dispatch_id) is None or ".." in dispatch_id:
+        raise WorkspaceError("dispatch_id is not a plain attempt identifier")
+    digest = hashlib.sha256(path.encode("utf-8")).hexdigest()[:16]
+    return layout.cache_dir / "reader-receipts" / digest / f"{dispatch_id}.json"
+
+
+def read_reader_receipt(layout: WorkspaceLayout, path: str, dispatch_id: str) -> dict[str, object] | None:
+    """Read attempt evidence; broken coordination storage requires repair."""
+    target = reader_receipt_path(layout, path, dispatch_id)
+    try:
+        value: object = json.loads(target.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return None
+    except (OSError, ValueError) as exc:
+        raise WorkspaceError(f"cannot read reader receipt {target}: {exc}") from exc
+    if not isinstance(value, dict):
+        raise WorkspaceError(f"invalid reader receipt {target}: expected a JSON object")
+    _reject_capabilities(json.dumps(value))
+    return value
+
+
+def _receipt_body(plan: ReaderReceiptPlan) -> dict[str, object]:
+    observation = plan.observation
+    return {
+        "schema": READER_RECEIPT_SCHEMA,
+        "version": 1,
+        "path": plan.path,
+        "root": plan.root,
+        "phase": plan.expected_phase,
+        "task_id": observation.task_id,
+        "dispatch_id": observation.dispatch_id,
+        "dispatch_key": observation.dispatch_key,
+        "repo": observation.repo,
+        "worktree": observation.worktree,
+        "start_sha": observation.start_sha,
+    }
+
+
+def _write_receipt(target: Path, body: dict[str, object]) -> None:
+    """Publish a complete sibling temp file atomically while holding the owner lock."""
+    temp: Path | None = None
+    try:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        fd, name = tempfile.mkstemp(dir=target.parent, prefix=f".{target.name}.", suffix=".tmp")
+        temp = Path(name)
+        with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as stream:
+            stream.write(json.dumps(body, indent=2, sort_keys=True) + "\n")
+        temp.replace(target)
+    except OSError as exc:
+        raise WorkspaceError(f"cannot write reader receipt {target}: {exc}") from exc
+    finally:
+        if temp is not None:
+            primary = sys.exception()
+            try:
+                temp.unlink(missing_ok=True)
+            except OSError as cleanup_exc:
+                if primary is not None:
+                    primary.add_note(f"cannot clean up temporary reader receipt {temp}: {cleanup_exc}")
+                else:
+                    raise WorkspaceError(
+                        f"cannot clean up temporary reader receipt {temp}: {cleanup_exc}"
+                    ) from cleanup_exc
+
+
+def run_record_reader(
+    layout: WorkspaceLayout,
+    path: str,
+    *,
+    root: str,
+    phase: str,
+    observation: ReaderObservation,
+    dry_run: bool = True,
+) -> ReaderRecord:
+    """Record a reader observation without mutating item bytes or placement stamps.
+
+    Refusal takes precedence over replay: old evidence cannot authorize a stale
+    phase. Live decisions, including replay/conflict checks and publication, run
+    under the same decision-owner lock as stage advance. Dry runs never lock.
+    """
+    for value in (
+        path,
+        root,
+        phase,
+        observation.task_id,
+        observation.dispatch_id,
+        observation.dispatch_key,
+        observation.repo,
+        observation.worktree,
+        observation.start_sha,
+    ):
+        _reject_capabilities(value)
+    target = reader_receipt_path(layout, path, observation.dispatch_id)
+
+    def decide(items: Sequence[WorkItem]) -> ReaderRecord:
+        if observation.repo not in declared_repositories(layout):
+            raise WorkspaceError(f"{path}: repo {observation.repo!r} names no declared repository")
+        plan = plan_reader_receipt(items, path, root=root, phase=phase, observation=observation)
+        receipt_path = None if plan.refusal == "unknown-path" else target
+        if plan.refusal is not None:
+            return ReaderRecord(plan, receipt_path, written=False, replayed=False)
+        existing = read_reader_receipt(layout, path, observation.dispatch_id)
+        body = _receipt_body(plan)
+        return ReaderRecord(
+            plan,
+            target,
+            written=False,
+            replayed=existing == body,
+            conflict="attempt-mismatch" if existing is not None and existing != body else None,
+        )
+
+    items = load_items(load_bundle(layout.bundle_dir, ignore=IGNORE))
+    if dry_run or not any(item.path == path for item in items):
+        return decide(items)
+    with locked_decision_owner(layout, path) as context:
+        record = decide(context.items)
+        if record.plan.refusal is not None or record.replayed or record.conflict is not None:
+            return record
+        assert record.receipt_path is not None
+        _write_receipt(record.receipt_path, _receipt_body(record.plan))
+        return replace(record, written=True)
 
 
 @dataclass(frozen=True, slots=True)
@@ -262,4 +422,13 @@ def _mutation(bundle: Bundle, plan: PlacementPlan) -> WorkMutationPlan:
     )
 
 
-__all__ = ["PlacementRecord", "preparation_guard", "run_record_placement"]
+__all__ = [
+    "READER_RECEIPT_SCHEMA",
+    "PlacementRecord",
+    "ReaderRecord",
+    "preparation_guard",
+    "read_reader_receipt",
+    "reader_receipt_path",
+    "run_record_placement",
+    "run_record_reader",
+]

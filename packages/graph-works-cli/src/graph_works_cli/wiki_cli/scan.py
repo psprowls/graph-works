@@ -6,7 +6,6 @@ import asyncio
 import shutil
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Never
 
 import typer
 from graph_works_core.scan.commands import (
@@ -29,12 +28,6 @@ from graph_works_cli import exit_codes
 from graph_works_cli.json_output import encode
 from graph_works_cli.wiki_cli.errors import exit_error
 from graph_works_cli.workspace_resolution import resolve_workspace
-
-
-def _exit_usage_error(message: str) -> Never:
-    """Report a conditional option requirement with Click's usage exit code."""
-    typer.echo(f"Error: {message}", err=True)
-    raise typer.Exit(code=2)
 
 
 def _reset_results_dir(path: Path) -> None:
@@ -64,18 +57,19 @@ def scan(
     workspace: str = typer.Option("", "--workspace"),
 ) -> None:
     """Run scan locally, emit its worklist, or apply an external result directory."""
+    # Click's usage code below is deliberately not exit_codes.STALE.
     if emit_worklist and apply:
-        _exit_usage_error("--emit-worklist and --apply are mutually exclusive")
+        exit_error("--emit-worklist and --apply are mutually exclusive", code=2)
     if no_narrate and (emit_worklist or apply):
-        _exit_usage_error("--no-narrate is a normal-mode flag and is mutually exclusive with emit/apply")
+        exit_error("--no-narrate is a normal-mode flag and is mutually exclusive with emit/apply", code=2)
     if apply and (not results_dir or not short_head):
-        _exit_usage_error("--apply requires both --results-dir and --short-head")
+        exit_error("--apply requires both --results-dir and --short-head", code=2)
     if not apply and results_dir:
-        _exit_usage_error("--results-dir is only valid with --apply")
+        exit_error("--results-dir is only valid with --apply", code=2)
     if not apply and short_head:
-        _exit_usage_error("--short-head is only valid with --apply")
+        exit_error("--short-head is only valid with --apply", code=2)
     if (emit_worklist or apply) and json_output:
-        _exit_usage_error("--json is only valid in normal mode")
+        exit_error("--json is only valid in normal mode", code=2)
 
     layout = resolve_workspace(workspace)
     now = datetime.now(UTC)
@@ -146,5 +140,8 @@ def scan(
 
     if json_output:
         _emit_json(scan_normal_payload(result))
+    else:
+        for warning in result.structural.warnings:
+            typer.echo(f"Warning: {warning}", err=True)
     if not result.ok:
         exit_error("scan completed with entity errors")

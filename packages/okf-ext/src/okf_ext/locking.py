@@ -48,7 +48,7 @@ class UnsupportedLockPlatform(RuntimeError):
     """
 
 
-def _flock_exclusive(descriptor: int) -> None:
+def _flock_exclusive(descriptor: int, *, blocking: bool = True) -> None:
     """`fcntl.flock(LOCK_EX)`, guarded on `sys.platform` rather than on the
     caller's `platform_name`.
 
@@ -64,7 +64,7 @@ def _flock_exclusive(descriptor: int) -> None:
         raise UnsupportedLockPlatform("fcntl.flock is POSIX-only and does not exist on win32")
     import fcntl
 
-    fcntl.flock(descriptor, fcntl.LOCK_EX)
+    fcntl.flock(descriptor, fcntl.LOCK_EX | (0 if blocking else fcntl.LOCK_NB))
 
 
 def _flock_release(descriptor: int) -> None:
@@ -88,8 +88,12 @@ def primitive_for(platform_name: str) -> str:
 
 
 @contextmanager
-def locked(path: Path, *, platform_name: str = sys.platform) -> Iterator[None]:
+def locked(path: Path, *, platform_name: str = sys.platform, blocking: bool = True) -> Iterator[None]:
     """Take an exclusive lock on *path* for the duration of the `with` block.
+
+    With `blocking=False`, contention raises `OSError` immediately on either
+    platform. The descriptor is closed on acquisition failure, body exception,
+    or process exit; the persistent file is not evidence of ownership.
 
     Creates `path.parent` (`parents=True, exist_ok=True`) and `path` itself
     on demand, and never unlinks it afterward -- unlinking races the next
@@ -123,7 +127,7 @@ def locked(path: Path, *, platform_name: str = sys.platform) -> Iterator[None]:
 
             os.lseek(descriptor, 0, os.SEEK_SET)
             try:
-                msvcrt.locking(descriptor, msvcrt.LK_LOCK, 1)  # type: ignore[attr-defined,unused-ignore]
+                msvcrt.locking(descriptor, msvcrt.LK_LOCK if blocking else msvcrt.LK_NBLCK, 1)  # type: ignore[attr-defined,unused-ignore]
             except OSError as exc:
                 raise OSError(
                     f"could not acquire the lock at {path}: another process holds it; the operation can be retried"
@@ -134,7 +138,7 @@ def locked(path: Path, *, platform_name: str = sys.platform) -> Iterator[None]:
                 os.lseek(descriptor, 0, os.SEEK_SET)
                 msvcrt.locking(descriptor, msvcrt.LK_UNLCK, 1)  # type: ignore[attr-defined,unused-ignore]
         else:
-            _flock_exclusive(descriptor)
+            _flock_exclusive(descriptor, blocking=blocking)
             try:
                 yield
             finally:

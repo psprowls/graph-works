@@ -16,8 +16,11 @@ from typing import Any, Protocol, cast
 
 from graph_works_core.archive.commands import ArchiveRun
 from graph_works_core.guidance.assembly import Guidance
+from graph_works_core.orchestrate.asks import AskAnswerResult, AskResult
 from graph_works_core.orchestrate.commands import OrchestrateResult
-from graph_works_core.orchestrate.placement import PlacementRecord
+from graph_works_core.orchestrate.dispatch import DispatchFailure, DispatchResult, ObservedPlacement
+from graph_works_core.orchestrate.placement import PlacementRecord, ReaderRecord
+from graph_works_core.orchestrate.reroute import RerouteResult
 from graph_works_core.orchestrate.stage_advance import StageAdvance
 from graph_works_core.work.commands import (
     ActiveWorkTouch,
@@ -164,11 +167,12 @@ class _ApplicationView(Protocol):
 
 class _WorktreeView(Protocol):
     action: str
-    path: str
-    branch: str
+    path: str | None
+    branch: str | None
     base_branch: str | None
     exists: bool | None
     parent_path: str | None
+    start_sha: str | None
 
 
 def _refusal(value: object) -> dict[str, str]:
@@ -244,7 +248,29 @@ def descent_payload(result: NextResult) -> dict[str, Any] | None:
     }
 
 
-def dispatch_payload(resolution: DispatchResolution) -> dict[str, Any]:
+def dispatch_payload(resolution: DispatchResolution | DispatchResult) -> dict[str, Any]:
+    """Project either the existing dispatch profile or a worker dispatch result.
+
+    The profile form predates the worker verb and remains a public contract.
+    """
+    if isinstance(resolution, DispatchResult):
+        placement = resolution.placement
+        return {
+            "ok": resolution.ok,
+            "status": resolution.status,
+            "key": resolution.key,
+            "task_id": resolution.task_id,
+            "task_title": resolution.task_title,
+            "display_name": resolution.display_name,
+            "dispatch_id": resolution.dispatch_id,
+            "run_id": resolution.run_id,
+            "terminal": resolution.terminal,
+            "placement": None if placement is None else _observed_placement(placement),
+            "recorded": resolution.recorded,
+            "probe": resolution.probe,
+            "record_path": resolution.record_path,
+            "failure": _dispatch_failure(resolution.failure),
+        }
     profile = resolution.profile
     return {
         "profile": {
@@ -262,6 +288,56 @@ def dispatch_payload(resolution: DispatchResolution) -> dict[str, Any]:
             }
             for field, origin in resolution.provenance.items()
         },
+    }
+
+
+def _observed_placement(placement: ObservedPlacement) -> dict[str, Any]:
+    return {
+        "action": placement.action,
+        "path": placement.path,
+        "branch": placement.branch,
+        "display_name": placement.display_name,
+        "repo_id": placement.repo_id,
+        "parent_worktree_id": placement.parent_worktree_id,
+        "lineage_set": placement.lineage_set,
+        "notes": list(placement.notes),
+        "start_sha": placement.start_sha,
+    }
+
+
+def _dispatch_failure(failure: DispatchFailure | None) -> dict[str, Any] | None:
+    if failure is None:
+        return None
+    return {
+        "step": failure.step,
+        "reason": failure.reason,
+        "detail": failure.detail,
+        "task_id": failure.task_id,
+        "dispatch_id": failure.dispatch_id,
+        "refusal": failure.refusal,
+    }
+
+
+def reroute_payload(result: RerouteResult) -> dict[str, Any]:
+    """Project a worker reroute result without exposing internal record data."""
+    overrides = result.overrides
+    return {
+        "ok": result.ok,
+        "status": result.status,
+        "key": result.key,
+        "run_id": result.run_id,
+        "reason": result.reason,
+        "superseded_task_id": result.superseded_task_id,
+        "superseded_dispatch_id": result.superseded_dispatch_id,
+        "overrides": None
+        if overrides is None
+        else {
+            "agent": overrides.agent,
+            "model": overrides.model,
+            "effort": overrides.effort,
+        },
+        "record_path": result.record_path,
+        "failure": _dispatch_failure(result.failure),
     }
 
 
@@ -320,6 +396,7 @@ def _finish_target(target: FinishTarget) -> dict[str, Any]:
         "worktree": target.worktree,
         "source_branch": target.source_branch,
         "target_branch": target.target_branch,
+        "target_worktree": target.target_worktree,
     }
 
 
@@ -489,6 +566,31 @@ def placement_payload(result: PlacementRecord) -> dict[str, Any]:
     }
 
 
+def reader_receipt_payload(result: ReaderRecord) -> dict[str, Any]:
+    """The observed detached reader attempt and its receipt outcome."""
+    plan = result.plan
+    observation = plan.observation
+    return {
+        "path": plan.path,
+        "root": plan.root,
+        "expected_phase": plan.expected_phase,
+        "current_phase": plan.current_phase,
+        "observation": {
+            "task_id": observation.task_id,
+            "dispatch_id": observation.dispatch_id,
+            "dispatch_key": observation.dispatch_key,
+            "repo": observation.repo,
+            "worktree": observation.worktree,
+            "start_sha": observation.start_sha,
+        },
+        "receipt_path": None if result.receipt_path is None else str(result.receipt_path),
+        "written": result.written,
+        "replayed": result.replayed,
+        "conflict": result.conflict,
+        "refusal": None if plan.refusal is None else {"reason": plan.refusal, "detail": plan.detail},
+    }
+
+
 # ---------------------------------------------------------------------------
 # touch-active-work
 # ---------------------------------------------------------------------------
@@ -538,6 +640,7 @@ def status_payload(report: StatusReport) -> dict[str, Any]:
         "by_work_status": dict(report.rollup.by_work_status),
         "by_type": dict(report.rollup.by_type),
         "by_phase": dict(report.rollup.by_phase),
+        "not_started": report.rollup.not_started,
         "children": {path: _rollup(rolled) for path, rolled in report.rollup.children.items()},
         "resume": None
         if resume is None
@@ -706,6 +809,35 @@ def overturn_payload(result: OverturnResult) -> dict[str, Any]:
     }
 
 
+def _ask_file(path: Path | None, resource: str | None) -> dict[str, Any] | None:
+    return None if path is None else {"path": str(path), "resource": resource}
+
+
+def ask_payload(result: AskResult) -> dict[str, Any]:
+    """`gw work ask --json`: where the payload is, and what Orca carries."""
+    return {
+        "ok": result.ok,
+        "applied": result.applied,
+        "payload": _ask_file(result.payload_path, result.resource),
+        "orca": None
+        if result.orca_question is None
+        else {"question": result.orca_question, "options": result.orca_options},
+        "refusals": list(result.refusals),
+    }
+
+
+def ask_answer_payload(result: AskAnswerResult) -> dict[str, Any]:
+    """`gw work ask-answer --json`: the recorded answer's reply body."""
+    return {
+        "ok": result.ok,
+        "applied": result.applied,
+        "changed": result.changed,
+        "payload": _ask_file(result.payload_path, result.resource),
+        "reply_body": result.reply_body,
+        "refusals": list(result.refusals),
+    }
+
+
 # ---------------------------------------------------------------------------
 # orchestrate
 # ---------------------------------------------------------------------------
@@ -720,7 +852,16 @@ def _worktree(value: object) -> dict[str, Any]:
         "base_branch": action.base_branch,
         "exists": action.exists,
         "parent_path": action.parent_path,
+        "start_sha": action.start_sha,
     }
+
+
+def _checkpoints(value: object | None) -> dict[str, Any] | None:
+    """Project a checkpoint reading, or null when a dispatch has none."""
+    if value is None:
+        return None
+    view = cast(Any, value)
+    return {"status": view.status, "items": list(view.items)}
 
 
 def orchestrate_payload(result: OrchestrateResult) -> dict[str, Any]:
@@ -729,6 +870,8 @@ def orchestrate_payload(result: OrchestrateResult) -> dict[str, Any]:
         "terminal": result.terminal,
         "max_parallel": result.max_parallel,
         "slots_free": result.slots_free,
+        "max_attend": result.max_attend,
+        "attend_slots_free": result.attend_slots_free,
         "supervise_merges": result.supervise_merges,
         "live": list(result.live),
         "repo": None
@@ -758,6 +901,7 @@ def orchestrate_payload(result: OrchestrateResult) -> dict[str, Any]:
                 "worktree": _worktree(dispatch.worktree),
                 "merge_target": dispatch.merge_target,
                 "auto_merge": dispatch.auto_merge,
+                "human_checkpoints": _checkpoints(result.plan.human_checkpoints.get(dispatch.key)),
                 "prompt": dispatch.prompt,
             }
             for dispatch in result.dispatches

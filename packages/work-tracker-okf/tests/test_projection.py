@@ -18,6 +18,17 @@ def test_rollup_keeps_a_childless_release_parent_gate() -> None:
     assert dict(rollup((release,)).children) == {release.path: ChildRollup(0, 0, ())}
 
 
+def test_rollup_counts_active_items_with_no_phase_as_not_started() -> None:
+    items = (
+        make_item("feature-new"),
+        make_item("feature-designing", phase="design"),
+        make_item("feature-archived", archived=True),
+    )
+    rolled = rollup(items)
+    assert rolled.not_started == 1
+    assert dict(rolled.by_phase) == {"design": 1}
+
+
 def test_resume_selection_returns_a_path_keyed_item() -> None:
     selection = select_resume((make_item("work/a", updated="2026-01-01", title="A"),))
     assert selection is not None

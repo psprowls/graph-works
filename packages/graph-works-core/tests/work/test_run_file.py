@@ -244,6 +244,29 @@ def _two_repo_workspace(tmp_path):
     return layout
 
 
+def test_run_file_refuses_an_undeclared_repo(tmp_path) -> None:
+    layout = _two_repo_workspace(tmp_path)
+    result = work.run_file(
+        layout, _config(layout), type="Feature", title="Unknown repo", description="d", on=TODAY, repo="nope"
+    )
+    assert result.plan.refusal == "unknown-repo"
+    assert f"code → {tmp_path / 'code'}, other → {tmp_path / 'other'}" in result.plan.filing.detail
+    assert result.application is None
+
+
+def test_run_file_warns_on_an_unresolved_repo_in_a_two_repo_workspace(tmp_path) -> None:
+    layout = _two_repo_workspace(tmp_path)
+    result = work.run_file(layout, _config(layout), type="Feature", title="Unassigned", description="d", on=TODAY)
+    [warning] = [item for item in result.plan.warnings if item.startswith("repo unresolved:")]
+    assert f"code → {tmp_path / 'code'}, other → {tmp_path / 'other'}" in warning
+
+
+def test_run_file_in_a_single_repo_workspace_never_warns(tmp_path) -> None:
+    layout = _split_workspace(tmp_path)
+    result = work.run_file(layout, _config(layout), type="Feature", title="One repo", description="d", on=TODAY)
+    assert not any(item.startswith("repo unresolved:") for item in result.plan.warnings)
+
+
 def test_two_declared_repos_file_against_every_declared_repo(tmp_path) -> None:
     layout = _two_repo_workspace(tmp_path)
     outcome = work.run_file(

@@ -1,0 +1,19 @@
+{
+  "path": "work/bug-fix",
+  "root": "work/bug-fix",
+  "expected_phase": "design",
+  "current_phase": "design",
+  "observation": {
+    "task_id": "task_reader",
+    "dispatch_id": "ctx_reader",
+    "dispatch_key": "reader-key",
+    "repo": "repo-1",
+    "worktree": "<tmp>/wt",
+    "start_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  },
+  "receipt_path": "<tmp>/works/.gw/cache/reader-receipts/9291960c413b1df2/ctx_reader.json",
+  "written": true,
+  "replayed": false,
+  "conflict": null,
+  "refusal": null
+}

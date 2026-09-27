@@ -5,7 +5,6 @@ from __future__ import annotations
 import os
 from enum import StrEnum
 from pathlib import Path
-from typing import Never
 
 import typer
 from config_io import (
@@ -26,6 +25,7 @@ from graph_works_core.workspace.manifest import workspace_store
 
 from graph_works_cli import exit_codes
 from graph_works_cli.config_cli.rendering import render_hooks, render_projection, render_resolved, render_resolved_list
+from graph_works_cli.errors import exit_error
 from graph_works_cli.workspace_resolution import resolve_workspace
 
 config_app = typer.Typer(
@@ -81,11 +81,6 @@ def _store(workspace: str) -> tuple[WorkspaceLayout, LayeredYamlStore]:
     return layout, workspace_store(layout)
 
 
-def _exit_config_error(exc: Exception, *, code: int) -> Never:
-    typer.echo(f"Error: {exc}", err=True)
-    raise typer.Exit(code=code) from exc
-
-
 def _repo_root(repo: str) -> Path:
     if repo:
         return Path(repo).expanduser().resolve()
@@ -103,9 +98,9 @@ def _run_hooks(
     try:
         result = apply_hooks(action, feature.value, _repo_root(repo))
     except HooksSettingsError as exc:
-        _exit_config_error(exc, code=exit_codes.SCHEMA_MISMATCH)
+        exit_error(str(exc), code=exit_codes.SCHEMA_MISMATCH, cause=exc)
     except WorkspaceError as exc:
-        _exit_config_error(exc, code=exit_codes.GENERIC)
+        exit_error(str(exc), code=exit_codes.GENERIC, cause=exc)
     typer.echo(render_hooks(result, json_output=json_output))
 
 
@@ -139,9 +134,9 @@ def get_cmd(
     try:
         result = manifest.resolve_checked_key(_layout(workspace), key, environ=os.environ)
     except RegistryError as exc:
-        _exit_config_error(exc, code=exit_codes.GENERIC)
+        exit_error(str(exc), code=exit_codes.GENERIC, cause=exc)
     except (StoreValidationError, WorkspaceError) as exc:
-        _exit_config_error(exc, code=exit_codes.SCHEMA_MISMATCH)
+        exit_error(str(exc), code=exit_codes.SCHEMA_MISMATCH, cause=exc)
     typer.echo(render_resolved(result, json_output=json_output))
 
 
@@ -154,9 +149,9 @@ def list_cmd(
     try:
         results = manifest.resolve_checked_all(_layout(workspace), environ=os.environ)
     except RegistryError as exc:
-        _exit_config_error(exc, code=exit_codes.GENERIC)
+        exit_error(str(exc), code=exit_codes.GENERIC, cause=exc)
     except (StoreValidationError, WorkspaceError) as exc:
-        _exit_config_error(exc, code=exit_codes.SCHEMA_MISMATCH)
+        exit_error(str(exc), code=exit_codes.SCHEMA_MISMATCH, cause=exc)
     typer.echo(render_resolved_list(results, json_output=json_output))
 
 
@@ -174,9 +169,9 @@ def set_cmd(
         mutate_workspace_config(layout, key, value, local=local)
         result = resolve_key(manifest.CATALOG, key, store=store, environ=os.environ)
     except RegistryError as exc:
-        _exit_config_error(exc, code=exit_codes.GENERIC)
+        exit_error(str(exc), code=exit_codes.GENERIC, cause=exc)
     except (StoreValidationError, WorkspaceError) as exc:
-        _exit_config_error(exc, code=exit_codes.SCHEMA_MISMATCH)
+        exit_error(str(exc), code=exit_codes.SCHEMA_MISMATCH, cause=exc)
     typer.echo(render_resolved(result, json_output=json_output))
 
 
@@ -196,9 +191,9 @@ def unset_cmd(
             mutate_workspace_config(layout, key, None, local=local)
             result = resolve_key(manifest.CATALOG, key, store=store, environ=os.environ)
     except RegistryError as exc:
-        _exit_config_error(exc, code=exit_codes.GENERIC)
+        exit_error(str(exc), code=exit_codes.GENERIC, cause=exc)
     except (StoreValidationError, WorkspaceError) as exc:
-        _exit_config_error(exc, code=exit_codes.SCHEMA_MISMATCH)
+        exit_error(str(exc), code=exit_codes.SCHEMA_MISMATCH, cause=exc)
     typer.echo(render_resolved(result, json_output=json_output))
 
 
@@ -211,7 +206,7 @@ def sync(
     try:
         target = write_dispatch_projection(_layout(workspace))
     except RegistryError as exc:
-        _exit_config_error(exc, code=exit_codes.GENERIC)
+        exit_error(str(exc), code=exit_codes.GENERIC, cause=exc)
     except (StoreValidationError, WorkspaceError) as exc:
-        _exit_config_error(exc, code=exit_codes.SCHEMA_MISMATCH)
+        exit_error(str(exc), code=exit_codes.SCHEMA_MISMATCH, cause=exc)
     typer.echo(render_projection(target, json_output=json_output))

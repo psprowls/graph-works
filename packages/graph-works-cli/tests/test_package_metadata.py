@@ -28,7 +28,7 @@ _STUB_VERSIONS: dict[str, tuple[str, ...]] = {
     "code-wiki-okf": ("0.1.0", "0.2.0", "0.3.0", "0.4.0", "0.5.0", "0.5.1"),
     "config-io": ("0.1.0", "0.2.0"),
     "doc-wiki-okf": ("0.1.0", "0.2.0", "0.2.1", "0.2.2", "0.3.0", "0.3.1", "0.3.2", "0.3.3"),
-    "graph-works-wire": ("0.1.0", "0.1.1", "0.1.2"),
+    "graph-works-wire": ("0.1.0", "0.1.1", "0.1.2", "0.1.3"),
     "langchain-core": ("1.4.0",),
     "markdown-it-py": ("3.0.0",),
     "models-io": ("0.2.0",),
@@ -45,12 +45,14 @@ _STUB_VERSIONS: dict[str, tuple[str, ...]] = {
         "0.4.13",
         "0.4.14",
         "0.5.0",
+        "0.5.1",
     ),
     "okf-io": ("0.1.1", "0.2.0", "0.2.1", "0.2.2", "0.2.3", "0.2.4", "0.2.5"),
     "plugin-fork-io": ("0.1.0", "0.1.1"),
     "ruamel-yaml": ("0.18.0",),
     "subagents-io": ("0.2.0", "0.2.1"),
     "typer": ("0.12.0",),
+    "workflow-orca": ("0.2.0",),
     "work-tracker-okf": ("0.1.0", "0.2.0", "0.2.1", "0.2.2", "0.3.0", "0.3.1", "0.4.0", "0.5.0", "0.5.1", "0.6.0"),
 }
 
@@ -99,6 +101,16 @@ def _manifest_requirements(relative_manifest: str) -> dict[str, Requirement]:
             "packages/graph-works-cli/pyproject.toml",
             "code-wiki-okf",
             frozenset({">=0.5", "<0.6"}),
+        ),
+        (
+            "packages/graph-works-cli/pyproject.toml",
+            "graph-works-wire",
+            frozenset({">=0.1.3", "<0.2"}),
+        ),
+        (
+            "packages/graph-works-cli/pyproject.toml",
+            "workflow-orca",
+            frozenset({">=0.2", "<0.3"}),
         ),
     ],
 )

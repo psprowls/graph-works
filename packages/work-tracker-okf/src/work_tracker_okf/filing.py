@@ -8,15 +8,16 @@ from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
 from types import MappingProxyType
-from typing import Any, Literal
+from typing import Any, Final, Literal
 
 from okf_ext.sections import render_skeleton
 from okf_ext.shape import SectionSet
 from okf_io import Document, parse
 
 from work_tracker_okf._selection import path_index
+from work_tracker_okf.affects import needs_affects_hint
 from work_tracker_okf.dependencies import DependencyEdge, serialize_dependencies, validate_dependencies
-from work_tracker_okf.hierarchy import unknown_depends_on
+from work_tracker_okf.hierarchy import declared_repo, unknown_depends_on
 from work_tracker_okf.items import WorkItem
 from work_tracker_okf.paths import child_lane, item_page, owned_dir, references_dir
 from work_tracker_okf.vocabulary import (
@@ -41,11 +42,17 @@ FilingRefusal = Literal[
     "invalid-effort",
     "invalid-blast-radius",
     "invalid-release-field",
+    "unknown-repo",
 ]
 
 _NAME_RE = re.compile(r"[^a-z0-9]+")
 _MAX_WORDS_CLEAN = 4
 _MAX_WORDS_HARD_CAP = 6
+#: The filing-time twin of lint's `targets.affects-empty`: warn, never refuse.
+AFFECTS_HINT: Final = (
+    "no `affects` declared: this item will serialize against every write in its repository. "
+    "Declare the paths it changes, or `gw:workspace` if it only changes the workspace."
+)
 _KEY_ORDER: tuple[str, ...] = (
     "type",
     "title",
@@ -83,6 +90,10 @@ class FilingSeed:
     affects: tuple[str, ...] = ()
     tags: tuple[str, ...] = ()
     repo: str | None = None
+    declared_repos: Mapping[str, str] | None = None
+    """Declared repository name -> display path, supplied by a workspace-aware
+    caller. `None` means "no repository knowledge": both repository checks are
+    skipped and this band never guesses at `workspace.yaml`."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -190,6 +201,10 @@ def _parent_note(parent: WorkItem | None) -> str:
     return "- Seeded for design.\n" if parent is None else f"- Filed under {parent.path}.\n"
 
 
+def _declared_listing(declared: Mapping[str, str]) -> str:
+    return ", ".join(f"{name} → {declared[name]}" for name in sorted(declared)) or "none"
+
+
 def _refused(
     seed: FilingSeed,
     path: str,
@@ -269,9 +284,34 @@ def plan_filing(root: Path, items: Sequence[WorkItem], seed: FilingSeed, section
         if parent.archived or parent.work_status in TERMINAL_STATUSES:
             return _refused(seed, "", root, root / "work", "inactive-parent", f"parent {parent.path!r} is inactive")
 
+    declared = seed.declared_repos
+    if declared is not None and seed.repo is not None and seed.repo not in declared:
+        return _refused(
+            seed,
+            "",
+            root,
+            root / "work",
+            "unknown-repo",
+            f"repo {seed.repo!r} names no declared repository; declared: {_declared_listing(declared)}",
+        )
+
     basename, warnings = compose_basename(seed.type, seed.title if seed.name is None else seed.name)
+    if needs_affects_hint(seed.type, has_parent=parent is not None, has_children=False, affects=seed.affects):
+        warnings = (*warnings, AFFECTS_HINT)
     lane = "work" if parent is None else child_lane(parent.path)
     path = f"{lane}/{basename}"
+    if (
+        declared is not None
+        and len(declared) > 1
+        and seed.repo is None
+        and (parent is None or declared_repo(parent, by_path)[0] is None)
+    ):
+        warnings = (
+            *warnings,
+            f"repo unresolved: workspace declares {len(declared)} repositories "
+            f"({_declared_listing(declared)}) and neither {path} nor its parents set repo:; "
+            "pass --repo <name>",
+        )
     target = item_page(path).path(root)
     owner = owned_dir(path).path(root)
 

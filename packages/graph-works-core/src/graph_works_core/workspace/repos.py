@@ -62,17 +62,20 @@ def resolve_repo(layout: WorkspaceLayout, *, repo_name: str | None = None) -> tu
     except OSError:
         return None, f"{path}: absent, so this workspace declares no code repository"
 
-    declared = sorted(entry.name for entry in config.repos)
+    by_name = {entry.name: entry.path for entry in config.repos}
     if repo_name is not None:
         match = next((entry for entry in config.repos if entry.name == repo_name), None)
         if match is None:
-            raise WorkspaceError(f"{path}: repo_name {repo_name!r} names no declared repository; declared: {declared}")
+            raise WorkspaceError(
+                f"{path}: repo_name {repo_name!r} names no declared repository; declared: {_declared_listing(by_name)}"
+            )
         return match.path, None
     if not config.repos:
         return None, f"{path}: declares no repositories, so no code repo was resolved"
     if len(config.repos) > 1:
         raise WorkspaceError(
-            f"{path}: {len(config.repos)} repositories declared ({declared}); pass repo_name= to choose one"
+            f"{path}: {len(config.repos)} repositories declared ({_declared_listing(by_name)}); "
+            "pass repo_name= to choose one"
         )
     return config.repos[0].path, None
 
@@ -137,6 +140,11 @@ def _join(*notes: str | None) -> str | None:
     return "; ".join(kept) if kept else None
 
 
+def _declared_listing(repositories: Mapping[str, Path]) -> str:
+    """Render declared repositories as name and path pairs, sorted by name."""
+    return ", ".join(f"{name} → {repositories[name]}" for name in sorted(repositories)) or "none"
+
+
 def _malformed_note(item: WorkItem, items: Mapping[str, WorkItem], setter: str | None) -> str | None:
     for path in (item.path, *reversed(item.ancestor_paths)):
         if path == setter:
@@ -179,7 +187,7 @@ def resolve_item_repo(
         if declared_name not in repositories:
             raise WorkspaceError(
                 f"{label}: repo {declared_name!r} (set by {setter}) names no declared repository "
-                f"in {layout.manifest_path}; declared: {sorted(repositories)}"
+                f"in {layout.manifest_path}; declared: {_declared_listing(repositories)}"
             )
         if repo_name is not None and repo_name != declared_name:
             raise WorkspaceError(
@@ -200,7 +208,7 @@ def resolve_item_repo(
         raise WorkspaceError(
             _join(
                 f"{label}: {layout.manifest_path} declares {len(repositories)} repositories "
-                f"({sorted(repositories)}) and {label} sets no repo:; add `repo: <name>` to it or an "
+                f"({_declared_listing(repositories)}) and {label} sets no repo:; add `repo: <name>` to it or an "
                 "ancestor, or pass repo_name= (--repo-name) to choose one",
                 note,
             )

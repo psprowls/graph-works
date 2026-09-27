@@ -14,6 +14,7 @@ REASONS: frozenset[str] = frozenset(
         "refused",
         "incomplete-apply",
         "conflict",
+        "attempt-mismatch",
         "incomplete",
         "usage",
         "workspace",

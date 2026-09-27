@@ -35,6 +35,7 @@ from pathlib import Path
 
 from okf_io import load_bundle
 from work_tracker_okf import decisions as _decisions
+from work_tracker_okf.affects import code_affects
 from work_tracker_okf.decisions import ledger_ref
 from work_tracker_okf.hierarchy import decision_owner
 from work_tracker_okf.items import IGNORE, WorkItem, load_items
@@ -137,13 +138,13 @@ def _landed_siblings(items: Sequence[WorkItem], item: WorkItem) -> tuple[LandedS
     Union by canonical path, so an item matching both arms appears once. Order follows
     *items*, which `load_items` returns sorted — the result is deterministic.
     """
-    own_affects = set(item.affects)
+    own_affects = set(code_affects(item.affects))
     declared = {edge.path for edge in item.dependency_edges}
     selected: dict[str, LandedSibling] = {}
     for other in items:
         if other.path == item.path or not _has_landed(other):
             continue
-        overlaps = other.parent_path == item.parent_path and bool(own_affects & set(other.affects))
+        overlaps = other.parent_path == item.parent_path and bool(own_affects & set(code_affects(other.affects)))
         if other.path in declared or overlaps:
             selected[other.path] = LandedSibling(path=other.path, resolved_in=other.resolved_in, affects=other.affects)
     return tuple(selected.values())
@@ -208,7 +209,14 @@ def run_reconcile_context(
     commit_range = f"{anchor}..HEAD" if anchor else None
 
     landed_siblings = _landed_siblings(items, item)
-    touched_paths = tuple(sorted({*item.affects, *(path for sibling in landed_siblings for path in sibling.affects)}))
+    touched_paths = tuple(
+        sorted(
+            {
+                *code_affects(item.affects),
+                *(path for sibling in landed_siblings for path in code_affects(sibling.affects)),
+            }
+        )
+    )
     commits_since: tuple[CommitRef, ...] = ()
     diff_command: str | None = None
     if repo is not None and commit_range and touched_paths:

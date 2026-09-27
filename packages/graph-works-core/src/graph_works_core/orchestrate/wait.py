@@ -19,7 +19,7 @@ from typing import Literal, TypeVar
 
 from subagents_io.backend import BackendError
 
-from graph_works_core.orchestrate.orca_port import OrcaMessage, OrcaPort, OrcaTask, OrcaWorker
+from graph_works_core.orchestrate.orca_port import OrcaDelivery, OrcaMessage, OrcaPort, OrcaTask, OrcaWorker
 
 REAL_TYPES: tuple[str, ...] = ("worker_done", "escalation", "question")
 SLEEP_GAP_FLOOR_S = 60
@@ -157,15 +157,19 @@ def run_wait(port: OrcaPort, run_id: str, *, ack: str | None, timeout_s: float, 
     messages: tuple[OrcaMessage, ...] = ()
     try:
         while True:
-            remaining_ms = int((deadline - clock.monotonic()) * 1000)
-            if remaining_ms <= 0:
-                if pending_ack is None:
-                    break
-                remaining_ms = 1
             sent_ack = pending_ack
-            delivery = fence.call(
-                partial(port.check_wait, run_id, types=",".join(REAL_TYPES), timeout_ms=remaining_ms, ack=sent_ack)
-            )
+
+            def check_with_remaining_budget(ack_to_send: str | None = sent_ack) -> OrcaDelivery | None:
+                remaining_ms = int((deadline - clock.monotonic()) * 1000)
+                if remaining_ms <= 0:
+                    if ack_to_send is None:
+                        return None
+                    remaining_ms = 1
+                return port.check_wait(run_id, types=",".join(REAL_TYPES), timeout_ms=remaining_ms, ack=ack_to_send)
+
+            delivery = fence.call(check_with_remaining_budget)
+            if delivery is None:
+                break
             pending_ack = None
             batch = delivery["messages"]
             if delivery["delivery_id"] is None and not batch:

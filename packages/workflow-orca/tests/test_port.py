@@ -523,14 +523,22 @@ def test_check_wait_payload_decoding(raw, payload, payload_raw):
     assert (message["subject"], message["body"], message["from_"], message["created_at"]) == (None, None, None, None)
 
 
-def test_check_wait_skips_non_object_messages_and_null_delivery_id():
+@pytest.mark.parametrize("messages", [None, "bad", {}, ["junk"], [{"id": "h", "type": "heartbeat"}, "junk"]])
+def test_check_wait_refuses_unreadable_message_container_or_row(messages):
     def batch(argv):
-        result = {"deliveryId": None, "messages": ["junk", {"id": "m1", "type": "heartbeat"}]}
+        result = {"deliveryId": "dlv_1", "messages": messages}
         return OrcaResult(0, json.dumps({"ok": True, "result": result}), "")
 
-    delivery = OrcaCliPort(run=batch).check_wait("r", types="t", timeout_ms=1, ack=None)
-    assert delivery["delivery_id"] is None
-    assert [m["id"] for m in delivery["messages"]] == ["m1"]
+    with pytest.raises(OrcaCliError, match=r"malformed.*messages"):
+        OrcaCliPort(run=batch).check_wait("r", types="t", timeout_ms=1, ack=None)
+
+
+def test_check_wait_refuses_missing_messages_even_with_delivery_id():
+    def batch(argv):
+        return OrcaResult(0, json.dumps({"ok": True, "result": {"deliveryId": "dlv_1"}}), "")
+
+    with pytest.raises(OrcaCliError, match=r"malformed.*messages"):
+        OrcaCliPort(run=batch).check_wait("r", types="t", timeout_ms=1, ack=None)
 
 
 def test_check_ack_argv():

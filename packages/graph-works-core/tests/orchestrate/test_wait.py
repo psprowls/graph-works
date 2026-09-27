@@ -170,6 +170,55 @@ def test_consumer_fenced_rebinds_once_and_retries():
     assert acks == ["dlv_prev", "dlv_prev"]  # the retried call repeats the idempotent ack
 
 
+def test_fenced_retry_uses_only_budget_left_after_failed_wait_and_rebind():
+    clock = Clock()
+    port = FakeOrcaPort()
+    attempts = 0
+
+    def check(run_id, *, types, timeout_ms, ack):
+        nonlocal attempts
+        port._record("check_wait", run_id, types=types, timeout_ms=timeout_ms, ack=ack)
+        attempts += 1
+        clock.advance(4 if attempts == 1 else timeout_ms / 1000)
+        if attempts == 1:
+            raise Fenced("fenced")
+        return delivery(None)
+
+    def rebind(run_id):
+        port._record("run_use", run_id)
+        clock.advance(4)
+
+    port.check_wait = check
+    port.run_use = rebind
+    result = wait(port, clock, timeout_s=10)
+    waits = [kwargs["timeout_ms"] for name, _args, kwargs in port.calls if name == "check_wait"]
+    assert waits == [10000, 2000]
+    assert result.waited_s == 10 and result.rebound
+
+
+@pytest.mark.parametrize("ack,expected_waits", [(None, [10000]), ("dlv_prev", [10000, 1])])
+def test_fenced_rebind_after_deadline_skips_retry_except_pending_ack(ack, expected_waits):
+    clock = Clock()
+    port = FakeOrcaPort(wait_errors=[Fenced("fenced")])
+    original_check = port.check_wait
+
+    def check(run_id, *, types, timeout_ms, ack):
+        clock.advance(6 if port.wait_errors else timeout_ms / 1000)
+        return original_check(run_id, types=types, timeout_ms=timeout_ms, ack=ack)
+
+    def rebind(run_id):
+        port._record("run_use", run_id)
+        clock.advance(6)
+
+    port.check_wait = check
+    port.run_use = rebind
+    result = wait(port, clock, ack=ack, timeout_s=10)
+    waits = [kwargs for name, _args, kwargs in port.calls if name == "check_wait"]
+    assert [row["timeout_ms"] for row in waits] == expected_waits
+    assert all(row["ack"] == ack for row in waits)
+    assert result.status == "timeout" and result.rebound and result.waited_s >= 12
+
+
 def test_fenced_twice_raises_wait_failed():
     port = FakeOrcaPort(wait_errors=[Fenced("a"), Fenced("b")])
     with pytest.raises(WaitFailed) as caught:

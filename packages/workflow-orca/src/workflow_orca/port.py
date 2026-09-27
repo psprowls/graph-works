@@ -114,12 +114,15 @@ def _payload(value: object) -> tuple[dict[str, Any] | None, str | None]:
 
 def _message(row: dict[str, Any]) -> OrcaMessage:
     payload, raw = _payload(row.get("payload"))
+    current_sender = _string(row.get("from_handle"))
+    historical_sender = _string(row.get("from"))
+    sender = current_sender if current_sender and current_sender.strip() else historical_sender
     return {
         "id": str(row.get("id") or ""),
         "type": str(row.get("type") or ""),
         "subject": _string(row.get("subject")),
         "body": _string(row.get("body")),
-        "from_": _string(row.get("from")),
+        "from_": sender if sender and sender.strip() else None,
         "created_at": _string(row.get("created_at")),
         "payload": payload,
         "payload_raw": raw,
@@ -408,9 +411,18 @@ class OrcaCliPort:
         if ack is not None:
             argv.extend(("--ack", ack))
         result = self._call(argv)
+        rows = result.get("messages")
+        if not isinstance(rows, list) or any(not isinstance(row, dict) for row in rows):
+            raise OrcaCliError(
+                ("orca", "orchestration", *argv, "--json"),
+                returncode=0,
+                stderr="",
+                message="malformed check messages",
+                receipt={"ok": True, "result": result},
+            )
         return {
             "delivery_id": _string(result.get("deliveryId")),
-            "messages": [_message(row) for row in _rows(result.get("messages"))],
+            "messages": [_message(row) for row in rows],
         }
 
     def check_ack(self, run_id: str, delivery_id: str) -> None:

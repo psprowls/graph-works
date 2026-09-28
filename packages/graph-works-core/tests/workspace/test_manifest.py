@@ -60,6 +60,7 @@ def test_the_catalog_carries_exactly_the_documented_keys():
         "workflow.auto_drive.max_attend",
         "workflow.auto_drive.supervise_merges",
         "workflow.workspace_commits",
+        "toolchain.git",
         "workspace.dir",
     ]
 
@@ -629,3 +630,10 @@ def test_a_base_only_value_still_resolves_with_the_manifest_origin(tmp_path):
     layout = _workspace(tmp_path, "version: 1\ntopic: Committed\n")
     got = resolve_checked_key(layout, "topic", environ={})
     assert (got.value, got.origin, got.shadowed) == ("Committed", "manifest", None)
+
+
+def test_toolchain_git_is_a_declared_optional_string():
+    from graph_works_core.workspace.manifest import CATALOG
+
+    [entry] = [entry for entry in CATALOG if entry.key == "toolchain.git"]
+    assert entry.type == "str" and entry.default is None and entry.env_var is None

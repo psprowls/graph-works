@@ -240,6 +240,15 @@ CATALOG: tuple[ConfigEntry, ...] = (
         ),
     ),
     ConfigEntry(
+        key="toolchain.git",
+        type="str",
+        default=None,
+        description=(
+            "The git executable gw uses for gate-feeding probes: an absolute path or a name on PATH. "
+            "Wins over GW_GIT, which wins over `git` on PATH. Usually set per machine in workspace.local.yaml."
+        ),
+    ),
+    ConfigEntry(
         key="workspace.dir",
         type="str",
         default=None,

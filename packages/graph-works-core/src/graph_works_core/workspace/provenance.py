@@ -1,9 +1,11 @@
 """Git provenance: what a completed stage leaves behind.
 
-The **only** module in this package that runs git. Every function is
-best-effort and degrades to `None` (or a silent no-op): provenance capture is a
-nice-to-have on the advance path, and an advance that failed because a `git`
-subprocess timed out would be a worse outcome than one that stamped nothing.
+The only module in this package that runs git. Two contracts live here.
+Provenance capture (`run_git`, `results_facts`, `worktree_state`, ...) is
+best-effort and degrades to `None`: an advance must not fail because a stub
+could not be gathered. Gate inputs (`gate_git` and the `strict_*` probes) are
+the opposite: they return a typed `GitFailure` that the gate turns into a
+refusal, never a silent pass.
 
 The exceptions are `write_active_work`'s canonical-path and dispatch-phase
 guards, which raise. Those are caller bugs, not git failures: a coordination
@@ -16,9 +18,12 @@ matching `work-tracker-okf`'s `today=` convention: the caller that knows what
 
 from __future__ import annotations
 
+import functools
 import json
+import os
+import shutil
 import subprocess
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
@@ -27,7 +32,9 @@ from work_tracker_okf.paths import parse_item_path
 from work_tracker_okf.results import ResultsFacts
 from work_tracker_okf.vocabulary import PHASES
 
+from graph_works_core.workspace.errors import WorkspaceError
 from graph_works_core.workspace.layout import WorkspaceLayout
+from graph_works_core.workspace.manifest import resolve_checked_key
 
 #: The pointer a transcript-capture hook reads to attribute a session to an
 #: item. It lands in `layout.cache_dir` -- gitignored machine state, which is
@@ -88,6 +95,162 @@ def run_git(cwd: Path, *args: str) -> str | None:
     """
     outcome = probe_git(cwd, *args)
     return outcome.stdout if outcome.returncode == 0 else None
+
+
+GIT_ENV = "GW_GIT"
+GitFailureCause = Literal["unresolved", "missing", "timeout", "error", "nonzero"]
+
+
+@dataclass(frozen=True, slots=True)
+class GitFailure:
+    """Why a gate input could not be read. Never a pass."""
+
+    cause: GitFailureCause
+    detail: str
+
+
+@dataclass(frozen=True, slots=True)
+class GitExecutable:
+    """The one git the gate runs, where it came from, and its `--version`."""
+
+    path: str
+    source: Literal["config", "env", "path"]
+    version: str
+
+
+def resolve_git(configured: str | None, *, environ: Mapping[str, str]) -> GitExecutable | GitFailure:
+    """Pick the gate's git: *configured* (`toolchain.git`), then `GW_GIT`, then PATH.
+
+    The first choice present is the choice. A broken one is a `GitFailure`,
+    never a silent fall-through to a lower one: which git a gate ran must be
+    predictable from configuration alone.
+    """
+    source: Literal["config", "env", "path"]
+    if configured:
+        candidate, source = configured, "config"
+    elif environ.get(GIT_ENV):
+        candidate, source = environ[GIT_ENV], "env"
+    else:
+        found = shutil.which("git", path=environ.get("PATH", ""))
+        if found is None:
+            return GitFailure("missing", "no `git` on PATH; set toolchain.git in workspace.local.yaml, or GW_GIT")
+        candidate, source = found, "path"
+    if not Path(candidate).is_absolute():
+        found = shutil.which(candidate, path=environ.get("PATH", ""))
+        if found is None:
+            return GitFailure("missing", f"{source} git {candidate!r} is not on PATH")
+        candidate = found
+    return _validated(candidate, source)
+
+
+@functools.lru_cache(maxsize=16)
+def _validated(executable: str, source: Literal["config", "env", "path"]) -> GitExecutable | GitFailure:
+    """`git --version` once per process per executable."""
+    if not Path(executable).is_file():
+        return GitFailure("missing", f"{source} git {executable!r} does not exist")
+    outcome = probe_git(Path(executable).parent, "--version", executable=executable, timeout=_GIT_TIMEOUT_SECONDS)
+    if outcome.cause == "timeout":
+        return GitFailure("timeout", f"`{executable} --version` did not answer in {_GIT_TIMEOUT_SECONDS}s")
+    if outcome.cause != "ok":
+        return GitFailure(
+            "missing" if outcome.cause == "missing" else "error", f"`{executable} --version` could not run"
+        )
+    version = outcome.stdout.strip()
+    if outcome.returncode != 0 or not version.startswith("git version"):
+        return GitFailure(
+            "nonzero",
+            f"`{executable} --version` exited {outcome.returncode}: {(outcome.stderr or version).strip()[:300]}",
+        )
+    return GitExecutable(executable, source, version)
+
+
+def gate_git(layout: WorkspaceLayout, *, environ: Mapping[str, str] | None = None) -> GitExecutable | GitFailure:
+    """`resolve_git` with `toolchain.git` read from the layered manifest."""
+    env: Mapping[str, str] = os.environ if environ is None else environ
+    try:
+        value = resolve_checked_key(layout, "toolchain.git", environ={}).value
+    except WorkspaceError as exc:
+        return GitFailure("unresolved", str(exc))
+    configured = value.strip() if isinstance(value, str) and value.strip() else None
+    return resolve_git(configured, environ=env)
+
+
+def strict_git(cwd: Path, *args: str, git: GitExecutable) -> str | GitFailure:
+    outcome = probe_git(cwd, *args, executable=git.path)
+    label = f"`git {' '.join(args[:2])}` in {cwd}"
+    if outcome.cause == "timeout":
+        return GitFailure("timeout", f"{label} timed out")
+    if outcome.cause != "ok":
+        return GitFailure("missing" if outcome.cause == "missing" else "error", f"{label} could not run")
+    if outcome.returncode != 0:
+        return GitFailure("nonzero", f"{label} exited {outcome.returncode}: {outcome.stderr.strip()[:300]}")
+    return outcome.stdout
+
+
+def strict_commit(repo: Path, ref: str, *, git: GitExecutable) -> str | GitFailure:
+    out = strict_git(repo, "rev-parse", "--verify", "--end-of-options", f"{ref}^{{commit}}", git=git)
+    return out if isinstance(out, GitFailure) else out.strip()
+
+
+def strict_is_ancestor(repo: Path, ancestor: str, descendant: str, *, git: GitExecutable) -> bool | GitFailure:
+    outcome = probe_git(repo, "merge-base", "--is-ancestor", ancestor, descendant, executable=git.path)
+    if outcome.cause != "ok" or outcome.returncode not in (0, 1):
+        return GitFailure("nonzero", f"`git merge-base --is-ancestor` in {repo} failed: {outcome.stderr.strip()[:300]}")
+    return outcome.returncode == 0
+
+
+def _porcelain_z(out: str) -> tuple[str, ...]:
+    fields = out.split("\0")
+    dirty: list[str] = []
+    index = 0
+    while index < len(fields):
+        entry = fields[index]
+        index += 1
+        if len(entry) < 4:
+            continue
+        status, name = entry[:2], entry[3:]
+        if status[0] in {"R", "C"}:
+            # A rename or copy carries its source in the very next field.
+            index += 1
+        dirty.append(name)
+    return tuple(dirty)
+
+
+def strict_dirty_paths(repo: Path, paths: Sequence[Path | str], *, git: GitExecutable) -> tuple[str, ...] | GitFailure:
+    """`dirty_paths` for the gate: a failed `git status` is a `GitFailure`, not `None`."""
+    out = strict_git(repo, "status", "--porcelain", "-z", "--", *(str(path) for path in paths), git=git)
+    return out if isinstance(out, GitFailure) else _porcelain_z(out)
+
+
+@dataclass(frozen=True, slots=True)
+class GateRange:
+    start_sha: str
+    end_sha: str
+    commits: tuple[str, ...]
+    files: tuple[str, ...]
+    scope: tuple[str, ...]
+
+
+def strict_range(
+    repo: Path, *, start_sha: str, paths: Sequence[Path | str], git: GitExecutable
+) -> GateRange | GitFailure:
+    end = strict_commit(repo, "HEAD", git=git)
+    if isinstance(end, GitFailure):
+        return end
+    scope = tuple(str(path) for path in paths)
+    diff = strict_git(repo, "diff", "--name-status", f"{start_sha}..{end}", "--", *scope, git=git)
+    if isinstance(diff, GitFailure):
+        return diff
+    log = strict_git(repo, "log", "--oneline", f"{start_sha}..{end}", "--", *scope, git=git)
+    if isinstance(log, GitFailure):
+        return log
+    return GateRange(
+        start_sha,
+        end,
+        tuple(line for line in log.splitlines() if line.strip()),
+        tuple(line.split("\t")[-1] for line in diff.splitlines() if line.strip()),
+        scope,
+    )
 
 
 def _absolute(raw: str, cwd: Path) -> Path | None:
@@ -272,20 +435,7 @@ def dirty_paths(repo: Path, paths: Sequence[Path | str]) -> tuple[str, ...] | No
     out = run_git(repo, "status", "--porcelain", "-z", "--", *(str(path) for path in paths))
     if out is None:
         return None
-    fields = out.split("\0")
-    dirty: list[str] = []
-    index = 0
-    while index < len(fields):
-        entry = fields[index]
-        index += 1
-        if len(entry) < 4:
-            continue
-        status, name = entry[:2], entry[3:]
-        if status[0] in {"R", "C"}:
-            # A rename or copy carries its source in the very next field.
-            index += 1
-        dirty.append(name)
-    return tuple(dirty)
+    return _porcelain_z(out)
 
 
 def results_facts(

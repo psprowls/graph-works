@@ -4,7 +4,10 @@ failing an advance."""
 from __future__ import annotations
 
 import json
+import os
+import stat
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -470,3 +473,122 @@ def test_dirty_paths_degrades_outside_a_repo(tmp_path):
 def test_dirty_paths_unquotes_a_path_git_would_escape(repo):
     (repo / "spaced name.txt").write_text("new\n", encoding="utf-8")
     assert provenance.dirty_paths(repo, ["spaced name.txt"]) == ("spaced name.txt",)
+
+
+posix_only = pytest.mark.skipif(sys.platform == "win32", reason="fake executables are POSIX shell scripts")
+
+
+@pytest.fixture(autouse=True)
+def _fresh_git_cache():
+    provenance._validated.cache_clear()
+    yield
+    provenance._validated.cache_clear()
+
+
+def _fake(path: Path, body: str) -> Path:
+    path.write_text("#!/bin/sh\n" + body + "\n", encoding="utf-8", newline="\n")
+    path.chmod(path.stat().st_mode | stat.S_IXUSR)
+    return path
+
+
+@posix_only
+def test_configured_git_wins_over_env_and_path(tmp_path):
+    configured = _fake(tmp_path / "cfg-git", 'echo "git version 9.9.9"')
+    env_git = _fake(tmp_path / "env-git", 'echo "git version 1.0.0"')
+    chosen = provenance.resolve_git(str(configured), environ={"GW_GIT": str(env_git), "PATH": ""})
+    assert isinstance(chosen, provenance.GitExecutable)
+    assert (chosen.path, chosen.source, chosen.version) == (str(configured), "config", "git version 9.9.9")
+
+
+@posix_only
+def test_env_wins_over_path(tmp_path):
+    env_git = _fake(tmp_path / "env-git", 'echo "git version 1.0.0"')
+    chosen = provenance.resolve_git(None, environ={"GW_GIT": str(env_git), "PATH": os.environ.get("PATH", "")})
+    assert isinstance(chosen, provenance.GitExecutable) and chosen.source == "env"
+
+
+@posix_only
+def test_path_is_the_last_resort(tmp_path):
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    _fake(bin_dir / "git", 'echo "git version 2.0.0"')
+    chosen = provenance.resolve_git(None, environ={"PATH": str(bin_dir)})
+    assert isinstance(chosen, provenance.GitExecutable) and chosen.source == "path"
+
+
+@posix_only
+def test_a_broken_first_choice_never_falls_through(tmp_path):
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    _fake(bin_dir / "git", 'echo "git version 2.0.0"')
+    broken = _fake(tmp_path / "broken-git", 'echo "xcrun: error: license" >&2; exit 69')
+    failure = provenance.resolve_git(str(broken), environ={"PATH": str(bin_dir)})
+    assert isinstance(failure, provenance.GitFailure)
+    assert failure.cause == "nonzero" and "69" in failure.detail and "license" in failure.detail
+
+
+def test_a_missing_configured_git_is_missing(tmp_path):
+    failure = provenance.resolve_git(str(tmp_path / "nope"), environ={"PATH": ""})
+    assert isinstance(failure, provenance.GitFailure) and failure.cause == "missing"
+
+
+def test_no_git_anywhere_is_missing():
+    failure = provenance.resolve_git(None, environ={"PATH": ""})
+    assert isinstance(failure, provenance.GitFailure) and failure.cause == "missing"
+
+
+@posix_only
+def test_a_hung_version_probe_times_out(tmp_path, monkeypatch):
+    monkeypatch.setattr(provenance, "_GIT_TIMEOUT_SECONDS", 0.2)
+    slow = _fake(tmp_path / "slow-git", "sleep 5")
+    failure = provenance.resolve_git(str(slow), environ={"PATH": ""})
+    assert isinstance(failure, provenance.GitFailure) and failure.cause == "timeout"
+
+
+def test_gate_git_reads_toolchain_git_from_the_local_overlay(tmp_path):
+    (tmp_path / "workspace.yaml").write_text("version: 1\n", encoding="utf-8", newline="\n")
+    (tmp_path / "workspace.local.yaml").write_text(
+        f"toolchain:\n  git: {tmp_path / 'absent-git'}\n", encoding="utf-8", newline="\n"
+    )
+    failure = provenance.gate_git(layout_for(tmp_path), environ={"PATH": os.environ.get("PATH", "")})
+    assert isinstance(failure, provenance.GitFailure) and failure.cause == "missing"
+    assert "absent-git" in failure.detail
+
+
+def _system_git():
+    chosen = provenance.resolve_git(None, environ={"PATH": os.environ.get("PATH", "")})
+    assert isinstance(chosen, provenance.GitExecutable)
+    return chosen
+
+
+def test_strict_dirty_paths_types_a_non_repo_as_a_failure(tmp_path):
+    failure = provenance.strict_dirty_paths(tmp_path, ["a"], git=_system_git())
+    assert isinstance(failure, provenance.GitFailure) and failure.cause == "nonzero"
+
+
+def test_strict_dirty_paths_reports_dirt(repo):
+    (repo / "a.txt").write_text("changed\n", encoding="utf-8")
+    assert provenance.strict_dirty_paths(repo, ["a.txt"], git=_system_git()) == ("a.txt",)
+
+
+def test_strict_commit_rejects_an_unknown_sha(repo):
+    failure = provenance.strict_commit(repo, "0" * 40, git=_system_git())
+    assert isinstance(failure, provenance.GitFailure)
+
+
+def test_strict_range_reads_commits_and_files(repo):
+    git = _system_git()
+    start = provenance.strict_commit(repo, "HEAD", git=git)
+    assert isinstance(start, str)
+    (repo / "a.txt").write_text("two\n", encoding="utf-8")
+    _git(repo, "commit", "-am", "second")
+    facts = provenance.strict_range(repo, start_sha=start, paths=["a.txt"], git=git)
+    assert isinstance(facts, provenance.GateRange)
+    assert len(facts.commits) == 1 and facts.files == ("a.txt",)
+
+
+def test_strict_is_ancestor(repo):
+    git = _system_git()
+    head = provenance.strict_commit(repo, "HEAD", git=git)
+    assert isinstance(head, str)
+    assert provenance.strict_is_ancestor(repo, head, head, git=git) is True

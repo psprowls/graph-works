@@ -7,6 +7,7 @@ import hashlib
 import re
 from collections.abc import Mapping
 from pathlib import Path
+from types import MappingProxyType
 from unittest import mock
 
 import pytest
@@ -49,6 +50,7 @@ def _item(path: str, **overrides: object) -> WorkItem:
         "resolved_in": None,
         "worktree": None,
         "branch": None,
+        "repo_stamps": MappingProxyType({}),
         "superseded_by": None,
         "tags": (),
         "sources": (),

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass
-from pathlib import PurePath
+from pathlib import Path, PurePath
 
 from subagents_io.dispatch import WorktreeAction
 from work_tracker_okf.items import WorkItem
@@ -12,6 +12,7 @@ from work_tracker_okf.items import WorkItem
 from graph_works_core.workspace.finish import enclosing_owner as enclosing_owner
 from graph_works_core.workspace.repo_context import RepositoryContext
 from graph_works_core.workspace.repos import ItemRepo
+from graph_works_core.workspace.workspace_branch import WORKSPACE_REPO
 
 
 @dataclass(frozen=True, slots=True)
@@ -157,3 +158,83 @@ def select_anchor(
             None,
         )
     return AnchorPreparation(owner.path, owner.phase, repo, branch, base, action)
+
+
+@dataclass(frozen=True, slots=True)
+class WorkspacePlacement:
+    worktree: str
+    branch: str
+
+
+@dataclass(frozen=True, slots=True)
+class WorkspacePreparation:
+    owner_path: str
+    owner_phase: str | None
+    worktree: str
+    branch: str
+    base_branch: str
+
+
+def workspace_chain(item: WorkItem, items: Mapping[str, WorkItem]) -> tuple[WorkItem, ...]:
+    """Return enclosing integration owners outermost first, then the item."""
+    chain = [item]
+    owner = enclosing_owner(item, items)
+    while owner is not None:
+        chain.append(owner)
+        owner = enclosing_owner(owner, items)
+    return tuple(reversed(chain))
+
+
+def workspace_worktree_path(worktrees_dir: str, path: str, type_: str) -> str:
+    """Return the workspace-owned checkout path for an item."""
+    from .commands import _stable_stem
+
+    return str(Path(worktrees_dir) / "workspace" / _stable_stem(path, type_))
+
+
+def verify_workspace_stamp(owner: WorkItem, context: RepositoryContext) -> WorkspacePlacement | AnchorRefusal | None:
+    """Prove the owner's workspace stamp against observed repository state."""
+    if "repo_stamps" in owner.invalid_optional_fields:
+        return AnchorRefusal("worktree-unprovable", f"repair malformed repo_stamps on {owner.path}")
+    stamp = owner.repo_stamps.get(WORKSPACE_REPO)
+    if stamp is None:
+        return None
+    matches = context.inventory.get(stamp.branch, ())
+    if len(matches) > 1:
+        return AnchorRefusal(
+            "worktree-ambiguous", f"repair ambiguous workspace branch {stamp.branch!r} on {owner.path}"
+        )
+    if matches != (stamp.worktree,) or context.path_exists.get(stamp.worktree) is not True:
+        return AnchorRefusal(
+            "worktree-unprovable", f"repair workspace stamp on {owner.path}: path and branch are not verified"
+        )
+    if context.checkout_usable_by_path.get(stamp.worktree) is not True:
+        return AnchorRefusal(
+            "worktree-unprovable", f"workspace checkout {stamp.worktree!r} for {owner.path} is dirty or unreadable"
+        )
+    return WorkspacePlacement(stamp.worktree, stamp.branch)
+
+
+def select_workspace(
+    item: WorkItem, *, items: Mapping[str, WorkItem], context: RepositoryContext, worktrees_dir: str
+) -> WorkspacePlacement | WorkspacePreparation | AnchorRefusal:
+    """Verify the chain outermost first, requesting the first missing link."""
+    from .commands import branch_name
+
+    base = context.default_base
+    placement: WorkspacePlacement | None = None
+    for owner in workspace_chain(item, items):
+        verified = verify_workspace_stamp(owner, context)
+        if isinstance(verified, AnchorRefusal):
+            return verified
+        if verified is None:
+            return WorkspacePreparation(
+                owner.path,
+                owner.phase,
+                workspace_worktree_path(worktrees_dir, owner.path, owner.type),
+                branch_name(owner.path, owner.type),
+                base,
+            )
+        base, placement = verified.branch, verified
+    assert placement is not None  # The chain always ends with item.
+    return placement

@@ -37,6 +37,7 @@ from typing import Literal, get_args
 
 from okf_io import Document
 
+from work_tracker_okf.items import COMMIT_OID as _OID
 from work_tracker_okf.items import WorkItem
 from work_tracker_okf.vocabulary import EFFORTS, PHASES, TERMINAL_STATUSES, TYPES, WORK_STATUSES
 from work_tracker_okf.workflow import route, state_for
@@ -78,7 +79,6 @@ ReaderRefusal = Literal[
 
 READER_REFUSALS: frozenset[str] = frozenset(get_args(ReaderRefusal))
 READER_PHASES: frozenset[str] = frozenset({"design", "plan"})
-_OID = re.compile(r"[0-9a-f]{40}(?:[0-9a-f]{24})?")
 _ATTEMPT = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]*")
 
 

@@ -1,9 +1,10 @@
 from dataclasses import replace
 
+import pytest
 from okf_io import Bundle
 from work_helpers import load_written_items, write_item
 from work_tracker_okf.dependencies import DependencyEdge
-from work_tracker_okf.items import Stamp, WorkItem, item_index, load_items, unreadable_detail
+from work_tracker_okf.items import Stamp, WorkItem, is_commit_oid, item_index, load_items, unreadable_detail
 
 
 def test_projection_derives_containment_and_every_direct_child(path_native_bundle: Bundle) -> None:
@@ -109,3 +110,48 @@ def test_a_non_mapping_repo_stamps_is_a_projection_problem(tmp_path) -> None:
     (item,) = load_written_items(tmp_path)
     assert dict(item.repo_stamps) == {}
     assert item.invalid_optional_fields == ("repo_stamps",)
+
+
+SHA = "0123456789abcdef0123456789abcdef01234567"
+
+
+def _sha_item(tmp_path, extra: str) -> WorkItem:
+    write_item(tmp_path, "work/feature-a", _BASE + extra)
+    (item,) = load_written_items(tmp_path)
+    return item
+
+
+def test_a_scalar_start_sha_is_projected(tmp_path) -> None:
+    item = _sha_item(tmp_path, f"start_sha: {SHA}\n")
+    assert item.start_sha == SHA
+    assert "start_sha" not in item.invalid_optional_fields
+
+
+@pytest.mark.parametrize("raw", ["abc", "0123456789ABCDEF0123456789ABCDEF01234567", "''", "[1]"])
+def test_a_malformed_scalar_start_sha_is_flagged_not_raised(tmp_path, raw: str) -> None:
+    item = _sha_item(tmp_path, f"start_sha: {raw}\n")
+    assert item.start_sha is None
+    assert "start_sha" in item.invalid_optional_fields
+
+
+def test_a_repo_stamp_may_carry_a_start_sha(tmp_path) -> None:
+    item = _sha_item(tmp_path, f"repo_stamps:\n  ui:\n    worktree: /wt/ui\n    branch: b\n    start_sha: {SHA}\n")
+    assert item.repo_stamps["ui"].start_sha == SHA
+    assert "repo_stamps" not in item.invalid_optional_fields
+
+
+def test_a_repo_stamp_without_start_sha_still_loads(tmp_path) -> None:
+    item = _sha_item(tmp_path, "repo_stamps:\n  ui:\n    worktree: /wt/ui\n    branch: b\n")
+    assert item.repo_stamps["ui"].start_sha is None
+    assert "repo_stamps" not in item.invalid_optional_fields
+
+
+def test_a_repo_stamp_with_a_bad_start_sha_is_malformed(tmp_path) -> None:
+    item = _sha_item(tmp_path, "repo_stamps:\n  ui:\n    worktree: /wt/ui\n    branch: b\n    start_sha: nope\n")
+    assert "ui" not in item.repo_stamps
+    assert "repo_stamps" in item.invalid_optional_fields
+
+
+def test_commit_oid_accepts_sha1_and_sha256_only() -> None:
+    assert is_commit_oid(SHA) and is_commit_oid("a" * 64)
+    assert not any(is_commit_oid(v) for v in ("a" * 39, "a" * 41, "A" * 40, None, 1))

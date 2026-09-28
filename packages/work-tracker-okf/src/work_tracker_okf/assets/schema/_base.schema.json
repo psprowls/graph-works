@@ -40,6 +40,7 @@
     "worktree": { "type": "string", "minLength": 1 },
     "branch": { "type": "string", "minLength": 1 },
     "repo": { "type": "string", "minLength": 1 },
+    "start_sha": { "type": "string", "pattern": "^[0-9a-f]{40}([0-9a-f]{24})?$" },
     "repo_stamps": {
       "type": "object",
       "propertyNames": { "minLength": 1 },
@@ -49,7 +50,8 @@
         "additionalProperties": false,
         "properties": {
           "worktree": { "type": "string", "minLength": 1 },
-          "branch": { "type": "string", "minLength": 1 }
+          "branch": { "type": "string", "minLength": 1 },
+          "start_sha": { "type": "string", "pattern": "^[0-9a-f]{40}([0-9a-f]{24})?$" }
         }
       }
     },

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from collections.abc import Mapping
 from dataclasses import dataclass, replace
 from types import MappingProxyType
@@ -41,12 +42,23 @@ def placement_directories(schema_set: SchemaSet) -> dict[str, str]:
     }
 
 
+#: A full lowercase commit object ID (SHA-1 or SHA-256). Placement baselines
+#: must be exact: an abbreviated or symbolic ref is not a recorded fact.
+COMMIT_OID = re.compile(r"[0-9a-f]{40}(?:[0-9a-f]{24})?")
+
+
+def is_commit_oid(value: object) -> bool:
+    return isinstance(value, str) and COMMIT_OID.fullmatch(value) is not None
+
+
 @dataclass(frozen=True, slots=True)
 class Stamp:
-    """One `repo_stamps` entry: where an item runs in a repository other than its own."""
+    """One `repo_stamps` entry: where an item runs in a repository other than its own,
+    and the commit that placement's work started from (`None` for a stamp that predates baselines)."""
 
     worktree: str
     branch: str
+    start_sha: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -64,6 +76,10 @@ class WorkItem:
     or any entry that is not exactly `{worktree, branch}` of non-empty
     text). The malformed parts project as absent, and well-formed
     `repo_stamps` entries are kept.
+
+    `start_sha` is the scalar placement's execute baseline; a value that is
+    not a full lowercase commit OID projects as `None` and names `start_sha`
+    in `invalid_optional_fields`.
     """
 
     path: str
@@ -102,6 +118,7 @@ class WorkItem:
     invalid_optional_fields: tuple[str, ...] = ()
     repo: str | None = None
     repo_stamps: Mapping[str, Stamp] = MappingProxyType({})
+    start_sha: str | None = None
 
 
 def _text(value: object) -> str:
@@ -131,11 +148,12 @@ def _repo_stamps(value: object) -> tuple[Mapping[str, Stamp], bool]:
             isinstance(name, str)
             and name
             and isinstance(entry, dict)
-            and set(entry) == {"worktree", "branch"}
+            and set(entry) in ({"worktree", "branch"}, {"worktree", "branch", "start_sha"})
             and _optional_text(entry["worktree"]) is not None
             and _optional_text(entry["branch"]) is not None
+            and ("start_sha" not in entry or is_commit_oid(entry["start_sha"]))
         ):
-            stamps[name] = Stamp(entry["worktree"], entry["branch"])
+            stamps[name] = Stamp(entry["worktree"], entry["branch"], entry.get("start_sha"))
         else:
             malformed = True
     return MappingProxyType(stamps), malformed
@@ -183,6 +201,7 @@ def _project(location: ItemLocation, document: Document) -> WorkItem:
         released_at=_optional_text(data.get("released_at")),
         repo=_optional_text(data.get("repo")),
         repo_stamps=repo_stamps,
+        start_sha=data.get("start_sha") if is_commit_oid(data.get("start_sha")) else None,
         invalid_optional_fields=(
             *(
                 field
@@ -190,6 +209,7 @@ def _project(location: ItemLocation, document: Document) -> WorkItem:
                 if data.get(field) is not None and _optional_text(data[field]) is None
             ),
             *(("repo_stamps",) if stamps_malformed else ()),
+            *(("start_sha",) if data.get("start_sha") is not None and not is_commit_oid(data.get("start_sha")) else ()),
         ),
     )
 
@@ -225,10 +245,12 @@ def unreadable_detail(bundle: Bundle, path: str) -> str | None:
 __all__ = [
     "ARCHIVE_DIR",
     "ARCHIVE_IGNORE",
+    "COMMIT_OID",
     "IGNORE",
     "WORK_DIR",
     "Stamp",
     "WorkItem",
+    "is_commit_oid",
     "item_index",
     "load_items",
     "placement_directories",

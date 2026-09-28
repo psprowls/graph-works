@@ -179,4 +179,15 @@ def test_orchestration_projects_repository_identity_and_preparations() -> None:
     assert preparation["branch"] == "epic/e"
     assert preparation["base_branch"] == "main"
     assert preparation["worktree"]["action"] == "create"
+    assert payload["workspace_preparations"] == [
+        {
+            "owner_path": "work/a",
+            "owner_phase": "execute",
+            "worktree": "/ws-wt/a",
+            "branch": "feature/a",
+            "base_branch": "main",
+        }
+    ]
+    assert payload["dispatches"][0]["workspace"] == {"worktree": "/ws-wt/a", "branch": "feature/a"}
     assert WORK["work.orchestrate_payload"][1]()["preparations"] == []
+    assert WORK["work.orchestrate_payload"][1]()["workspace_preparations"] == []

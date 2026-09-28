@@ -473,3 +473,5 @@ def test_root_repo_flag_does_not_override_foreign_child_assignment(two_repos: tu
         "start_sha": sha,
     }
     assert payload["preparations"] == []
+    assert payload["workspace_preparations"] == []
+    assert all("workspace" in dispatch for dispatch in payload["dispatches"])

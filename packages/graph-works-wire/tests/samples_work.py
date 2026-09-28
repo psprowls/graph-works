@@ -301,6 +301,7 @@ def orchestrate(*, busy: bool) -> object:
             finish_targets={},
             dispatch_resolutions={dispatch.key: RESOLUTION},
             human_checkpoints={dispatch.key: ns(status="declared", items=("Task 2: skim",))},
+            workspace_placements={dispatch.key: ns(worktree="/ws-wt/a", branch="feature/a")} if busy else {},
         ),
         dispatch_repos={dispatch.key: ns(name="ui", path=Path("/ui"), source="item")},
         preparations=(
@@ -312,6 +313,11 @@ def orchestrate(*, busy: bool) -> object:
                 base_branch="main",
                 worktree=worktree,
             ),
+        )
+        if busy
+        else (),
+        workspace_preparations=(
+            ns(owner_path="work/a", owner_phase="execute", worktree="/ws-wt/a", branch="feature/a", base_branch="main"),
         )
         if busy
         else (),

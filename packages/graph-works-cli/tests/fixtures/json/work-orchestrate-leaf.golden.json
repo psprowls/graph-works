@@ -10,6 +10,7 @@
   "repo": null,
   "dispatches": [],
   "preparations": [],
+  "workspace_preparations": [],
   "advances": [],
   "blocked": [
     {
@@ -34,6 +35,7 @@
   },
   "holds": [],
   "warnings": [
-    "<tmp>/works/workspace.yaml: declares no repositories, so no code repo was resolved"
+    "<tmp>/works/workspace.yaml: declares no repositories, so no code repo was resolved",
+    "<tmp>/works: not the toplevel of its own git repository; workspace placement disabled"
   ]
 }

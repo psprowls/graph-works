@@ -245,6 +245,16 @@ def test_dense_human_renderers_cover_every_optional_group(capsys: pytest.Capture
                     "provenance": {},
                     "model": "m",
                     "worktree": {"action": "create"},
+                    "workspace": {"worktree": "/ws-wt/a", "branch": "feature/a"},
+                }
+            ],
+            "workspace_preparations": [
+                {
+                    "owner_path": "work/a",
+                    "owner_phase": "execute",
+                    "branch": "feature/a",
+                    "worktree": "/ws-wt/a",
+                    "base_branch": "main",
                 }
             ],
             "advances": [{"path": "work/a", "reason": "ready", "mode": "advance"}],
@@ -275,6 +285,8 @@ def test_dense_human_renderers_cover_every_optional_group(capsys: pytest.Capture
     captured = capsys.readouterr()
     header = next(line for line in captured.out.splitlines() if line.startswith("work/e: terminal="))
     assert "slots_free=1/2 attend_slots_free=0/1" in header
+    assert "worktree=create workspace=feature/a" in captured.out
+    assert "  workspace-prepare work/a (execute): feature/a at /ws-wt/a from main" in captured.out
     assert "CONTRADICTION" in captured.out
     assert "partial" in captured.err
     assert "  guidance: 1 entries, 2,870 tokens → /tmp/guidance-design.md\n" in captured.out
@@ -301,6 +313,7 @@ def test_render_orchestrate_prints_supervise_merges_only_when_true(
         "attend_slots_free": 0,
         "supervise_merges": False,
         "dispatches": [],
+        "workspace_preparations": [],
         "advances": [],
         "blocked": [],
         "decisions": {"open": []},
@@ -342,6 +355,7 @@ def test_render_orchestrate_prints_holds(capsys: pytest.CaptureFixture[str]) -> 
         live=(),
         dispatches=(),
         preparations=(),
+        workspace_preparations=(),
         advances=(),
         blocked=(),
         decisions_owner_path="work/e",

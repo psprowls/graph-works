@@ -108,6 +108,77 @@ def _declare_repo(monkeypatch, tmp_path: Path) -> Path:
     return code
 
 
+def _workspace_with_git(tmp_path: Path, *, embedded: bool = False):
+    import subprocess
+
+    code = _git_repo(tmp_path / "code")
+    root = tmp_path / "outer" / "ws" if embedded else tmp_path / "ws"
+    layout = _workspace(root, f"version: 1\nrepositories:\n  code:\n    path: {json.dumps(str(code))}\n")
+    git_root = root.parent if embedded else root
+    subprocess.run(["git", "init", "-b", "main", str(git_root)], check=True, capture_output=True)
+    _commit_workspace(git_root)
+    return layout
+
+
+def _commit_workspace(root: Path) -> None:
+    import subprocess
+
+    subprocess.run(["git", "-C", str(root), "add", "."], check=True, capture_output=True)
+    subprocess.run(
+        [
+            "git",
+            "-C",
+            str(root),
+            "-c",
+            "user.name=Test",
+            "-c",
+            "user.email=test@example.test",
+            "commit",
+            "-m",
+            "workspace files",
+        ],
+        check=True,
+        capture_output=True,
+    )
+
+
+def test_git_workspace_emits_workspace_preparations(tmp_path: Path) -> None:
+    layout = _workspace_with_git(tmp_path)
+    _write(layout, "work/feature-lone", phase="execute", work_status="accepted", affects=("packages/a/x.py",))
+    _commit_workspace(layout.root)
+    result = orchestrate.run_orchestrate(layout, "work/feature-lone")
+    (prep,) = result.workspace_preparations
+    assert Path(prep.worktree).parent == (layout.worktrees_dir.resolve() / "workspace")
+    assert prep.base_branch == "main"
+    assert [b.kind for b in result.blocked] == ["workspace-pending"]
+
+
+def test_embedded_workspace_notes_and_plans_as_before(tmp_path: Path) -> None:
+    layout = _workspace_with_git(tmp_path, embedded=True)
+    _write(layout, "work/feature-lone", phase="execute", work_status="accepted", affects=("packages/a/x.py",))
+    _commit_workspace(layout.root.parent)
+    result = orchestrate.run_orchestrate(layout, "work/feature-lone")
+    assert not result.workspace_preparations
+    assert any("workspace placement disabled" in warning for warning in result.warnings)
+    assert [dispatch.slug for dispatch in result.dispatches] == ["work/feature-lone"]
+
+
+def test_workspace_commits_off_notes_and_plans_as_before(tmp_path: Path) -> None:
+    layout = _workspace_with_git(tmp_path)
+    layout.manifest_path.write_text(
+        layout.manifest_path.read_text(encoding="utf-8").replace(
+            "workflow:\n", "workflow:\n  workspace_commits: off\n", 1
+        ),
+        encoding="utf-8",
+    )
+    _write(layout, "work/feature-lone", phase="execute", work_status="accepted", affects=("packages/a/x.py",))
+    _commit_workspace(layout.root)
+    result = orchestrate.run_orchestrate(layout, "work/feature-lone")
+    assert not result.workspace_preparations
+    assert any("workspace placement disabled" in warning for warning in result.warnings)
+    assert [dispatch.slug for dispatch in result.dispatches] == ["work/feature-lone"]
+
+
 def test_lone_item_shell_returns_canonical_dispatch(tmp_path: Path, monkeypatch) -> None:
     layout = _workspace(tmp_path)
     path = "work/feature-a"
@@ -355,7 +426,8 @@ def test_explicit_repo_skips_declared_repo_resolution(tmp_path: Path, monkeypatc
     monkeypatch.setattr(orchestrate, "_checkout_is_dirty", lambda candidate: False)
     monkeypatch.setattr(orchestrate, "default_base", lambda candidate: "main")
     result = orchestrate.run_orchestrate(layout, path, repo=repo)
-    assert result.warnings == ()
+    assert len(result.warnings) == 1
+    assert "workspace placement disabled" in result.warnings[0]
     # A reader pins the explicit repository baseline -- `resolve_item_repo` still must not be called, since
     # `repo=` bypasses declared-repo resolution regardless of placement.
     assert result.dispatches[0].worktree.action == "pin-detached"

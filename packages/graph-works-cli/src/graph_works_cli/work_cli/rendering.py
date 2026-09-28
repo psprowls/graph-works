@@ -375,6 +375,12 @@ def render_orchestrate(payload: dict[str, Any]) -> None:
         typer.echo(
             f"  dispatch {dispatch['key']}: {dispatch['skill']} mode={dispatch['mode']} "
             f"model={dispatch['model']} worktree={dispatch['worktree']['action']}"
+            f"{(' workspace=' + dispatch['workspace']['branch']) if dispatch['workspace'] else ''}"
+        )
+    for preparation in payload["workspace_preparations"]:
+        typer.echo(
+            f"  workspace-prepare {preparation['owner_path']} ({preparation['owner_phase']}): "
+            f"{preparation['branch']} at {preparation['worktree']} from {preparation['base_branch']}"
         )
     for advance in payload["advances"]:
         typer.echo(f"  advance {advance['path']} (mode={advance['mode']}): {advance['reason']}")

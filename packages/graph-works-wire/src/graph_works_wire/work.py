@@ -937,6 +937,11 @@ def orchestrate_payload(result: OrchestrateResult) -> dict[str, Any]:
                 "provenance": dispatch_payload(result.plan.dispatch_resolutions[dispatch.key])["provenance"],
                 "reasoning_effort": dispatch.reasoning_effort,
                 "worktree": _worktree(dispatch.worktree),
+                "workspace": (
+                    None
+                    if (placement := result.plan.workspace_placements.get(dispatch.key)) is None
+                    else {"worktree": placement.worktree, "branch": placement.branch}
+                ),
                 "merge_target": dispatch.merge_target,
                 "auto_merge": dispatch.auto_merge,
                 "human_checkpoints": _checkpoints(result.plan.human_checkpoints.get(dispatch.key)),
@@ -958,6 +963,16 @@ def orchestrate_payload(result: OrchestrateResult) -> dict[str, Any]:
                 "worktree": _worktree(preparation.worktree),
             }
             for preparation in result.preparations
+        ],
+        "workspace_preparations": [
+            {
+                "owner_path": preparation.owner_path,
+                "owner_phase": preparation.owner_phase,
+                "worktree": preparation.worktree,
+                "branch": preparation.branch,
+                "base_branch": preparation.base_branch,
+            }
+            for preparation in result.workspace_preparations
         ],
         "advances": [
             {

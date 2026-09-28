@@ -95,7 +95,7 @@ from graph_works_core.workspace.repo_context import (
     repository_identity,
 )
 from graph_works_core.workspace.repos import ItemRepo, resolve_item_repo
-from graph_works_core.workspace.workspace_branch import WORKSPACE_REPO
+from graph_works_core.workspace.workspace_branch import WORKSPACE_REPO, workspace_repo
 
 WALK_DEPTH_CAP = 10_000
 
@@ -2348,6 +2348,20 @@ def run_orchestrate(
         if item.path in subtree_paths and item.phase == "execute"
     }
 
+    ws_repo, ws_note = workspace_repo(layout)
+    ws_context = None
+    if ws_repo is not None:
+        assert ws_repo.path is not None
+        ws_context = observe_repository(
+            ws_repo.path,
+            paths=(
+                Path(stamp.worktree)
+                for item in items
+                for name, stamp in item.repo_stamps.items()
+                if name == WORKSPACE_REPO
+            ),
+        )
+
     computed = plan(
         planning_items,
         path,
@@ -2374,6 +2388,9 @@ def run_orchestrate(
         item_repos=item_repos,
         repo_contexts=repo_contexts,
         finish_plans=finish_plans,
+        workspace_repo=ws_repo,
+        workspace_context=ws_context,
+        workspace_worktrees_dir=str(layout.worktrees_dir.resolve()) if ws_repo else None,
         checkpoints=checkpoints,
     )
 
@@ -2395,7 +2412,13 @@ def run_orchestrate(
         open_decisions=decisions.open_,
         assumed_decisions=decisions.assumed,
         decision_counts=decisions.counts,
-        warnings=computed.warnings + decisions.warnings + ((repo_note,) if repo_note else ()) + descendant_repo_notes,
+        warnings=(
+            computed.warnings
+            + decisions.warnings
+            + ((repo_note,) if repo_note else ())
+            + descendant_repo_notes
+            + ((ws_note,) if ws_note else ())
+        ),
         holds=open_holds(items, bundle.root, subtree),
         code_repo=code_repo,
         code_repo_name=root_repo.name if repo is None else None,

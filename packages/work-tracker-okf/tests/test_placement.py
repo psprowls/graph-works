@@ -13,8 +13,15 @@ from okf_io import load, load_bundle
 from work_helpers import load_written_items, make_item, write_item
 from work_tracker_okf.decisions import HoldFact
 from work_tracker_okf.dependencies import DependencyEdge
-from work_tracker_okf.items import Stamp, WorkItem, load_items
-from work_tracker_okf.placement import PLACEMENT_REFUSALS, PlacementPlan, apply_placement, plan_placement
+from work_tracker_okf.items import IGNORE, Stamp, WorkItem, load_items
+from work_tracker_okf.placement import (
+    PLACEMENT_REFUSALS,
+    PlacementPlan,
+    apply_baseline,
+    apply_placement,
+    plan_baseline,
+    plan_placement,
+)
 from work_tracker_okf.workflow import route, state_for
 
 TODAY = date(2026, 9, 14)
@@ -101,6 +108,9 @@ def test_the_refusal_vocabulary_is_closed() -> None:
         "terminal",
         "entry-unprovable",
         "phase-mismatch",
+        "invalid-baseline",
+        "baseline-conflict",
+        "baseline-missing",
     } == PLACEMENT_REFUSALS
 
 
@@ -554,3 +564,146 @@ def test_apply_updates_an_existing_repo_stamp_entry_leaving_the_sibling_and_the_
     unchanged = [i for i in range(len(before_lines)) if i not in changed]
     for i in unchanged:
         assert before_lines[i] == after_lines[i]
+
+
+# --- execute baseline (start_sha) ---
+
+A = "a" * 40
+B = "b" * 40
+TODAY_B = date(2026, 9, 28)
+PATH = "work/bug-x"
+
+
+def _page(tmp_path, *, phase="execute", worktree=None, branch=None, start_sha=None, repo_stamps=""):
+    root = tmp_path / "okf"
+    page = root / f"{PATH}.md"
+    page.parent.mkdir(parents=True, exist_ok=True)
+    extra = "".join(
+        f"{k}: {v}\n" for k, v in (("worktree", worktree), ("branch", branch), ("start_sha", start_sha)) if v
+    )
+    page.write_text(
+        "---\ntype: Bug\ntitle: x\ndescription: d\nstatus: stable\nwork_status: in-progress\n"
+        f"phase: {phase}\neffort: small\nopened: 2026-09-01\nupdated: 2026-09-01\naffects:\n- packages/a\n"
+        + extra
+        + repo_stamps
+        + "---\n\nbody\n",
+        encoding="utf-8",
+        newline="\n",
+    )
+    return root, page
+
+
+def _items(tmp_path, **fm):
+    root, _page_path = _page(tmp_path, **fm)
+    return load_items(load_bundle(root, ignore=IGNORE)), PATH
+
+
+def _bplan(items, path, **kw):
+    return plan_placement(items, path, root=path, phase="execute", today=TODAY_B, **kw)
+
+
+def test_a_new_pair_records_the_given_baseline(tmp_path):
+    items, path = _items(tmp_path)
+    plan = _bplan(items, path, worktree="/wt/x", branch="b", start_sha=A)
+    assert plan.refusal is None and plan.start_after == A
+    assert ("start_sha", A) in plan.changes
+
+
+def test_an_unchanged_pair_keeps_its_recorded_baseline_when_none_is_given(tmp_path):
+    items, path = _items(tmp_path, worktree="/wt/x", branch="b", start_sha=A)
+    plan = _bplan(items, path, worktree="/wt/x", branch="b")
+    assert plan.refusal is None and plan.start_after == A and not plan.changed
+
+
+def test_a_changed_pair_never_retains_the_prior_baseline(tmp_path):
+    items, path = _items(tmp_path, worktree="/wt/old", branch="old", start_sha=A)
+    plan = _bplan(items, path, worktree="/wt/new", branch="new")
+    assert plan.start_after is None and ("start_sha", None) in plan.changes
+
+
+def test_a_conflicting_baseline_on_an_unchanged_pair_refuses(tmp_path):
+    items, path = _items(tmp_path, worktree="/wt/x", branch="b", start_sha=A)
+    plan = _bplan(items, path, worktree="/wt/x", branch="b", start_sha=B)
+    assert plan.refusal == "baseline-conflict" and plan.changes == ()
+
+
+def test_an_identical_replay_is_a_no_op(tmp_path):
+    items, path = _items(tmp_path, worktree="/wt/x", branch="b", start_sha=A)
+    plan = _bplan(items, path, worktree="/wt/x", branch="b", start_sha=A)
+    assert plan.refusal is None and not plan.changed
+
+
+def test_an_unstamped_pair_gains_a_baseline(tmp_path):
+    items, path = _items(tmp_path, worktree="/wt/x", branch="b")
+    plan = _bplan(items, path, worktree="/wt/x", branch="b", start_sha=A)
+    assert plan.changes[0] == ("start_sha", A)
+
+
+@pytest.mark.parametrize("bad", ["abc", A.upper(), "HEAD"])
+def test_a_malformed_baseline_refuses(tmp_path, bad):
+    items, path = _items(tmp_path)
+    assert _bplan(items, path, worktree="/wt/x", branch="b", start_sha=bad).refusal == "invalid-baseline"
+
+
+def test_a_required_baseline_refuses_when_absent(tmp_path):
+    items, path = _items(tmp_path)
+    plan = _bplan(items, path, worktree="/wt/x", branch="b", require_start_sha=True)
+    assert plan.refusal == "baseline-missing"
+
+
+def test_a_scalar_repoint_deletes_the_old_baseline_from_the_page(tmp_path):
+    root, page = _page(tmp_path, worktree="/wt/old", branch="old", start_sha=A)
+    items = load_items(load_bundle(root, ignore=IGNORE))
+    document = load(page)
+    apply_placement(document, _bplan(items, PATH, worktree="/wt/new", branch="new"))
+    assert "start_sha" not in document.fm_data()
+
+
+def test_a_foreign_stamp_writes_its_own_baseline_and_drops_it_on_repoint(tmp_path):
+    stamps = f"repo_stamps:\n  ui:\n    worktree: /wt/u\n    branch: u\n    start_sha: {A}\n"
+    root, page = _page(tmp_path, repo_stamps=stamps)
+    items = load_items(load_bundle(root, ignore=IGNORE))
+    document = load(page)
+    apply_placement(document, _bplan(items, PATH, worktree="/wt/v", branch="v", repo="ui"))
+    assert document.fm_data()["repo_stamps"]["ui"] == {"worktree": "/wt/v", "branch": "v"}
+    page.write_text(document.serialize(), encoding="utf-8", newline="")
+    items = load_items(load_bundle(root, ignore=IGNORE))
+    document = load(page)
+    apply_placement(document, _bplan(items, PATH, worktree="/wt/v", branch="v", repo="ui", start_sha=B))
+    assert document.fm_data()["repo_stamps"]["ui"]["start_sha"] == B
+
+
+def test_baseline_fills_an_absent_scalar(tmp_path):
+    items, path = _items(tmp_path)
+    plan = plan_baseline(items, path, observed_head=A, head_descends_from_recorded=False, today=TODAY_B)
+    assert plan.refusal is None and plan.after == A and plan.changed
+
+
+def test_baseline_keeps_a_recorded_ancestor(tmp_path):
+    items, path = _items(tmp_path, start_sha=A)
+    plan = plan_baseline(items, path, observed_head=B, head_descends_from_recorded=True, today=TODAY_B)
+    assert plan.refusal is None and plan.after == A and not plan.changed
+
+
+def test_baseline_refuses_a_diverged_head(tmp_path):
+    items, path = _items(tmp_path, start_sha=A)
+    plan = plan_baseline(items, path, observed_head=B, head_descends_from_recorded=False, today=TODAY_B)
+    assert plan.refusal == "baseline-conflict"
+
+
+def test_baseline_is_only_recorded_at_execute(tmp_path):
+    items, path = _items(tmp_path, phase="plan")
+    assert (
+        plan_baseline(items, path, observed_head=A, head_descends_from_recorded=False, today=TODAY_B).refusal
+        == "not-execute"
+    )
+
+
+def test_apply_baseline_writes_start_sha_and_updated(tmp_path):
+    root, page = _page(tmp_path)
+    items = load_items(load_bundle(root, ignore=IGNORE))
+    document = load(page)
+    apply_baseline(
+        document, plan_baseline(items, PATH, observed_head=A, head_descends_from_recorded=False, today=TODAY_B)
+    )
+    assert document.fm_data()["start_sha"] == A

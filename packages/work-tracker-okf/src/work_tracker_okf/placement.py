@@ -38,7 +38,7 @@ from typing import Literal, get_args
 from okf_io import Document
 
 from work_tracker_okf.items import COMMIT_OID as _OID
-from work_tracker_okf.items import WorkItem
+from work_tracker_okf.items import WorkItem, is_commit_oid
 from work_tracker_okf.vocabulary import EFFORTS, PHASES, TERMINAL_STATUSES, TYPES, WORK_STATUSES
 from work_tracker_okf.workflow import route, state_for
 
@@ -54,6 +54,9 @@ PlacementRefusal = Literal[
     "terminal",
     "entry-unprovable",
     "phase-mismatch",
+    "invalid-baseline",
+    "baseline-conflict",
+    "baseline-missing",
 ]
 
 PLACEMENT_REFUSALS: frozenset[str] = frozenset(get_args(PlacementRefusal))
@@ -183,6 +186,8 @@ class PlacementPlan:
     repo: str | None = None
     """`None` is the scalar pair; a name is `repo_stamps[name]`, passed only
     for a repository other than the item's own."""
+    start_before: str | None = None
+    start_after: str | None = None
 
     @property
     def changed(self) -> bool:
@@ -199,20 +204,37 @@ def plan_placement(
     branch: str,
     today: date,
     repo: str | None = None,
+    start_sha: str | None = None,
+    require_start_sha: bool = False,
 ) -> PlacementPlan:
     """Plan recording (*worktree*, *branch*) on *path* for a *phase* dispatch
-    of the subtree rooted at *root*. Mutates nothing, reads no clock."""
+    of the subtree rooted at *root*. Mutates nothing, reads no clock.
+
+    The pair travels with its execute baseline (`start_sha`). With the pair
+    unchanged and no *start_sha* given, a recorded baseline is kept; with the
+    pair changed and none given, the recorded baseline is dropped (a changed
+    placement never retains the prior SHA). A given *start_sha* equal to the
+    recorded one is a no-op, one filling an absent baseline is written, and one
+    differing from a recorded baseline on an unchanged pair refuses
+    `baseline-conflict`. A malformed one refuses `invalid-baseline`.
+    *require_start_sha* refuses `baseline-missing` when the resulting stamp
+    would have no baseline.
+    """
     index = {item.path: item for item in items}
     item = index.get(path)
     if item is None or repo is None:
         before = (item.worktree, item.branch) if item is not None else (None, None)
+        start_before = item.start_sha if item is not None else None
     else:
         stamp = item.repo_stamps.get(repo)
         before = (stamp.worktree, stamp.branch) if stamp is not None else (None, None)
+        start_before = stamp.start_sha if stamp is not None else None
     after = (worktree, branch)
 
     def refused(reason: PlacementRefusal, detail: str, current: str | None = None) -> PlacementPlan:
-        return PlacementPlan(path, root, phase, current, before, after, (), reason, detail, repo)
+        return PlacementPlan(
+            path, root, phase, current, before, after, (), reason, detail, repo, start_before, start_before
+        )
 
     if item is None:
         return refused("unknown-path", f"unknown work item {path!r}")
@@ -235,6 +257,14 @@ def plan_placement(
     problem = _pair_problem(worktree, branch, repo)
     if problem is not None:
         return refused("invalid-pair", problem, item.phase)
+    if start_sha is not None and not is_commit_oid(start_sha):
+        return refused(
+            "invalid-baseline", f"start_sha {start_sha!r} is not a full lowercase commit object ID", item.phase
+        )
+    if repo is None and "start_sha" in item.invalid_optional_fields:
+        return refused(
+            "invalid-item", f"{path} has a malformed start_sha; repair it before recording a placement", item.phase
+        )
     if path != root and phase not in CODE_PHASES:
         return refused(
             "read-only-descendant",
@@ -260,15 +290,37 @@ def plan_placement(
             f"{path} is at phase {current!r}, not the dispatched {phase!r}; inspect before recording",
             current,
         )
+    pair_changed = before != after
+    if start_sha is None:
+        start_after = None if pair_changed else start_before
+    elif not pair_changed and start_before is not None and start_before != start_sha:
+        return refused(
+            "baseline-conflict",
+            f"{path} already records start_sha {start_before} for {worktree}; the observed {start_sha} differs "
+            "-- inspect before recording",
+            current,
+        )
+    else:
+        start_after = start_sha
+    if require_start_sha and start_after is None:
+        return refused(
+            "baseline-missing",
+            f"{path} has no recorded start_sha for {worktree} and none was proved; a code placement needs its baseline",
+            current,
+        )
     changes: list[tuple[str, object]] = [
         (key, value)
         for key, old, value in (("worktree", before[0], worktree), ("branch", before[1], branch))
         if old != value
     ]
+    if start_after != start_before:
+        changes.append(("start_sha", start_after))
     if changes and item.updated != today.isoformat():
         # A `date`, not an ISO string: ruamel would quote a string that re-parses as a date.
         changes.append(("updated", today))
-    return PlacementPlan(path, root, phase, current, before, after, tuple(changes), None, "", repo)
+    return PlacementPlan(
+        path, root, phase, current, before, after, tuple(changes), None, "", repo, start_before, start_after
+    )
 
 
 def apply_placement(document: Document, plan: PlacementPlan) -> None:
@@ -281,25 +333,113 @@ def apply_placement(document: Document, plan: PlacementPlan) -> None:
     assert plan.refusal is None, f"refused placement ({plan.refusal}) must not be applied"
     if plan.repo is None:
         for key, value in plan.changes:
-            document.set(key, value)
+            if value is None:
+                document.delete(key)
+            else:
+                document.set(key, value)
         return
-    pair = {key: value for key, value in plan.changes if key in ("worktree", "branch")}
+    stamp_keys = ("worktree", "branch", "start_sha")
+    pair = {key: value for key, value in plan.changes if key in stamp_keys}
     if pair:
         stamps = document.fm_raw.get("repo_stamps")
-        fresh = {"worktree": plan.after[0], "branch": plan.after[1]}
+        fresh: dict[str, str] = {"worktree": plan.after[0], "branch": plan.after[1]}
+        if plan.start_after is not None:
+            fresh["start_sha"] = plan.start_after
         if not isinstance(stamps, MutableMapping):
             document.set("repo_stamps", {plan.repo: fresh})
         else:
             entry = stamps.get(plan.repo)
             if isinstance(entry, MutableMapping):
                 for key, value in pair.items():
-                    entry[key] = value
+                    if value is None:
+                        entry.pop(key, None)
+                    else:
+                        entry[key] = value
             else:
                 stamps[plan.repo] = fresh
             document.mark_dirty()
     for key, value in plan.changes:
         if key == "updated":
             document.set(key, value)
+
+
+BaselineRefusal = Literal[
+    "unknown-path",
+    "invalid-item",
+    "terminal",
+    "not-execute",
+    "invalid-baseline",
+    "baseline-conflict",
+    "no-repo",
+    "outside-repository",
+    "git-unavailable",
+]
+BASELINE_REFUSALS: frozenset[str] = frozenset(get_args(BaselineRefusal))
+
+
+@dataclass(frozen=True, slots=True)
+class BaselinePlan:
+    """Recording the scalar execute baseline for an attended execute stage.
+    The last three refusals are produced one band up, by the git-reading shell."""
+
+    path: str
+    before: str | None
+    after: str | None
+    changes: tuple[tuple[str, object], ...]
+    refusal: BaselineRefusal | None
+    detail: str
+
+    @property
+    def changed(self) -> bool:
+        return bool(self.changes)
+
+
+def plan_baseline(
+    items: Sequence[WorkItem], path: str, *, observed_head: str, head_descends_from_recorded: bool, today: date
+) -> BaselinePlan:
+    """Plan writing *observed_head* as *path*'s scalar `start_sha` before execute work starts.
+
+    Absent: written. Equal: no-op. A recorded baseline *observed_head* descends
+    from is kept -- the stage is already under way, and its range starts there.
+    Anything else is `baseline-conflict`: two unrelated starting points. Reads no git.
+    """
+    item = next((candidate for candidate in items if candidate.path == path), None)
+    before = item.start_sha if item is not None else None
+
+    def refused(reason: BaselineRefusal, detail: str) -> BaselinePlan:
+        return BaselinePlan(path, before, before, (), reason, detail)
+
+    if item is None:
+        return refused("unknown-path", f"unknown work item {path!r}")
+    problem = _item_problem(item)
+    if problem is not None:
+        return refused("invalid-item", problem)
+    if "start_sha" in item.invalid_optional_fields:
+        return refused("invalid-item", f"{path} has a malformed start_sha; repair it first")
+    if item.work_status in TERMINAL_STATUSES or item.work_status == "mitigated" or item.phase == "done":
+        return refused("terminal", f"{path} is {item.work_status} at phase {item.phase!r}")
+    if item.phase != "execute":
+        return refused("not-execute", f"{path} is at phase {item.phase!r}; a baseline is recorded as execute starts")
+    if not is_commit_oid(observed_head):
+        return refused("invalid-baseline", f"observed HEAD {observed_head!r} is not a full commit object ID")
+    if before is None:
+        changes: list[tuple[str, object]] = [("start_sha", observed_head)]
+        if item.updated != today.isoformat():
+            changes.append(("updated", today))
+        return BaselinePlan(path, None, observed_head, tuple(changes), None, "")
+    if before == observed_head or head_descends_from_recorded:
+        return BaselinePlan(path, before, before, (), None, "")
+    return refused(
+        "baseline-conflict",
+        f"{path} records start_sha {before}, and HEAD {observed_head} does not descend from it; "
+        "inspect where this stage's work started before recording",
+    )
+
+
+def apply_baseline(document: Document, plan: BaselinePlan) -> None:
+    assert plan.refusal is None, f"refused baseline ({plan.refusal}) must not be applied"
+    for key, value in plan.changes:
+        document.set(key, value)
 
 
 def _item_problem(item: WorkItem) -> str | None:
@@ -360,16 +500,21 @@ def _pair_problem(worktree: str, branch: str, repo: str | None = None) -> str | 
 
 
 __all__ = [
+    "BASELINE_REFUSALS",
     "CODE_PHASES",
     "PLACEMENT_REFUSALS",
     "READER_PHASES",
     "READER_REFUSALS",
+    "BaselinePlan",
+    "BaselineRefusal",
     "PlacementPlan",
     "PlacementRefusal",
     "ReaderObservation",
     "ReaderReceiptPlan",
     "ReaderRefusal",
+    "apply_baseline",
     "apply_placement",
+    "plan_baseline",
     "plan_placement",
     "plan_reader_receipt",
 ]

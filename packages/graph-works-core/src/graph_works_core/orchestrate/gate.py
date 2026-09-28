@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
 import subprocess
 import sys
@@ -118,6 +119,9 @@ Spawn = Callable[[Path], None]
 
 WINDOWS_DETACHED_FLAGS = 0x00000200 | 0x00000008  # CREATE_NEW_PROCESS_GROUP | DETACHED_PROCESS
 RUNNER_START_TIMEOUT = 10.0
+REPLACE_ATTEMPTS = 5
+REPLACE_PAUSE = 0.05
+RUN_ID_PATTERN = re.compile(r"\d{8}T\d{6}Z-[0-9a-f]{8}")
 START_GRACE = timedelta(seconds=30)
 
 
@@ -149,18 +153,23 @@ def _parse_started(value: object) -> datetime | None:
         return None
 
 
-def _live(record_path: Path, data: dict[str, Any], now: datetime) -> bool:
-    """Alive: the runner holds its lock, or it was spawned moments ago and has not taken it yet.
+def _read_live(record_path: Path, now: datetime) -> tuple[dict[str, Any] | None, bool]:
+    """The record and whether its runner is alive, probed in the one safe order.
 
-    The grace closes the window between the record being written and the detached
-    runner's lock acquire; a spawn-failed record carries a `result`, so it never qualifies.
+    Liveness is probed BEFORE the record is read. The runner writes `result` before it
+    releases its lock, so a free lock means the record read afterwards is final; the
+    reverse order can see "no result" and then "no lock" for a run that just finished.
+    Alive means the runner holds its lock, or it was spawned moments ago and has not
+    taken it yet (the grace; a spawn-failed record carries a `result`, so never qualifies).
     """
-    if _alive(record_path):
-        return True
-    if data.get("runner_started") or data.get("result") is not None:
-        return False
+    held = _alive(record_path)
+    data = _read_record(record_path)
+    if held:
+        return data, True
+    if data is None or data.get("runner_started") or data.get("result") is not None:
+        return data, False
     started = _parse_started(data.get("started"))
-    return started is not None and timedelta(0) <= now - started <= START_GRACE
+    return data, started is not None and timedelta(0) <= now - started <= START_GRACE
 
 
 def _check_refusal(reason: GateRefusal, detail: str, *, tree: str | None = None) -> GateCheckResult:
@@ -214,13 +223,10 @@ def resolve_target(layout: WorkspaceLayout, path: str, *, worktree: Path | None)
 
 def _existing_run(directory: Path, request: dict[str, object], now: datetime) -> str | None:
     for record_path in sorted(directory.glob("*.json")):
-        try:
-            data = json.loads(record_path.read_text(encoding="utf-8"))
-        except (OSError, UnicodeError, ValueError):
+        data, live = _read_live(record_path, now)
+        if data is None or data.get("result") is not None or not live:
             continue
-        if not isinstance(data, dict) or data.get("result") is not None:
-            continue
-        if all(data.get(key) == value for key, value in request.items()) and _live(record_path, data, now):
+        if all(data.get(key) == value for key, value in request.items()):
             run_id = data.get("run_id")
             if isinstance(run_id, str):
                 return run_id
@@ -305,13 +311,17 @@ def run_gate_run(
         joined = _existing_run(directory, request, now)
         if joined is not None:
             return GateRunResult("running", None, "", joined, None, command, names, log_path, lookup.warnings)
-        with record_path.open("x", encoding="utf-8", newline="\n") as handle:
-            handle.write(json.dumps(record, indent=2) + "\n")
+        write_record(record_path, record, exclusive=True)
     try:
         spawn(record_path)
     except OSError as exc:
-        record["result"] = {"exit": None, "error": str(exc)}
-        record_path.write_text(json.dumps(record, indent=2) + "\n", encoding="utf-8", newline="\n")
+        held = _alive(record_path)
+        current = _read_record(record_path) or record
+        if held or current.get("result") is not None:
+            # slow to start, not failed: the runner owns the record now
+            return GateRunResult("started", None, "", run_id, None, command, names, log_path, lookup.warnings)
+        current["result"] = {"exit": None, "error": str(exc)}
+        write_record(record_path, current)
         return GateRunResult(None, "runner-failed", str(exc), run_id, None, command, names, log_path, lookup.warnings)
     return GateRunResult("started", None, "", run_id, None, command, names, log_path, lookup.warnings)
 
@@ -386,7 +396,8 @@ def spawn_runner(record_path: Path) -> None:
 def _await_runner_started(record_path: Path, timeout: float) -> None:
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
-        if json.loads(record_path.read_text(encoding="utf-8")).get("runner_started"):
+        data = _read_record(record_path)
+        if data is not None and data.get("runner_started"):
             return
         time.sleep(0.05)
     raise OSError(f"gate runner did not start within {timeout:.0f}s ({record_path})")
@@ -419,6 +430,8 @@ def _read_record(record_path: Path) -> dict[str, Any] | None:
 
 def _choose_record(directory: Path, run_id: str | None) -> Path | None:
     if run_id is not None:
+        if RUN_ID_PATTERN.fullmatch(run_id) is None:
+            return None
         chosen = directory / f"{run_id}.json"
         return chosen if chosen.is_file() else None
     ranked: list[tuple[str, str, Path]] = []
@@ -429,14 +442,37 @@ def _choose_record(directory: Path, run_id: str | None) -> Path | None:
     return max(ranked)[2] if ranked else None
 
 
+def write_record(
+    record_path: Path,
+    data: dict[str, Any],
+    *,
+    exclusive: bool = False,
+    sleep: Callable[[float], None] = time.sleep,
+) -> None:
+    """Write a pending record atomically (temp + replace); a Windows reader may briefly block the replace."""
+    if exclusive and record_path.exists():
+        raise FileExistsError(record_path)
+    temp = record_path.with_name(f".{record_path.name}.{os.getpid()}.{time.monotonic_ns()}.tmp")
+    try:
+        temp.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8", newline="\n")
+        for attempt in range(REPLACE_ATTEMPTS):
+            try:
+                temp.replace(record_path)
+                return
+            except PermissionError:
+                if attempt + 1 == REPLACE_ATTEMPTS:
+                    raise
+                sleep(REPLACE_PAUSE * (attempt + 1))
+    except BaseException:
+        temp.unlink(missing_ok=True)
+        raise
+
+
 def _mark_recorded(record_path: Path) -> None:
     data = _read_record(record_path)
-    if data is None:
-        return
-    data["recorded"] = True
-    temp = record_path.with_name(f".{record_path.name}.{time.monotonic_ns()}.tmp")
-    temp.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8", newline="\n")
-    temp.replace(record_path)
+    if data is not None:
+        data["recorded"] = True
+        write_record(record_path, data)
 
 
 def run_gate_wait(
@@ -455,14 +491,13 @@ def run_gate_wait(
         return _wait_refusal(f"{path}: no gate run to wait for")
     deadline = clock.monotonic() + timeout
     while True:
-        data = _read_record(record_path)
+        data, alive = _read_live(record_path, clock.wall())
         if data is None:
             return _wait_refusal(f"{record_path}: unreadable pending record")
         rid = str(data.get("run_id"))
         log_path = data.get("log_path")
         log_path = log_path if isinstance(log_path, str) else None
         result = data.get("result")
-        alive = _live(record_path, data, clock.wall())
         if isinstance(result, dict):
             code = result.get("exit")
             if not isinstance(code, int):

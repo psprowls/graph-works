@@ -306,3 +306,87 @@ def test_a_log_with_invalid_utf8_is_decoded_leniently(tmp_path):
     log.write_bytes(b"ok \xff\n")
     assert "ok" in gate_runner._read_log(log)
     assert gate_runner._read_log(tmp_path / "missing.log") == ""
+
+
+def test_wait_probes_liveness_before_reading_the_record(env, monkeypatch):
+    """A runner finishing between probe and read must not look orphaned."""
+    record = start(env)
+    real_probe = gate._alive
+
+    def probe_then_finish(path):
+        alive = real_probe(path)
+        finish_unrecorded(record, exit=0)  # the runner completes right after the lock is seen free
+        return alive
+
+    monkeypatch.setattr(gate, "_alive", probe_then_finish)
+    result = run_gate_wait(env.layout, env.path, run_id=None, timeout=0, clock=LATER, sleep=no_sleep, today=TODAY)
+    assert (result.status, result.exit) == ("finished", 0)
+
+
+def test_existing_run_probes_liveness_before_reading_the_record(env, monkeypatch):
+    record = start(env)
+    monkeypatch.setattr(gate, "_alive", lambda path: (finish_unrecorded(record, exit=0), False)[1])
+    second = run_gate_run(env.layout, env.path, now=NOW + timedelta(seconds=5), token="1a1b2c3d", spawn=env.spawn)
+    assert second.status == "started" and len(env.spawned) == 1  # finished record is not joined
+
+
+def test_a_slow_runner_start_is_not_declared_failed(env, monkeypatch):
+    def slow(record_path):
+        gate_lock = locked(record_path.with_suffix(".lock"))
+        env.stack.enter_context(gate_lock)  # the runner took its lock just after the timeout
+        raise OSError("gate runner did not start within 10s")
+
+    result = run_gate_run(env.layout, env.path, now=NOW, token="0a1b2c3d", spawn=slow)
+    assert result.status == "started" and result.refusal is None
+    record = runs_dir(env.layout, env.path) / f"{result.run_id}.json"
+    assert json.loads(record.read_text(encoding="utf-8"))["result"] is None
+
+
+def test_runner_exits_early_when_the_record_already_has_a_result(env):
+    record = start(env)
+    finish_unrecorded(record, exit=7)
+    calls = []
+    code = gate_runner.execute(
+        record, wall=lambda: NOW, monotonic=ticks(0, 1), sleep=no_sleep, run=lambda *a: calls.append(a) or 0
+    )
+    assert code == 0 and calls == []
+    assert json.loads(record.read_text(encoding="utf-8"))["result"]["exit"] == 7
+
+
+def test_await_runner_started_tolerates_a_torn_record(tmp_path):
+    record = tmp_path / "r.json"
+    record.write_text("{", encoding="utf-8")
+    with pytest.raises(OSError, match="did not start"):
+        gate._await_runner_started(record, 0.1)
+
+
+def test_record_update_retries_a_blocked_replace(tmp_path, monkeypatch):
+    record = write_record(tmp_path)
+    real = Path.replace
+    failures = []
+
+    def flaky(self, target):
+        if len(failures) < 2:
+            failures.append(1)
+            raise PermissionError("held by a reader")
+        return real(self, target)
+
+    monkeypatch.setattr(Path, "replace", flaky)
+    slept = []
+    gate_runner._update(record, sleep=slept.append, recorded=True)
+    assert json.loads(record.read_text(encoding="utf-8"))["recorded"] is True and len(slept) == 2
+
+
+def test_record_update_gives_up_after_bounded_permission_errors(tmp_path, monkeypatch):
+    record = write_record(tmp_path)
+    monkeypatch.setattr(Path, "replace", lambda self, target: (_ for _ in ()).throw(PermissionError("held")))
+    with pytest.raises(PermissionError):
+        gate_runner._update(record, sleep=no_sleep, recorded=True)
+    assert [p.name for p in tmp_path.iterdir() if p.name.endswith(".tmp")] == []
+
+
+@pytest.mark.parametrize("bad", ["../x", "..", "a/b", "nope", "20260928T120000Z-ZZZZZZZZ"])
+def test_wait_rejects_a_malformed_run_id(env, bad):
+    start(env)
+    result = run_gate_wait(env.layout, env.path, run_id=bad, timeout=0, clock=CLOCK, sleep=no_sleep, today=TODAY)
+    assert result.refusal == "no-run"

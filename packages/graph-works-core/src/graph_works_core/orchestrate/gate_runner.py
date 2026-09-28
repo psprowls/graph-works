@@ -11,7 +11,6 @@ import json
 import os
 import subprocess
 import sys
-import tempfile
 import time
 from collections.abc import Callable, Sequence
 from contextlib import ExitStack
@@ -22,7 +21,7 @@ from typing import Any
 from okf_ext.locking import locked
 
 from graph_works_core.orchestrate import gate_git
-from graph_works_core.orchestrate.gate import gate_run_from_record
+from graph_works_core.orchestrate.gate import gate_run_from_record, write_record
 from graph_works_core.orchestrate.gate_receipts import record_gate_run, sanitize_tail
 from graph_works_core.workspace import provenance
 from graph_works_core.workspace.discovery import resolve
@@ -53,17 +52,10 @@ def _read(record_path: Path) -> dict[str, Any]:
     return data
 
 
-def _update(record_path: Path, **fields: object) -> None:
+def _update(record_path: Path, *, sleep: Callable[[float], None] = time.sleep, **fields: object) -> None:
     data = _read(record_path)
     data.update(fields)
-    handle, temp = tempfile.mkstemp(dir=record_path.parent, prefix=".record-", suffix=".tmp")
-    try:
-        with os.fdopen(handle, "w", encoding="utf-8", newline="\n") as out:
-            out.write(json.dumps(data, indent=2) + "\n")
-        Path(temp).replace(record_path)
-    except BaseException:
-        Path(temp).unlink(missing_ok=True)
-        raise
+    write_record(record_path, data, sleep=sleep)
 
 
 def _read_log(log_path: Path) -> str:
@@ -99,7 +91,9 @@ def execute(
         if not _acquire(stack, record_path, sleep):
             return 1  # another runner already owns this record
         record = _read(record_path)
-        _update(record_path, runner_started=True)
+        if record.get("result") is not None:
+            return 0  # already finished (or marked failed): never run twice
+        _update(record_path, sleep=sleep, runner_started=True)
         worktree = Path(record["worktree"])
         log_path = Path(record["log_path"])
         layout = resolve(workspace=record["workspace"])
@@ -116,12 +110,12 @@ def execute(
             changed = True
         tail = sanitize_tail(_read_log(log_path))
         result = {"exit": _exit_status(returncode), "tree_changed": changed, "duration_s": duration, "log_tail": tail}
-        _update(record_path, result=result)
+        _update(record_path, sleep=sleep, result=result)
         entry = gate_run_from_record(record, result)
         for delay in RETRY_DELAYS:
             outcome = record_gate_run(layout, record["owner"], entry, today=wall().date())
             if outcome.refusal is None:
-                _update(record_path, recorded=True)
+                _update(record_path, sleep=sleep, recorded=True)
                 break
             if outcome.refusal == "owner-terminal":
                 break

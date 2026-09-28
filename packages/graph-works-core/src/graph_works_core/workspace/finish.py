@@ -8,10 +8,12 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from types import MappingProxyType
+from typing import Literal
 
 from okf_io import Bundle, Document, load_bundle, parse
 from work_tracker_okf.items import IGNORE, WorkItem, load_items
 from work_tracker_okf.paths import MANAGED_ARTIFACTS, artifact_ref
+from work_tracker_okf.vocabulary import TERMINAL_STATUSES
 
 from graph_works_core.workspace.errors import WorkspaceError
 from graph_works_core.workspace.layout import WorkspaceLayout
@@ -343,6 +345,165 @@ def inspect_finish(layout: WorkspaceLayout, path: str) -> FinishVerification:
     code_entries = [entry for entry in verified if entry.repo != WORKSPACE_REPO]
     resolved = (code_entries or verified)[0].result_commit if verified else None
     return FinishVerification(not blockers, resolved, tuple(blockers), tuple(verified))
+
+
+CleanupAction = Literal["remove", "deferred", "skip"]
+
+
+@dataclass(frozen=True, slots=True)
+class CleanupRow:
+    repo: str
+    worktree: str
+    branch: str
+    target_branch: str
+    action: CleanupAction
+    reason: str
+
+
+@dataclass(frozen=True, slots=True)
+class CleanupPlan:
+    rows: tuple[CleanupRow, ...]
+    refusal: str | None
+
+
+def _worktree_list(repo: Path) -> tuple[tuple[str, str], ...] | None:
+    """Read `(canonical checkout, checked-out branch)` without changing Git state."""
+    listed = probe_git(repo, "worktree", "list", "--porcelain")
+    if listed.returncode != 0:
+        return None
+    rows: list[tuple[str, str]] = []
+    path: str | None = None
+    branch = ""
+    for line in (*listed.stdout.splitlines(), ""):
+        if not line:
+            if path is not None:
+                rows.append((path, branch))
+            path, branch = None, ""
+        elif line.startswith("worktree "):
+            if path is not None:
+                return None
+            path = str(Path(line[len("worktree ") :]).resolve())
+        elif line.startswith("branch "):
+            branch = line[len("branch ") :].removeprefix("refs/heads/")
+    if not rows or len({path for path, _ in rows}) != len(rows):
+        return None
+    return tuple(rows)
+
+
+def plan_finish_cleanup(layout: WorkspaceLayout, path: str, *, runner_cwd: Path | None) -> CleanupPlan:
+    """Plan removal of resolved, receipted stamps from read-only Git observations."""
+    items = load_items(load_bundle(layout.bundle_dir, ignore=IGNORE))
+    by_path = {item.path: item for item in items}
+    item = by_path.get(path)
+    if item is None:
+        return CleanupPlan((), f"{path}: unknown work item")
+    if item.work_status != "resolved" or item.phase != "done":
+        return CleanupPlan((), f"{path}: not resolved")
+    if "repo_stamps" in item.invalid_optional_fields:
+        return CleanupPlan((), f"{path}: malformed repo_stamps")
+    receipt, entries, error = read_finish_receipt(layout, path)
+    if error is not None:
+        return CleanupPlan((), error)
+    if receipt is None:
+        return CleanupPlan((), f"{path}: no finish receipt")
+
+    stamps: list[tuple[str | None, Path | None, str, str]] = []
+    try:
+        declared = declared_repositories(layout)
+        if item.worktree or item.branch:
+            own = resolve_item_repo(layout, item, by_path)
+            stamps.append((own.name, own.path, item.worktree or "", item.branch or ""))
+        for name, stamp in sorted(item.repo_stamps.items()):
+            if name == WORKSPACE_REPO:
+                ws_repo, _note = workspace_repo(layout)
+                repo = ws_repo.path if ws_repo is not None else None
+            else:
+                repo = declared.get(name)
+            stamps.append((name, repo, stamp.worktree, stamp.branch))
+    except WorkspaceError as exc:
+        return CleanupPlan((), str(exc))
+    targets = {entry.repo: entry.target_branch for entry in entries}
+    for stamp_name, repo, _worktree, _branch in stamps:
+        if stamp_name is None or repo is None:
+            return CleanupPlan((), f"{path}: stamped repo {stamp_name!r} has no verified checkout")
+        if stamp_name not in targets:
+            return CleanupPlan((), f"{path}: finish receipt does not name {stamp_name!r}")
+
+    live = [other for other in items if other.path != path and other.work_status not in TERMINAL_STATUSES]
+    if any("repo_stamps" in other.invalid_optional_fields for other in live):
+        return CleanupPlan((), f"{path}: live item has malformed repo_stamps; shared checkout cannot be ruled out")
+    live_worktrees = {
+        str(Path(worktree).resolve())
+        for other in live
+        for worktree in (other.worktree, *(stamp.worktree for stamp in other.repo_stamps.values()))
+        if worktree
+    }
+    live_branches: set[tuple[str | None, str]] = set()
+    for other in live:
+        if other.branch:
+            try:
+                owner = resolve_item_repo(layout, other, by_path).name
+            except WorkspaceError:
+                owner = None
+            live_branches.add((owner, other.branch))
+        live_branches.update((name, stamp.branch) for name, stamp in other.repo_stamps.items() if stamp.branch)
+
+    runner = runner_cwd.resolve() if runner_cwd is not None else None
+    rows: list[CleanupRow] = []
+    for stamp_name, repo, worktree, branch in stamps:
+        assert stamp_name is not None and repo is not None
+        target = targets[stamp_name]
+        listed = _worktree_list(repo)
+        if listed is None:
+            return CleanupPlan((), f"{path}: cannot verify worktrees in {stamp_name!r}")
+        listed_paths = {checkout for checkout, _ in listed}
+        tree = str(Path(worktree).resolve()) if worktree else ""
+        if tree not in listed_paths:
+            tree = ""
+        if branch:
+            exists = probe_git(repo, "show-ref", "--verify", "--quiet", "refs/heads/" + branch)
+            if exists.cause != "ok" or exists.returncode not in (0, 1):
+                return CleanupPlan((), f"{path}: cannot verify branch {branch!r} in {stamp_name!r}")
+            if exists.returncode == 1:
+                branch = ""
+            elif _commit(repo, "refs/heads/" + branch) is None:
+                return CleanupPlan((), f"{path}: cannot verify branch commit {branch!r} in {stamp_name!r}")
+        if not tree and not branch:
+            continue
+        trunk = {str(repo.resolve()), listed[0][0]}
+        target_checkouts = {checkout for checkout, checked_branch in listed if checked_branch == target}
+        # A stamp whose checkout moved to another branch is stale; do not offer
+        # either that checkout or its separately existing branch for removal.
+        checkout_branch = next((checked_branch for checkout, checked_branch in listed if checkout == tree), None)
+        stale_checkout = bool(tree and branch and checkout_branch not in (branch, ""))
+        branch_elsewhere = bool(
+            branch and any(checked_branch == branch and checkout != tree for checkout, checked_branch in listed)
+        )
+        action: CleanupAction
+        reason: str
+        if branch:
+            ancestry = probe_git(repo, "merge-base", "--is-ancestor", "refs/heads/" + branch, "refs/heads/" + target)
+            if ancestry.cause != "ok" or ancestry.returncode not in (0, 1):
+                return CleanupPlan((), f"{path}: cannot verify merge of {branch!r} into {target!r} in {stamp_name!r}")
+        else:
+            ancestry = None
+        if ancestry is not None and ancestry.returncode == 1:
+            action, reason = "skip", "unmerged"
+        elif branch == target or (tree and (tree in trunk or tree in target_checkouts)):
+            action, reason = "skip", "target"
+        elif (
+            stale_checkout
+            or branch_elsewhere
+            or (tree and tree in live_worktrees)
+            or (branch and ((stamp_name, branch) in live_branches or (None, branch) in live_branches))
+        ):
+            action, reason = "skip", "shared"
+        elif runner is not None and tree and runner.is_relative_to(tree):
+            action, reason = "deferred", "runner"
+        else:
+            action, reason = "remove", ""
+        rows.append(CleanupRow(stamp_name, tree, branch, target, action, reason))
+    return CleanupPlan(tuple(rows), None)
 
 
 def finish_read_guard(layout: WorkspaceLayout, path: str, *, bundle: Bundle | None = None) -> str:

@@ -24,7 +24,12 @@ from graph_works_core.archive.commands import run_archive, stranded_warnings
 from graph_works_core.orchestrate.commands import run_orchestrate
 from graph_works_core.orchestrate.dispatch import run_dispatch
 from graph_works_core.orchestrate.merge_workspace import run_merge_workspace
-from graph_works_core.orchestrate.placement import ReaderObservation, run_record_placement, run_record_reader
+from graph_works_core.orchestrate.placement import (
+    ReaderObservation,
+    run_record_baseline,
+    run_record_placement,
+    run_record_reader,
+)
 from graph_works_core.orchestrate.reroute import run_reroute
 from graph_works_core.orchestrate.stage_advance import ExpectedPhase, run_stage_advance
 from graph_works_core.orchestrate.wait import WaitClock, WaitFailed, run_wait
@@ -497,6 +502,7 @@ def record_placement(
             "recorded under repo_stamps."
         ),
     ),
+    start_sha: str = typer.Option("", "--start-sha", help="The observed commit this placement's work starts from."),
     dry_run: bool = typer.Option(False, "--dry-run", help="Print the plan instead of writing."),
     workspace: str = typer.Option("", "--workspace", help="Workspace path."),
     json_output: bool = rendering.json_option("Emit the placement record as JSON."),
@@ -533,6 +539,7 @@ def record_placement(
             repo_name=repo_name or None,
             repo=repo or None,
             dry_run=dry_run,
+            start_sha=start_sha or None,
         )
     except WorkspaceError as exc:
         rendering.fail(str(exc), reason="workspace", code=exit_codes.SCHEMA_MISMATCH, cause=exc)
@@ -560,6 +567,61 @@ def record_placement(
             rendering.warn(payload["repo_note"])
         return
     rendering.render_placement(payload)
+    rendering.render_commit(payload["commit"])
+
+
+@work_app.command(name="record-baseline")
+def record_baseline(
+    path: str = typer.Argument(..., help="Extensionless bundle-relative canonical concept path."),
+    cwd: str = typer.Option("", "--cwd", help="Checkout whose HEAD is recorded; default: the current directory."),
+    repo_name: str = typer.Option("", "--repo-name", help="Select among several declared repositories."),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Print the plan instead of writing."),
+    workspace: str = typer.Option("", "--workspace", help="Workspace path."),
+    json_output: bool = rendering.json_option("Emit the baseline record as JSON."),
+) -> None:
+    """Record where this item's execute stage starts.
+
+    Records HEAD of --cwd (default: the current directory), which must be in the
+    item's code repository. Run by the workflow skill before an execute stage's
+    code work starts. An already-recorded baseline HEAD descends from is kept; an
+    unrelated one refuses.
+    """
+    layout = resolve_workspace(workspace)
+    try:
+        result = run_record_baseline(
+            layout,
+            path,
+            cwd=Path(cwd) if cwd else Path.cwd(),
+            today=_today(),
+            repo_name=repo_name or None,
+            dry_run=dry_run,
+        )
+    except WorkspaceError as exc:
+        rendering.fail(str(exc), reason="workspace", code=exit_codes.SCHEMA_MISMATCH, cause=exc)
+    except ValueError as exc:
+        rendering.fail(str(exc), reason="unresolved", code=exit_codes.AMBIGUOUS, cause=exc)
+    except OSError as exc:
+        rendering.fail(str(exc), reason="io", cause=exc)
+
+    payload = wire_work.baseline_payload(result)
+    if payload["refusal"] is not None:
+        rendering.fail(
+            f"{path}: refused ({payload['refusal']['reason']}) — {payload['refusal']['detail']}",
+            reason="refused",
+            payload=payload,
+        )
+    if payload["applied"] and (payload["rolled_back"] or payload["failures"]):
+        for failure in payload["failures"]:
+            rendering.warn(failure)
+        rendering.fail(f"{path}: apply was incomplete", reason="incomplete-apply", payload=payload)
+    for warning in payload["warnings"]:
+        rendering.warn(warning)
+    if json_output:
+        rendering.emit(payload)
+        if payload["repo_note"]:
+            rendering.warn(payload["repo_note"])
+        return
+    typer.echo(f"{path}: start_sha {payload['after']} ({'recorded' if payload['written'] else 'unchanged'})")
     rendering.render_commit(payload["commit"])
 
 

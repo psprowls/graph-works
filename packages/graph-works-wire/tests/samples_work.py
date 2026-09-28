@@ -145,6 +145,8 @@ def placement(*, applied: bool) -> object:
         before=(None, None),
         after=("/wt", "b"),
         repo=None,
+        start_before=None,
+        start_after="a" * 40,
         changed=True,
         refusal=None if applied else "stale",
         detail="d",
@@ -157,6 +159,18 @@ def placement(*, applied: bool) -> object:
         pending_commit=None,
         warnings=(),
     )
+
+
+def baseline(*, applied: bool) -> object:
+    plan = ns(
+        path="work/a",
+        before=None,
+        after="a" * 40,
+        changed=True,
+        refusal=None if applied else "not-execute",
+        detail="d",
+    )
+    return ns(plan=plan, application=APPLICATION if applied else None, written=applied, repo_note="note")
 
 
 def filing(*, applied: bool) -> object:
@@ -613,6 +627,10 @@ WORK: dict[str, tuple[Callable[[], object], ...]] = {
     "work.placement_payload": (
         lambda: work.placement_payload(placement(applied=True)),
         lambda: work.placement_payload(placement(applied=False)),
+    ),
+    "work.baseline_payload": (
+        lambda: work.baseline_payload(baseline(applied=True)),
+        lambda: work.baseline_payload(baseline(applied=False)),
     ),
     "work.file_payload": (
         lambda: work.file_payload(filing(applied=True)),

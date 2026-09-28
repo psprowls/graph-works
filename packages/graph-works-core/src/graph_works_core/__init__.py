@@ -176,6 +176,7 @@ from graph_works_core.orchestrate.placement import (
     ReaderRecord,
     read_reader_receipt,
     reader_receipt_path,
+    run_record_baseline,
     run_record_placement,
     run_record_reader,
 )
@@ -329,6 +330,7 @@ __all__ = [
     "run_mechanical",
     "run_orchestrate",
     "run_propagate_drift",
+    "run_record_baseline",
     "run_record_placement",
     "run_record_reader",
     "run_scan",

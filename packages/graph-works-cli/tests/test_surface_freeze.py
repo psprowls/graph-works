@@ -87,6 +87,7 @@ def test_the_golden_pins_every_verb_this_item_shipped() -> None:
         ("work", "ask-answer"),
         ("work", "ingest-queue"),
         ("work", "reparent"),
+        ("work", "record-baseline"),
         ("work", "record-placement"),
         ("work", "record-reader"),
         ("work", "wait"),

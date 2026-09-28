@@ -2473,6 +2473,7 @@
         "orchestrate",
         "prepare-workspace",
         "reconcile-context",
+        "record-baseline",
         "record-placement",
         "record-reader",
         "regen-index",
@@ -4341,6 +4342,84 @@
       ]
     },
     {
+      "name": "gw work record-baseline",
+      "help": "Record where this item's execute stage starts.\n\nRecords HEAD of --cwd (default: the current directory), which must be in the\nitem's code repository. Run by the workflow skill before an execute stage's\ncode work starts. An already-recorded baseline HEAD descends from is kept; an\nunrelated one refuses.",
+      "short_help": "Record where this item's execute stage starts.",
+      "usage": [
+        "[OPTIONS]",
+        "{path}"
+      ],
+      "arguments": [
+        {
+          "name": "path",
+          "required": true,
+          "nargs": 1
+        }
+      ],
+      "options": [
+        {
+          "name": "cwd",
+          "opts": [
+            "--cwd"
+          ],
+          "secondary_opts": [],
+          "help": "Checkout whose HEAD is recorded; default: the current directory.",
+          "required": false,
+          "default": "",
+          "is_flag": false
+        },
+        {
+          "name": "repo_name",
+          "opts": [
+            "--repo-name"
+          ],
+          "secondary_opts": [],
+          "help": "Select among several declared repositories.",
+          "required": false,
+          "default": "",
+          "is_flag": false
+        },
+        {
+          "name": "dry_run",
+          "opts": [
+            "--dry-run"
+          ],
+          "secondary_opts": [],
+          "help": "Print the plan instead of writing.",
+          "required": false,
+          "default": false,
+          "is_flag": true
+        },
+        {
+          "name": "workspace",
+          "opts": [
+            "--workspace"
+          ],
+          "secondary_opts": [],
+          "help": "Workspace path.",
+          "required": false,
+          "default": "",
+          "is_flag": false
+        },
+        {
+          "name": "json_output",
+          "opts": [
+            "--json"
+          ],
+          "secondary_opts": [],
+          "help": "Emit the baseline record as JSON.",
+          "required": false,
+          "default": false,
+          "is_flag": true
+        }
+      ],
+      "commands": [],
+      "path": [
+        "work",
+        "record-baseline"
+      ]
+    },
+    {
       "name": "gw work record-placement",
       "help": "Record where a dispatched stage runs. Never advances PATH.\n\nWrites `worktree`, `branch` and `updated` -- or, with `--repo` naming a\nrepository other than PATH's own, `repo_stamps[NAME]` and `updated`\ninstead. Refuses -- writing nothing -- when PATH is not ROOT or its\ndescendant, when a descendant is recorded at `design` or `plan`, when\nPATH's phase is no longer `--phase`, and for an invalid or terminal item\nor an invalid observation. An identical pair is a no-op. The values must\nbe observed, never the planner's requested names.\n\n`--repo-name` selects the code repository when `workspace.yaml` declares\nseveral and PATH's chain sets no `repo:`; an item whose own or an\nancestor's `repo:` already resolves one needs neither flag, and a\nconflicting `--repo-name` refuses.\n\n`--repo` names the repository the pair was observed in. A repository\nother than PATH's own records under `repo_stamps`; its own records the\nscalar pair.",
       "short_help": "Record where a dispatched stage runs.",
@@ -4418,6 +4497,17 @@
           ],
           "secondary_opts": [],
           "help": "Declared repository the observed pair lives in; one other than the item's own is recorded under repo_stamps.",
+          "required": false,
+          "default": "",
+          "is_flag": false
+        },
+        {
+          "name": "start_sha",
+          "opts": [
+            "--start-sha"
+          ],
+          "secondary_opts": [],
+          "help": "The observed commit this placement's work starts from.",
           "required": false,
           "default": "",
           "is_flag": false

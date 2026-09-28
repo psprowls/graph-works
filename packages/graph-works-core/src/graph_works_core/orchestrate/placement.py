@@ -1,4 +1,4 @@
-"""`gw work record-placement`: write an observed worktree/branch, nothing else.
+"""`gw work record-placement`: write an observed worktree/branch and its baseline, nothing else.
 
 The third orchestrate module, beside the planner (`commands.py`) and the
 stage-completion shell (`stage_advance.py`). It shares no module-level symbol
@@ -12,8 +12,8 @@ sees the new phase and refuses rather than stamping a stage that already ended.
 The lock prevents lost updates; it does not remove that race, and the refusal
 is how the race is made visible.
 
-Nothing here runs git or reads Orca. The pair is the caller's verified
-observation; this module proves only that the item is entitled to it now.
+Nothing here reads Orca; only `run_record_baseline` runs git, through `provenance`'s gate probes.
+The pair is the caller's verified observation; this module proves only that the item is entitled to it now.
 `run_record_reader` is the reader counterpart: it writes a receipt in
 workspace coordination storage, never the page.
 """
@@ -26,7 +26,7 @@ import os
 import re
 import sys
 import tempfile
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
 from datetime import date
 from pathlib import Path
@@ -37,9 +37,13 @@ from work_tracker_okf.items import IGNORE, WorkItem, load_items
 from work_tracker_okf.mutation import PlannedWrite, WorkMutationPlan
 from work_tracker_okf.paths import item_page
 from work_tracker_okf.placement import (
+    BaselinePlan,
+    BaselineRefusal,
     PlacementPlan,
     ReaderReceiptPlan,
+    apply_baseline,
     apply_placement,
+    plan_baseline,
     plan_placement,
     plan_reader_receipt,
 )
@@ -47,6 +51,7 @@ from work_tracker_okf.placement import (
     ReaderObservation as ReaderObservation,
 )
 
+from graph_works_core.workspace import provenance
 from graph_works_core.workspace.commits import (
     COMMIT_FAILED_PREFIX,
     CommitOutcome,
@@ -243,6 +248,8 @@ def _prepare_placement(
     today: date,
     repo_name: str | None,
     repo: str | None,
+    start_sha: str | None = None,
+    require_start_sha: bool = False,
 ) -> tuple[PlacementPlan, ItemRepo | None]:
     """Plan first, then resolve the item's repository for eligible placements."""
     by_path = {item.path: item for item in items}
@@ -271,6 +278,8 @@ def _prepare_placement(
         branch=branch,
         today=today,
         repo=target,
+        start_sha=start_sha,
+        require_start_sha=require_start_sha,
     )
     if plan.refusal is None and own is None:
         own = resolve_item_repo(layout, by_path.get(path), by_path, repo_name=repo_name)
@@ -290,6 +299,8 @@ def run_record_placement(
     repo: str | None = None,
     dry_run: bool = True,
     expected_preparation: str | None = None,
+    start_sha: str | None = None,
+    require_start_sha: bool = False,
 ) -> PlacementRecord:
     """Record (*worktree*, *branch*) on *path* for its *phase* dispatch under *root*.
 
@@ -320,6 +331,11 @@ def run_record_placement(
     against the projection read inside it, and applies one journaled page
     write before releasing it. A stale preimage returns a failed
     `MutationApplication` and writes nothing.
+
+    *start_sha* is the observed commit this placement's work starts from (its
+    execute baseline); see `plan_placement` for keep/drop/conflict.
+    *require_start_sha* refuses a code placement that would end up with no
+    baseline.
     """
     bundle = load_bundle(layout.bundle_dir, ignore=IGNORE)
     items = load_items(bundle)
@@ -336,6 +352,8 @@ def run_record_placement(
             today=today,
             repo_name=repo_name,
             repo=repo,
+            start_sha=start_sha,
+            require_start_sha=require_start_sha,
         )
         return PlacementRecord(plan=plan, repo_note=own.note if own else None)
     commit_mode(layout)
@@ -356,6 +374,8 @@ def run_record_placement(
             today=today,
             repo_name=repo_name,
             repo=repo,
+            start_sha=start_sha,
+            require_start_sha=require_start_sha,
         )
         workspace_commit = WorkspaceCommit(f"workspace: record {item_stem(path)} {phase} placement", items=(path,))
         if plan.refusal is not None:
@@ -410,6 +430,113 @@ def _preparation_guard(layout: WorkspaceLayout, bundle: Bundle, path: str) -> st
     return digest.hexdigest()
 
 
+@dataclass(frozen=True, slots=True)
+class BaselineRecord:
+    plan: BaselinePlan
+    application: MutationApplication | None = None
+    repo_note: str | None = None
+
+    @property
+    def written(self) -> bool:
+        return self.application is not None and self.application.ok
+
+
+def run_record_baseline(
+    layout: WorkspaceLayout,
+    path: str,
+    *,
+    cwd: Path,
+    today: date,
+    repo_name: str | None = None,
+    dry_run: bool = True,
+    environ: Mapping[str, str] | None = None,
+) -> BaselineRecord:
+    """Record *cwd*'s HEAD as *path*'s scalar execute baseline, before execute work starts.
+
+    The attended pipeline's equivalent of preparation's stamp (D-001): the
+    workflow skill runs it from the checkout where the execute stage's work
+    begins. *cwd* must be in *path*'s own code repository, and HEAD is read with
+    the gate's git (`provenance.gate_git`), so the baseline and the gate that
+    later reads it agree on which git answered. A live record takes the decision
+    owner's lock and applies one journaled page write.
+    """
+    git = provenance.gate_git(layout, environ=environ)
+
+    def decide(items: Sequence[WorkItem]) -> tuple[BaselinePlan, ItemRepo | None]:
+        by_path = {item.path: item for item in items}
+        item = by_path.get(path)
+        if item is None:
+            return plan_baseline(items, path, observed_head="", head_descends_from_recorded=False, today=today), None
+        own = resolve_item_repo(layout, item, by_path, repo_name=repo_name)
+
+        def refused(reason: BaselineRefusal, detail: str) -> tuple[BaselinePlan, ItemRepo]:
+            return BaselinePlan(path, item.start_sha, item.start_sha, (), reason, detail), own
+
+        if own.path is None:
+            return refused(
+                "no-repo", f"no code repository resolved for {path}" + (f" ({own.note})" if own.note else "")
+            )
+        if provenance.repository_of(cwd, (own.path,)) is None:
+            return refused(
+                "outside-repository",
+                f"{cwd} is not in {path}'s repository {own.name!r} ({own.path}); "
+                "run from the checkout where execute work starts",
+            )
+        if isinstance(git, provenance.GitFailure):
+            return refused("git-unavailable", f"no usable git ({git.cause}): {git.detail}")
+        head = provenance.strict_commit(cwd, "HEAD", git=git)
+        if isinstance(head, provenance.GitFailure):
+            return refused("git-unavailable", f"cannot read HEAD in {cwd}: {head.detail}")
+        descends = False
+        if item.start_sha is not None and item.start_sha != head:
+            answer = provenance.strict_is_ancestor(cwd, item.start_sha, head, git=git)
+            if isinstance(answer, provenance.GitFailure):
+                return refused("git-unavailable", answer.detail)
+            descends = answer
+        return plan_baseline(items, path, observed_head=head, head_descends_from_recorded=descends, today=today), own
+
+    items = load_items(load_bundle(layout.bundle_dir, ignore=IGNORE))
+    if dry_run or not any(item.path == path for item in items):
+        plan, own = decide(items)
+        return BaselineRecord(plan, repo_note=own.note if own else None)
+    commit_mode(layout)
+    with locked_decision_owner(layout, path) as context:
+        plan, own = decide(context.items)
+        if plan.refusal is not None or not plan.changed:
+            return BaselineRecord(plan, repo_note=own.note if own else None)
+        assert own is not None
+        application = apply_mutation(
+            layout,
+            _baseline_mutation(context.bundle, plan),
+            repo_root=own.path,
+            repo_roots=resolve_repos(layout),
+            baseline_bundle=context.bundle,
+            commit=WorkspaceCommit(f"workspace: record {item_stem(path)} execute baseline", items=(path,)),
+        )
+        return BaselineRecord(plan, application=application, repo_note=own.note)
+
+
+def _baseline_mutation(bundle: Bundle, plan: BaselinePlan) -> WorkMutationPlan:
+    member = item_page(plan.path).rel
+    before = bundle.concepts[plan.path].serialize().encode("utf-8")
+    document = parse(before.decode("utf-8"), path=bundle.root / member)
+    apply_baseline(document, plan)
+    return WorkMutationPlan(
+        root=bundle.root,
+        operation="file",
+        path_mapping=MappingProxyType({}),
+        move_plan=None,
+        moves=(),
+        writes=(PlannedWrite(member, hashlib.sha256(before).hexdigest(), document.serialize().encode("utf-8")),),
+        deletes=(),
+        mkdirs=(),
+        warnings=(),
+        refusals=(),
+        validate_paths=(plan.path,),
+        directory_preconditions=(),
+    )
+
+
 def _mutation(bundle: Bundle, plan: PlacementPlan) -> WorkMutationPlan:
     member = item_page(plan.path).rel
     page = bundle.root / member
@@ -437,11 +564,13 @@ def _mutation(bundle: Bundle, plan: PlacementPlan) -> WorkMutationPlan:
 
 __all__ = [
     "READER_RECEIPT_SCHEMA",
+    "BaselineRecord",
     "PlacementRecord",
     "ReaderRecord",
     "preparation_guard",
     "read_reader_receipt",
     "reader_receipt_path",
+    "run_record_baseline",
     "run_record_placement",
     "run_record_reader",
 ]

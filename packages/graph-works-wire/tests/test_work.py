@@ -22,6 +22,7 @@ from samples_work import (
     BUNDLE,
     advance,
     archive_run,
+    baseline,
     decision,
     filing,
     next_result,
@@ -54,6 +55,7 @@ def test_mutation_payloads_include_commit_outcome() -> None:
     assert work.advance_payload(advanced, "work/a")["commit"] == work._commit(outcome)
     assert work.advance_payload(advance(applied=False), "work/a")["commit"] is None
     assert work.placement_payload(placement(applied=False))["commit"] is None
+    assert work.baseline_payload(baseline(applied=False))["commit"] is None
     assert work.file_payload(filing(applied=False))["commit"] is None
     assert work.regen_index_payload(regen(applied=False))["commit"] is None
     archived = work.archive_payload(archive_run(applied=False), dry_run=True)

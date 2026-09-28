@@ -21,7 +21,7 @@ from graph_works_core.orchestrate.commands import OrchestrateResult
 from graph_works_core.orchestrate.dispatch import DispatchFailure, DispatchResult, ObservedPlacement
 from graph_works_core.orchestrate.merge_workspace import MergeWorkspaceResult
 from graph_works_core.orchestrate.orca_port import OrcaMessage
-from graph_works_core.orchestrate.placement import PlacementRecord, ReaderRecord
+from graph_works_core.orchestrate.placement import BaselineRecord, PlacementRecord, ReaderRecord
 from graph_works_core.orchestrate.reroute import RerouteResult
 from graph_works_core.orchestrate.stage_advance import StageAdvance
 from graph_works_core.orchestrate.wait import WaitResult
@@ -600,8 +600,8 @@ def placement_payload(result: PlacementRecord) -> dict[str, Any]:
         "root": plan.root,
         "expected_phase": plan.expected_phase,
         "current_phase": plan.current_phase,
-        "before": {"worktree": plan.before[0], "branch": plan.before[1]},
-        "after": {"worktree": plan.after[0], "branch": plan.after[1]},
+        "before": {"worktree": plan.before[0], "branch": plan.before[1], "start_sha": plan.start_before},
+        "after": {"worktree": plan.after[0], "branch": plan.after[1], "start_sha": plan.start_after},
         "repo": plan.repo,
         "changed": plan.changed,
         "applied": application is not None,
@@ -610,6 +610,26 @@ def placement_payload(result: PlacementRecord) -> dict[str, Any]:
         "failures": [] if application is None else list(application.failures),
         "warnings": list(result.warnings),
         "commit": _commit(application.commit if application is not None else result.pending_commit),
+        "refusal": None if plan.refusal is None else {"reason": plan.refusal, "detail": plan.detail},
+        "repo_note": result.repo_note,
+    }
+
+
+def baseline_payload(result: BaselineRecord) -> dict[str, Any]:
+    """The `gw work record-baseline` contract."""
+    plan = result.plan
+    application = result.application
+    return {
+        "path": plan.path,
+        "before": plan.before,
+        "after": plan.after,
+        "changed": plan.changed,
+        "applied": application is not None,
+        "written": result.written,
+        "rolled_back": False if application is None else application.rolled_back,
+        "failures": [] if application is None else list(application.failures),
+        "warnings": [] if application is None else list(application.warnings),
+        "commit": _commit(None if application is None else application.commit),
         "refusal": None if plan.refusal is None else {"reason": plan.refusal, "detail": plan.detail},
         "repo_note": result.repo_note,
     }

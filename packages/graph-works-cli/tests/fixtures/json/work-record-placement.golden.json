@@ -5,11 +5,13 @@
   "current_phase": "design",
   "before": {
     "worktree": null,
-    "branch": null
+    "branch": null,
+    "start_sha": null
   },
   "after": {
     "worktree": "<tmp>/wt",
-    "branch": "b/observed"
+    "branch": "b/observed",
+    "start_sha": null
   },
   "repo": null,
   "changed": true,

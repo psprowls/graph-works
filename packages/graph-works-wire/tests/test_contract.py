@@ -69,6 +69,7 @@ EXPECTED: set[str] = {
     "wiki.wiki_tree_payload",
     "work.advance_payload",
     "work.archive_payload",
+    "work.baseline_payload",
     "work.ask_answer_payload",
     "work.ask_payload",
     "work.decision_payload",

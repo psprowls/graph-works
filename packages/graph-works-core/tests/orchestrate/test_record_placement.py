@@ -1187,3 +1187,35 @@ def test_invalid_commit_config_precedes_orchestration_effects(tmp_path: Path, ve
             invoke()
     after = {p.relative_to(layout.root): p.read_bytes() for p in layout.root.rglob("*") if p.is_file()}
     assert after == before
+
+
+def test_a_live_record_writes_start_sha_and_a_different_one_conflicts(tmp_path: Path) -> None:
+    layout = _vault(tmp_path)
+    a, b = "a" * 40, "b" * 40
+    first = placement.run_record_placement(
+        layout, CHILD, root=EPIC, phase="execute", worktree=WT, branch=BR, today=TODAY, dry_run=False, start_sha=a
+    )
+    assert first.written
+    assert load(layout.bundle_dir / f"{CHILD}.md").fm_data()["start_sha"] == a
+    before = _snapshot(layout)
+    second = placement.run_record_placement(
+        layout, CHILD, root=EPIC, phase="execute", worktree=WT, branch=BR, today=TODAY, dry_run=False, start_sha=b
+    )
+    assert second.plan.refusal == "baseline-conflict" and not second.written
+    assert _snapshot(layout) == before
+
+
+def test_require_start_sha_refuses_baseline_missing(tmp_path: Path) -> None:
+    layout = _vault(tmp_path)
+    record = placement.run_record_placement(
+        layout,
+        CHILD,
+        root=EPIC,
+        phase="execute",
+        worktree=WT,
+        branch=BR,
+        today=TODAY,
+        dry_run=False,
+        require_start_sha=True,
+    )
+    assert record.plan.refusal == "baseline-missing" and not record.written

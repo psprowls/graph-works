@@ -645,7 +645,7 @@ def test_record_placement_writes_the_pair_and_never_advances(workspace: Path) ->
     assert result.exit_code == 0, result.output
     payload = json.loads(result.stdout)
     assert payload["refusal"] is None and payload["written"] is True and payload["changed"] is True
-    assert payload["after"] == {"worktree": placed, "branch": "psprowls/placed-1a2b3c4d"}
+    assert payload["after"] == {"worktree": placed, "branch": "psprowls/placed-1a2b3c4d", "start_sha": None}
     fm = _fm(workspace, path)
     assert (fm["worktree"], fm["branch"], fm["phase"]) == (placed, "psprowls/placed-1a2b3c4d", phase)
 
@@ -802,7 +802,7 @@ def test_record_placement_distinguishes_write_replay_and_preview(workspace: Path
         }
         assert payload["path"] == payload["root"] == path
         assert payload["expected_phase"] == payload["current_phase"] == fm_before["phase"]
-        assert payload["after"] == {"worktree": _abs("wt", "observed"), "branch": "b/observed"}
+        assert payload["after"] == {"worktree": _abs("wt", "observed"), "branch": "b/observed", "start_sha": None}
         assert payload["changed"] is (mode != "unchanged")
         assert payload["applied"] is (mode == "recorded")
         assert payload["written"] is (mode == "recorded")
@@ -811,7 +811,7 @@ def test_record_placement_distinguishes_write_replay_and_preview(workspace: Path
         if mode == "unchanged":
             assert payload["before"] == payload["after"]
         else:
-            assert payload["before"] == {"worktree": None, "branch": None}
+            assert payload["before"] == {"worktree": None, "branch": None, "start_sha": None}
         if payload["repo_note"]:
             assert payload["repo_note"] in result.stderr
     else:
@@ -1367,3 +1367,56 @@ def test_advance_skip_gate_bypasses_one_refusal_and_reports_it(workspace: Path) 
     payload = json.loads(bypassed.stdout)
     assert payload["gate_bypass"]["code"] == "no-start-sha"
     assert payload["gate_bypass"]["actor"] == "pat" and payload["gate_bypass"]["decision_id"]
+
+
+def _executing_item_in_a_declared_repo(workspace: Path, tmp_path: Path) -> tuple[str, Path, str]:
+    repo = tmp_path / "code"
+    repo.mkdir()
+    for args in (
+        ["init", "-b", "main"],
+        ["config", "user.email", "t@example.com"],
+        ["config", "user.name", "T"],
+        ["commit", "--allow-empty", "-m", "first"],
+    ):
+        subprocess.run(["git", *args], cwd=repo, check=True, capture_output=True)
+    head = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=repo, check=True, capture_output=True, text=True
+    ).stdout.strip()
+    manifest = workspace / "workspace.yaml"
+    manifest.write_text(
+        manifest.read_text(encoding="utf-8").replace(
+            "repositories: {}\n", f"repositories:\n  code:\n    path: {repo.as_posix()}\n"
+        ),
+        encoding="utf-8",
+        newline="\n",
+    )
+    path = file_item(workspace, "Baselined")
+    page = workspace / "okf" / f"{path}.md"
+    text = page.read_text(encoding="utf-8")
+    text = text.replace("work_status: open", "work_status: in-progress\nphase: execute")
+    page.write_text(text, encoding="utf-8", newline="")
+    return path, repo, head
+
+
+def test_record_baseline_records_head_of_cwd(workspace: Path, tmp_path: Path) -> None:
+    path, repo, head = _executing_item_in_a_declared_repo(workspace, tmp_path)
+    result = runner.invoke(
+        app, ["work", "record-baseline", path, "--cwd", str(repo), "--workspace", str(workspace), "--json"]
+    )
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.stdout)
+    assert payload["after"] == head and payload["written"] is True
+    assert _fm(workspace, path)["start_sha"] == head
+
+
+def test_record_baseline_refusal_is_an_envelope(workspace: Path, tmp_path: Path) -> None:
+    path, _repo, _head = _executing_item_in_a_declared_repo(workspace, tmp_path)
+    outside = tmp_path / "elsewhere"
+    outside.mkdir()
+    result = runner.invoke(
+        app, ["work", "record-baseline", path, "--cwd", str(outside), "--workspace", str(workspace), "--json"]
+    )
+    assert result.exit_code != 0
+    doc = json.loads(result.stdout)
+    assert doc["error"]["reason"] == "refused"
+    assert doc["error"]["payload"]["refusal"]["reason"] == "outside-repository"

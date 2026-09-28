@@ -20,6 +20,7 @@ VERBS = [
     ["work", "file"],
     ["work", "next"],
     ["work", "advance"],
+    ["work", "record-baseline"],
     ["work", "record-placement"],
     ["work", "record-reader"],
     ["work", "touch-active-work"],
@@ -44,8 +45,8 @@ VERBS = [
 ]
 
 
-def test_the_surface_is_exactly_twenty_four_verbs() -> None:
-    assert len(VERBS) == 24
+def test_the_surface_is_exactly_twenty_five_verbs() -> None:
+    assert len(VERBS) == 25
 
 
 @pytest.mark.parametrize("verb", VERBS, ids=lambda verb: " ".join(verb))
@@ -187,8 +188,8 @@ def test_advance_declares_the_inference_opt_out() -> None:
 def test_record_placement_declares_its_observation_and_no_lifecycle_flags() -> None:
     payload = json.loads(runner.invoke(app, ["help", "work", "record-placement", "--json"]).stdout)
     opts = {opt for option in payload["options"] for opt in option["opts"]}
-    assert {"--root", "--phase", "--worktree", "--branch", "--dry-run", "--workspace", "--json"} <= opts
-    assert not opts & {"--effort", "--owner", "--resolved-in", "--released-at", "--return", "--start-sha"}
+    assert {"--root", "--phase", "--worktree", "--branch", "--dry-run", "--workspace", "--json", "--start-sha"} <= opts
+    assert not opts & {"--effort", "--owner", "--resolved-in", "--released-at", "--return"}
 
 
 def test_touch_active_work_declares_only_workspace_and_json() -> None:

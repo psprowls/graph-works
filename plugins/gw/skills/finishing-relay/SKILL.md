@@ -37,6 +37,8 @@ Enter the Escalation path and hold the finish stage until targets are verified.
 For every entry in the supplied `finish_targets` list, run that repository's test suite (same discovery approach as
 `finishing-a-development-branch` Step 1 — `npm test` / `cargo test` /
 `pytest` / `go test ./...`, whichever the repo uses).
+The `_workspace` target has no test suite; its merged-result check is `gw lint`
+on the workspace.
 
 **If tests fail:** do not stop silently and do not present options. Enter
 the **Escalation path** (below) with the failure output in the escalation
@@ -88,6 +90,10 @@ git worktree list --porcelain
   enter the **Escalation path**. A missing or mismatched supplied path also
   enters the **Escalation path**. Never check the target out yourself and
   never merge from this worker's worktree.
+  For `_workspace` targeting workspace `main`, R4 uses
+  `gw work merge-workspace <work-path> --apply --json` instead of `git merge`.
+  For `_workspace` targeting an epic workspace anchor, R4 merges in that
+  anchor worktree and records the result with `finish-receipt.py record --repo _workspace`.
 
 **Dirty state blocks the whole set.** Run `git status --porcelain` in each source
 and target checkout and require clean output. Every
@@ -174,18 +180,29 @@ what already integrated. Cross-repository atomicity is not promised.
   target. Skip straight to R5 with `resolved_in` = the HEAD SHA captured in
   R2.
 - **Integration-branch case:**
+  For `_workspace` → workspace `main`, run
+  `gw work merge-workspace <work-path> --apply --json` and never record its
+  receipt separately: the verb merges and records it in one locked step.
+  A refusal enters the Escalation path and holds the entire finish. Run
+  `gw lint` on the merged workspace; a failure also enters Escalation.
+  For `_workspace` → an epic anchor, run
+  `git -C <anchor worktree> merge <source_branch>`, check the merged result
+  with `gw lint` on the workspace, then run
+  `finish-receipt.py record <work-path> --workspace <workspace> --repo _workspace`.
+  A conflict, failed lint, or refusal enters the Escalation path. For code
+  repositories, run:
   ```bash
   git -C <target worktree path from R2> merge <this target's source_branch>
   ```
   **Conflicts:** never auto-resolve (parent-epic policy). Enter the
   **Escalation path** with the conflict file list in the body; wait for
   instructions.
-  **On a clean merge:** re-run the test suite (R1's command) in the target
+  **On a clean code merge:** re-run the test suite (R1's command) in the target
   worktree, on the merged result. **Failing tests post-merge:** enter the
   Escalation path — the merge already happened, so the escalation body must
   say so explicitly (don't let the coordinator think it's still pending).
-  Continue to R5 with `resolved_in` = the merge commit SHA
-  (`git -C <target worktree path> rev-parse HEAD`).
+  Continue to R5 with each target's merge commit SHA from its target
+  worktree; for workspace `main`, use the merge result returned by gw.
 
 ### `pr`
 
@@ -243,8 +260,10 @@ The shared rule is: only a verified integration resolves — same rule
 as attended `workflow` step 5. The trunk-case confirmation counts as
 integration into the merge target; PR, hold and discard do not.
 
-- **`merge`:** Record each successful target immediately using the helper
-  procedure below. Only after every target is proven integrated and all checks
+- **`merge`:** Record each successful code or workspace-anchor target
+  immediately using the helper procedure below. The workspace `main` target
+  was recorded by `merge-workspace`; do not record it again. Only after every
+  target is proven integrated and all checks
   pass, inspect the complete workflow-owned finish receipt and use its
   `resolved_in` for advancement. Missing evidence holds the entire stage. Run the advance below exactly once
   for the item, never once per target.

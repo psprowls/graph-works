@@ -275,6 +275,9 @@ On success, the result contains:
 - `advances[]` — each: `path`, `reason`, `mode` (`advance` or `return`), `worktree`/`branch` (the epic's
   already-known worktree, when one exists — `null` otherwise, e.g. before any
   worker has ever been dispatched for this epic).
+- `workspace_preparations[]` — workspace branch anchors to prepare before
+  launching their owners. Each entry carries `owner_path`, `owner_phase`,
+  `worktree`, `branch`, and `base_branch`.
 - `blocked[]` — each: `path`, `kind` (one of exactly `deps`, `capacity`,
   `affects-overlap`, `effort-required`, `decisions`, `human`,
   `relay-untailed`, `worktree-pending`, `workspace-pending`, `worktree-unsupported`,
@@ -370,6 +373,17 @@ fresh dispatches can still consume the shared free slots. Do not manufacture
 a worker/task for preparation. Use `dispatch.repo.path` for both normal and
 retry placement arguments; the top-level plan `repo` is root metadata only.
 
+**Workspace preparations.** `workspace_preparations[]` carries `owner_path`,
+`owner_phase`, `worktree`, `branch` and `base_branch`. It reserves no worker
+slot, and its items are blocked `workspace-pending`. Process the entries
+serially, after the code preparations, with
+`gw work prepare-workspace <owner_path> --apply --json`. gw creates the
+worktree itself, runs no Orca command, and records `repo_stamps[_workspace]`.
+A `note` (workspace placement disabled) means the entry would not have been
+emitted: replan. A refusal (`workspace-unprovable`, `workspace-ambiguous`,
+`stamp-refused`, `not-entitled`) blocks that owner's dependents until a human
+repairs it. **Replan after every attempt**, exactly as for code preparations.
+
 ### 2.3 Terminal?
 
 `terminal: true` → go to Wrap-up (§5), including its fresh launch-proof gate,
@@ -430,6 +444,8 @@ you know is out of date).
   `human`, `relay-untailed`, `worktree-pending`, `workspace-pending`, `worktree-unsupported`,
   `worktree-unprovable`, `worktree-ambiguous`, `cross-repo-child`, `invalid`):
   print one line each (`blocked <work-path> (<kind>): <reason>`) and take no action.
+  `workspace-pending` means the workspace branch is not yet prepared: process
+  `workspace_preparations[]` under §2.2 and replan.
   Readers at `design`/`plan` require provable repository and committed-ref
   evidence for `pin-detached`; missing evidence is `worktree-unprovable` and
   a provisioning capability gap is `worktree-unsupported`. Never fall back to
@@ -1047,6 +1063,15 @@ with the same key resumes a journaled attempt or reports the existing Task; it
 never creates a second one. Why each check exists: `references/dispatch-checks.md`.
 Permissions come from the selected agent's existing settings; dispatch rules
 do not select or promise a permission mode.
+
+In `references/dispatch-checks.md` step 3, a non-reader orchestration root is
+recorded at any phase except an Epic/Release root at `design` or `plan`, which
+is never recorded (`read-only-owner`). When `dispatch.repo.name` is
+`_workspace` (a workspace-only item's no-fork placement), add `--repo _workspace`
+to `gw work record-placement`. The stamp already exists, so a
+matching observation is an unchanged no-op. In step 5, `read-only-owner` is
+expected for an Epic/Release reader; there is nothing to record. Do not turn
+that expected reader result into a new placement or a dependent launch.
 
 **Readers (`pin-detached`).** A `design`/`plan` dispatch is a reader placed
 on a dedicated checkout detached at the plan's `worktree.start_sha`. The verb

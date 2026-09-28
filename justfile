@@ -371,6 +371,8 @@ test-plugin:
     bash tests/test-dispatch-profile-contract.sh
     echo "--- test-workspace-commit-authority"
     bash tests/test-workspace-commit-authority.sh
+    echo "--- test-workspace-branch-docs"
+    bash tests/test-workspace-branch-docs.sh
     echo "--- test_launch_placement"
     python3 tests/test_launch_placement.py
     echo "--- test_attend_cards"

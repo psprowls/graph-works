@@ -129,6 +129,13 @@ Every `gw work advance` this skill runs then adds `--no-infer-worktree` and
 never `--worktree`/`--branch` — here, and at step 5. An attended session
 (no `Dispatch key:` line) keeps today's behavior.
 
+**Workspace branch at execute.** When the dispatch transition (or the current
+phase) enters `execute`, run `gw work prepare-workspace <work-path> --apply --json`
+after it, adding nothing else under a supervised dispatch. A refusal stops the
+stage with its `refusal.detail`. A `note` (workspace placement disabled)
+continues without a content root. Otherwise keep `placement.worktree` and
+`placement.branch` for step 3.
+
 ### 3. Dispatch the stage skill
 
 **Stamp the active-work pointer first.** Run
@@ -172,6 +179,9 @@ another stage, same as the stock skill it replaces.
   stage starts from durable artifacts, not from memory
 - when `artifact.path` is set: "Write your output document to
   `<artifact.path>` — this overrides the skill's default location."
+- **Workspace content root.** When step 2 produced a placement, add the line
+  `Workspace content root: <worktree> (branch <branch>). Write workspace content there — run content-producing commands with GRAPH_WORKS_DIR=<worktree> — and commit it on that branch. Run every gw work verb against GRAPH_WORKS_DIR=<workspace>.`
+  This is the same line `gw work orchestrate` puts in a supervised prompt.
 - when the `gw next` output's `guidance_file` is non-null, add a
   `## Relevant guidance` block to the brief pointing the stage skill at the
   assembled bundle:
@@ -397,6 +407,13 @@ uv run --package graph-works-core python <plugin>/skills/finishing-relay/referen
 
 Inspect before any integration. After each repository's merge and merged-result
 checks pass, record that repository immediately.
+For a `_workspace` entry in `finish_targets` targeting workspace `main`, run
+`gw work merge-workspace <work-path> --apply --json`. It merges and records
+that receipt entry in one locked step; do not run `record` for it. A
+`_workspace` target that is an epic's workspace anchor is merged like code
+(`git merge` in the anchor worktree), then recorded with
+`finish-receipt.py record <work-path> --workspace <workspace> --repo _workspace`.
+A `merge-failed` refusal holds the entire finish.
 `record` commits the receipt itself; do not commit the workspace.
 `record` derives commit evidence itself; never hand-author completion
 claims. Preserve source branches and worktrees until final verification.

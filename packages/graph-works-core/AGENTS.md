@@ -75,7 +75,7 @@ shell-syntax command string here.
 ### Module layout (four import-linter layers, per the package `__init__.py`)
 
 ```
-workspace/    layer 0 — errors, layout, manifest, discovery, init, provenance, anchor, pipeline, dispatch, dispatch_config, dispatch_projection, repos, config, context_seed, transactions, decision_owner, repo_files
+workspace/    layer 0 — errors, layout, manifest, discovery, init, provenance, anchor, pipeline, dispatch, dispatch_config, dispatch_projection, repos, config, context_seed, transactions, decision_owner, repo_files, gate_config
 agent_config/  layer 1 — conventions resolves injected paths; git_state probes repository identity/state through provenance; local resolves Claude local-file placement/permission gates; trust reads decisions; merge models policy; read exposes project/workspace reports
 agent_substrate/ : graph/ : prompts/                                   layer 1, shared
 guidance/                                                              layer 1.5 — claims index + affects closure, between the verticals and the shared substrate

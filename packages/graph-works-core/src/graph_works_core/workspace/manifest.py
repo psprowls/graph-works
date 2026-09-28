@@ -138,6 +138,27 @@ CATALOG: tuple[ConfigEntry, ...] = (
         default=None,
         description="Per-repository git glob pathspecs to exclude, merged with the global `ignore:` list.",
     ),
+    # The repository gate (feature-gate-receipts). `gw work gate` runs `full`
+    # as the stage-boundary gate; `scoped` is a fix-wave recheck template.
+    # Validation beyond type lives in `workspace.gate_config`.
+    ConfigEntry(
+        key="repositories.*.gate.full",
+        type="str",
+        default=None,
+        description="The full gate command `gw work gate run` executes in the item's worktree via `sh -c`.",
+    ),
+    ConfigEntry(
+        key="repositories.*.gate.scoped.roots",
+        type="str",
+        default=None,
+        description="One repository-relative glob naming package roots a scoped gate runs per (e.g. `packages/*`).",
+    ),
+    ConfigEntry(
+        key="repositories.*.gate.scoped.command",
+        type="str",
+        default=None,
+        description="Scoped gate command template; must contain `{name}` (a matched root's basename), no other field.",
+    ),
     ConfigEntry(
         key="ignore",
         type="list[str]",

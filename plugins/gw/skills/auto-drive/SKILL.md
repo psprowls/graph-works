@@ -1064,14 +1064,8 @@ never creates a second one. Why each check exists: `references/dispatch-checks.m
 Permissions come from the selected agent's existing settings; dispatch rules
 do not select or promise a permission mode.
 
-In `references/dispatch-checks.md` step 3, a non-reader orchestration root is
-recorded at any phase except an Epic/Release root at `design` or `plan`, which
-is never recorded (`read-only-owner`). When `dispatch.repo.name` is
-`_workspace` (a workspace-only item's no-fork placement), add `--repo _workspace`
-to `gw work record-placement`. The stamp already exists, so a
-matching observation is an unchanged no-op. In step 5, `read-only-owner` is
-expected for an Epic/Release reader; there is nothing to record. Do not turn
-that expected reader result into a new placement or a dependent launch.
+Follow `references/dispatch-checks.md` steps 3–5 for recording and refusal
+handling, including workspace-only no-fork dispatches and Epic/Release readers.
 
 **Readers (`pin-detached`).** A `design`/`plan` dispatch is a reader placed
 on a dedicated checkout detached at the plan's `worktree.start_sha`. The verb

@@ -311,14 +311,24 @@ matches or resolves rules. Treat model IDs and effort strings as opaque.
       step 6. Reader success goes directly to the submission probe, not the
       scalar placement check below.
 
-      For non-reader actions, the root's placement is recorded only at `execute`/`finish`,
-      as is a descendant's (the current planner places every `design`/`plan`
-      stage, root or descendant, as a reader). Run:
+      For non-reader actions, an orchestration root's placement is recorded at
+      any phase except an Epic/Release root at `design` or `plan`, which is never
+      placement-recorded (`read-only-owner`). With current reader pinning, the
+      root's placement is recorded only at `execute`/`finish` in practice:
+      `design`/`plan` stages are `pin-detached` and use the reader receipt above.
+      A descendant's non-reader placement is recorded at `execute`/`finish`.
+      Run:
 
       ```
       gw work record-placement <slug> --root <work-path> --phase <dispatch phase> \
         --worktree <observed path> --branch <normalized branch> --json
       ```
+
+      When `dispatch.repo.name` is `_workspace`, add `--repo _workspace`
+      before `--json` in that command. This is a workspace-only item's no-fork
+      placement; its workspace stamp already exists from preparation.
+      A matching observation is an unchanged no-op. Use the same `--repo`
+      on the `--dry-run` verification in step 4.
 
       A descendant dispatched at `design` or `plan` is never recorded as a
       placement: the current planner places it as a `pin-detached` reader,
@@ -346,8 +356,12 @@ matches or resolves rules. Treat model IDs and effort strings as opaque.
       Independent items continue only where live-key and hold rules already
       allow. `unknown-path`, `unknown-root`, `outside-root`, `invalid-item`,
       `invalid-phase`, `invalid-pair`, `terminal`, `entry-unprovable` and
-      `read-only-descendant` and `read-only-owner` are the same inspection halt: each means the
-      coordinator's own reading of this dispatch is wrong.
+      `read-only-descendant` are the same inspection halt: each means the
+      coordinator's own reading of this dispatch is wrong. `read-only-owner` is expected for an Epic/Release reader; nothing to record
+      as a scalar placement. Confirm the action was `pin-detached` and the
+      reader receipt above succeeded, then continue to the submission probe.
+      Without that proof, halt into inspection; do not reinterpret a refusal
+      on a non-reader dispatch as a successful record.
 
    6. **Application failed or other non-success.** Every other non-success,
       including when `refusal: null`, enters inspection: a failed application,

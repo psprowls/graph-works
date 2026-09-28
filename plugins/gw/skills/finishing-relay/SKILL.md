@@ -253,8 +253,8 @@ orca orchestration ask --from <this session's --from> \
 
 - The reply JSON's `notes` is exactly `discard` → confirmed. **Discard is
   recorded, not executed**: delete nothing. Continue to R5 with the branch name and commit
-  list for the report — the human removes the branch/worktree later, after
-  Orca releases it (see Worktree & branch ownership, below).
+  list for the report — the human removes the branch/worktree later (see
+  Worktree & branch ownership, below).
 - Anything else (other notes, unparseable reply) → downgrade to `hold`; say
   so explicitly in the R5 report (state the reply that caused the downgrade).
 
@@ -293,12 +293,23 @@ integration into the merge target; PR, hold and discard do not.
   phase. The merge may already have happened, so include the merge SHA in the
   escalation body (or say the commits were already on the target in the trunk case).
   Do not claim settlement or send `worker_done` while escalating.
+  **Cleanup (`merge` only, after the successful advance).** Before sending
+  `worker_done`, run the cleanup plan from this session's own cwd and execute
+  it per [finish-cleanup.md](references/finish-cleanup.md):
+  ```bash
+  uv run --package graph-works-core python <plugin>/skills/finishing-relay/references/finish-receipt.py cleanup <work-path> --workspace <workspace> --runner-cwd "$PWD"
+  ```
+  This session's own worktree comes back `deferred`; leave it for the
+  coordinator. Add one line per removed, skipped and deferred row (path and
+  branch) to the `worker_done` body. A refused plan is one line in that body,
+  never an escalation. The item has already resolved.
   Only after a successful advance, send `worker_done --outcome succeeded` (this session's own dispatch
   preamble command, `--task-id`/`--dispatch-id` filled in from it) with a
-  body naming the merge target, the resolved-in reference, and a one-line
-  summary of what shipped.
+  body naming the merge target, the resolved-in reference, a one-line
+  summary of what shipped, and the cleanup lines above.
 - **`pr` / `hold` / `discard`:** **no `gw work advance` call** — the item
-  stays at `phase: finish` for a later attended pass. Send
+  stays at `phase: finish` for a later attended pass. `pr` / `hold` / `discard` run no cleanup: nothing is removed and discard stays recorded, not executed.
+  Send
   `worker_done --outcome succeeded` with a body stating exactly what
   happened:
   - `pr` → the PR URL.
@@ -347,13 +358,14 @@ release date or phase-mismatch):
 
 ## Worktree & branch ownership
 
-Relay mode never removes worktrees and never deletes branches — not for
-`merge`, not for `discard`. Orca owns worker worktree lifecycle: the
-coordinator releases this session's terminal on `worker_done`, and any
-child-worktree removal after merge-back is the coordinator's or the human's
-concern, not this skill's. `finishing-a-development-branch`'s Step 6
-cleanup logic does not apply here — every auto-drive worktree is
-host-managed by definition.
+The relay removes merged worktrees and branches only through the cleanup
+plan (`finish-receipt.py cleanup`, executed per
+[finish-cleanup.md](references/finish-cleanup.md)), only after a resolved
+advance, and never its own worktree: the plan reports that row as
+`deferred`, and the coordinator removes the relay's own worktree after
+`worker-release` (`auto-drive` §4.1). `pr`, `hold` and `discard` remove
+nothing. `finishing-a-development-branch`'s Step 6 cleanup logic still does
+not apply here.
 
 ## Out of scope
 
@@ -380,13 +392,16 @@ assume the worker's current directory is the Graph Works source checkout.
 ```bash
 uv run --package graph-works-core python <plugin>/skills/finishing-relay/references/finish-receipt.py inspect <work-path> --workspace <workspace>
 uv run --package graph-works-core python <plugin>/skills/finishing-relay/references/finish-receipt.py record <work-path> --workspace <workspace> --repo <name>
+uv run --package graph-works-core python <plugin>/skills/finishing-relay/references/finish-receipt.py cleanup <work-path> --workspace <workspace> --runner-cwd <cwd>
 ```
 
 Inspect before any integration. After each repository's merge and merged-result
 checks pass, record that repository immediately.
 `record` commits the receipt itself; do not commit the workspace.
 `record` derives commit evidence itself; never hand-author completion
-claims. Preserve source branches and worktrees until final verification.
+claims. Preserve source branches and worktrees until the item resolves: the
+cleanup plan, run only after the resolved advance, is the only thing that
+ends that preservation.
 
 If a later repository fails, hold the entire finish and report already verified
 entries. If a merge succeeded but receipt persistence failed, run `record` again:
@@ -399,4 +414,5 @@ Run `inspect` again after recording every target. Only `complete: true` authoriz
 the single final advance; use its `resolved_in` verbatim and
 `gw work advance <work-path> --no-infer-worktree --resolved-in <resolved_in>`
 (with the required Release date when applicable). An incomplete inspection exits
-nonzero and names blockers. No helper mode merges or advances.
+nonzero and names blockers. No helper mode merges, advances or removes
+anything; `cleanup` only prints the plan.

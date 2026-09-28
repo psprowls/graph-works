@@ -234,8 +234,12 @@ def config_from_mapping(
                 "code-graph/index.md; rename it"
             )
         entry = _require_mapping(entry, name=name, where=f"`repositories.{repo_name}`")
-        allowed_repo_keys = {"path", "ignore"}
+        allowed_repo_keys = {"path", "ignore", "gate"}
         _reject_unknown_keys(entry, allowed=allowed_repo_keys, name=name, where=f"`repositories.{repo_name}`")
+        if "gate" in entry:
+            # The gate block is graph-works-core's (`workspace/gate_config.py`); this
+            # reader only refuses a shape no gate could have.
+            _require_mapping(entry["gate"], name=name, where=f"`repositories.{repo_name}.gate`")
         repo_path_raw = _require_nonempty_string(entry.get("path"), name=name, where=f"`repositories.{repo_name}.path`")
         repo_path = _resolve(anchor, repo_path_raw)
         per_repo_ignore = _string_list(entry.get("ignore"), name=name, where=f"`repositories.{repo_name}.ignore`")

@@ -316,3 +316,31 @@ def test_load_config_accepts_names_that_merely_contain_index(tmp_path: Path, rep
     _write(tmp_path, f"version: 1\nrepositories:\n  {repo_name}:\n    path: ../x\n")
     config = load_config(tmp_path, graph_dir="../graphs/code")
     assert tuple(repo.name for repo in config.repos) == (repo_name,)
+
+
+def test_a_repository_gate_block_is_accepted_and_ignored(tmp_path: Path) -> None:
+    from code_wiki_okf.config import config_from_mapping
+
+    config = config_from_mapping(
+        {"repositories": {"code": {"path": ".", "gate": {"full": "make check"}}}},
+        anchor=tmp_path,
+        bundle_root=tmp_path / "okf",
+        graph_dir=tmp_path / "g",
+        declarations_dir=tmp_path / ".gw",
+        source="workspace.yaml",
+    )
+    assert [entry.name for entry in config.repos] == ["code"]
+
+
+def test_a_non_mapping_repository_gate_is_refused(tmp_path: Path) -> None:
+    from code_wiki_okf.config import config_from_mapping
+
+    with pytest.raises(ConfigError, match=r"repositories\.code\.gate"):
+        config_from_mapping(
+            {"repositories": {"code": {"path": ".", "gate": "make check"}}},
+            anchor=tmp_path,
+            bundle_root=tmp_path / "okf",
+            graph_dir=tmp_path / "g",
+            declarations_dir=tmp_path / ".gw",
+            source="workspace.yaml",
+        )

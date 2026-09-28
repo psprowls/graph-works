@@ -277,7 +277,7 @@ On success, the result contains:
   worker has ever been dispatched for this epic).
 - `blocked[]` — each: `path`, `kind` (one of exactly `deps`, `capacity`,
   `affects-overlap`, `effort-required`, `decisions`, `human`,
-  `relay-untailed`, `worktree-pending`, `worktree-unsupported`,
+  `relay-untailed`, `worktree-pending`, `workspace-pending`, `worktree-unsupported`,
   `worktree-unprovable`, `worktree-ambiguous`, `cross-repo-child`, `invalid`),
   `reason`. The closed vocabulary is `BLOCKED_KINDS` in
   `graph_works_core.orchestrate.commands` — if a `kind` arrives that isn't in
@@ -427,7 +427,7 @@ you know is out of date).
   this action and replan at §2.1 without changing the captured expectation.
   Never add `--worktree`/`--branch` to it: sizing is not a placement.
 - **Every other kind** (`deps`, `capacity`, `affects-overlap`, `decisions`,
-  `human`, `relay-untailed`, `worktree-pending`, `worktree-unsupported`,
+  `human`, `relay-untailed`, `worktree-pending`, `workspace-pending`, `worktree-unsupported`,
   `worktree-unprovable`, `worktree-ambiguous`, `cross-repo-child`, `invalid`):
   print one line each (`blocked <work-path> (<kind>): <reason>`) and take no action.
   Readers at `design`/`plan` require provable repository and committed-ref

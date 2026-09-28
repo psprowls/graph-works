@@ -40,6 +40,7 @@ from work_tracker_okf.asks import plan_checkpoints
 from work_tracker_okf.decisions import HoldFact
 from work_tracker_okf.hierarchy import PICK_ORDER, active_nonterminal_descendants, child_gated, decision_owner
 from work_tracker_okf.items import IGNORE, WorkItem, load_items
+from work_tracker_okf.placement import CODE_PHASES
 from work_tracker_okf.vocabulary import (
     PHASES,
     PLAN_SOURCE_ID,
@@ -52,10 +53,14 @@ from graph_works_core.orchestrate.anchors import (
     Anchor,
     AnchorPreparation,
     AnchorRefusal,
+    WorkspacePlacement,
+    WorkspacePreparation,
     enclosing_owner,
     integration_branch,
     reader_anchor,
     select_anchor,
+    select_workspace,
+    verify_workspace_stamp,
 )
 from graph_works_core.orchestrate.claims import (
     CODE_WRITE_PHASES,
@@ -90,6 +95,7 @@ from graph_works_core.workspace.repo_context import (
     repository_identity,
 )
 from graph_works_core.workspace.repos import ItemRepo, resolve_item_repo
+from graph_works_core.workspace.workspace_branch import WORKSPACE_REPO
 
 WALK_DEPTH_CAP = 10_000
 
@@ -120,6 +126,7 @@ BLOCKED_KINDS: frozenset[str] = frozenset(
         "human",
         "relay-untailed",
         "worktree-pending",
+        "workspace-pending",
         "worktree-unsupported",
         "worktree-unprovable",
         "worktree-ambiguous",
@@ -206,6 +213,8 @@ class OrchestratePlan:
     human_checkpoints: Mapping[str, HumanCheckpoints] = field(default_factory=lambda: MappingProxyType({}))
     max_attend: int = 1
     attend_slots_free: int = 0
+    workspace_preparations: tuple[WorkspacePreparation, ...] = ()
+    workspace_placements: Mapping[str, WorkspacePlacement] = MappingProxyType({})
 
 
 #: The character budget for a session name. Orca renders it in a task row and
@@ -952,6 +961,14 @@ WORKER_PLACEMENT_LINE = (
 )
 
 
+#: Content instructions precede the mandatory worker placement instruction.
+WORKSPACE_CONTENT_LINE = (
+    "Workspace content root: {worktree} (branch {branch}). Write workspace content there -- run "
+    "content-producing commands with GRAPH_WORKS_DIR={worktree} -- and commit it on that branch. "
+    "Run every gw work verb against GRAPH_WORKS_DIR={workspace}."
+)
+
+
 def _prompt(
     *,
     path: str,
@@ -962,6 +979,7 @@ def _prompt(
     tail: str | None,
     mode: str,
     reader: tuple[str, str] | None = None,
+    content_root: WorkspacePlacement | None = None,
 ) -> str:
     """Five vendor-neutral lines, the ask line off attend, the tail, reader baseline, then placement.
 
@@ -1001,6 +1019,12 @@ def _prompt(
         lines.append(tail)
     if reader is not None:
         lines.append(READER_BASELINE_LINE.format(branch=reader[0], sha=reader[1]))
+    if content_root is not None:
+        lines.append(
+            WORKSPACE_CONTENT_LINE.replace("{worktree}", content_root.worktree)
+            .replace("{branch}", content_root.branch)
+            .replace("{workspace}", workspace)
+        )
     lines.append(WORKER_PLACEMENT_LINE)
     return "\n".join(lines)
 
@@ -1078,6 +1102,9 @@ def plan(
     item_repos: Mapping[str, ItemRepo] | None = None,
     repo_contexts: Mapping[str, RepositoryContext] | None = None,
     finish_plans: Mapping[str, FinishPlan] = MappingProxyType({}),
+    workspace_repo: ItemRepo | None = None,
+    workspace_context: RepositoryContext | None = None,
+    workspace_worktrees_dir: str | None = None,
     checkpoints: Mapping[str, HumanCheckpoints] = MappingProxyType({}),
 ) -> OrchestratePlan:
     """The whole dispatch plan for *root*'s subtree. Mutates nothing, reads nothing.
@@ -1143,6 +1170,10 @@ def plan(
     A candidate without its own evidence refuses locally. Affects reservations
     include repository identity, while capacity and holds remain global.
 
+    `workspace_repo`/`workspace_context`/`workspace_worktrees_dir` enable workspace
+    placement when all three are given; `run_orchestrate` passes `None` when
+    `workspace_repo(layout)` is disabled.
+
     `checkpoints` maps execute-phase item paths to their plan readings, collected
     by `run_orchestrate`. Accepted execute dispatches carry those readings in
     `OrchestratePlan.human_checkpoints`, keyed by dispatch key.
@@ -1161,6 +1192,9 @@ def plan(
     writing a spec or plan may change both during a run. An unresolvable
     live profile counts as attend, with a warning.
     """
+    workspace_enabled = (
+        workspace_repo is not None and workspace_context is not None and workspace_worktrees_dir is not None
+    )
     exists = worktree_exists or {}
     inventory = worktree_inventory or {}
     by_path = {item.path: item for item in items}
@@ -1238,7 +1272,11 @@ def plan(
         # dirty enclosing target must not release a still-running source.
         # Readers hold no affects claims, and their old stamps describe no
         # mutable occupancy. The live key, not an advanced item, owns phase.
-        for live_stamp in item.repo_stamps.values():
+        for name, live_stamp in item.repo_stamps.items():
+            if name == WORKSPACE_REPO:
+                if mutable_worker:
+                    live_worktree_owners.setdefault(live_stamp.worktree, set()).add(item.path)
+                continue
             if mutable_worker:
                 live_worktree_owners.setdefault(live_stamp.worktree, set()).add(item.path)
             stamp_context = next(
@@ -1328,6 +1366,8 @@ def plan(
     finish_targets: dict[str, tuple[FinishTarget, ...]] = {}
     human_checkpoints: dict[str, HumanCheckpoints] = {}
     preparations: dict[tuple[str, str], AnchorPreparation] = {}
+    workspace_preparations: dict[str, WorkspacePreparation] = {}
+    workspace_placements: dict[str, WorkspacePlacement] = {}
 
     def _emit(
         item: WorkItem,
@@ -1341,6 +1381,7 @@ def plan(
         targets: tuple[FinishTarget, ...] = (),
         claims: Sequence[Claim] = (),
         reader: tuple[str, str] | None = None,
+        content_root: WorkspacePlacement | None = None,
     ) -> None:
         entry = resolution.profile
         key = session_name(item.path, item.type, phase)
@@ -1351,6 +1392,8 @@ def plan(
         accepted_worktrees.update(path for target in targets for path in _finish_worktrees(target))
         if item_repo is not None:
             dispatch_repos[key] = item_repo
+        if content_root is not None:
+            workspace_placements[key] = content_root
         dispatches.append(
             PlannedDispatch(
                 key=key,
@@ -1375,6 +1418,7 @@ def plan(
                     tail=entry.prompt_tail,
                     mode=entry.mode,
                     reader=reader,
+                    content_root=content_root,
                 ),
             )
         )
@@ -1512,6 +1556,37 @@ def plan(
             blocked.append(BlockedItem(path=item.path, kind="capacity", reason="ready, but no worker slot free"))
             continue
 
+        content_root: WorkspacePlacement | None = None
+        if workspace_enabled and phase in CODE_PHASES:
+            assert workspace_context is not None and workspace_worktrees_dir is not None
+            selected_ws: WorkspacePlacement | WorkspacePreparation | AnchorRefusal | None
+            if phase == "execute":
+                selected_ws = select_workspace(
+                    item, items=by_path, context=workspace_context, worktrees_dir=workspace_worktrees_dir
+                )
+            else:
+                # Finish never prepares a branch for an item executed before
+                # workspace placement was enabled.
+                selected_ws = verify_workspace_stamp(item, workspace_context)
+            if isinstance(selected_ws, AnchorRefusal):
+                blocked.append(BlockedItem(item.path, selected_ws.kind, selected_ws.reason))
+                continue
+            if isinstance(selected_ws, WorkspacePreparation):
+                workspace_preparations.setdefault(selected_ws.owner_path, selected_ws)
+                blocked.append(
+                    BlockedItem(
+                        item.path,
+                        "workspace-pending",
+                        f"workspace branch for {selected_ws.owner_path} requires `gw work prepare-workspace`",
+                    )
+                )
+                continue
+            content_root = selected_ws
+        workspace_only = workspace_enabled and touches_workspace(item.affects) and not code_affects(item.affects)
+        if workspace_only and phase == "execute" and content_root is None:
+            blocked.append(BlockedItem(item.path, "workspace-pending", "workspace-only item has no workspace branch"))
+            continue
+
         if phase in READ_ONLY_PHASES:
             source = _reader_source(
                 item,
@@ -1564,6 +1639,7 @@ def plan(
                 merge_target,
                 item_repo,
                 reader=(source[1], reader_action.start_sha),
+                content_root=content_root,
             )
             continue
 
@@ -1575,117 +1651,142 @@ def plan(
         local_epic_path = epic_worktree_path
         local_epic_branch = epic_branch
         local_repo_known = repo_known
-        if context is not None and not targets:
-            local_exists = context.path_exists
-            selected_path = str(item_repo.path) if item_repo and item_repo.path else context.path
-            usable = context.checkout_usable_by_path.get(
-                selected_path, context.checkout_usable if selected_path == context.path else False
+        is_root = item.path == root
+        action: WorktreeAction | _Refusal | None
+        if workspace_only and phase == "execute":
+            assert content_root is not None and workspace_repo is not None
+            action, claimed_now = (
+                WorktreeAction(
+                    action="reuse",
+                    path=content_root.worktree,
+                    branch=content_root.branch,
+                    base_branch=None,
+                    exists=True,
+                    parent_path=None,
+                    start_sha=None,
+                ),
+                False,
             )
-            local_repo_path = selected_path if usable else None
-            local_code_repo = selected_path
-            local_base = context.default_base
-            local_repo_known = context.identity_known and context.inventory_known
-            owner = enclosing_owner(item, by_path)
-            local_epic_path = None
-            local_epic_branch = branch_name(item.path, item.type)
-            if owner is None and item.path == root:
-                local_epic_path = item.worktree
-                local_epic_branch = item.branch or local_epic_branch
-            if not usable and (item.worktree == selected_path or local_epic_path == selected_path):
-                blocked.append(
-                    BlockedItem(
-                        item.path, "worktree-unprovable", "selected checkout has uncommitted or unreadable state"
+            item_repo = workspace_repo
+        else:
+            if context is not None and not targets:
+                local_exists = context.path_exists
+                selected_path = str(item_repo.path) if item_repo and item_repo.path else context.path
+                usable = context.checkout_usable_by_path.get(
+                    selected_path, context.checkout_usable if selected_path == context.path else False
+                )
+                local_repo_path = selected_path if usable else None
+                local_code_repo = selected_path
+                local_base = context.default_base
+                local_repo_known = context.identity_known and context.inventory_known
+                owner = enclosing_owner(item, by_path)
+                local_epic_path = None
+                local_epic_branch = branch_name(item.path, item.type)
+                if owner is None and item.path == root:
+                    local_epic_path = item.worktree
+                    local_epic_branch = item.branch or local_epic_branch
+                if not usable and (item.worktree == selected_path or local_epic_path == selected_path):
+                    blocked.append(
+                        BlockedItem(
+                            item.path, "worktree-unprovable", "selected checkout has uncommitted or unreadable state"
+                        )
                     )
-                )
-                continue
-            if not context.identity_known or not context.inventory_known:
-                blocked.append(
-                    BlockedItem(item.path, "worktree-unprovable", "repository Git identity or inventory is unavailable")
-                )
-                continue
-            matching = context.inventory.get(item.branch or "", ())
-            if item.worktree and item.branch and (len(matching) != 1 or item.worktree != matching[0]):
-                blocked.append(
-                    BlockedItem(
-                        item.path,
-                        "worktree-unprovable",
-                        "stamped worktree and branch are not verified in this repository",
-                    )
-                )
-                continue
-            if any(len(paths) > 1 for paths in context.inventory.values()):
-                blocked.append(
-                    BlockedItem(
-                        item.path, "worktree-ambiguous", "repository inventory contains duplicate branch observations"
-                    )
-                )
-                continue
-            if owner is not None and item_repo is not None and item_repos is not None:
-                selected = select_anchor(
-                    owner,
-                    items=by_path,
-                    repos=item_repos,
-                    repo=item_repo,
-                    context=context,
-                    prepare=True,
-                )
-                if isinstance(selected, AnchorRefusal):
-                    blocked.append(BlockedItem(item.path, selected.kind, selected.reason))
                     continue
-                if isinstance(selected, AnchorPreparation):
-                    if selected.worktree.path is None and not provisions_worktrees:
+                if not context.identity_known or not context.inventory_known:
+                    blocked.append(
+                        BlockedItem(
+                            item.path, "worktree-unprovable", "repository Git identity or inventory is unavailable"
+                        )
+                    )
+                    continue
+                matching = context.inventory.get(item.branch or "", ())
+                if item.worktree and item.branch and (len(matching) != 1 or item.worktree != matching[0]):
+                    blocked.append(
+                        BlockedItem(
+                            item.path,
+                            "worktree-unprovable",
+                            "stamped worktree and branch are not verified in this repository",
+                        )
+                    )
+                    continue
+                if any(len(paths) > 1 for paths in context.inventory.values()):
+                    blocked.append(
+                        BlockedItem(
+                            item.path,
+                            "worktree-ambiguous",
+                            "repository inventory contains duplicate branch observations",
+                        )
+                    )
+                    continue
+                if owner is not None and item_repo is not None and item_repos is not None:
+                    selected = select_anchor(
+                        owner,
+                        items=by_path,
+                        repos=item_repos,
+                        repo=item_repo,
+                        context=context,
+                        prepare=True,
+                    )
+                    if isinstance(selected, AnchorRefusal):
+                        blocked.append(BlockedItem(item.path, selected.kind, selected.reason))
+                        continue
+                    if isinstance(selected, AnchorPreparation):
+                        if selected.worktree.path is None and not provisions_worktrees:
+                            blocked.append(
+                                BlockedItem(
+                                    item.path,
+                                    "worktree-unsupported",
+                                    "integration preparation needs a backend that provisions worktrees",
+                                )
+                            )
+                            continue
+                        preparations.setdefault((selected.owner_path, context.identity), selected)
                         blocked.append(
                             BlockedItem(
-                                item.path,
-                                "worktree-unsupported",
-                                "integration preparation needs a backend that provisions worktrees",
+                                item.path, "worktree-pending", "repository integration anchor requires preparation"
                             )
                         )
                         continue
-                    preparations.setdefault((selected.owner_path, context.identity), selected)
-                    blocked.append(
-                        BlockedItem(item.path, "worktree-pending", "repository integration anchor requires preparation")
-                    )
-                    continue
-                if isinstance(selected, Anchor):
-                    local_epic_path, local_epic_branch = selected.worktree, selected.branch
-            if local_epic_path is not None:
-                anchor_paths = context.inventory.get(local_epic_branch, ())
-                if len(anchor_paths) != 1 or local_epic_path != anchor_paths[0]:
-                    blocked.append(
-                        BlockedItem(
-                            item.path, "worktree-unprovable", "integration anchor is not verified in this repository"
+                    if isinstance(selected, Anchor):
+                        local_epic_path, local_epic_branch = selected.worktree, selected.branch
+                if local_epic_path is not None:
+                    anchor_paths = context.inventory.get(local_epic_branch, ())
+                    if len(anchor_paths) != 1 or local_epic_path != anchor_paths[0]:
+                        blocked.append(
+                            BlockedItem(
+                                item.path,
+                                "worktree-unprovable",
+                                "integration anchor is not verified in this repository",
+                            )
                         )
-                    )
-                    continue
-            local_inventory = {branch: paths[0] for branch, paths in context.inventory.items() if paths}
+                        continue
+                local_inventory = {branch: paths[0] for branch, paths in context.inventory.items() if paths}
 
-        is_root = item.path == root
-        placement_item = item
-        if targets:
-            first = targets[0]
-            item_repo = first.repo
-            placement_item = replace(item, worktree=first.worktree, branch=first.source_branch)
-            local_exists = {first.worktree: True}
-            local_inventory = {first.source_branch: first.worktree}
-            local_base = first.target_branch
-            local_epic_branch = first.target_branch
-            local_epic_path = None
-        action, claimed_now = _resolve_worktree(
-            placement_item,
-            epic_worktree_path=local_epic_path,
-            epic_branch=local_epic_branch,
-            live_worktree_owners=live_worktree_owners,
-            accepted_worktrees=accepted_worktrees,
-            epic_worktree_claimed=identity in epic_worktree_claimed,
-            worktree_exists=local_exists,
-            default_base=local_base,
-            phase=phase,
-            is_root=is_root,
-            repo_path=local_repo_path,
-            inventory=local_inventory,
-            code_repo=local_code_repo,
-        )
+            placement_item = item
+            if targets:
+                first = targets[0]
+                item_repo = first.repo
+                placement_item = replace(item, worktree=first.worktree, branch=first.source_branch)
+                local_exists = {first.worktree: True}
+                local_inventory = {first.source_branch: first.worktree}
+                local_base = first.target_branch
+                local_epic_branch = first.target_branch
+                local_epic_path = None
+            action, claimed_now = _resolve_worktree(
+                placement_item,
+                epic_worktree_path=local_epic_path,
+                epic_branch=local_epic_branch,
+                live_worktree_owners=live_worktree_owners,
+                accepted_worktrees=accepted_worktrees,
+                epic_worktree_claimed=identity in epic_worktree_claimed,
+                worktree_exists=local_exists,
+                default_base=local_base,
+                phase=phase,
+                is_root=is_root,
+                repo_path=local_repo_path,
+                inventory=local_inventory,
+                code_repo=local_code_repo,
+            )
         if isinstance(action, _Refusal):
             # Consumes no slot and claims no worktree: a refused item is not a
             # dispatch that failed, it is a dispatch that was never made.
@@ -1752,6 +1853,7 @@ def plan(
             auto_merge=auto_merge,
             targets=targets,
             claims=claims,
+            content_root=content_root,
         )
 
     return OrchestratePlan(
@@ -1768,6 +1870,8 @@ def plan(
         dispatch_resolutions=MappingProxyType(resolutions),
         dispatch_repos=MappingProxyType(dispatch_repos),
         preparations=tuple(preparations.values()),
+        workspace_preparations=tuple(workspace_preparations.values()),
+        workspace_placements=MappingProxyType(workspace_placements),
         finish_targets=MappingProxyType(finish_targets),
         human_checkpoints=MappingProxyType(human_checkpoints),
         max_attend=max_attend,
@@ -1862,6 +1966,14 @@ class OrchestrateResult:
     @property
     def preparations(self) -> tuple[AnchorPreparation, ...]:
         return self.plan.preparations
+
+    @property
+    def workspace_preparations(self) -> tuple[WorkspacePreparation, ...]:
+        return self.plan.workspace_preparations
+
+    @property
+    def workspace_placements(self) -> Mapping[str, WorkspacePlacement]:
+        return self.plan.workspace_placements
 
     @property
     def advances(self) -> tuple[PlannedAdvance, ...]:
@@ -2238,6 +2350,8 @@ __all__ = [
     "OrchestratePlan",
     "OrchestrateResult",
     "PlannedAdvance",
+    "WorkspacePlacement",
+    "WorkspacePreparation",
     "branch_name",
     "integration_branch",
     "plan",

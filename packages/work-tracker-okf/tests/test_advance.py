@@ -685,6 +685,32 @@ def test_the_refusal_vocabulary_carries_the_affects_coverage_reason() -> None:
     assert "unreadable-member" in typing.get_args(RefusalReason)
 
 
+def test_the_gate_vocabulary_is_closed_and_in_the_refusal_reason() -> None:
+    import typing
+
+    from work_tracker_okf.advance import BYPASS_REFUSALS, COMMIT_GATE_REFUSALS, GATE_REFUSALS, RefusalReason
+
+    assert {
+        "no-affects",
+        "no-repo",
+        "worktree-missing",
+        "git-unavailable",
+        "uncommitted-work",
+        "no-start-sha",
+        "range-unreadable",
+        "no-commits",
+        "no-affects-touched",
+    } == COMMIT_GATE_REFUSALS
+    assert {
+        "gate-bypass-invalid",
+        "gate-bypass-mismatch",
+        "gate-bypass-unused",
+        "gate-bypass-unrecorded",
+    } == BYPASS_REFUSALS
+    assert COMMIT_GATE_REFUSALS | BYPASS_REFUSALS | {"finish-incomplete"} == GATE_REFUSALS
+    assert set(typing.get_args(RefusalReason)) >= GATE_REFUSALS
+
+
 # --- which transition the plan picked (bug-transcript-capture-labels-the-wrong-phase) ---
 
 

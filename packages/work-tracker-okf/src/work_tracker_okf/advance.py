@@ -44,6 +44,16 @@ RefusalReason = Literal[
     "no-commits",
     "return-not-available",
     "no-affects-touched",
+    "no-affects",
+    "no-repo",
+    "worktree-missing",
+    "git-unavailable",
+    "no-start-sha",
+    "range-unreadable",
+    "gate-bypass-invalid",
+    "gate-bypass-mismatch",
+    "gate-bypass-unused",
+    "gate-bypass-unrecorded",
 ]
 
 #: Which routing-table transition a plan picked. `dispatch` is an entry
@@ -54,15 +64,33 @@ RefusalReason = Literal[
 #: mislabels that session's own transcript.
 Trigger = Literal["dispatch", "complete", "return"]
 
-#: The four reasons above that this module never produces itself. They are
-#: raised one band up, by the commit and finish receipt gates in
+#: The execute -> finish commit gate's codes, raised one band up by
 #: `graph_works_core.orchestrate.stage_advance`, which cannot own the
-#: vocabulary: `RefusalReason` is the CLI's rendering contract
-#: (`rendering.advance_payload` reads `outcome.plan.refusal`), and a closed
-#: string vocabulary is band-legal here where a git observation is not.
-#: `return-not-available` and `unreadable-member` sit between them in
-#: `RefusalReason` but are *not* members: `advance()` produces both itself.
-GATE_REFUSALS: frozenset[str] = frozenset({"uncommitted-work", "no-commits", "no-affects-touched", "finish-incomplete"})
+#: vocabulary: `RefusalReason` is the CLI's rendering contract and a closed
+#: string vocabulary is band-legal here where a git observation is not. Every
+#: one of them fails closed, and every one is bypassable only by
+#: `gw work advance --skip-gate <code>`, recorded in the decision ledger.
+COMMIT_GATE_REFUSALS: frozenset[str] = frozenset(
+    {
+        "no-affects",
+        "no-repo",
+        "worktree-missing",
+        "git-unavailable",
+        "uncommitted-work",
+        "no-start-sha",
+        "range-unreadable",
+        "no-commits",
+        "no-affects-touched",
+    }
+)
+#: How a `--skip-gate` request itself is refused.
+BYPASS_REFUSALS: frozenset[str] = frozenset(
+    {"gate-bypass-invalid", "gate-bypass-mismatch", "gate-bypass-unused", "gate-bypass-unrecorded"}
+)
+#: Every reason this module never produces itself. `return-not-available` and
+#: `unreadable-member` sit among them in `RefusalReason` but are *not*
+#: members: `advance()` produces both itself.
+GATE_REFUSALS: frozenset[str] = COMMIT_GATE_REFUSALS | BYPASS_REFUSALS | {"finish-incomplete"}
 
 
 @dataclass(frozen=True, slots=True)
@@ -316,6 +344,8 @@ def apply(document: Document, plan: AdvancePlan) -> None:
 
 
 __all__ = [
+    "BYPASS_REFUSALS",
+    "COMMIT_GATE_REFUSALS",
     "GATE_REFUSALS",
     "AdvancePlan",
     "ExpectedPhase",

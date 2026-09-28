@@ -8,14 +8,27 @@ malformed file is a warning naming its path and contributes nothing.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 from collections.abc import Sequence
 from dataclasses import asdict, dataclass
+from datetime import date
 from pathlib import Path
+from types import MappingProxyType
 from typing import Literal, cast
 
-from okf_io import parse
+from okf_io import load_bundle, parse
+from work_tracker_okf.items import IGNORE, load_items
+from work_tracker_okf.mutation import DirectoryPrecondition, PlannedWrite, WorkMutationPlan
+from work_tracker_okf.paths import MANAGED_ARTIFACTS, artifact_ref, item_page
+from work_tracker_okf.sources import upsert
+
+from graph_works_core.workspace.commits import WorkspaceCommit, commit_mode, item_stem
+from graph_works_core.workspace.decision_owner import locked_decision_owner
+from graph_works_core.workspace.layout import WorkspaceLayout
+from graph_works_core.workspace.repos import resolve_repos
+from graph_works_core.workspace.transactions import apply_mutation
 
 GateScope = Literal["full", "scoped"]
 RECEIPT_GLOB = "work/**/references/03-gate-receipts.md"
@@ -167,14 +180,105 @@ def find_satisfying(bundle_root: Path, *, repo: str, tree: str, command: str) ->
     return ReceiptLookup(found[0] if found else None, tuple(warnings))
 
 
+TERMINAL = frozenset({"resolved", "wontfix", "superseded"})
+
+
+@dataclass(frozen=True, slots=True)
+class GateRecord:
+    refusal: str | None
+    receipt_path: str | None
+    changed: bool
+    detail: str = ""
+
+
+def record_gate_run(layout: WorkspaceLayout, owner: str, run: GateRun, *, today: date) -> GateRecord:
+    """Append *run* to *owner*'s receipt as one committed gw write.
+
+    Any non-terminal phase may record: a receipt is a fact about a tree, not a
+    phase. Idempotent on `run_id`.
+    """
+    if not any(i.path == owner for i in load_items(load_bundle(layout.bundle_dir, ignore=IGNORE))):
+        return GateRecord("unknown-item", None, False, f"{owner}: no such work item")
+    commit_mode(layout)
+    with locked_decision_owner(layout, owner) as context:
+        item = next(i for i in context.items if i.path == owner)
+        if item.work_status in TERMINAL:
+            return GateRecord("owner-terminal", None, False, f"{owner} is {item.work_status}; receipts are closed")
+        ref = artifact_ref(owner, MANAGED_ARTIFACTS["gate-receipts"])
+        target = ref.path(context.bundle.root)
+        try:
+            before: bytes | None = target.read_bytes()
+        except FileNotFoundError:
+            before = None
+        if before is None:
+            receipt = parse(render_receipt(owner, [], created=today.isoformat()))
+        else:
+            try:
+                recorded_owner, runs = parse_gate_receipt(before.decode("utf-8"))
+            except (UnicodeError, ValueError) as exc:
+                return GateRecord("malformed-receipt", ref.rel, False, f"{ref.rel}: {exc}; repair it by hand")
+            if recorded_owner != owner:
+                return GateRecord("malformed-receipt", ref.rel, False, f"{ref.rel}: owner is {recorded_owner}")
+            if any(existing.run_id == run.run_id for existing in runs):
+                return GateRecord(None, ref.rel, False)
+            receipt = parse(before.decode("utf-8"))
+        raw_runs = receipt.fm_data()["runs"]
+        raw_runs.append(run_data(run))
+        receipt.set("runs", raw_runs)
+        page_before = context.bundle.concepts[owner].serialize().encode("utf-8")
+        page = parse(page_before.decode("utf-8"))
+        upsert(page, ref, title="Gate receipts")
+        if "[^gate-receipts]" not in page.body:
+            newline = "\r\n" if "\r\n" in page_before.decode("utf-8") else "\n"
+            page.set_body(page.body + f"{newline}[^gate-receipts]: [Gate receipts]({ref.resource}){newline}")
+        writes = tuple(
+            PlannedWrite(member, hashlib.sha256(old).hexdigest() if old is not None else None, new)
+            for member, old, new in (
+                (item_page(owner).rel, page_before, page.serialize().encode("utf-8")),
+                (ref.rel, before, receipt.serialize().encode("utf-8")),
+            )
+            if old != new
+        )
+        parent = target.parent.relative_to(context.bundle.root).as_posix()
+        mutation = WorkMutationPlan(
+            root=context.bundle.root,
+            operation="file",
+            path_mapping=MappingProxyType({}),
+            move_plan=None,
+            moves=(),
+            writes=writes,
+            deletes=(),
+            mkdirs=(parent,),
+            warnings=(),
+            refusals=(),
+            validate_paths=(owner,),
+            directory_preconditions=()
+            if (context.bundle.root / parent).exists()
+            else (DirectoryPrecondition(parent, None),),
+        )
+        application = apply_mutation(
+            layout,
+            mutation,
+            repo_roots=resolve_repos(layout),
+            baseline_bundle=context.bundle,
+            commit=WorkspaceCommit(f"workspace: record {item_stem(owner)} gate receipt {run.run_id}", items=(owner,)),
+        )
+        if not application.ok:
+            return GateRecord("transaction-refused", ref.rel, False, str(application))
+        return GateRecord(None, ref.rel, True)
+
+
 __all__ = [
     "RECEIPT_GLOB",
+    "TERMINAL",
     "GateMatch",
+    "GateRecord",
     "GateRun",
     "GateScope",
     "ReceiptLookup",
     "find_satisfying",
     "parse_gate_receipt",
+    "record_gate_run",
     "render_receipt",
     "run_data",
     "sanitize_tail",

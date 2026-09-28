@@ -1,15 +1,44 @@
 """The `OrcaPort` graph-works-core declares, satisfied structurally — this module never imports core.
 
-One method per Orca call; `OrcaSession` is unchanged and does not use it.
+Most methods project one Orca call; timeout liveness reuses session observation.
 """
 
 from __future__ import annotations
 
+import json
 from collections.abc import Callable, Sequence
+from datetime import datetime
 from typing import Any, TypedDict
 
 from workflow_orca._cli import OrcaCliError, OrcaResult, _subprocess_run, unwrap
 from workflow_orca._launch import check_launch_receipt
+from workflow_orca._liveness import liveness_data
+from workflow_orca._map import (
+    INBOX_LIMIT,
+    SETTLED_ORCA_STATES,
+    OrcaPendingQuestion,
+    OrcaPendingQuestions,
+    inbox_truncated,
+    join_pending_questions,
+    reply_threads,
+    run_questions,
+)
+from workflow_orca.backend import OrcaSession
+
+__all__ = [
+    "OrcaCliPort",
+    "OrcaDelivery",
+    "OrcaMessage",
+    "OrcaPendingQuestion",
+    "OrcaPendingQuestions",
+    "OrcaRead",
+    "OrcaRepo",
+    "OrcaStart",
+    "OrcaTask",
+    "OrcaWorker",
+    "OrcaWorkerShow",
+    "OrcaWorktree",
+]
 
 
 class OrcaRepo(TypedDict):
@@ -34,6 +63,7 @@ class OrcaTask(TypedDict):
     display_name: str | None
     status: str | None
     spec: str | None
+    result: dict[str, Any] | None
 
 
 class OrcaStart(TypedDict):
@@ -50,6 +80,8 @@ class OrcaWorker(TypedDict):
     state: str | None
     dispatch_status: str | None
     worktree_id: str | None
+    release_state: str | None
+    terminal: str | None
 
 
 class OrcaWorkerShow(TypedDict):
@@ -61,6 +93,22 @@ class OrcaWorkerShow(TypedDict):
 class OrcaRead(TypedDict):
     source: str | None
     message_count: int
+
+
+class OrcaMessage(TypedDict):
+    id: str
+    type: str
+    subject: str | None
+    body: str | None
+    from_: str | None
+    created_at: str | None
+    payload: dict[str, Any] | None
+    payload_raw: str | None
+
+
+class OrcaDelivery(TypedDict):
+    delivery_id: str | None
+    messages: list[OrcaMessage]
 
 
 def _object(value: object) -> dict[str, Any]:
@@ -75,6 +123,48 @@ def _rows(value: object) -> list[dict[str, Any]]:
     if not isinstance(value, list):
         return []
     return [row for row in value if isinstance(row, dict)]
+
+
+def _payload(value: object) -> tuple[dict[str, Any] | None, str | None]:
+    """Decode current JSON-string or historical mapping payloads without raising."""
+    if value is None:
+        return {}, None
+    if isinstance(value, dict):
+        return value, None
+    if isinstance(value, str):
+        try:
+            decoded = json.loads(value)
+        except json.JSONDecodeError:
+            return None, value
+        return (decoded, None) if isinstance(decoded, dict) else (None, value)
+    return None, json.dumps(value)
+
+
+def _message(row: dict[str, Any]) -> OrcaMessage:
+    payload, raw = _payload(row.get("payload"))
+    current_sender = _string(row.get("from_handle"))
+    historical_sender = _string(row.get("from"))
+    sender = current_sender if current_sender and current_sender.strip() else historical_sender
+    return {
+        "id": str(row.get("id") or ""),
+        "type": str(row.get("type") or ""),
+        "subject": _string(row.get("subject")),
+        "body": _string(row.get("body")),
+        "from_": sender if sender and sender.strip() else None,
+        "created_at": _string(row.get("created_at")),
+        "payload": payload,
+        "payload_raw": raw,
+    }
+
+
+def _result(value: object) -> dict[str, Any] | None:
+    if not isinstance(value, str) or not value:
+        return None
+    try:
+        decoded = json.loads(value)
+    except json.JSONDecodeError:
+        return None
+    return decoded if isinstance(decoded, dict) else None
 
 
 def _worktree(row: dict[str, Any]) -> OrcaWorktree:
@@ -93,7 +183,12 @@ def _worktree(row: dict[str, Any]) -> OrcaWorktree:
 
 
 class OrcaCliPort:
-    """A small, typed projection of one CLI operation per port method."""
+    """Typed CLI operations and read-only liveness observation."""
+
+    def liveness(self, run_id: str, *, now: datetime) -> list[dict[str, Any]]:
+        """Observe an existing Run without binding its consumer or nudging workers."""
+        session = OrcaSession(name=run_id, run_id=run_id, run=self._run, repo_selector=None)
+        return liveness_data(session.liveness(now=now))
 
     def __init__(self, *, run: Callable[[Sequence[str]], OrcaResult] = _subprocess_run) -> None:
         self._run = run
@@ -193,6 +288,7 @@ class OrcaCliPort:
                 "display_name": _string(row.get("display_name")),
                 "status": _string(row.get("status")),
                 "spec": None if row.get("spec_truncated") else _string(row.get("spec")),
+                "result": _result(row.get("result")),
             }
             for row in _rows(result.get("tasks"))
         ]
@@ -278,6 +374,8 @@ class OrcaCliPort:
                         "state": _string(row.get("workerState")),
                         "dispatch_status": _string(row.get("dispatchStatus")),
                         "worktree_id": _string(row.get("worktreeId")) or _string(resource.get("worktreeId")),
+                        "release_state": _string(resource.get("releaseState")),
+                        "terminal": _string(row.get("agentTerminalHandle")),
                     }
                 )
             page = _object(result.get("page"))
@@ -337,5 +435,59 @@ class OrcaCliPort:
             "message_count": len(messages) if isinstance(messages, list) else 0,
         }
 
+    def pending_questions(self, run_id: str) -> OrcaPendingQuestions:
+        """Questions on the Run with no reply in their thread from a still-live Dispatch.
+
+        Three reads: the Run mailbox, `worker-list`, then each live asker's own
+        mailbox, where `reply --id` lands. An ended asker's mailbox is not read:
+        its question is closed whatever it holds. The join is `_map`'s.
+        """
+        run_inbox = self._call(("inbox", "--terminal", f"run:{run_id}", "--limit", str(INBOX_LIMIT)))
+        questions = run_questions(run_id, run_inbox)
+        states = {worker["dispatch_id"]: worker["state"] for worker in self.worker_list(run_id)}
+        truncated = inbox_truncated(run_inbox)
+        replied: set[str] = set()
+        live_askers = sorted(
+            {
+                q.dispatch_id
+                for q in questions
+                if q.dispatch_id is not None
+                and q.dispatch_id in states
+                and states[q.dispatch_id] not in SETTLED_ORCA_STATES
+            }
+        )
+        for dispatch_id in live_askers:
+            inbox = self._call(("inbox", "--terminal", f"dispatch:{dispatch_id}", "--limit", str(INBOX_LIMIT)))
+            replied |= reply_threads(run_id, inbox)
+            truncated = truncated or inbox_truncated(inbox)
+        return join_pending_questions(questions, worker_states=states, replied=replied, truncated=truncated)
+
     def terminal_send_enter(self, terminal: str) -> None:
         self._call_top(("terminal", "send", "--terminal", terminal, "--text", "", "--enter"))
+
+    def check_wait(self, run_id: str, *, types: str, timeout_ms: int, ack: str | None) -> OrcaDelivery:
+        """One blocking check; optionally acknowledge the prior delivery in the same call."""
+        argv = ["check", "--run", run_id, "--wait", "--types", types, "--timeout-ms", str(timeout_ms)]
+        if ack is not None:
+            argv.extend(("--ack", ack))
+        result = self._call(argv)
+        rows = result.get("messages")
+        if not isinstance(rows, list) or any(not isinstance(row, dict) for row in rows):
+            raise OrcaCliError(
+                ("orca", "orchestration", *argv, "--json"),
+                returncode=0,
+                stderr="",
+                message="malformed check messages",
+                receipt={"ok": True, "result": result},
+            )
+        return {
+            "delivery_id": _string(result.get("deliveryId")),
+            "messages": [_message(row) for row in rows],
+        }
+
+    def check_ack(self, run_id: str, delivery_id: str) -> None:
+        self._call(("check", "--run", run_id, "--ack", delivery_id))
+
+    def run_use(self, run_id: str) -> None:
+        """Rebind this terminal as the Run's consumer after a fence."""
+        self._call(("run-use", "--id", run_id))

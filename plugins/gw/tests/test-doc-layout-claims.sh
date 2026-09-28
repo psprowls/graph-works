@@ -561,6 +561,66 @@ assert_contains "skills/auto-drive/references/grace-period-protocol.md" "Attend 
 assert_contains "skills/auto-drive/references/grace-period-protocol.md" "its \`gw-ask:\` payload resource" \
     "grace-period checkpoint records the typed ask's payload resource"
 
+# feature-nonblocking-coordinator-questions: a worker question is mirrored
+# (printed), acked, and answered later by label — never a blocking prompt.
+assert_contains "skills/auto-drive/SKILL.md" \
+    'For a question, *handled* means *mirrored to the human*, not *answered*.' \
+    "auto-drive §2.7 acks a question once it is mirrored"
+assert_contains "skills/auto-drive/SKILL.md" \
+    'gw work wait --run <run_id> --timeout-s 0 --json' \
+    "auto-drive reads pending_questions through a zero-timeout gw work wait"
+assert_contains "skills/auto-drive/SKILL.md" \
+    'Resolve the label against a fresh `pending_questions` read' \
+    "auto-drive §4.3 resolves a typed answer against a fresh read"
+assert_contains "skills/auto-drive/SKILL.md" \
+    '<label> <key> — <kind>, waiting since <asked_at>' \
+    "auto-drive §4.3 prints an already-shown question as one line"
+section_43="$(awk '/^### 4\.3 `question`/{on=1} /^### 4\.4 /{on=0} on' "$PLUGIN_ROOT/skills/auto-drive/SKILL.md")"
+if [[ -n "$section_43" ]] && ! grep -Fq 'AskUserQuestion' <<<"$section_43"; then
+    pass "auto-drive §4.3 never routes a worker question through AskUserQuestion"
+else
+    fail "auto-drive §4.3 never routes a worker question through AskUserQuestion"
+    grep -nF 'AskUserQuestion' <<<"$section_43" | sed 's/^/      /'
+fi
+
+# Task 5 I1: pin the explicit ordering and fail-closed label contract.
+assert_contains "skills/auto-drive/SKILL.md" \
+    '**On delivery, before mirroring:** obtain fresh pending labels with' \
+    "auto-drive I1 reads fresh labels before delivery mirroring"
+assert_contains "skills/auto-drive/SKILL.md" \
+    'Never invent a label or reuse a cached label when the refresh fails.' \
+    "auto-drive I1 rejects invented or stale labels on refresh failure"
+assert_contains "skills/auto-drive/SKILL.md" \
+    'Without positive closure/reply evidence, leave its delivery unacked for replay.' \
+    "auto-drive I1 preserves unprinted questions for replay"
+assert_contains "skills/auto-drive/SKILL.md" \
+    '**On both delivery and timeout, display pending before restarting.**' \
+    "auto-drive I1 displays pending on both paths before restart"
+assert_contains "skills/auto-drive/SKILL.md" \
+    'Only after the pending display, restart the cycle at §2.1.' \
+    "auto-drive I1 restarts only after the pending display"
+
+# Final review F1: missing pending entries include terminal questions, not
+# just transient refresh failures. These are prose-contract checks, not a
+# simulation of Orca or proof that an agent executed the protocol.
+for contract in \
+    '**Missing delivery question: prove disposition before ack.**' \
+    'Match `result.dispatch.id`, `runId`, and `taskId` to the delivered' \
+    'orca orchestration inbox --terminal dispatch:<dispatch_id> --limit 1000 --json' \
+    '`thread_id == <message_id>`, `from_handle == run:<run_id>`,' \
+    '`to_handle == dispatch:<dispatch_id>`, and `type == status`' \
+    '`result.worker.state` is `succeeded`, `failed`, or `stopped`' \
+    'Absence, a warning, a failed/truncated read, or an unknown state alone' \
+    'Do not create a label, send a new reply, or require a new answer.' \
+    'Ended-before-mirror: positive ended evidence → fresh park/failure routing' \
+    'Answered-before-ack/restart: matching reply evidence → report already answered' \
+    'Inconclusive read: no matching positive evidence → defer, keep delivery unacked' \
+    'Closure handles only this question; every other batch message still needs'
+do
+    assert_contains "skills/auto-drive/SKILL.md" "$contract" \
+        "auto-drive F1 disposition contract: $contract"
+done
+
 # Finishing-relay's three asks are typed; hand-written --options produced
 # comma-split and invented-grammar asks. Typed replies have a strict JSON body.
 assert_contains "skills/finishing-relay/SKILL.md" "gw work ask <work-path> --kind choice" \
@@ -599,6 +659,37 @@ done
 assert_not_matches "skills/auto-drive/SKILL.md" \
     'reads from the shared epic worktree|read-only descendant that records nothing' \
     "auto-drive retires shared-reader placement and receipt skipping"
+
+# tech-debt-auto-drive-skill-orca-edge-cases: §2.7 waits through the tested
+# `gw work wait` verb; no raw `check --wait` / `check --ack` survives anywhere
+# in the skill tree. Wording pins are prose contracts, not a simulation.
+raw_check_hits="$(grep -rnE -- 'orchestration check --run <run_id> --(wait|ack)|check --wait|check --ack' \
+    "$PLUGIN_ROOT/skills/auto-drive" || true)"
+if [[ -z "$raw_check_hits" ]]; then
+    pass "auto-drive carries no raw orca check --wait / --ack loop"
+else
+    fail "auto-drive carries no raw orca check --wait / --ack loop"
+    echo "$raw_check_hits" | sed 's/^/      /'
+fi
+for contract in \
+    'gw work wait --run <run_id> [--ack <delivery_id>] --timeout-s 600 --json' \
+    'the one named exception to §2' \
+    'A deferred ack is simply the next call without `--ack`' \
+    'absorbed duplicate worker_done <dispatch_id>' \
+    'On `status: timeout`, triage from `liveness[]`' \
+    'Verb failure with code `consumer_fenced`' \
+    'strips them and self-acks heartbeat-only deliveries' \
+    'The verb absorbs a late duplicate only for a released single-attempt completion' \
+    'stablyai/orca#14910' \
+    'stablyai/orca#21226' \
+    'is "unknown", not "none"'
+do
+    assert_contains "skills/auto-drive/SKILL.md" "$contract" \
+        "auto-drive gw work wait contract: $contract"
+done
+assert_not_matches "skills/auto-drive/SKILL.md" \
+    "so they're never delivered|Until \`tech-debt-auto-drive-skill-orca-edge-cases\` replaces" \
+    "auto-drive drops the never-delivered heartbeat claim and the interim parenthetical"
 
 if [[ "$FAILURES" -gt 0 ]]; then
     echo "STATUS: FAILED ($FAILURES failure(s))"

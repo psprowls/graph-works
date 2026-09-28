@@ -159,14 +159,16 @@ def test_a_recorded_renamed_fork_child_reuses_its_execute_commit_at_finish(
     assert load(layout.bundle_dir / f"{EPIC}.md").fm_data()["branch"] == EPIC_BRANCH
 
 
-def test_without_a_record_finish_uses_verified_declared_checkout(
+def test_without_a_record_finish_uses_verified_enclosing_anchor(
     world: tuple[WorkspaceLayout, Path, Path],
 ) -> None:
-    """Unstamped finish can only identify the declared checkout, not hidden work.
+    """Unstamped finish sources a descendant from its enclosing anchor, not the declared checkout.
 
     Recording actual placement is required to associate an execute commit in a
-    renamed fork with the child. The compatibility fallback must never invent
-    a new fork at finish and imply that it contains those changes.
+    renamed fork with the child. Without a record, the compatibility fallback
+    must never invent a new fork at finish and imply that it contains those
+    changes — it reuses the enclosing Epic's anchor worktree instead, since
+    that is the checkout the child actually finishes into.
     """
     layout, repo, fork = world
     current_planned = orchestrate.branch_name(CHILD, "Bug")
@@ -179,8 +181,10 @@ def test_without_a_record_finish_uses_verified_declared_checkout(
     assert fm["phase"] == "finish"
     assert fm.get("worktree") is None and fm.get("branch") is None
     dispatch = _finish_dispatch(layout, repo)
-    assert dispatch.worktree.action == "main"
-    assert dispatch.worktree.path == str(repo)
+    assert dispatch.worktree.action == "reuse"
+    epic_worktree = load(layout.bundle_dir / f"{EPIC}.md").fm_data()["worktree"]
+    assert dispatch.worktree.path == epic_worktree
+    assert dispatch.worktree.branch == EPIC_BRANCH
     assert dispatch.merge_target == EPIC_BRANCH
     assert _git(repo, "rev-parse", "HEAD") != commit
     assert _git(fork, "rev-parse", "HEAD") == commit

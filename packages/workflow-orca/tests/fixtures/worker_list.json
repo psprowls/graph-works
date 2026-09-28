@@ -4,16 +4,6 @@
   "result": {
     "workers": [
       {
-        "dispatchId": "ctx_000000000001",
-        "taskId": "task_5ca8c19ffa5e",
-        "runId": "run_43b63f0bdf2b",
-        "workerState": "failed",
-        "dispatchStatus": "failed",
-        "agentTerminalHandle": "term_0000000000000001",
-        "terminalState": "released",
-        "resource": {"id": "wtr_0000000001", "releaseState": "released", "terminalHandle": "term_0000000000000001"}
-      },
-      {
         "dispatchId": "ctx_817ed5bf5986",
         "taskId": "task_5ca8c19ffa5e",
         "runId": "run_43b63f0bdf2b",
@@ -44,6 +34,16 @@
         "agentTerminalHandle": "term_ff2faacf-db5b-43ad-b05b-c6dfee58eb53",
         "terminalState": "active",
         "resource": {"id": "wtr_f5ffa724faff", "releaseState": "active", "terminalHandle": "term_ff2faacf-db5b-43ad-b05b-c6dfee58eb53"}
+      },
+      {
+        "dispatchId": "ctx_000000000001",
+        "taskId": "task_5ca8c19ffa5e",
+        "runId": "run_43b63f0bdf2b",
+        "workerState": "failed",
+        "dispatchStatus": "failed",
+        "agentTerminalHandle": "term_0000000000000001",
+        "terminalState": "released",
+        "resource": {"id": "wtr_0000000001", "releaseState": "released", "terminalHandle": "term_0000000000000001"}
       }
     ],
     "counts": {"retained": 1, "active": 1, "released": 1}

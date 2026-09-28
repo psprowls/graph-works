@@ -1,0 +1,35 @@
+{
+  "id": "6a1d4b9f-2c3e-4f70-9bac-1d2e3f4a5b6c",
+  "ok": true,
+  "result": {
+    "messages": [
+      {
+        "id": "msg_00000000f002",
+        "run_id": "run_q00000000001",
+        "from_handle": "run:run_q00000000001",
+        "to_handle": "dispatch:ctx_aaaaaaaaaaaa",
+        "subject": "note",
+        "body": "unrelated status",
+        "type": "status",
+        "thread_id": null,
+        "payload": null,
+        "sequence": 107,
+        "created_at": "2026-09-27T15:20:00Z"
+      },
+      {
+        "id": "msg_00000000f001",
+        "run_id": "run_q00000000001",
+        "from_handle": "run:run_q00000000001",
+        "to_handle": "dispatch:ctx_aaaaaaaaaaaa",
+        "subject": "Re: Question",
+        "body": "main",
+        "type": "status",
+        "thread_id": "msg_0000000000a1",
+        "payload": null,
+        "sequence": 106,
+        "created_at": "2026-09-27T15:05:00Z"
+      }
+    ],
+    "count": 2
+  }
+}

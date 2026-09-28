@@ -10,6 +10,7 @@ of annotations at runtime. Every failure crosses the seam as
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any, Protocol, TypedDict, runtime_checkable
 
 
@@ -35,6 +36,7 @@ class OrcaTask(TypedDict):
     display_name: str | None
     status: str | None
     spec: str | None
+    result: dict[str, Any] | None
 
 
 class OrcaStart(TypedDict):
@@ -51,6 +53,8 @@ class OrcaWorker(TypedDict):
     state: str | None
     dispatch_status: str | None
     worktree_id: str | None
+    release_state: str | None
+    terminal: str | None
 
 
 class OrcaWorkerShow(TypedDict):
@@ -64,8 +68,45 @@ class OrcaRead(TypedDict):
     message_count: int
 
 
+class OrcaPendingQuestion(TypedDict):
+    message_id: str
+    label: str
+    dispatch_id: str | None
+    task_id: str | None
+    question: str
+    options: list[str]
+    ask_resource: str | None
+    asked_at: str
+
+
+class OrcaPendingQuestions(TypedDict):
+    questions: list[OrcaPendingQuestion]
+    truncated: bool
+    warnings: list[str]
+
+
+class OrcaMessage(TypedDict):
+    id: str
+    type: str
+    subject: str | None
+    body: str | None
+    from_: str | None
+    created_at: str | None
+    payload: dict[str, Any] | None
+    payload_raw: str | None
+
+
+class OrcaDelivery(TypedDict):
+    delivery_id: str | None
+    messages: list[OrcaMessage]
+
+
 @runtime_checkable
 class OrcaPort(Protocol):
+    def liveness(self, run_id: str, *, now: datetime) -> list[dict[str, Any]]:
+        """Observe live dispatches as JSON data, without binding or nudging."""
+        ...
+
     def repo_list(self) -> list[OrcaRepo]: ...
     def worktree_show(self, selector: str) -> OrcaWorktree | None: ...
     def worktree_list(self, repo_id: str) -> list[OrcaWorktree]: ...
@@ -81,4 +122,8 @@ class OrcaPort(Protocol):
     def worker_list(self, run_id: str) -> list[OrcaWorker]: ...
     def worker_show(self, dispatch_id: str) -> OrcaWorkerShow: ...
     def worker_read(self, dispatch_id: str, *, limit: int) -> OrcaRead: ...
+    def pending_questions(self, run_id: str) -> OrcaPendingQuestions: ...
     def terminal_send_enter(self, terminal: str) -> None: ...
+    def check_wait(self, run_id: str, *, types: str, timeout_ms: int, ack: str | None) -> OrcaDelivery: ...
+    def check_ack(self, run_id: str, delivery_id: str) -> None: ...
+    def run_use(self, run_id: str) -> None: ...

@@ -7,7 +7,9 @@ import json
 import pytest
 from orca_fakes import FIXTURES, FakeRunner, fixture
 
-NAMES = sorted(p.stem for p in FIXTURES.glob("*.json"))
+#: Captured refusals: a complete `{"id","ok","error"}` envelope with `ok: false`.
+ERROR_FIXTURES = frozenset({"check_consumer_fenced"})
+NAMES = sorted(p.stem for p in FIXTURES.glob("*.json") if p.stem not in ERROR_FIXTURES)
 
 
 def test_the_fixture_walk_found_something():
@@ -23,6 +25,14 @@ def test_every_fixture_is_a_complete_envelope(name):
     body = json.loads(fixture(name))
     assert set(body) >= {"id", "ok", "result"}
     assert body["ok"] is True
+
+
+@pytest.mark.parametrize("name", sorted(ERROR_FIXTURES))
+def test_every_error_fixture_is_a_complete_refusal(name):
+    body = json.loads(fixture(name))
+    assert set(body) >= {"id", "ok", "error"}
+    assert body["ok"] is False
+    assert isinstance(body["error"].get("code"), str)
 
 
 def test_the_fake_runner_refuses_an_unrouted_call():

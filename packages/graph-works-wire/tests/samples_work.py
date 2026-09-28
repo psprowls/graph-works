@@ -14,6 +14,7 @@ from graph_works_core.orchestrate.dispatch import DispatchFailure, DispatchResul
 from graph_works_core.orchestrate.dispatch_record import Overrides
 from graph_works_core.orchestrate.placement import ReaderRecord
 from graph_works_core.orchestrate.reroute import RerouteResult
+from graph_works_core.orchestrate.wait import Absorbed, WaitResult
 from graph_works_core.work.commands import DispatchExplanation, ItemRead, ItemSource
 from graph_works_core.work.reconcile import CitedDecision, CommitRef, LandedSibling, ReconcileContext
 from graph_works_core.workspace.dispatch import packaged_rule, resolve_dispatch
@@ -422,6 +423,94 @@ WORK: dict[str, tuple[Callable[[], object], ...]] = {
                 run_id="run_2",
                 reason="retry",
                 failure=DispatchFailure("reroute", "unsent", "worker unavailable"),
+            )
+        ),
+    ),
+    "work.wait_payload": (
+        lambda: work.wait_payload(
+            WaitResult(
+                status="event",
+                run_id="run_1",
+                delivery_id="dlv_1",
+                messages=(
+                    {
+                        "id": "m1",
+                        "type": "question",
+                        "subject": "q",
+                        "body": "q",
+                        "from_": "term_1",
+                        "created_at": "t",
+                        "payload": {"question": "q"},
+                        "payload_raw": None,
+                    },
+                ),
+                absorbed=(Absorbed("m0", "worker_done", "ctx_0", "duplicate-completion"),),
+                self_acked=1,
+                rebound=False,
+                sleep_gap_s=None,
+                waited_s=12,
+                pending_questions=(
+                    {
+                        "message_id": "msg_0000000000b2",
+                        "label": "q-00b2",
+                        "dispatch_id": "ctx_b",
+                        "task_id": "task_b",
+                        "question": "Merge?",
+                        "options": ["merge", "hold"],
+                        "ask_resource": None,
+                        "asked_at": "2026-09-27T15:30:00Z",
+                    },
+                ),
+                warnings=("partial read",),
+            )
+        ),
+        lambda: work.wait_payload(
+            WaitResult(
+                status="timeout",
+                run_id="run_1",
+                delivery_id=None,
+                messages=(),
+                absorbed=(),
+                self_acked=0,
+                rebound=True,
+                sleep_gap_s=3000,
+                waited_s=600,
+                liveness=[],
+                pending_questions=(),
+            )
+        ),
+        lambda: work.wait_payload(
+            WaitResult(
+                status="timeout",
+                run_id="run_1",
+                delivery_id=None,
+                messages=(),
+                absorbed=(),
+                self_acked=0,
+                rebound=False,
+                sleep_gap_s=None,
+                waited_s=600,
+                liveness=[
+                    {
+                        "key": "work/a#execute",
+                        "handle": "ctx_1",
+                        "state": "running",
+                        "heartbeat_at": "2026-09-27T12:00:00Z",
+                        "heartbeat_age_s": 90,
+                        "transcript_at": None,
+                        "transcript_age_s": None,
+                        "output_at": None,
+                        "output_age_s": None,
+                        "worktree_path": "/worktree",
+                        "progress": {
+                            "ledger": "/worktree/.superpowers/sdd/plan/progress.md",
+                            "plan": "/worktree/plan.md",
+                            "completed": 1,
+                            "total": 2,
+                        },
+                        "notes": [],
+                    }
+                ],
             )
         ),
     ),

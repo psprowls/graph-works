@@ -260,6 +260,91 @@ def test_unstamped_leaf_without_checkout_evidence_blocks(tmp_path, monkeypatch):
     assert result.blockers
 
 
+@pytest.mark.parametrize("leaf_type", ["Feature", "Bug"])
+def test_unstamped_descendant_finishes_from_enclosing_anchor(tmp_path, monkeypatch, leaf_type):
+    from graph_works_core.orchestrate import commands
+    from graph_works_core.work.commands import run_next
+
+    layout, _items, path = setup(tmp_path, monkeypatch, nested=True)
+    page = layout.bundle_dir / f"{path}.md"
+    page.write_text(
+        f"---\ntype: {leaf_type}\nrepo: core\nphase: finish\nwork_status: in-progress\naffects: [packages]\n---\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(commands, "observe_repository", finish_module.observe_repository)
+    monkeypatch.setattr(commands, "repository_identity", lambda p: str(p))
+    attended = run_next(layout, path)
+    assert attended.route.blockers == ()
+    [target] = attended.finish_targets
+    assert target.repo.name == "core"
+    assert target.worktree == "/core/parent"
+    assert target.source_branch == "epic/parent"
+    assert target.target_branch == "epic/parent"
+    assert target.target_worktree == "/core/parent"
+    automated = commands.run_orchestrate(layout, path)
+    assert len(automated.dispatches) == 1, automated.blocked
+    assert automated.finish_targets[automated.dispatches[0].key] == attended.finish_targets
+
+
+def test_unstamped_descendant_with_unprepared_anchor_blocks(tmp_path, monkeypatch):
+    layout, _items, path = setup(tmp_path, monkeypatch, nested=True)
+    parent_page = layout.bundle_dir / "work/epic-parent.md"
+    parent_page.write_text("---\ntype: Epic\nrepo: core\n---\n", encoding="utf-8")
+    page = layout.bundle_dir / f"{path}.md"
+    page.write_text(
+        "---\ntype: Bug\nrepo: core\nphase: finish\nwork_status: in-progress\naffects: [packages]\n---\n",
+        encoding="utf-8",
+    )
+    items = load_items(load_bundle(layout.bundle_dir))
+    result = resolve_finish_targets(layout, items, path)
+    assert result.targets == ()
+    assert any("prepare enclosing integration anchor" in b for b in result.blockers)
+    assert not any("/core'" in b for b in result.blockers if "cannot verify" in b)
+
+
+def test_unstamped_descendant_receipt_verifies_against_anchor_tip(tmp_path):
+    import subprocess
+    from datetime import date
+
+    from graph_works_core import apply_init, plan_init
+    from graph_works_core.workspace.finish import observe_integration
+
+    def git(repo, *args):
+        return subprocess.run(
+            ["git", "-C", str(repo), *args], check=True, capture_output=True, text=True
+        ).stdout.strip()
+
+    layout = apply_init(plan_init(tmp_path / "workspace", today=date(2026, 9, 23), topic="Finish")).layout
+    repo = tmp_path / "code"
+    repo.mkdir()
+    git(repo, "init", "-b", "main")
+    git(repo, "config", "user.name", "Test")
+    git(repo, "config", "user.email", "test@example.test")
+    git(repo, "commit", "--allow-empty", "-m", "base")
+    layout.manifest_path.write_text(f"version: 1\nrepositories:\n  code: {{path: {repo}}}\n", encoding="utf-8")
+    anchor = tmp_path / "anchor"
+    git(repo, "worktree", "add", "-b", "epic/x", str(anchor))
+    git(anchor, "commit", "--allow-empty", "-m", "child work")
+    tip = git(anchor, "rev-parse", "HEAD")
+
+    parent_page = layout.bundle_dir / "work/epic-parent.md"
+    parent_page.parent.mkdir(parents=True, exist_ok=True)
+    parent_page.write_text(f"---\ntype: Epic\nrepo: code\nworktree: {anchor}\nbranch: epic/x\n---\n", encoding="utf-8")
+    child_page = layout.bundle_dir / "work/epic-parent/children/bug-a.md"
+    child_page.parent.mkdir(parents=True, exist_ok=True)
+    child_page.write_text(
+        "---\ntype: Bug\nrepo: code\nphase: finish\nwork_status: in-progress\naffects: [packages]\n---\n",
+        encoding="utf-8",
+    )
+    items = load_items(load_bundle(layout.bundle_dir))
+    result = resolve_finish_targets(layout, items, "work/epic-parent/children/bug-a")
+    assert result.blockers == ()
+    [target] = result.targets
+    entry = observe_integration(target)
+    assert entry is not None
+    assert entry.source_commit == entry.result_commit == tip
+
+
 @pytest.mark.parametrize("same_worktree", [True, False])
 def test_live_foreign_source_stays_reserved_after_anchor_revalidation_fails(tmp_path, monkeypatch, same_worktree):
     from graph_works_core.orchestrate.commands import plan, session_name

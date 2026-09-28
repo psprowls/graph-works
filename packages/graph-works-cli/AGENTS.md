@@ -56,6 +56,11 @@ change that moved it, never as an incidental side effect.
   `gw work reroute KEY --run RUN --reason TEXT` supersedes a settled Task and journals
   optional `--agent`, `--model`, and `--effort` overrides for the next dispatch.
 
+  `gw work wait --run RUN [--ack DELIVERY_ID] [--timeout-s N]` is the coordinator's one wait:
+  core's `orchestrate/wait.py` strips heartbeats, self-acks deliveries holding nothing real,
+  absorbs duplicate completions and rebinds once on `consumer_fenced`; a real delivery is
+  returned unacked, and the next wait's `--ack` acks it.
+
   `gw work next` has one blocker source the routing table cannot see: a malformed
   configured stage skill. `entry_for()` is called under a `WorkspaceError` guard
   and its message is appended to `blockers[]` with `action` nulled, rather than

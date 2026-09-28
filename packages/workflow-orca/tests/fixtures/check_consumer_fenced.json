@@ -1,0 +1,8 @@
+{
+  "id": "6e2f3041-1b2c-4d3e-9f40-5b6c7d8e9fa0",
+  "ok": false,
+  "error": {
+    "code": "consumer_fenced",
+    "message": "This terminal is not the bound consumer for run run_43b63f0bdf2b; run `orca orchestration run-use --id run_43b63f0bdf2b`."
+  }
+}

@@ -108,12 +108,15 @@ enforced here via a live Orca query rather than a local set.
   against the plan, never warns, and degrades every failure to `None`,
   because `launch()` has already started a real worker by then. Comparing
   actual against planned is a caller's business and is tracked separately.
-- **enumerate** (`workers()`): costs `2 + W` CLI calls (`task-list`,
-  `worker-list`, plus one `worker-show` per worker with a handle) — read
+- **enumerate** (`workers()`): costs `1 + P + W` CLI calls (`task-list`,
+  all `P` worker-list pages, plus one `worker-show` per worker with a handle) — read
   `WorkerRecord.last_heartbeat_at`'s and `workers()`'s docstrings in
   `backend.py` before "optimizing" this away; the per-live-worker call is
   deliberate because a nudge decision (below) treats "has ever heartbeat" as
-  a hard veto and a lazily-`None` heartbeat would silently defeat it.
+  a hard veto and a lazily-`None` heartbeat would silently defeat it. Rows are
+  newest first; the first attempt for each task wins across all pages. Failed
+  later pages or malformed/repeated continuations raise rather than returning
+  a partial inventory. Historical responses without page metadata remain valid.
 - **wait**: one blocking `check --wait --types
   worker_done,escalation,question,heartbeat --timeout-ms <ms>` call,
   translated by the pure `_map.py` (`event_from_message`) into the protocol's
@@ -155,6 +158,27 @@ requires an actual `worker-show.terminal` whose handle matches worker-list's
 `agentTerminalHandle`. The cache is cleared on every enumeration: a vanished
 terminal cannot leave stale proof. Structured workers may have an agent handle
 without a terminal; their lifecycle and reads use orchestration only.
+
+### Liveness rows
+
+`OrcaSession.liveness(now=…)` returns one `LivenessRow` per live (`pending` /
+`running`) dispatch with a handle: facts, never a verdict. It is available for
+coordinators after a timeout; wait-verb integration is a separate task, and the
+landed wait verb never nudges. Liveness itself neither nudges nor marks nudged.
+It reuses `workers()`' per-handle worker-show cache (`_shown` /
+`_show_failures`, refreshed with `_agent_terminals`), then adds one
+`worker-read --limit 1` per live dispatch. Transcript age comes only from a
+`source == "transcript"` read; terminal fallback is a note, never a stand-in.
+When terminal worktree path is unavailable, it falls back to `worktree show`
+using `worker.worktreeId`. Invalid path values are unknown, not stringified.
+`progress` comes from `_progress.find_progress` over
+`<worktree>/.superpowers/sdd/*/progress.md`, ignoring ledgers older than the
+dispatch's `createdAt`. Worker read failures produce null fields plus notes;
+only failed task/worker enumeration raises `OrcaCliError`. Malformed dispatch,
+terminal and transcript shapes are treated as unavailable. `now` is required
+and must be timezone-aware (otherwise `ValueError`, before any CLI call); this
+method never reads the clock. `LivenessRow`, `SddProgress` and `liveness_data`
+are public package exports; the protocol remains unchanged.
 
 ### Other gotchas that need cross-file reading
 
@@ -202,3 +226,12 @@ pinning. Graph Works auto-drive prepares and verifies each reader itself —
 an independent, setup-skipped one; core detaches and verifies it), or the
 legacy `launch-worker.py prepare-reader` — then starts it at that exact path. Creation actions
 require a non-None branch before assembling CLI flags.
+
+`port.py` is the structural `OrcaPort` implementation for core's coordinator
+logic. Its `check_wait` builds one blocking `check --wait` call with optional
+`--ack`, `check_ack` acknowledges a delivery separately, and `run_use` rebinds
+the Run's consumer. The port adds `OrcaTask.result`,
+`OrcaWorker.release_state` / `terminal`, and message `payload_raw` to its
+normalized rows so core can inspect duplicate completions without losing
+malformed payload evidence. Unlike `OrcaSession`, the port rebinds only when
+the caller's core logic asks it to.

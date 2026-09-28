@@ -34,6 +34,13 @@ class FakeOrcaPort:
         }
     )
     reads: list[dict[str, Any]] = field(default_factory=lambda: [{"source": "transcript", "message_count": 1}])
+    pending: dict[str, Any] = field(default_factory=lambda: {"questions": [], "truncated": False, "warnings": []})
+    #: Deliveries `check_wait` returns in order; an exhausted script returns an empty batch.
+    deliveries: list[dict[str, Any]] = field(default_factory=list)
+    #: `check_wait` raises these, in order, before consuming a delivery.
+    wait_errors: list[BaseException] = field(default_factory=list)
+    #: Called with the timeout of each wait; tests may advance their clock here.
+    on_wait: Callable[[int], None] | None = None
     fail: dict[str, BaseException] = field(default_factory=dict)
     calls: list[tuple[str, tuple[Any, ...], dict[str, Any]]] = field(default_factory=list)
     next_task: int = 1
@@ -45,6 +52,10 @@ class FakeOrcaPort:
 
     def names(self) -> list[str]:
         return [name for name, _a, _k in self.calls]
+
+    def liveness(self, run_id, *, now):
+        self._record("liveness", run_id, now=now)
+        return []
 
     def repo_list(self):
         self._record("repo_list")
@@ -117,5 +128,29 @@ class FakeOrcaPort:
         self._record("worker_read", dispatch_id, limit=limit)
         return dict(self.reads.pop(0) if len(self.reads) > 1 else self.reads[0])
 
+    def pending_questions(self, run_id):
+        self._record("pending_questions", run_id)
+        return {
+            "questions": [dict(q) for q in self.pending["questions"]],
+            "truncated": self.pending["truncated"],
+            "warnings": list(self.pending["warnings"]),
+        }
+
     def terminal_send_enter(self, terminal):
         self._record("terminal_send_enter", terminal)
+
+    def check_wait(self, run_id, *, types, timeout_ms, ack):
+        self._record("check_wait", run_id, types=types, timeout_ms=timeout_ms, ack=ack)
+        if self.wait_errors:
+            raise self.wait_errors.pop(0)
+        if self.on_wait is not None:
+            self.on_wait(timeout_ms)
+        if not self.deliveries:
+            return {"delivery_id": None, "messages": []}
+        return self.deliveries.pop(0)
+
+    def check_ack(self, run_id, delivery_id):
+        self._record("check_ack", run_id, delivery_id)
+
+    def run_use(self, run_id):
+        self._record("run_use", run_id)

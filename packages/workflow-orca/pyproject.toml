@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "workflow-orca"
-version = "0.2.0"
+version = "0.2.1"
 description = "The Orca DispatchBackend: launch, enumerate, supervise and resume workers on an Orca Run."
 authors = [
   { name = "Patrick Sprowls", email = "psprowls@gmail.com" },

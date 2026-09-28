@@ -496,7 +496,10 @@ class RestartProofTests(unittest.TestCase):
                 shown = json.loads((FIXTURES / "worker_show_settled.json").read_text(encoding="utf-8"))
                 task = tasks["result"]["tasks"][0]
                 tasks["result"]["tasks"] = [task]
-                worker = workers["result"]["workers"][1]
+                worker = next(
+                    row for row in workers["result"]["workers"]
+                    if row["dispatchId"] == "ctx_817ed5bf5986"
+                )
                 workers["result"]["workers"] = [worker]
                 shown["result"]["dispatch"].update(id=worker["dispatchId"], task_id=task["id"])
                 shown["result"]["worker"].update(dispatch_id=worker["dispatchId"], state="succeeded")

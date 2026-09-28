@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 from types import SimpleNamespace as ns
@@ -10,6 +11,7 @@ from types import SimpleNamespace as ns
 from graph_works_core.orchestrate.dispatch import DispatchFailure, DispatchResult, ObservedPlacement
 from graph_works_core.orchestrate.dispatch_record import Overrides
 from graph_works_core.orchestrate.reroute import RerouteResult
+from graph_works_core.orchestrate.wait import Absorbed, WaitResult
 from graph_works_core.work.commands import DispatchExplanation, OpenDecision
 from graph_works_core.work.reconcile import CitedDecision, CommitRef, LandedSibling, ReconcileContext
 from graph_works_core.workspace.commits import CommitOutcome
@@ -75,6 +77,79 @@ def test_placement_pending_commit_failure_warns_once() -> None:
     payload = work.placement_payload(result)
     assert payload["commit"] == work._commit(result.pending_commit)
     assert payload["warnings"] == ["workspace commit failed: hook-failed"]
+
+
+def _wait_message(**over: object) -> dict:
+    base = {
+        "id": "m1",
+        "type": "worker_done",
+        "subject": "s",
+        "body": "b",
+        "from_": "term_1",
+        "created_at": "2026-09-27T18:00:00Z",
+        "payload": {"dispatchId": "ctx_1"},
+        "payload_raw": None,
+    }
+    return {**base, **over}
+
+
+def test_wait_payload_exact_event_shape() -> None:
+    result = WaitResult(
+        status="event",
+        run_id="run_1",
+        delivery_id="dlv_1",
+        messages=(_wait_message(),),
+        absorbed=(Absorbed("m0", "worker_done", "ctx_0", "duplicate-completion"),),
+        self_acked=1,
+        rebound=False,
+        sleep_gap_s=None,
+        waited_s=312,
+    )
+    assert work.wait_payload(result) == {
+        "status": "event",
+        "run_id": "run_1",
+        "delivery_id": "dlv_1",
+        "messages": [
+            {
+                "id": "m1",
+                "type": "worker_done",
+                "subject": "s",
+                "body": "b",
+                "from": "term_1",
+                "created_at": "2026-09-27T18:00:00Z",
+                "payload": {"dispatchId": "ctx_1"},
+            }
+        ],
+        "absorbed": [
+            {"message_id": "m0", "type": "worker_done", "dispatch_id": "ctx_0", "reason": "duplicate-completion"}
+        ],
+        "self_acked": 1,
+        "rebound": False,
+        "sleep_gap": None,
+        "waited_s": 312,
+        "pending_questions": None,
+        "warnings": [],
+        "liveness": None,
+    }
+
+
+def test_wait_payload_timeout_with_sleep_gap_and_raw_payload() -> None:
+    result = WaitResult(
+        status="timeout",
+        run_id="run_1",
+        delivery_id=None,
+        messages=(_wait_message(payload=None, payload_raw="{bad"),),
+        absorbed=(),
+        self_acked=0,
+        rebound=True,
+        sleep_gap_s=3000,
+        waited_s=600,
+    )
+    payload = work.wait_payload(result)
+    assert payload["sleep_gap"] == {"seconds": 3000}
+    assert payload["messages"][0]["payload"] == "{bad"
+    assert payload["rebound"] is True and payload["pending_questions"] is None and payload["liveness"] is None
+    json.dumps(payload)
 
 
 def test_worker_dispatch_payload_exact_success_shape() -> None:
@@ -873,3 +948,42 @@ def test_reader_receipt_payload_freezes_attempt_and_outcome_fields() -> None:
         ReaderRecord(plan, Path("/cache/ctx_1.json"), False, False, "attempt-mismatch")
     )
     assert payload["conflict"] == "attempt-mismatch"
+
+
+def test_wait_liveness_preserves_empty_populated_and_uncomputed():
+    from graph_works_core.orchestrate.wait import WaitResult
+
+    for rows in (None, [], [{"handle": "ctx_1", "progress": None, "notes": ["no SDD ledger"]}]):
+        result = WaitResult(
+            status="event" if rows is None else "timeout",
+            run_id="run_1",
+            delivery_id=None,
+            messages=(),
+            absorbed=(),
+            self_acked=0,
+            rebound=False,
+            sleep_gap_s=None,
+            waited_s=1,
+            liveness=rows,
+        )
+        assert work.wait_payload(result)["liveness"] == rows
+
+
+QUESTION = {
+    "message_id": "msg_0000000000b2",
+    "label": "q-00b2",
+    "dispatch_id": "ctx_b",
+    "task_id": "task_b",
+    "question": "Merge?",
+    "options": ["merge", "hold"],
+    "ask_resource": None,
+    "asked_at": "2026-09-27T15:30:00Z",
+}
+
+
+def test_wait_payload_projects_pending_questions_and_null():
+    base = WaitResult("timeout", "run_1", None, (), (), 0, False, None, 0)
+    assert work.wait_payload(replace(base, pending_questions=(QUESTION,)))["pending_questions"] == [QUESTION]
+    assert work.wait_payload(replace(base, pending_questions=()))["pending_questions"] == []
+    assert work.wait_payload(replace(base, pending_questions=None))["pending_questions"] is None
+    assert work.wait_payload(replace(base, warnings=("w",)))["warnings"] == ["w"]

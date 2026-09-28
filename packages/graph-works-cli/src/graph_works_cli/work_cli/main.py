@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 import sys
+import time
 from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Any, Never, cast
@@ -25,6 +26,7 @@ from graph_works_core.orchestrate.dispatch import run_dispatch
 from graph_works_core.orchestrate.placement import ReaderObservation, run_record_placement, run_record_reader
 from graph_works_core.orchestrate.reroute import run_reroute
 from graph_works_core.orchestrate.stage_advance import ExpectedPhase, run_stage_advance
+from graph_works_core.orchestrate.wait import WaitClock, WaitFailed, run_wait
 from graph_works_core.work import commands as work
 from graph_works_core.workspace.config import WorkspaceConfig, load_workspace_config
 from graph_works_core.workspace.errors import WorkspaceConfigError, WorkspaceError
@@ -51,6 +53,11 @@ work_app.command(name="ask-answer")(ask_answer)
 def _today() -> date:
     """One UTC date per invocation. Core never reads the clock (spec 6)."""
     return datetime.now(UTC).date()
+
+
+def _wait_clock() -> WaitClock:
+    """The one clock `gw work wait` reads; core measures sleep as wall minus monotonic."""
+    return WaitClock(wall=lambda: datetime.now(UTC), monotonic=time.monotonic)
 
 
 _VALIDATION_REASONS = frozenset(
@@ -757,6 +764,49 @@ def reroute(
         rendering.emit(payload)
         return
     typer.echo(f"rerouted {key}: superseded {payload['superseded_task_id']} ({payload['status']})")
+
+
+@work_app.command()
+def wait(
+    run: str = typer.Option(..., "--run", help="The Orca Run id."),
+    ack: str = typer.Option(
+        "", "--ack", help="The previous event's delivery_id, acked before waiting; ignored when --timeout-s is 0."
+    ),
+    timeout_s: float = typer.Option(
+        600.0,
+        "--timeout-s",
+        min=0,
+        help="Seconds before timeout; 0 reads pending questions only, without consuming or acknowledging deliveries.",
+    ),
+    workspace: str = typer.Option("", "--workspace", help="Workspace path."),
+    json_output: bool = rendering.json_option("Emit the wait result as JSON."),
+) -> None:
+    """Wait for a real coordinator event; heartbeats and duplicate completions never wake it."""
+    resolve_workspace(workspace, json_mode=json_output, command="work wait")
+    try:
+        result = run_wait(orca_port(), run, ack=ack or None, timeout_s=timeout_s, clock=_wait_clock())
+    except WaitFailed as exc:
+        rendering.fail(
+            f"work wait --run {run}: {exc}",
+            reason="refused",
+            payload={"run_id": exc.run_id, "code": exc.code},
+            cause=exc,
+        )
+    payload = wire_work.wait_payload(result)
+    if json_output:
+        rendering.emit(payload)
+        return
+    if payload["status"] == "event":
+        line = f"event: {len(payload['messages'])} message(s) in {payload['delivery_id']}"
+    else:
+        line = f"timeout after {payload['waited_s']}s"
+    if payload["sleep_gap"] is not None:
+        line += f"; sleep gap {payload['sleep_gap']['seconds']}s"
+    if payload["rebound"]:
+        line += "; rebound"
+    typer.echo(line)
+    for warning in result.warnings:
+        typer.echo(f"warning: {warning}")
 
 
 @work_app.command(name="regen-index")

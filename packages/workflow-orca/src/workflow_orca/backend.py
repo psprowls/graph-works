@@ -14,13 +14,19 @@ paths (`task-list`, `worker-list`) do not, and are not re-bound for.
 Three things Orca needs that the protocol does not name — releasing a settled
 worker's resource, verifying successful completion, and nudging a worker whose prompt
 was typed but never submitted — are folded into `ack()`, `close()` and
-`wait()`. Nothing new is exported: an Orca-aware coordinator with extra methods
-to call is a coordinator that no longer swaps backends.
+`wait()`. Nothing the protocol names is widened.
+
+`liveness(now=…)` adds Orca-specific facts (heartbeat, transcript and
+terminal-output ages, SDD ledger progress) for a coordinator whose wait timed
+out. The protocol, `WorkerRecord` and `workers()` return value are unchanged.
+It reuses the worker-show payloads already fetched by `workers()`.
 """
 
 from __future__ import annotations
 
 from collections.abc import Callable, Sequence
+from datetime import datetime
+from pathlib import Path
 from typing import Any
 
 from subagents_io.backend import (
@@ -34,9 +40,11 @@ from subagents_io.backend import (
 )
 from subagents_io.dispatch import DISPATCH_MODES, PlannedDispatch, WorktreeAction
 
+from workflow_orca import _liveness as live
 from workflow_orca._cli import OrcaCliError, OrcaResult, _subprocess_run, unwrap
 from workflow_orca._launch import check_launch_receipt, decode_launch_spec, encode_launch_spec, launch_preferences
 from workflow_orca._map import event_from_message, normalize_message, parse_task_result, worker_state
+from workflow_orca._progress import find_progress
 
 #: Every argv this package builds starts here.
 _ORCA = ("orca", "orchestration")
@@ -146,6 +154,9 @@ class OrcaSession:
         #: matching worker-list/worker-show evidence on every enumeration.
         #: An agent handle alone can also identify a terminal-free worker.
         self._agent_terminals: dict[str, str] = {}
+        #: Latest enumeration's worker-show evidence, refreshed with terminal proof.
+        self._shown: dict[str, dict[str, Any]] = {}
+        self._show_failures: dict[str, str] = {}
         #: Handles with verified durable launch receipts in the latest enumeration.
         self._verified_launches: set[str] = set()
         self._done_by_delivery: dict[str, tuple[WorkerDone, ...]] = {}
@@ -263,25 +274,27 @@ class OrcaSession:
     def workers(self) -> list[WorkerRecord]:
         """Every worker ever launched in this session.
 
-        Costs `2 + W` calls, where `W` counts workers with handles. Full task
+        Costs `1 + P + W` calls: `P` worker-list pages and `W` workers with handles. Full task
         specs and durable worker launch receipts are required even after
         settlement. The same worker-show also supplies heartbeat and actual
         terminal proof; lifecycle never depends on the presence of a terminal.
         """
         tasks = self._call(["task-list"]).get("tasks") or []
-        rows = self._call(["worker-list"]).get("workers") or []
+        rows = self._worker_rows()
 
-        # Later rows win: retries append, so the last row for a task is the
-        # most recent attempt.
+        # Orca returns newest first, including across page boundaries.
+        # Keep the first attempt for each task; older retries cannot replace it.
         latest: dict[str, dict[str, Any]] = {}
-        for row in rows:
-            task_id = str(row.get("taskId") or "")
+        for attempt in rows:
+            task_id = str(attempt.get("taskId") or "")
             if task_id:
-                latest[task_id] = row
+                latest.setdefault(task_id, attempt)
 
         self._keys_by_task = {str(t["id"]): str(t.get("task_title") or "") for t in tasks}
         records: list[WorkerRecord] = []
         self._agent_terminals.clear()
+        self._shown.clear()
+        self._show_failures.clear()
         self._verified_launches.clear()
         for task in tasks:
             task_id = str(task["id"])
@@ -305,8 +318,8 @@ class OrcaSession:
                 continue
             handle = str(row.get("dispatchId") or "")
             state = worker_state(row.get("workerState"))
-            shown = self._show(handle)
-            context = shown.get("dispatch") or {}
+            shown = self._show_enumerated(handle)
+            context = live.as_object(shown.get("dispatch"))
             heartbeat = (
                 (context.get("lastHeartbeatAt") or context.get("last_heartbeat_at"))
                 if state in self._LIVE_STATES
@@ -333,6 +346,38 @@ class OrcaSession:
                 # enumeration is what re-earns its release obligation.
                 self._unreleased.add(handle)
         return records
+
+    def _worker_rows(self) -> list[dict[str, Any]]:
+        """Complete newest-first inventory, or an enumeration error (never partial)."""
+        rows: list[dict[str, Any]] = []
+        argv = ["worker-list"]
+        seen: set[str] = set()
+        while True:
+            result = self._call(argv)
+            rows.extend(result.get("workers") or [])
+            # Historical responses have no pagination metadata.
+            if "page" not in result and not seen:
+                return rows
+            page = result.get("page")
+            if isinstance(page, dict) and page.get("hasMore") is False:
+                return rows
+            cursor = page.get("nextCursor") if isinstance(page, dict) else None
+            if (
+                not isinstance(page, dict)
+                or page.get("hasMore") is not True
+                or not isinstance(cursor, str)
+                or not cursor.strip()
+                or cursor in seen
+            ):
+                raise OrcaCliError(
+                    (*_ORCA, *argv, "--run", self.run_id, "--json"),
+                    returncode=0,
+                    stderr="",
+                    message="worker-list page has malformed or repeated continuation",
+                    receipt={"ok": True, "result": result},
+                )
+            seen.add(cursor)
+            argv = ["worker-list", "--cursor", cursor]
 
     def describe(self, key: str) -> WorkerRecord | None:
         """`workers()` filtered to one key. Same cost, same honesty — a
@@ -440,6 +485,125 @@ class OrcaSession:
             return self._call_unscoped(["worker-show", "--dispatch", handle])
         except OrcaCliError:
             return {}
+
+    def _show_enumerated(self, handle: str) -> dict[str, Any]:
+        """`_show`, remembering the payload or the failure for `liveness()`."""
+        if not handle:
+            return {}
+        try:
+            shown = self._call_unscoped(["worker-show", "--dispatch", handle])
+        except OrcaCliError as exc:
+            self._show_failures[handle] = exc.code or f"exit {exc.returncode}"
+            return {}
+        self._shown[handle] = shown
+        return shown
+
+    def liveness(self, *, now: datetime) -> list[live.LivenessRow]:
+        """One row per live dispatch: facts for a coordinator whose wait timed out.
+
+        Independent of nudging. Costs one enumeration (exactly `workers()`),
+        one `worker-read --limit 1` per live dispatch, and one `worktree show`
+        only when the terminal does not supply a usable worktree path.
+        Never raises for a condition confined to one worker: this describes a
+        wait that already timed out, and a failed read must not turn that into
+        a coordinator error. Only a failed enumeration raises.
+        """
+        if now.utcoffset() is None:
+            raise ValueError("liveness(now=…) needs a timezone-aware datetime")
+        return [
+            self._liveness_row(record.key, record.handle, record.state, now)
+            for record in self.workers()
+            if record.state in self._LIVE_STATES and record.handle
+        ]
+
+    def _liveness_row(self, key: str, handle: str, state: str, now: datetime) -> live.LivenessRow:
+        notes: list[str] = []
+        failure = self._show_failures.get(handle)
+        shown = self._shown.get(handle, {})
+        if failure is not None:
+            notes.append(live.show_failed(failure))
+        context = live.as_object(shown.get("dispatch"))
+        heartbeat_at, heartbeat_age = live.stamp(
+            context.get("lastHeartbeatAt") or context.get("last_heartbeat_at"), "lastHeartbeatAt", now, notes
+        )
+        transcript_at, transcript_age = self._transcript_stamp(handle, now, notes)
+        output_at: str | None = None
+        output_age: int | None = None
+        worktree_path: str | None = None
+        progress = None
+        if failure is None:
+            terminal = shown.get("terminal")
+            if isinstance(terminal, dict):
+                output_at, output_age = live.stamp(terminal.get("lastOutputAt"), "lastOutputAt", now, notes)
+                worktree_path = self._valid_worktree_path(terminal.get("worktreePath"))
+            else:
+                notes.append(live.NO_TERMINAL)
+            if worktree_path is None:
+                worktree_path = self._worktree_path(live.as_object(shown.get("worker")))
+            if worktree_path is None:
+                notes.append(live.WORKTREE_UNKNOWN)
+            else:
+                created = live.instant(context.get("createdAt") or context.get("created_at"))
+                if created is None:
+                    notes.append(live.CREATED_AT_UNKNOWN)
+                else:
+                    progress, progress_notes = find_progress(Path(worktree_path), since=created)
+                    notes.extend(progress_notes)
+        return live.LivenessRow(
+            key=key,
+            handle=handle,
+            state=state,
+            heartbeat_at=heartbeat_at,
+            heartbeat_age_s=heartbeat_age,
+            transcript_at=transcript_at,
+            transcript_age_s=transcript_age,
+            output_at=output_at,
+            output_age_s=output_age,
+            worktree_path=worktree_path,
+            progress=progress,
+            notes=tuple(notes),
+        )
+
+    def _transcript_stamp(self, handle: str, now: datetime, notes: list[str]) -> tuple[str | None, int | None]:
+        """The latest transcript message's age; terminal output never stands in for it."""
+        try:
+            read = self._call_unscoped(["worker-read", "--dispatch", handle, "--limit", "1"])
+        except OrcaCliError as exc:
+            notes.append(live.read_failed(exc.code or f"exit {exc.returncode}"))
+            return None, None
+        source = str(read.get("source") or "unknown")
+        if source != "transcript":
+            notes.append(live.transcript_unavailable(source))
+            return None, None
+        messages = live.as_object(read.get("transcript")).get("messages") or []
+        messages = messages if isinstance(messages, list) else []
+        latest = live.as_object(messages[-1]) if messages else {}
+        if not latest:
+            notes.append(live.TRANSCRIPT_EMPTY)
+            return None, None
+        if latest.get("timestamp") is None:
+            notes.append(live.TRANSCRIPT_TIMESTAMP_MISSING)
+            return None, None
+        return live.stamp(latest["timestamp"], "transcript timestamp", now, notes)
+
+    def _worktree_path(self, worker: dict[str, Any]) -> str | None:
+        """`worker.worktreeId` read back through `worktree show`, or None."""
+        worktree_id = worker.get("worktreeId") or worker.get("worktree_id")
+        if not isinstance(worktree_id, str) or not worktree_id.strip() or "\x00" in worktree_id:
+            return None
+        try:
+            shown = self._call_top_level(["worktree", "show", "--worktree", f"id:{worktree_id}"])
+        except OrcaCliError:
+            return None
+        path = live.as_object(shown.get("worktree")).get("path")
+        return self._valid_worktree_path(path)
+
+    @staticmethod
+    def _valid_worktree_path(value: object) -> str | None:
+        """A path from vendor JSON must be a usable string, never coerced data."""
+        if not isinstance(value, str) or not value.strip() or "\x00" in value:
+            return None
+        return value
 
     @staticmethod
     def _launch_verification(task: dict[str, Any], shown: dict[str, Any]) -> str | None:

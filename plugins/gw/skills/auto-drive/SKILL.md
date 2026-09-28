@@ -15,8 +15,11 @@ worktree, an agent, a model, or a stage on its own.
 loop for `<work-path>`."
 
 This session **is** the coordinator — a human-attended session, not itself a
-dispatched worker. Wherever this skill says "ask the user," that means the
-native `AskUserQuestion` tool, talking to the person running this session.
+dispatched worker. Wherever this skill says "ask the user," that means the native
+`AskUserQuestion` tool, talking to the person running this session — for the
+coordinator's **own** decisions (§2.5 blockers, the §4.1 failure question).
+A **worker's** question is never asked that way: §4.3 prints it and takes the
+human's typed answer later, so one slow decision never blocks the loop.
 `orca orchestration ask`/`send` is a *different* channel: it carries messages
 a dispatched *worker* sends up to this coordinator — it is never how this
 skill talks to its own human. The channel back down is asymmetric by message
@@ -76,7 +79,9 @@ don't rely on implicit terminal binding once other dispatches may exist.
 Loop until Wrap-up (§5) or the user says stop. Each iteration is
 self-contained — never trust anything from a previous iteration in this same
 session; re-derive from Orca + the vault every time. This is what makes
-crash/compaction resume the same code path as a normal cycle. Run §2.5.3
+crash/compaction resume the same code path as a normal cycle. The one named
+exception to §2's rule is §2.7's carried delivery id; losing it only causes a
+replay, which §4 already tolerates. Run §2.5.3
 after §2.5.2 on every cycle that reaches park handling; terminal plans reconcile
 cards in §5 before ending.
 
@@ -721,7 +726,7 @@ classification is an ordinary fresh dispatch — run §3 unmodified.
    a decision is never un-answered — so without this check a resumed attempt
    that parks again or dies would leave the same answered decision and the
    same checkpoint on disk and be resumed again every cycle, forever, at
-   `check --wait` intervals. Derive the answer from the Task's own Dispatch
+   `gw work wait` intervals. Derive the answer from the Task's own Dispatch
    history rather than adding a new write path: every Dispatch on this Task is
    already in §2.1's worker-list snapshot (rows joined by `taskId`). For each,
    read `orca orchestration worker-show --dispatch <id> --json` →
@@ -840,7 +845,7 @@ hold at once:
   `worktree-pending` blocker means slots or worktrees free up on their own, so
   keep looping.
 
-When all three hold, the loop has nothing to wait *for*: `check --wait` would
+When all three hold, the loop has nothing to wait *for*: `gw work wait` would
 block for its full ten minutes with zero live dispatches, time out, re-derive
 an identical plan, and do it again indefinitely — never escalating to the one
 human whose answer is the only thing that can unblock it. So **stop the run**,
@@ -859,18 +864,106 @@ for finished work, and a parked run is not finished. Do not run §5.
 ### 2.7 Wait
 
 ```
-orca orchestration check --run <run_id> --wait \
-  --types worker_done,escalation,question --timeout-ms 600000 --json
+gw work wait --run <run_id> [--ack <delivery_id>] --timeout-s 600 --json
 ```
 
-- **On delivery:** process **every** message in the batch (§4) before
-  acking. Then acknowledge with the delivery id from the response:
-  `orca orchestration check --run <run_id> --ack <delivery_id>`, reading the
-  id from `result.deliveryId` (a bound Run replays the same delivery until
-  acked — don't ack before every message in the batch is handled). If a
-  future runtime version reports the id under a different key, read it off
-  the first real `check --wait --json` response rather than trusting this
-  name blindly. Restart the cycle at §2.1.
+One call waits, and acknowledges the previous event first. The result carries
+`status` (`event` or `timeout`), `delivery_id`, `messages[]`, `absorbed[]`,
+`self_acked`, `rebound`, `sleep_gap` (`{seconds}` or null), `waited_s`,
+`pending_questions` (null when the read failed), `warnings`, and `liveness`
+(rows on timeout only, else null). Heartbeats never wake it, and a
+heartbeat-only or absorbed-only delivery is acked by the verb itself.
+
+- **Carried state: the delivery id to ack.** This is
+  the one named exception to §2's self-contained-iteration rule. Carry `delivery_id` into the next
+  call's `--ack` only once every message in its batch is handled under the
+  rules below. A deferred ack is simply the next call without `--ack`; Orca
+  replays the same batch. Losing the id (restart, compaction) causes that same
+  replay. There is no standalone ack, and `--ack` is ignored at
+  `--timeout-s 0`.
+- **On `status: event`:** process `messages[]` under §4. For each
+  `absorbed[]` entry print `absorbed duplicate worker_done <dispatch_id>` and
+  take no action. Report `rebound: true` (the verb re-bound a fenced consumer)
+  and any `sleep_gap` (the host slept; wall-clock ages across it are not idle
+  time).
+- **On delivery, before mirroring:** obtain fresh pending labels with
+  this wait result's own `pending_questions`; no separate read is needed
+  here. Match each question's
+  `message_id` to this read's `pending_questions` entry and use its `label`
+  in §4.3; suffix collisions can change labels between reads.
+  Never invent a label or reuse a cached label when the refresh fails.
+  If `pending_questions` is `null`, or a question needing mirroring has no
+  matching entry, report the failed refresh or missing entry and inspect the
+  disposition below: answered and ended questions will never regain a label.
+  Without positive closure/reply evidence, leave its delivery unacked for replay.
+  Defer mirroring until a successful fresh read supplies a label; an unprinted
+  question is not mirrored.
+  Continue handling other messages under §4, including the existing step 0
+  policy-answer path and its reply guards for questions not proven closed;
+  do not count a deferred question as handled. A successfully policy-answered
+  question needs no mirroring.
+- **Missing delivery question: prove disposition before ack.** Use the original
+  delivered message id and sender `dispatch:<dispatch_id>`, not a label or a
+  guessed current attempt. Read
+  `orca orchestration worker-show --dispatch <dispatch_id> --json` successfully.
+  Match `result.dispatch.id`, `runId`, and `taskId` to the delivered
+  question's Dispatch, this Run, and its Task (join through §2.1's complete
+  worker-list when the payload lacks `taskId`). Conflicting or unprovable
+  identities mean inspection and deferral, never acknowledgment.
+  With those identities proved, either of these is positive evidence:
+  - **Already answered:** read
+    `orca orchestration inbox --terminal dispatch:<dispatch_id> --limit 1000 --json`.
+    Require an actual reply row with
+    `thread_id == <message_id>`, `from_handle == run:<run_id>`,
+    `to_handle == dispatch:<dispatch_id>`, and `type == status`
+    (the existing `reply --id` linkage, subject `Re: Question`). Report the
+    matching message id and that its question was already answered, including
+    after restart; a typed answer file alone does not prove delivery to Orca.
+  - **Dispatch ended:** require matching `result.worker.dispatchId` and that
+    `result.worker.state` is `succeeded`, `failed`, or `stopped`.
+    PTY exit, a missing worker, or an omitted pending entry is not this proof.
+    Report the original message id, Dispatch id and observed terminal state.
+  Absence, a warning, a failed/truncated read, or an unknown state alone
+  never proves closure. A matching positive row still proves its own fact in
+  a bounded read; missing rows prove nothing. Show warnings and retain an
+  inconclusive question for replay while handling other messages.
+
+  For a positively ended Dispatch with no proven reply, apply §4.3 step 2a's
+  path resolution and fresh park check before counting the question handled.
+  A matching park/checkpoint is reported with its decision id as awaiting a
+  decision; without a human answer, do not write a decision answer or claim
+  the item is resumable. If an actual human answer is available, save it only
+  to that verified hold as step 2a requires. No park → route through §4.2's
+  failure flow, even for an ended success with an unanswered question.
+  An already-answered question does not waive any failed/stopped Dispatch's
+  recovery or any completion validation. If recovery remains unresolved,
+  preserve the applicable §4 recovery record before any ack; that record
+  cannot substitute for the positive question-disposition evidence above.
+  After reporting the evidence and completing the required routing, count
+  this question as handled without mirroring it as pending or re-running
+  §4.3 step 0's policy answer.
+  Do not create a label, send a new reply, or require a new answer.
+  Closure handles only this question; every other batch message still needs
+  its handling and recovery record under the next two bullets before ack.
+  These checks use Orca reads and session memory only, not a new pending file.
+
+  Protocol scenarios (all retain the batch-wide ack gate):
+  - Ended-before-mirror: positive ended evidence → fresh park/failure routing
+    → report closure → question handled without a pending label.
+  - Answered-before-ack/restart: matching reply evidence → report already answered
+    → question handled without another reply or a remembered label.
+  - Inconclusive read: no matching positive evidence → defer, keep delivery unacked
+    → handle other messages and retry the reads on replay.
+- **Handle, then acknowledge:** process **every** message in the batch (§4)
+  before acking, preserving the recovery-record requirement below. Only when
+  every message is handled, acknowledge by passing the result's `delivery_id`
+  as the next wait's `--ack <delivery_id>` (a bound Run replays the same
+  delivery until acked — don't ack before every message in the batch is
+  handled). For a question, *handled* means *mirrored to the human*, not *answered*.
+  The positive closure/reply path above also handles an already closed question.
+  Once §4.3 has printed it, it satisfies the mirroring requirement; the question
+  stays pending in Orca until `reply --id` answers it or its Dispatch ends.
+  Continue to the pending display below, even if ack was deferred.
 - **Rejected or unprovable completion:** a delivery holding a
   `claimed-unconfirmed` report (§4.1) may be acked only once that report's
   recovery record is written with its identities, the evidence so far, and
@@ -879,22 +972,50 @@ orca orchestration check --run <run_id> --wait \
   replayed delivery is the only copy. After the ack, each cycle's §2.1 row
   carrying `recovery` resumes §4.1.1. A timeout never launches a replacement,
   and an unresolved active worker keeps its live key.
-- **stderr note:** `--wait` emits JSON keepalive lines to **stderr** every
-  15s so the caller can tell the process is alive — stdout carries only the
-  real response. Don't merge streams (`2>&1`) when capturing this call; if a
-  merge is unavoidable, filter with `jq "select(._keepalive|not)"`. The
-  `_heartbeat` alias inside this keepalive stream is unrelated to worker
-  heartbeat messages and to `lastHeartbeatAt` (§3's probe) — three
-  unrelated things share the name.
-- **On timeout with nothing delivered:**
-  `orca orchestration worker-show --dispatch <id> --json` for every
-  still-live dispatch. Any `failed`/`stopped` → failure flow
-  (§4.2), then restart the cycle at §2.1. An unsuccessful or uncertain read
-  enters inspection without nudging. Still `ready`/`running` → before
-  looping back into another `--wait`, run §3's **Manual ordered probe** on
-  each still-live dispatch. An `attend` dispatch may legitimately be waiting
-  on a dialog, while an unsent prompt can report `running` indefinitely;
-  elapsed idle time decides neither case.
+- **On `status: timeout`, triage from `liveness[]`**, one row per still-live
+  dispatch, instead of a per-dispatch `worker-show` sweep. Rows carry facts
+  (`key`, `handle`, `state`, heartbeat/transcript/output instants and ages,
+  `worktree_path`, `progress`, `notes[]`), never a verdict. A `failed` or
+  `stopped` row → failure flow (§4.2), then continue to the pending display
+  below. A `worker-show failed` note or an unknown state enters inspection
+  without nudging. A `ready`/`running` row → before looping back into another
+  wait, run §3's **Manual ordered probe** on that dispatch, unchanged: it
+  takes its own fresh reads and keeps its heartbeat veto. An `attend` dispatch
+  may legitimately be waiting on a dialog, while an unsent prompt can report
+  `running` indefinitely; elapsed idle time decides neither case. Print one
+  progress line per row: key, state, heartbeat age, and SDD task counts when
+  `progress` is present. With a `sleep_gap`, ages are not idle time.
+- **Verb failure.** A nonzero exit carries `reason: refused` and payload
+  `{run_id, code}`; nothing unprocessed was acked.
+  Verb failure with code `consumer_fenced` means the verb's own rebind failed: re-run §1's bind once
+  and retry the wait. Any other code → report it and stop the loop;
+  re-running `/gw:auto-drive <work-path>` resumes cleanly.
+- **On both delivery and timeout, display pending before restarting.**
+  After the handling above, refresh the pending set:
+  `gw work wait --run <run_id> --timeout-s 0 --json` — a zero
+  timeout makes no Orca `check` call and acks nothing; it only derives the
+  Run's unanswered questions from Orca. A timeout whose triage sent, stopped
+  or replied to nothing may display its own result's `pending_questions`
+  instead. Print its `pending_questions` as
+  §4.3 step 1a says, and show its `warnings`. A failed read prints the refresh
+  failure notice, not an invented pending list. If this display finally mirrors
+  a deferred delivery question, or positive evidence handles its closure,
+  acknowledge only after every message meets
+  the handling and recovery-record safeguards above.
+  Only after the pending display, restart the cycle at §2.1.
+
+**Orca behaviour the verb does not absorb.**
+
+- The "You have N orchestration messages" text Orca types into the
+  coordinator terminal is noise. Do not run `check` or `inbox` in response;
+  the next `gw work wait` receives the messages (stablyai/orca#14910,
+  stablyai/orca#16822).
+- Under a fence, `inbox --terminal` returns `count: 0`
+  (stablyai/orca#21226). A zero-timeout `gw work wait` makes no `check` call
+  and so never rebinds: an empty `pending_questions` or an empty reply-proof
+  `inbox` read is "unknown", not "none". Only a full wait detects the fence
+  and rebinds. The fail-closed rules above (no ack without positive evidence)
+  already prevent a wrong ack; this note keeps the display honest.
 
 ## 3. Dispatch mechanics
 
@@ -1038,13 +1159,13 @@ paths, which relaunch an existing Task; new dispatches do not use them.
 
 ## 4. Delivery processing
 
-Handle every message in the `check --wait` batch (§2.7) — one at a time —
+Handle every message in the `gw work wait` batch (§2.7) — one at a time —
 before acking.
 
 ### 4.1 `worker_done`
 
 Classify each `worker_done` before reading its outcome. Save the message
-object from `result.messages[]` and run:
+object from the wait result's `messages[]` and run:
 
 ```
 python3 references/launch-worker.py classify-report --message <message-json>
@@ -1092,7 +1213,8 @@ capability, pane/leaf, process incarnation — are authority boundaries: never
 resend the report for the worker, never rewrite `--from`, and
 never infer identity from a terminal-handle prefix.
 The historical caller-identity cause remains unverified upstream; this branch
-recovers without explaining it.
+recovers without explaining it. The verb absorbs a late duplicate only for a released single-attempt completion
+(§2.7's `absorbed[]`); every other rejected or late report still arrives here.
 
 Recovery records live at
 `<workspace>/okf/<dispatched-item-path>/references/orca-settlement/<dispatch_id>.json`
@@ -1639,7 +1761,7 @@ what the options *mean*; that is the worker's job.
    check; `changed: false` alone is not a refusal. Use that `reply_body` as
    the step 2 body.
    On refusal or an unusable `reply_body`, show the result to the human
-   and ask how to recover; do not print `auto-merged`, reply,
+   and take their direction by label (step 1b); do not print `auto-merged`, reply,
    fabricate a body, overwrite the payload, or automatically resend a
    conflicting answer. For `already-answered`, read and show the recorded
    answer alongside the proposed `merge`, then let the human decide which
@@ -1651,7 +1773,7 @@ what the options *mean*; that is the worker's job.
    **On an untyped ask**, the step 2 body is the bare string `merge`, preserving
    the legacy fallback. Only after that check, print the `auto-merged` notice
    in this session (for an untyped ask, after selecting the literal body) — no
-   `AskUserQuestion`, no outward worktree comment or status push:
+   human prompt, no outward worktree comment or status push:
 
    ```
    auto-merged <work-path> -> <merge_target> (child of <root-path>; not mirrored)
@@ -1662,37 +1784,72 @@ what the options *mean*; that is the worker's job.
    answer does, and with no human watching for it. If either guard fails,
    continue to step 1 and mirror as usual.
 
-1. **Typed or untyped?** Test whether the question text's last line starts with `gw-ask: `.
+1. **Mirror it — print, never block.** Every still-pending worker question step 0 did not
+   answer is *mirrored*: printed in this session, then left pending while the
+   loop runs on. The coordinator never waits on the human for a worker
+   question; the human answers later, by label (step 1b), in any order. A
+   question's label is its `label` in `gw work wait`'s `pending_questions`
+   (an opaque, collision-aware label). Use §2.7's fresh read before delivery
+   mirroring, matching by `message_id`; never derive the label yourself. If
+   that read fails or has no matching entry, follow §2.7's positive-evidence
+   disposition path; defer if inconclusive. Proven closed questions need no mirror.
+   Once printed, it is handled for §2.7's ack rule.
+
+   Typed or untyped? Test whether the question text's last line starts with `gw-ask: `.
    - **Typed.** The rest of that line is the payload's root-absolute
      resource. Read the file at `$GRAPH_WORKS_DIR/okf<resource>` as JSON
      (`schema: "gw.ask/1"`).
-     1. Print the payload's `question` in this session **verbatim**. Never summarize, condense or truncate it.
-        The `AskUserQuestion` below carries only the short prompt, so no
-        length limit can cut what the human reads.
-     2. Ask by the payload's `kind`:
-        - `spec-review`: one `AskUserQuestion` with two questions. The first
-          offers **Approve** / **Request changes**. The second asks for
+     1. Print `<label> <key> — <kind>`, then the payload's `question` in this
+        session **verbatim**. Never summarize, condense or truncate it.
+     2. Print what an answer looks like, by the payload's `kind`:
+        - `spec-review`: `approve`, or `request changes: <notes>`; and an
           effort (`xtra-small`/`small`/`medium`/`large`/`xtra-large`) with
-          `current_effort` marked; it is required only when `current_effort`
-          is null. Take notes from the "Other" text or the annotation notes.
-        - `choice`: one `AskUserQuestion` with one option per `options[]`
-          entry, labelled from `label` (the answer is its `token`).
-        - `free`: no `AskUserQuestion`. Ask free-form in this session; the
-          human's text is the answer's `notes`.
-     3. Record it:
-        `gw work ask-answer <resource> [--choice <token>] [--effort <value>] [--notes "<text>"] --json`.
-        On a refusal (`answer-choice-invalid`, `answer-effort-required`,
-        `answer-effort-invalid`, `answer-notes-required`, or `answer-by-invalid`
-        for a blank `--by`), show the refusal and re-ask the human.
-        **Never fix an answer up yourself.**
-        `already-answered` means a different answer is already recorded: show
-        both and ask the human which stands; never overwrite.
-     4. The `reply_body` from that call is the step 2 `--body`.
+          `current_effort` marked — required only when `current_effort` is
+          null.
+        - `choice`: one line per `options[]` entry, `<token> — <label>`.
+        - `free`: `a free-text answer is expected`.
    - **Untyped** (no `gw-ask:` line — a worker from before typed asks):
      print `untyped ask from <key>` first, so the gap stays visible while old
-     workers drain. Then mirror the message's question text and options to
-     the user as one `AskUserQuestion`, as before, and use the human's answer
-     as the step 2 body.
+     workers drain. Then print `<label> <key> — untyped`, the question text
+     verbatim, and its options; the human's text will be the reply body.
+
+1a. **Each cycle, print the pending block.** After §2.7's pending read, for
+    each entry of `pending_questions`: one not yet printed in full in this
+    session → print it as step 1; one already printed → one line,
+    `<label> <key> — <kind>, waiting since <asked_at>`. Which questions were
+    printed is session memory only: after a restart every pending question
+    prints in full once more. `[]` prints nothing. `null` means the read
+    failed — print `pending questions: refresh failed`, keep the last printed
+    list as historical display only, and show the result's `warnings`. Do not
+    use that list's labels to mirror a new delivery or mark an unprinted
+    question as mirrored. Track printed questions by `message_id`, not label,
+    so reminders use the current read's label even when suffixes collide.
+
+1b. **Take a typed answer.** The human types into this terminal whenever they
+    like — `q-e862 merge`, `q-1a2b approve, effort medium`,
+    `q-77c0 request changes: tighten scope`. It reaches you at your next turn
+    boundary, when the current wait returns. Then:
+    1. **Resolve the label against a fresh `pending_questions` read** (the
+       zero-timeout `gw work wait` of §2.7), never a cached one. An unknown
+       label, or a question no longer pending, is reported back to the human
+       and nothing is sent. With no label: if exactly one question is
+       pending, it is that one; if more than one is, the answer is ambiguous
+       — print the pending labels and ask which is meant. Never guess.
+    2. **Record.** For a typed ask, map the human's words onto
+       `gw work ask-answer <resource> [--choice <token>] [--effort <value>] [--notes "<text>"] --json`
+       (default `--by human`): `--choice` takes a `choice` option's `token`,
+       or `approve`/`changes` for `spec-review`; `--effort` when the human
+       states one; `--notes` carries free text and change requests. The CLI
+       is the validator. On a refusal (`answer-choice-invalid`,
+       `answer-effort-required`, `answer-effort-invalid`,
+       `answer-notes-required`, or `answer-by-invalid` for a blank `--by`),
+       print the refusal; the question stays pending and the human answers
+       again by label. **Never fix an answer up yourself.**
+       `already-answered` means a different answer is already recorded:
+       print both and let the human say which stands; never overwrite.
+       The `reply_body` from that call is the step 2 `--body`. For an untyped
+       ask, the human's text after the label is the body.
+    3. Continue with steps 2, 2a and 3 — unchanged.
 2. Reply, and **read the response** — `--json` is not optional here:
 
    ```
@@ -1723,7 +1880,7 @@ what the options *mean*; that is the worker's job.
     2. **Re-read hold state fresh — never this cycle's snapshot.** The park
        hold is filed by the worker *after* the question was sent and *after*
        the human spent time answering, so it cannot be in a plan taken before
-       the `AskUserQuestion` was even raised. Run
+       the question was even printed. Run
        `gw work orchestrate <work-path> --json` again now (or
        `gw work decision list <owner-path> --json` when the owner is already
        known) and look for an entry naming this path with
@@ -1798,9 +1955,10 @@ joined on the escalation's sender terminal handle.
 Otherwise just note it and continue — an escalation doesn't have to block
 the loop unless the user says so.
 
-Worker heartbeats are never in `--types` (§2.7), so they're never delivered
-here; liveness between deliveries is checked only via `worker-show` on
-wait-timeout.
+Orca's batches can carry worker heartbeats, but `gw work wait` (§2.7)
+strips them and self-acks heartbeat-only deliveries (`self_acked`), so §4
+never sees one; liveness between events comes from the timeout `liveness[]`
+rows.
 
 ## 5. Resume & wrap-up
 

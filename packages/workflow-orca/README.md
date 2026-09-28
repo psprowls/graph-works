@@ -93,3 +93,7 @@ The integration tests compare the backend's frozen envelope and receipt
 semantics directly with the shipped plugin launch recipe. See the
 [configuration guide](../graph-works-core/docs/dispatch-rules.md) for the
 upstream shared/local profile contract and explicit cutover.
+
+`OrcaCliPort` exposes `check_wait`, `check_ack`, and `run_use` plus additive
+task, worker, and message row fields for the coordinator wait; unlike
+`OrcaSession`, it rebinds only when core's caller logic asks it to.

@@ -6,6 +6,7 @@ import json
 
 import pytest
 from orca_fakes import FakeRunner
+from subagents_io.backend import BackendError
 from workflow_orca._cli import OrcaCliError, OrcaResult
 from workflow_orca.port import OrcaCliPort
 
@@ -416,3 +417,339 @@ def test_degraded_worker_read_stays_inconclusive_without_transcript():
         return OrcaResult(0, json.dumps({"ok": True, "result": {"source": "terminal"}}), "")
 
     assert OrcaCliPort(run=response).worker_read("ctx", limit=5) == {"source": "terminal", "message_count": 0}
+
+
+def test_check_wait_argv_without_ack():
+    p, runner = port([(("check", "--wait"), "check_batch")])
+    p.check_wait("run_1", types="worker_done,escalation,question", timeout_ms=600000, ack=None)
+    assert runner.calls == [
+        (
+            "orca",
+            "orchestration",
+            "check",
+            "--run",
+            "run_1",
+            "--wait",
+            "--types",
+            "worker_done,escalation,question",
+            "--timeout-ms",
+            "600000",
+            "--json",
+        )
+    ]
+
+
+def test_check_wait_argv_with_ack():
+    p, runner = port([(("check", "--wait"), "check_batch")])
+    p.check_wait("run_1", types="worker_done", timeout_ms=5000, ack="dlv_prev")
+    assert runner.calls[-1] == (
+        "orca",
+        "orchestration",
+        "check",
+        "--run",
+        "run_1",
+        "--wait",
+        "--types",
+        "worker_done",
+        "--timeout-ms",
+        "5000",
+        "--ack",
+        "dlv_prev",
+        "--json",
+    )
+
+
+def test_check_wait_projects_messages():
+    p, _ = port([(("check", "--wait"), "check_batch")])
+    delivery = p.check_wait("run_1", types="worker_done", timeout_ms=1, ack=None)
+    assert delivery["delivery_id"] == "dlv_0000000000a1"
+    assert [m["type"] for m in delivery["messages"]] == ["worker_done", "question", "escalation", "heartbeat"]
+    first = delivery["messages"][0]
+    assert first == {
+        "id": "msg_b84fb919772e",
+        "type": "worker_done",
+        "subject": "wiki_smoke.py closes the coverage gap",
+        "body": "Added scripts/wiki_smoke.py and its tests.",
+        "from_": "term_10fb90d2-9735-42b5-84a0-dc73a7e1a66a",
+        "created_at": "2026-08-13T18:31:58Z",
+        "payload": {
+            "taskId": "task_5ca8c19ffa5e",
+            "dispatchId": "ctx_817ed5bf5986",
+            "outcome": "succeeded",
+            "filesModified": ["scripts/wiki_smoke.py", "scripts/tests/test_wiki_smoke.py"],
+            "reportPath": None,
+        },
+        "payload_raw": None,
+    }
+
+
+def test_check_wait_decodes_a_string_payload():
+    p, _ = port([(("check", "--wait"), "check_heartbeat_only")])
+    [message] = p.check_wait("run_1", types="worker_done", timeout_ms=1, ack=None)["messages"]
+    assert message["payload"] == {
+        "taskId": "task_338800a1fa14",
+        "dispatchId": "ctx_320c498114b8",
+        "phase": "implementing",
+    }
+    assert message["payload_raw"] is None
+
+
+def test_check_wait_empty_batch_has_no_delivery_id():
+    p, _ = port([(("check", "--wait"), "check_timeout")])
+    assert p.check_wait("run_1", types="worker_done", timeout_ms=1, ack=None) == {
+        "delivery_id": None,
+        "messages": [],
+    }
+
+
+@pytest.mark.parametrize(
+    ("raw", "payload", "payload_raw"),
+    [
+        ("{not json", None, "{not json"),
+        ("[1, 2]", None, "[1, 2]"),
+        (7, None, "7"),
+        (None, {}, None),
+        ({"a": 1}, {"a": 1}, None),
+    ],
+    ids=["undecodable-string", "string-non-object", "non-string-scalar", "null", "historical-mapping"],
+)
+def test_check_wait_payload_decoding(raw, payload, payload_raw):
+    def batch(argv):
+        message = {"id": "m1", "type": "worker_done", "payload": raw}
+        result = {"deliveryId": "dlv_1", "messages": [message]}
+        return OrcaResult(0, json.dumps({"ok": True, "result": result}), "")
+
+    [message] = OrcaCliPort(run=batch).check_wait("r", types="t", timeout_ms=1, ack=None)["messages"]
+    assert (message["payload"], message["payload_raw"]) == (payload, payload_raw)
+    assert (message["subject"], message["body"], message["from_"], message["created_at"]) == (None, None, None, None)
+
+
+@pytest.mark.parametrize("messages", [None, "bad", {}, ["junk"], [{"id": "h", "type": "heartbeat"}, "junk"]])
+def test_check_wait_refuses_unreadable_message_container_or_row(messages):
+    def batch(argv):
+        result = {"deliveryId": "dlv_1", "messages": messages}
+        return OrcaResult(0, json.dumps({"ok": True, "result": result}), "")
+
+    with pytest.raises(OrcaCliError, match=r"malformed.*messages"):
+        OrcaCliPort(run=batch).check_wait("r", types="t", timeout_ms=1, ack=None)
+
+
+def test_check_wait_refuses_missing_messages_even_with_delivery_id():
+    def batch(argv):
+        return OrcaResult(0, json.dumps({"ok": True, "result": {"deliveryId": "dlv_1"}}), "")
+
+    with pytest.raises(OrcaCliError, match=r"malformed.*messages"):
+        OrcaCliPort(run=batch).check_wait("r", types="t", timeout_ms=1, ack=None)
+
+
+def test_check_ack_argv():
+    p, runner = port([(("check", "--ack"), "terminal_send")])
+    p.check_ack("run_1", "dlv_1")
+    assert runner.calls == [("orca", "orchestration", "check", "--run", "run_1", "--ack", "dlv_1", "--json")]
+
+
+def test_run_use_argv():
+    p, runner = port([(("run-use",), "terminal_send")])
+    p.run_use("run_1")
+    assert runner.calls == [("orca", "orchestration", "run-use", "--id", "run_1", "--json")]
+
+
+def test_consumer_fenced_surfaces_as_the_error_code():
+    p, _ = port([(("check", "--wait"), "check_consumer_fenced")])
+    with pytest.raises(OrcaCliError) as caught:
+        p.check_wait("run_43b63f0bdf2b", types="worker_done", timeout_ms=1, ack=None)
+    assert caught.value.code == "consumer_fenced"
+
+
+def test_worker_list_projects_release_state_and_terminal():
+    p, _ = port([(("worker-list",), "worker_list")])
+    rows = {row["dispatch_id"]: row for row in p.worker_list("run_1")}
+    assert rows["ctx_000000000001"]["release_state"] == "released"
+    assert rows["ctx_000000000001"]["terminal"] == "term_0000000000000001"
+    assert rows["ctx_817ed5bf5986"]["release_state"] == "retained"
+    assert rows["ctx_320c498114b8"]["release_state"] == "active"
+
+
+def test_task_list_decodes_result():
+    p, _ = port([(("task-list",), "task_list")])
+    rows = {row["id"]: row for row in p.task_list("run_1")}
+    assert rows["task_5ca8c19ffa5e"]["result"] is not None
+    assert rows["task_5ca8c19ffa5e"]["result"]["provenance"] == "worker_report"
+    assert rows["task_338800a1fa14"]["result"] is None
+
+
+@pytest.mark.parametrize("raw", ["{bad", "[1]", 3, None], ids=["undecodable", "array", "number", "null"])
+def test_task_list_unusable_result_is_none(raw):
+    def listing(argv):
+        result = {"tasks": [{"id": "task_1", "result": raw}]}
+        return OrcaResult(0, json.dumps({"ok": True, "result": result}), "")
+
+    assert OrcaCliPort(run=listing).task_list("run_1")[0]["result"] is None
+
+
+def test_liveness_projects_observation_without_binding_or_nudging():
+    from datetime import UTC, datetime
+
+    p, runner = port(
+        [
+            (("task-list",), "task_list"),
+            (("worker-list",), "worker_list"),
+            (("worker-show",), "worker_show_live_terminal"),
+            (("worker-read",), "worker_read_latest"),
+            (("worktree", "show"), "worktree_show_renamed"),
+        ]
+    )
+    [row] = p.liveness("run_observe", now=datetime(2026, 9, 27, tzinfo=UTC))
+    assert row["handle"] == "ctx_320c498114b8"
+    assert set(row) == {
+        "key",
+        "handle",
+        "state",
+        "heartbeat_at",
+        "heartbeat_age_s",
+        "transcript_at",
+        "transcript_age_s",
+        "output_at",
+        "output_age_s",
+        "worktree_path",
+        "progress",
+        "notes",
+    }
+    assert json.loads(json.dumps(row)) == row
+    assert not any(token in call for call in runner.calls for token in ("run-use", "run-create", "send", "check"))
+    for command in ("task-list", "worker-list"):
+        [call] = runner.calls_matching(command)
+        assert runner.argv_after("--run", call) == "run_observe"
+
+
+RUN_Q = "run_q00000000001"
+
+
+def question_port():
+    return port(
+        [
+            (("inbox", "--terminal", f"run:{RUN_Q}"), "inbox_run_questions"),
+            (("inbox", "--terminal", "dispatch:ctx_aaaaaaaaaaaa"), "inbox_dispatch_replies"),
+            (("inbox", "--terminal", "dispatch:ctx_bbbbbbbbbbbb"), "inbox_dispatch_empty"),
+            (("worker-list",), "worker_list_questions"),
+        ]
+    )
+
+
+def test_pending_questions_reads_run_inbox_workers_then_live_asker_inboxes():
+    p, runner = question_port()
+    p.pending_questions(RUN_Q)
+    assert runner.calls == [
+        ("orca", "orchestration", "inbox", "--terminal", f"run:{RUN_Q}", "--limit", "1000", "--json"),
+        ("orca", "orchestration", "worker-list", "--run", RUN_Q, "--json"),
+        ("orca", "orchestration", "inbox", "--terminal", "dispatch:ctx_aaaaaaaaaaaa", "--limit", "1000", "--json"),
+        ("orca", "orchestration", "inbox", "--terminal", "dispatch:ctx_bbbbbbbbbbbb", "--limit", "1000", "--json"),
+    ]
+    # ctx_dddddddddddd has ended: its inbox is never read.
+
+
+def test_pending_questions_projects_the_join():
+    p, _runner = question_port()
+    result = p.pending_questions(RUN_Q)
+    assert result["truncated"] is False
+    assert [(q["label"], q["dispatch_id"], q["options"]) for q in result["questions"]] == [
+        ("q-00b2", "ctx_bbbbbbbbbbbb", ["merge", "pr", "hold", "discard"]),
+        ("q-00c3", "ctx_aaaaaaaaaaaa", ["approve", "changes"]),
+    ]
+    assert result["questions"][1]["ask_resource"] == "/work/feature-x/references/asks/spec-review-1.json"
+    assert len(result["warnings"]) == 1 and "msg_0000000000d4" in result["warnings"][0]
+
+
+def test_pending_a_full_dispatch_inbox_marks_the_read_truncated():
+    def runner(argv):
+        if "dispatch:ctx_aaaaaaaaaaaa" in argv:
+            return OrcaResult(0, json.dumps({"ok": True, "result": {"messages": [], "count": 1000}}), "")
+        return question_port()[1](argv)
+
+    assert OrcaCliPort(run=runner).pending_questions(RUN_Q)["truncated"] is True
+
+
+def test_pending_a_question_with_no_dispatch_reads_no_dispatch_inbox():
+    inbox = {
+        "messages": [
+            {"id": "msg_nodisp1", "type": "question", "to_handle": f"run:{RUN_Q}", "body": "?", "payload": "{}"}
+        ],
+        "count": 1,
+    }
+    calls = []
+
+    def runner(argv):
+        calls.append(tuple(argv))
+        if "inbox" in argv:
+            return OrcaResult(0, json.dumps({"ok": True, "result": inbox}), "")
+        return OrcaResult(0, json.dumps({"ok": True, "result": {"workers": []}}), "")
+
+    result = OrcaCliPort(run=runner).pending_questions(RUN_Q)
+    assert [q["dispatch_id"] for q in result["questions"]] == [None]
+    assert [c for c in calls if any(str(a).startswith("dispatch:") for a in c)] == []
+
+
+def test_pending_any_failed_read_raises_backend_error():
+    for failing in ("run:", "worker-list", "dispatch:ctx_aaaaaaaaaaaa"):
+
+        def runner(argv, failing=failing):
+            if any(failing in str(a) for a in argv):
+                return OrcaResult(1, json.dumps({"ok": False, "error": {"code": "boom", "message": "x"}}), "")
+            return question_port()[1](argv)
+
+        with pytest.raises(BackendError):
+            OrcaCliPort(run=runner).pending_questions(RUN_Q)
+
+
+@pytest.mark.parametrize("state", [None, "future-state"])
+def test_pending_reads_unknown_state_askers_from_later_worker_pages(state):
+    calls = []
+    base = question_port()[1]
+
+    def runner(argv):
+        calls.append(tuple(argv))
+        if "worker-list" in argv:
+            later = "--cursor" in argv
+            result = {
+                "workers": [{"dispatchId": "ctx_bbbbbbbbbbbb", "workerState": state}] if later else [],
+                "page": {"hasMore": not later, "nextCursor": None if later else "page_2"},
+            }
+            return OrcaResult(0, json.dumps({"ok": True, "result": result}), "")
+        return base(argv)
+
+    result = OrcaCliPort(run=runner).pending_questions(RUN_Q)
+    assert [q["dispatch_id"] for q in result["questions"]] == ["ctx_bbbbbbbbbbbb"]
+    assert calls[2] == ("orca", "orchestration", "worker-list", "--run", RUN_Q, "--cursor", "page_2", "--json")
+    assert calls[3:] == [
+        ("orca", "orchestration", "inbox", "--terminal", "dispatch:ctx_bbbbbbbbbbbb", "--limit", "1000", "--json")
+    ]
+
+
+def test_pending_failed_later_worker_page_raises_before_dispatch_reads():
+    base = question_port()[1]
+
+    def runner(argv):
+        if "--cursor" in argv:
+            return OrcaResult(1, '{"ok": false, "error": {"message": "later page failed"}}', "")
+        if "worker-list" in argv:
+            result = {"workers": [], "page": {"hasMore": True, "nextCursor": "page_2"}}
+            return OrcaResult(0, json.dumps({"ok": True, "result": result}), "")
+        assert f"run:{RUN_Q}" in argv
+        return base(argv)
+
+    with pytest.raises(BackendError, match="later page failed"):
+        OrcaCliPort(run=runner).pending_questions(RUN_Q)
+
+
+def test_pending_full_run_inbox_preserves_truncation_after_dispatch_reads():
+    base = question_port()[1]
+
+    def runner(argv):
+        response = base(argv)
+        if f"run:{RUN_Q}" in argv:
+            body = json.loads(response.stdout)
+            body["result"]["count"] = 1000
+            return OrcaResult(0, json.dumps(body), "")
+        return response
+
+    assert OrcaCliPort(run=runner).pending_questions(RUN_Q)["truncated"] is True

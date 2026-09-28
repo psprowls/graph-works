@@ -5,11 +5,11 @@
 > **Bundle dir:** `{{BUNDLE_DIR}}/`
 > **Config dir:** `{{CONFIG_DIR}}/`
 
-This is a graph-works workspace: a per-repo container for the knowledge graph, its
-config, and its work tracker. `{{BUNDLE_DIR}}/` is the OKF v0.2 bundle (the content
-itself); `{{CONFIG_DIR}}/` holds everything graph-works owns about it. The workspace
-is strictly larger than the bundle: `{{CONFIG_DIR}}/` and `scratch/` are siblings of
-the bundle root, not bundle content.
+This is a graph-works workspace: a container for the knowledge graph built around
+your source code, its config, and its work tracker. `{{BUNDLE_DIR}}/` is the OKF
+v0.2 bundle (the content itself); `{{CONFIG_DIR}}/` holds everything graph-works
+owns about it. The workspace is strictly larger than the bundle: `{{CONFIG_DIR}}/`
+and `scratch/` are siblings of the bundle root, not bundle content.
 
 The repositories this workspace catalogs are declared in `workspace.yaml` under
 `repositories:`, with paths relative to that file. Nothing in this document names an
@@ -19,18 +19,18 @@ from the skill-doc-routing hook, never from here.
 ## Layout
 
 - `workspace.yaml` — the workspace manifest, committed. `layout.bundle_dir` (here:
-  `{{BUNDLE_DIR}}`), the scanned `repositories:` and their `ignore:` globs, and the
-  `workflow:` block that configures auto-drive (per-phase models, `max_parallel`, the
-  seeded relay tail).
+  `{{BUNDLE_DIR}}`) and the scanned `repositories:` and their `ignore:` globs.
+- `dispatch.yaml` — the `workflow:` block that configures auto-drive (per-phase
+  models, `max_parallel`, the seeded relay tail).
 - `workspace.local.yaml` — an optional, gitignored sibling of `workspace.yaml` for
-  per-machine values: a `repositories.<name>.path` that differs on this machine,
-  `workflow.auto_drive` settings that suit this box. Mappings deep-merge over
-  `workspace.yaml`; lists and scalars replace; local wins. Born by
-  `gw config set --local <key> <value>`; `gw config get` / `gw config list` report
-  which layer a value came from. `gw bootstrap` keeps its line in the workspace-root
-  `.gitignore`.
-- `{{BUNDLE_DIR}}/` — the OKF bundle: `index.md`, `log.md`, and every page the
-  installed verticals write. See "The bundle" below.
+  per-machine values: a `repositories.<name>.path` that differs on this machine.
+  Mappings deep-merge over `workspace.yaml`; lists and scalars replace; local wins.
+  Born by `gw config set --local <key> <value>`; `gw config get` / `gw config list`
+  report which layer a value came from. `gw bootstrap` keeps its line in the
+  workspace-root `.gitignore`.
+- `dispatch.local.yaml` — an optional, gitignored sibling of `dispatch.yaml` for
+  per-machine workflow settings (e.g. `workflow.auto_drive` tuning that suits this
+  box). Same deep-merge, local-wins strategy as `workspace.local.yaml` above.
 - `{{CONFIG_DIR}}/schema/` — per-type JSON Schema (`Bug.schema.json`,
   `Package.schema.json`, …) plus the shared `_base.schema.json` /
   `_base-diataxis.schema.json`. Defines the frontmatter each `type:` requires.
@@ -45,6 +45,8 @@ from the skill-doc-routing hook, never from here.
   Gitignored.
 - `scratch/` — handoffs, staged material, and scratch documents. Not bundle content.
   Ingest reads material from anywhere on disk, so nothing has to be staged here first.
+- `{{BUNDLE_DIR}}/` — the OKF bundle: `index.md`, `log.md`, and every page the
+  installed verticals write. See "The bundle" below.
 
 ## The `gw` CLI
 
@@ -79,6 +81,8 @@ to the filesystem root.
 <workspace>/
 ├── workspace.yaml            manifest (committed)
 ├── workspace.local.yaml      per-machine overrides (gitignored, optional)
+├── dispatch.yaml             auto-drive workflow config (committed)
+├── dispatch.local.yaml       per-machine workflow overrides (gitignored, optional)
 ├── AGENTS.md, CLAUDE.md      this file and its one-line pointer
 ├── scratch/                  handoffs; not bundle content
 ├── {{CONFIG_DIR}}/           schema/, sections/, tags.yaml, cache/, worktrees/
@@ -184,7 +188,7 @@ Frontmatter carries the live state: `phase`, `work_status`, `worktree`, `branch`
 `affects`, `depends_on`, `sources`.
 
 Unattended runs go through `/gw:auto-drive`, which dispatches each ready stage as an
-Orca-supervised worker using the per-phase models in `workspace.yaml`. Re-running the
+Orca-supervised worker using the per-phase models in `dispatch.yaml`. Re-running the
 same command is the resume path.
 
 ## Frontmatter
@@ -209,7 +213,7 @@ legacy keys (`category:`, `kind:`) from the graph-wiki era.
 `tags:` must come from the vocabulary in `{{CONFIG_DIR}}/tags.yaml`. The work lane does
 not enforce the vocabulary; curated lanes do.
 
-## The four operations
+## The four wiki operations
 
 Each has a `/gw:*` skill that adds discussion and confirmation around the CLI verb. Use
 the skill interactively; use the verb when scripting.

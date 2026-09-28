@@ -50,6 +50,9 @@ dev = [
     # this is what makes that option resolvable.
     "pytest-asyncio>=0.24",
     "pytest-cov>=5.0",
+    # `-n auto` in `just test`/`just cov`/`just check-pkg` — pytest-cov detects
+    # xdist automatically and combines per-worker coverage data, no extra flag.
+    "pytest-xdist>=3.6",
     "ruff>=0.6",
     # Neither `jsonschema` nor `pyyaml` ships a `py.typed`, so `just types`
     # fails without stubs. Dev tooling only — not runtime dependencies.

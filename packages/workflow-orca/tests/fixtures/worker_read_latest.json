@@ -1,0 +1,106 @@
+{
+  "id": "6fe0eb53-b4a3-432e-bff3-3364968292d0",
+  "ok": true,
+  "result": {
+    "dispatchId": "ctx_259a906bc061",
+    "source": "transcript",
+    "sourceIdentity": "IsMTPXg5i_wWp8MBcyR6N9dttSz7396p",
+    "provider": "codex",
+    "transcript": {
+      "messages": [
+        {
+          "id": "ctc_061367d53b9afcde016ab985639ccc87d2be0bb3ade1d7ec24",
+          "role": "assistant",
+          "blocks": [
+            {
+              "type": "tool-call",
+              "name": "exec",
+              "input": "(redacted)",
+              "callId": "call_gCWXVWkqchrjyg9eDAkVdXmk"
+            }
+          ],
+          "timestamp": 1790543211456,
+          "source": "transcript"
+        }
+      ],
+      "nextCursor": "owr1_eyJ2IjoxLCJkIjoiY3R4XzI1OWE5MDZiYzA2MSIsInMiOiJ0cmFuc2NyaXB0IiwiaSI6IklzTVRQWGc1aV93V3A4TUJjeVI2TjlkdHRTejczOTZwIiwicCI6MTU3NzM3MywiYyI6IjFILXBpZU9fV1NMMFM1aFNHY0tCaGtUazRuZU1WbnVWIn0",
+      "limited": true,
+      "returnedMessageCount": 1
+    },
+    "cursor": "owr1_eyJ2IjoxLCJkIjoiY3R4XzI1OWE5MDZiYzA2MSIsInMiOiJ0cmFuc2NyaXB0IiwiaSI6IklzTVRQWGc1aV93V3A4TUJjeVI2TjlkdHRTejczOTZwIiwicCI6MTU3NzM3MywiYyI6IjFILXBpZU9fV1NMMFM1aFNHY0tCaGtUazRuZU1WbnVWIn0",
+    "status": {
+      "worker": "ready",
+      "terminal": "running",
+      "liveness": "live"
+    },
+    "fallbackReason": null,
+    "warnings": [],
+    "sourceExact": true,
+    "contentComplete": false,
+    "clipping": [
+      "message_limit_or_scan_window"
+    ],
+    "projection": {
+      "id": "ctx_259a906bc061",
+      "dispatchId": "ctx_259a906bc061",
+      "taskId": "task_ae978aae2daf",
+      "runId": "run_b0e8078bd22f",
+      "role": "worker",
+      "parent": null,
+      "provider": {
+        "id": "codex",
+        "model": "gpt-6-astra"
+      },
+      "host": {
+        "kind": "local",
+        "id": "local"
+      },
+      "workspace": {
+        "id": "6be4952f-4076-4893-b858-0aa79c108446::/Users/pat/orca/workspaces/gw/feature-heartbeat-progress-c6984656",
+        "kind": "folder_or_worktree"
+      },
+      "stage": {
+        "worker": "ready",
+        "dispatch": "dispatched",
+        "detail": "input_accepted",
+        "activity": "working"
+      },
+      "outcome": "in_progress",
+      "liveness": {
+        "verdict": "live",
+        "observedAt": 1790543211500,
+        "source": "agent_status"
+      },
+      "evidence": {
+        "durable": true,
+        "liveStatus": "fresh",
+        "lastObservedAt": 1790543211500
+      },
+      "resource": {
+        "state": "owned",
+        "id": "wtr_decd7cc38f7a",
+        "ownerDispatchId": "ctx_259a906bc061",
+        "releaseState": "not_requested",
+        "terminalState": "active"
+      },
+      "nextAction": {
+        "kind": "inspect",
+        "argv": [
+          "orchestration",
+          "worker-show",
+          "--dispatch",
+          "ctx_259a906bc061"
+        ]
+      },
+      "attention": {
+        "categories": [
+          "input"
+        ],
+        "requiresAction": true
+      }
+    }
+  },
+  "_meta": {
+    "runtimeId": "859f2710-c2e8-46b9-b05e-f448662f9dad"
+  }
+}

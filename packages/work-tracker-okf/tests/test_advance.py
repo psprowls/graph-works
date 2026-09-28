@@ -722,6 +722,8 @@ def test_the_gate_vocabulary_is_closed_and_in_the_refusal_reason() -> None:
         "range-unreadable",
         "no-commits",
         "no-affects-touched",
+        "no-gate-receipt",
+        "no-gate-configured",
     } == COMMIT_GATE_REFUSALS
     assert {
         "gate-bypass-invalid",
@@ -731,6 +733,17 @@ def test_the_gate_vocabulary_is_closed_and_in_the_refusal_reason() -> None:
     } == BYPASS_REFUSALS
     assert COMMIT_GATE_REFUSALS | BYPASS_REFUSALS | {"finish-incomplete"} == GATE_REFUSALS
     assert set(typing.get_args(RefusalReason)) >= GATE_REFUSALS
+
+
+def test_receipt_gate_codes_are_gate_refusals() -> None:
+    import typing
+
+    from work_tracker_okf.advance import COMMIT_GATE_REFUSALS, GATE_REFUSALS, RefusalReason
+
+    codes = {"no-gate-receipt", "no-gate-configured"}
+    assert codes <= GATE_REFUSALS
+    assert codes <= COMMIT_GATE_REFUSALS  # bypassable through --skip-gate
+    assert codes <= set(typing.get_args(RefusalReason))
 
 
 # --- which transition the plan picked (bug-transcript-capture-labels-the-wrong-phase) ---

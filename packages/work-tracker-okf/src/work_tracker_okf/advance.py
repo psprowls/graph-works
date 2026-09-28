@@ -54,6 +54,8 @@ RefusalReason = Literal[
     "gate-bypass-mismatch",
     "gate-bypass-unused",
     "gate-bypass-unrecorded",
+    "no-gate-receipt",
+    "no-gate-configured",
 ]
 
 #: Which routing-table transition a plan picked. `dispatch` is an entry
@@ -81,6 +83,8 @@ COMMIT_GATE_REFUSALS: frozenset[str] = frozenset(
         "range-unreadable",
         "no-commits",
         "no-affects-touched",
+        "no-gate-receipt",
+        "no-gate-configured",
     }
 )
 #: How a `--skip-gate` request itself is refused.

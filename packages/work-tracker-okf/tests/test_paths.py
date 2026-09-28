@@ -176,3 +176,11 @@ def test_finish_receipt_is_separate_managed_artifact():
     ref = artifact_ref("work/epic-a", MANAGED_ARTIFACTS[FINISH_RECEIPT_SOURCE_ID])
     assert ref.source_id == "finish-receipt"
     assert ref.rel == "work/epic-a/references/04-finish-receipt.md"
+
+
+def test_gate_receipts_is_a_managed_execute_artifact() -> None:
+    assert paths.MANAGED_ARTIFACTS["gate-receipts"] == "03-gate-receipts.md"
+    assert (
+        paths.artifact_ref("work/x", paths.MANAGED_ARTIFACTS["gate-receipts"]).rel
+        == "work/x/references/03-gate-receipts.md"
+    )

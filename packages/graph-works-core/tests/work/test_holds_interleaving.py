@@ -51,7 +51,7 @@ def _layout(tmp_path: Path):
     page.parent.mkdir(parents=True, exist_ok=True)
     page.write_text(
         "---\ntype: Feature\ntitle: Race\ndescription: d\nstatus: stable\nwork_status: in-progress\nowner: pat\n"
-        "phase: execute\neffort: medium\nopened: 2026-08-01\nupdated: 2026-08-01\naffects:\n- packages/a\n---\n\n"
+        "phase: execute\neffort: medium\nopened: 2026-08-01\nupdated: 2026-08-01\naffects:\n- gw:workspace\n---\n\n"
         "## Summary\nd\n\n## Plan\n\n| Action | Done when | Rationale |\n| --- | --- | --- |\n",
         encoding="utf-8",
         newline="",

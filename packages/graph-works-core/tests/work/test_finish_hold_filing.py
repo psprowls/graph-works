@@ -160,7 +160,7 @@ def test_finish_allowance_requires_a_captured_baseline(tmp_path: Path, monkeypat
 
 def test_ordinary_advance_gets_no_finish_allowance(tmp_path: Path) -> None:
     layout = _layout(tmp_path)
-    _page(layout)
+    _page(layout, affects="gw:workspace")
     result = _add(layout)  # unnamed: no routing hold, but ordinary lint still gates finish
     assert result.application.ok
     advanced = stage.run_stage_advance(layout, FEATURE, today=TODAY, dry_run=False)

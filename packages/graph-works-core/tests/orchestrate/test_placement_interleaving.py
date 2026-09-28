@@ -50,7 +50,7 @@ def _layout(tmp_path: Path, *, work_status: str = "in-progress", owner: str = "o
     page.parent.mkdir(parents=True, exist_ok=True)
     page.write_text(
         f"---\ntype: Feature\ntitle: Race\ndescription: d\nstatus: stable\nwork_status: {work_status}\n{owner}"
-        "phase: execute\neffort: medium\nopened: 2026-08-01\nupdated: 2026-08-01\naffects:\n- packages/a\n---\n\n"
+        "phase: execute\neffort: medium\nopened: 2026-08-01\nupdated: 2026-08-01\naffects:\n- gw:workspace\n---\n\n"
         "## Summary\nd\n\n## Plan\n\n| Action | Done when | Rationale |\n| --- | --- | --- |\n",
         encoding="utf-8",
         newline="",

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import sys
 from datetime import date
 from pathlib import Path
 
@@ -60,6 +61,7 @@ def _write(
     phase: str | None = "plan",
     work_status: str = "open",
     affects: tuple[str, ...] = ("packages/a",),
+    extra: str = "",
 ) -> None:
     page = layout.bundle_dir / f"{path}.md"
     page.parent.mkdir(parents=True, exist_ok=True)
@@ -68,7 +70,7 @@ def _write(
     page.write_text(
         f"---\ntype: {type}\ntitle: {path}\ndescription: d\nstatus: stable\n"
         f"work_status: {work_status}\n{phase_line}effort: medium\nopened: 2026-08-01\n"
-        f"updated: 2026-08-01\n{rendered}\n---\n\n## Summary\nd\n\n## Plan\n\n"
+        f"updated: 2026-08-01\n{extra}{rendered}\n---\n\n## Summary\nd\n\n## Plan\n\n"
         "| Action | Done when | Rationale |\n| --- | --- | --- |\n",
         encoding="utf-8",
     )
@@ -671,12 +673,12 @@ def test_an_explicit_start_sha_writes_the_execute_results_stub(tmp_path: Path) -
     assert "Execute — results" in result.results_path.read_text(encoding="utf-8")
 
 
-def test_the_execute_stage_derives_a_start_sha_with_no_flag(tmp_path: Path) -> None:
-    """D-002's acceptance bar: a plain advance writes the stub."""
+def test_the_execute_stage_reads_the_recorded_baseline_with_no_flag(tmp_path: Path) -> None:
+    """A plain advance writes the stub from the placement's recorded baseline."""
     layout = _initialized_workspace(tmp_path)
-    repo, _fork = _code_repo(tmp_path / "c")
+    repo, fork = _code_repo(tmp_path / "c")
     path = "work/feature-a"
-    _ready(layout, path)
+    _ready(layout, path, extra=f"start_sha: {fork}\n")
     result = stage.run_stage_advance(layout, path, today=TODAY, repo=repo, dry_run=False)
     assert result.results_path is not None and result.results_path.is_file()
 
@@ -723,21 +725,33 @@ def _base_branch_repo(tmp_path: Path) -> Path:
     return repo
 
 
+def _item(layout, path: str):
+    return next(
+        i for i in stage.load_items(stage.load_bundle(layout.bundle_dir, ignore=stage.IGNORE)) if i.path == path
+    )
+
+
 def test_a_derived_start_sha_equal_to_head_still_writes_a_stub_carrying_the_empty_range_warning(
     tmp_path: Path,
 ) -> None:
-    """Spec's own Testing bar: a merge-base equal to `HEAD` (main-mode, no
-    `--start-sha`) produces an empty range whose stub still carries
-    `render()`'s existing "Range is empty" warning -- the controller ruling is
-    to keep writing the stub, not decline it."""
+    """The stub-only derivation (no flag, no recorded baseline) is unchanged: a
+    merge-base equal to `HEAD` yields an empty range whose stub still carries
+    `render()`'s "Range is empty" warning. The gate never uses this derivation
+    (it refuses `no-start-sha`), so the stub helper is exercised directly."""
     layout = _initialized_workspace(tmp_path)
     repo = _base_branch_repo(tmp_path / "c")
     path = "work/feature-a"
     _ready(layout, path)
-    result = stage.run_stage_advance(layout, path, today=TODAY, repo=repo, dry_run=False)
-    assert result.results_path is not None and result.results_path.is_file()
-    text = result.results_path.read_text(encoding="utf-8")
-    assert "Range is empty: the stage recorded no commits in this scope" in text
+    item = _item(layout, path)
+    start = stage._effective_start_sha(
+        None, phase="execute", facts_root=repo, bundle_root=layout.bundle_dir, item=item, repo_name=None
+    )
+    assert start is not None
+    facts = stage.provenance.results_facts(
+        repo, phase="execute", start_sha=start, paths=stage.code_affects(item.affects), opened=item.opened
+    )
+    assert facts is not None
+    assert "Range is empty: the stage recorded no commits in this scope" in stage.render_results(facts)
 
 
 def test_a_derivation_that_finds_nothing_writes_no_stub(tmp_path: Path, monkeypatch) -> None:
@@ -746,9 +760,22 @@ def test_a_derivation_that_finds_nothing_writes_no_stub(tmp_path: Path, monkeypa
     path = "work/feature-a"
     _ready(layout, path)
     monkeypatch.setattr(stage.anchor, "phase_start_sha", lambda *args: None)
-    result = stage.run_stage_advance(layout, path, today=TODAY, repo=repo, dry_run=False)
-    assert result.results_path is None
-    assert result.outcome.changed
+    start = stage._effective_start_sha(
+        None, phase="execute", facts_root=repo, bundle_root=layout.bundle_dir, item=_item(layout, path), repo_name=None
+    )
+    assert start is None
+
+
+def test_a_recorded_baseline_is_used_for_the_stub_before_any_derivation(tmp_path: Path, monkeypatch) -> None:
+    layout = _initialized_workspace(tmp_path)
+    repo, fork = _code_repo(tmp_path / "c")
+    path = "work/feature-a"
+    _ready(layout, path, extra=f"start_sha: {fork}\n")
+    monkeypatch.setattr(stage.anchor, "phase_start_sha", lambda *args: pytest.fail("derived despite a baseline"))
+    start = stage._effective_start_sha(
+        None, phase="finish", facts_root=repo, bundle_root=layout.bundle_dir, item=_item(layout, path), repo_name=None
+    )
+    assert start == fork
 
 
 # --- the execute -> finish commit gate ------------------------------------
@@ -781,11 +808,11 @@ def test_a_dirty_execute_stage_is_refused_and_writes_nothing(tmp_path: Path) -> 
 
 def test_dirt_outside_the_declared_affects_does_not_refuse(tmp_path: Path) -> None:
     layout = _initialized_workspace(tmp_path)
-    repo, _fork = _code_repo(tmp_path / "c")
+    repo, fork = _code_repo(tmp_path / "c")
     path = "work/feature-a"
     _ready(layout, path)
     _dirty(repo, "elsewhere/unrelated.py")
-    result = stage.run_stage_advance(layout, path, today=TODAY, repo=repo, dry_run=False)
+    result = stage.run_stage_advance(layout, path, today=TODAY, repo=repo, start_sha=fork, dry_run=False)
     assert result.outcome.plan.refusal is None
 
 
@@ -810,37 +837,6 @@ def test_a_clean_execute_stage_with_commits_advances_unchanged(tmp_path: Path) -
     assert result.outcome.written
 
 
-def test_an_unevaluable_gate_proceeds_and_names_the_missing_input(tmp_path: Path) -> None:
-    layout = _workspace(tmp_path)
-    path = "work/feature-a"
-    _write(layout, path, phase="execute", work_status="in-progress")
-    result = stage.run_stage_advance(layout, path, today=TODAY, dry_run=False)
-    assert result.outcome.plan.refusal is None
-    assert any("no code repository" in warning for warning in result.warnings)
-
-
-def test_an_empty_affects_leaves_the_gate_unevaluable_and_warns(tmp_path: Path) -> None:
-    layout = _initialized_workspace(tmp_path)
-    repo, _fork = _code_repo(tmp_path / "c")
-    path = "work/feature-a"
-    _ready(layout, path, affects=())
-    _dirty(repo)
-    result = stage.run_stage_advance(layout, path, today=TODAY, repo=repo, dry_run=False)
-    assert result.outcome.plan.refusal is None
-    assert any("affects" in warning for warning in result.warnings)
-
-
-def test_a_workspace_only_item_fails_the_gate_open_with_a_note(tmp_path: Path) -> None:
-    layout = _initialized_workspace(tmp_path)
-    repo, _fork = _code_repo(tmp_path / "c")
-    path = "work/feature-a"
-    _ready(layout, path, affects=("gw:workspace",))
-    _dirty(repo)
-    result = stage.run_stage_advance(layout, path, today=TODAY, repo=repo, dry_run=False)
-    assert result.outcome.plan.refusal is None
-    assert any("workspace-only item (`gw:workspace`)" in warning for warning in result.warnings)
-
-
 def test_the_gate_scopes_its_read_to_code_affects(tmp_path: Path) -> None:
     layout = _initialized_workspace(tmp_path)
     repo, _fork = _code_repo(tmp_path / "c")
@@ -851,14 +847,196 @@ def test_the_gate_scopes_its_read_to_code_affects(tmp_path: Path) -> None:
     assert result.outcome.plan.refusal == "uncommitted-work"
 
 
-def test_the_gate_does_not_fire_on_a_dry_run(tmp_path: Path) -> None:
+def _refused_inertly(layout, path: str, result, code: str) -> None:
+    page = layout.bundle_dir / f"{path}.md"
+    assert result.outcome.plan.refusal == code, result.outcome.plan.detail
+    assert result.outcome.plan.changes == ()
+    assert result.application is None and result.results_path is None and result.pointer_path is None
+    assert "phase: execute" in page.read_text(encoding="utf-8")
+    assert not (layout.bundle_dir / path / "references/03-execute-results.md").exists()
+    assert provenance_pointer_absent(layout)
+
+
+def provenance_pointer_absent(layout) -> bool:
+    return _pointer(layout) is None
+
+
+def test_no_code_repository_refuses_no_repo(tmp_path: Path) -> None:
+    layout = _workspace(tmp_path)
+    path = "work/feature-a"
+    _write(layout, path, phase="execute", work_status="in-progress")
+    result = stage.run_stage_advance(layout, path, today=TODAY, dry_run=False)
+    _refused_inertly(layout, path, result, "no-repo")
+
+
+def test_an_empty_affects_refuses_no_affects(tmp_path: Path) -> None:
+    layout = _initialized_workspace(tmp_path)
+    repo, fork = _code_repo(tmp_path / "c")
+    path = "work/feature-a"
+    _ready(layout, path, affects=())
+    result = stage.run_stage_advance(layout, path, today=TODAY, repo=repo, start_sha=fork, dry_run=False)
+    _refused_inertly(layout, path, result, "no-affects")
+
+
+def test_a_workspace_only_item_passes_without_a_repo(tmp_path: Path) -> None:
+    layout = _initialized_workspace(tmp_path)
+    path = "work/feature-a"
+    _write(layout, path, phase="execute", work_status="in-progress", affects=("gw:workspace",))
+    result = stage.run_stage_advance(layout, path, today=TODAY, dry_run=False)
+    assert result.outcome.plan.refusal is None
+    assert "phase: finish" in (layout.bundle_dir / f"{path}.md").read_text(encoding="utf-8")
+    assert any("workspace-only" in warning for warning in result.warnings)
+
+
+def test_a_non_repo_worktree_refuses_git_unavailable(tmp_path: Path) -> None:
+    layout = _initialized_workspace(tmp_path)
+    loose = tmp_path / "loose"
+    (loose / "packages/a").mkdir(parents=True)
+    path = "work/feature-a"
+    _ready(layout, path)
+    result = stage.run_stage_advance(layout, path, today=TODAY, repo=loose, dry_run=False)
+    _refused_inertly(layout, path, result, "git-unavailable")
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="fake git is a POSIX shell script")
+def test_a_configured_broken_git_refuses_git_unavailable(tmp_path: Path) -> None:
+    layout = _initialized_workspace(tmp_path)
+    repo, fork = _code_repo(tmp_path / "c")
+    broken = tmp_path / "broken-git"
+    broken.write_text("#!/bin/sh\necho 'xcrun: error: license' >&2\nexit 69\n", encoding="utf-8", newline="\n")
+    broken.chmod(0o755)
+    layout.local_manifest_path.write_text(f"toolchain:\n  git: {broken}\n", encoding="utf-8", newline="\n")
+    stage.provenance._validated.cache_clear()
+    path = "work/feature-a"
+    _ready(layout, path)
+    result = stage.run_stage_advance(layout, path, today=TODAY, repo=repo, start_sha=fork, dry_run=False)
+    _refused_inertly(layout, path, result, "git-unavailable")
+    assert "license" in result.outcome.plan.detail
+
+
+def test_no_baseline_refuses_and_names_the_bypass(tmp_path: Path) -> None:
     layout = _initialized_workspace(tmp_path)
     repo, _fork = _code_repo(tmp_path / "c")
     path = "work/feature-a"
     _ready(layout, path)
+    result = stage.run_stage_advance(layout, path, today=TODAY, repo=repo, dry_run=False)
+    _refused_inertly(layout, path, result, "no-start-sha")
+    assert "--skip-gate no-start-sha" in result.outcome.plan.detail
+
+
+def test_a_recorded_baseline_is_read_without_a_flag(tmp_path: Path) -> None:
+    layout = _initialized_workspace(tmp_path)
+    repo, fork = _code_repo(tmp_path / "c")
+    path = "work/feature-a"
+    _ready(layout, path, extra=f"start_sha: {fork}\n")
+    result = stage.run_stage_advance(layout, path, today=TODAY, repo=repo, dry_run=False)
+    assert result.outcome.plan.refusal is None and result.outcome.written
+
+
+def test_an_explicit_flag_overrides_the_recorded_baseline(tmp_path: Path) -> None:
+    layout = _initialized_workspace(tmp_path)
+    repo, fork = _code_repo(tmp_path / "c")
+    head = stage.provenance.head_sha(repo)
+    path = "work/feature-a"
+    _ready(layout, path, extra=f"start_sha: {fork}\n")
+    result = stage.run_stage_advance(layout, path, today=TODAY, repo=repo, start_sha=head, dry_run=False)
+    assert result.outcome.plan.refusal == "no-commits"
+
+
+def test_an_unknown_start_sha_refuses_range_unreadable(tmp_path: Path) -> None:
+    layout = _initialized_workspace(tmp_path)
+    repo, _fork = _code_repo(tmp_path / "c")
+    path = "work/feature-a"
+    _ready(layout, path)
+    fabricated = "0123456789abcdef0123456789abcdef01234567"
+    result = stage.run_stage_advance(layout, path, today=TODAY, repo=repo, start_sha=fabricated, dry_run=False)
+    _refused_inertly(layout, path, result, "range-unreadable")
+    assert fabricated in result.outcome.plan.detail
+
+
+def test_a_missing_recorded_worktree_refuses_instead_of_reading_the_repo(tmp_path: Path) -> None:
+    layout = _initialized_workspace(tmp_path)
+    repo, fork = _code_repo(tmp_path / "c")
+    path = "work/feature-a"
+    _ready(layout, path, extra=f"worktree: {tmp_path / 'gone'}\nbranch: feature/a\nstart_sha: {fork}\n")
+    result = stage.run_stage_advance(layout, path, today=TODAY, repo=repo, infer_worktree=False, dry_run=False)
+    _refused_inertly(layout, path, result, "worktree-missing")
+
+
+def test_a_foreign_stamp_supplies_its_own_baseline(tmp_path: Path) -> None:
+    layout = _initialized_workspace(tmp_path)
+    repo, fork = _code_repo(tmp_path / "c")
+    path = "work/feature-a"
+    _ready(
+        layout,
+        path,
+        extra=f"repo_stamps:\n  code:\n    worktree: {repo}\n    branch: feature/a\n    start_sha: {fork}\n",
+    )
+    verdict = stage._commit_gate(
+        stage.load_items(stage.load_bundle(layout.bundle_dir, ignore=stage.IGNORE))[0],
+        repo=repo,
+        repo_note=None,
+        repo_name="code",
+        stamped_worktree=None,
+        explicit_start=None,
+        git=stage.provenance.gate_git(layout),
+    )
+    assert verdict.refusal is None
+
+
+def test_an_unreadable_range_after_a_resolved_start_refuses_range_unreadable(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    layout = _initialized_workspace(tmp_path)
+    repo, fork = _code_repo(tmp_path / "c")
+    path = "work/feature-a"
+    _ready(layout, path)
+    failure = stage.provenance.GitFailure("error", "boom")
+    monkeypatch.setattr(stage.provenance, "strict_range", lambda *args, **kwargs: failure)
+    result = stage.run_stage_advance(layout, path, today=TODAY, repo=repo, start_sha=fork, dry_run=False)
+    _refused_inertly(layout, path, result, "range-unreadable")
+    assert "boom" in result.outcome.plan.detail
+
+
+def test_an_explicitly_stamped_worktree_is_the_gate_root(tmp_path: Path) -> None:
+    layout = _initialized_workspace(tmp_path)
+    repo, fork = _code_repo(tmp_path / "c")
+    path = "work/feature-a"
+    _ready(layout, path)
     _dirty(repo)
-    result = stage.run_stage_advance(layout, path, today=TODAY, repo=repo, dry_run=True)
-    assert result.outcome.plan.refusal is None
+    result = stage.run_stage_advance(
+        layout,
+        path,
+        today=TODAY,
+        repo=repo,
+        start_sha=fork,
+        worktree=str(repo),
+        branch="feature/a",
+        dry_run=False,
+    )
+    assert result.outcome.plan.refusal == "uncommitted-work"
+
+
+@pytest.mark.parametrize("code", ["uncommitted-work", "no-commits", "no-affects-touched", "no-start-sha"])
+def test_a_dry_run_reports_the_same_refusal_and_writes_nothing(tmp_path: Path, code: str) -> None:
+    layout = _initialized_workspace(tmp_path)
+    repo, fork = _code_repo(tmp_path / "c")
+    path = "work/feature-a"
+    _ready(layout, path)
+    start: str | None = fork
+    if code == "uncommitted-work":
+        _dirty(repo)
+    elif code == "no-commits":
+        start = stage.provenance.head_sha(repo)
+    elif code == "no-affects-touched":
+        start = _net_zero_range(repo)
+    else:
+        start = None
+    page = layout.bundle_dir / f"{path}.md"
+    before = page.read_bytes()
+    result = stage.run_stage_advance(layout, path, today=TODAY, repo=repo, start_sha=start, dry_run=True)
+    assert result.outcome.plan.refusal == code
+    assert page.read_bytes() == before
 
 
 @pytest.mark.parametrize("phase", ["plan", "finish"])
@@ -893,30 +1071,6 @@ def test_returning_an_item_that_is_not_at_finish_is_refused(tmp_path: Path) -> N
     _ready(layout, path)
     result = stage.run_stage_advance(layout, path, today=TODAY, repo=repo, return_=True, dry_run=False)
     assert result.outcome.plan.refusal == "return-not-available"
-
-
-def test_a_worktree_that_is_not_a_repo_leaves_the_gate_unevaluable(tmp_path: Path) -> None:
-    """`git status` itself failing is the third fail-open case: the gate says
-    so rather than passing silently."""
-    layout = _initialized_workspace(tmp_path)
-    not_a_repo = tmp_path / "loose"
-    (not_a_repo / "packages/a").mkdir(parents=True)
-    path = "work/feature-a"
-    _ready(layout, path)
-    result = stage.run_stage_advance(layout, path, today=TODAY, repo=not_a_repo, dry_run=False)
-    assert result.outcome.plan.refusal is None
-    assert any("git status" in warning for warning in result.warnings)
-
-
-def test_an_unreadable_commit_range_leaves_the_zero_commits_signal_unevaluable(tmp_path: Path) -> None:
-    layout = _initialized_workspace(tmp_path)
-    repo, _fork = _code_repo(tmp_path / "c")
-    path = "work/feature-a"
-    _ready(layout, path)
-    fabricated = "0123456789abcdef0123456789abcdef01234567"
-    result = stage.run_stage_advance(layout, path, today=TODAY, repo=repo, start_sha=fabricated, dry_run=False)
-    assert result.outcome.plan.refusal is None
-    assert any(fabricated in warning for warning in result.warnings)
 
 
 def _net_zero_range(repo: Path) -> str:
@@ -981,29 +1135,6 @@ def test_commits_touching_the_declared_scope_advance(tmp_path: Path) -> None:
     assert result.outcome.plan.transition.phase == "finish"
 
 
-def test_an_unevaluable_signal_advances_and_names_the_missing_input(tmp_path: Path) -> None:
-    """Fail-open, loudly. `gw work advance` runs against workspaces with no code
-    repo at all; a fail-closed unevaluable gate would break the pipeline
-    everywhere for a condition it cannot even observe."""
-    layout = _initialized_workspace(tmp_path)
-    repo, _fork = _code_repo(tmp_path / "c")
-    path = "work/feature-a"
-    _ready(layout, path)
-    result = stage.run_stage_advance(layout, path, today=TODAY, repo=repo, start_sha=None, dry_run=False)
-    assert result.outcome.plan.refusal is None
-    assert any("start_sha" in warning for warning in result.warnings)
-
-
-def test_an_item_with_no_declared_surface_advances_and_warns(tmp_path: Path) -> None:
-    layout = _initialized_workspace(tmp_path)
-    repo, fork = _code_repo(tmp_path / "c")
-    path = "work/feature-a"
-    _ready(layout, path, affects=())
-    result = stage.run_stage_advance(layout, path, today=TODAY, repo=repo, start_sha=fork, dry_run=False)
-    assert result.outcome.plan.refusal is None
-    assert any("affects" in warning for warning in result.warnings)
-
-
 @pytest.mark.parametrize("phase", ["plan", "finish"])
 def test_the_signal_does_not_fire_outside_execute_to_finish(tmp_path: Path, phase: str) -> None:
     layout = _initialized_workspace(tmp_path / phase)
@@ -1016,18 +1147,6 @@ def test_the_signal_does_not_fire_outside_execute_to_finish(tmp_path: Path, phas
         layout, path, today=TODAY, repo=repo, start_sha=start, resolved_in="pr-1", dry_run=False
     )
     assert result.outcome.plan.refusal != "no-affects-touched"
-
-
-def test_the_signal_does_not_fire_on_a_dry_run(tmp_path: Path) -> None:
-    """A dry run inspects no worktree and refuses nothing -- the same rule the
-    other two signals are bound by."""
-    layout = _initialized_workspace(tmp_path)
-    repo, _fork = _code_repo(tmp_path / "c")
-    path = "work/feature-a"
-    _ready(layout, path)
-    start = _net_zero_range(repo)
-    result = stage.run_stage_advance(layout, path, today=TODAY, repo=repo, start_sha=start, dry_run=True)
-    assert result.outcome.plan.refusal is None
 
 
 def test_a_refusal_writes_nothing(tmp_path: Path) -> None:
@@ -1054,7 +1173,7 @@ def test_a_refusal_writes_nothing(tmp_path: Path) -> None:
 def test_an_execute_advance_registers_a_present_coverage_file(tmp_path: Path) -> None:
     layout = _initialized_workspace(tmp_path)
     path = "work/feature-a"
-    _ready(layout, path, phase="execute")
+    _ready(layout, path, phase="execute", affects=("gw:workspace",))
     coverage = layout.bundle_dir / path / "references/03-execute-coverage.md"
     coverage.parent.mkdir(parents=True, exist_ok=True)
     coverage.write_text("- [x] one\n- [ ] two\n", encoding="utf-8")
@@ -1084,7 +1203,7 @@ def test_the_coverage_registration_rides_the_page_write(tmp_path: Path) -> None:
     # phase change, and vice versa.
     layout = _initialized_workspace(tmp_path)
     path = "work/feature-c"
-    _ready(layout, path, phase="execute")
+    _ready(layout, path, phase="execute", affects=("gw:workspace",))
     coverage = layout.bundle_dir / path / "references/03-execute-coverage.md"
     coverage.parent.mkdir(parents=True, exist_ok=True)
     coverage.write_text("- [x] one\n", encoding="utf-8")

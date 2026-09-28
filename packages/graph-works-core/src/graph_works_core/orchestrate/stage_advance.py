@@ -24,6 +24,7 @@ from pathlib import Path
 from types import MappingProxyType
 
 from okf_io import Bundle, load_bundle
+from work_tracker_okf.advance import COMMIT_GATE_REFUSALS as COMMIT_GATE_REFUSALS
 from work_tracker_okf.advance import ExpectedPhase as ExpectedPhase
 from work_tracker_okf.advance import RefusalReason
 from work_tracker_okf.advance import apply as apply_advance
@@ -56,9 +57,9 @@ from graph_works_core.workspace.transactions import MutationApplication, apply_m
 #: commit range worth summarizing.
 RESULTS_PHASES: frozenset[str] = frozenset({"execute", "finish"})
 
-#: The prefix every unevaluable-gate warning carries, so a reader grepping the
-#: coordinator's output finds all of them with one string.
-_GATE = "execute -> finish gate not evaluated"
+#: The prefix of the one gate note (a workspace-only pass), so a reader grepping
+#: the coordinator's output finds it with one string.
+_GATE_NOTE = "execute -> finish gate"
 
 
 @dataclass(frozen=True, slots=True)
@@ -78,14 +79,12 @@ class StageAdvance:
     every git-derived field above it is `None` for one known reason rather
     than for an unknown one.
 
-    `warnings` carries what the `execute -> finish` commit gate could not
-    evaluate. The gate fails **open**: an advance that cannot see a repo, or
-    an item that declares no `affects`, proceeds -- but says so, because an
-    unevaluable gate is otherwise indistinguishable from a gate that passed.
-    It also carries a skipped worktree inference when the item's repository
-    came from `repo:` (frontmatter) or `repo_name` (flag) and cwd is not in
-    that repository -- inference is skipped, never a silent guess, and a
-    foreign checkout is never stamped.
+    `warnings` carries the gate's note for a workspace-only item, a skipped
+    worktree inference when the item's repository came from `repo:`
+    (frontmatter) or `repo_name` (flag) and cwd is not in that repository --
+    inference is skipped, never a silent guess, and a foreign checkout is
+    never stamped -- and the plan-exit affects-drift check. Gate *failures*
+    are refusals, never warnings.
     At `plan -> execute` it also carries the advisory affects-drift check
     (plan-named files outside `affects`), on a dry run too.
     """
@@ -158,15 +157,15 @@ def run_stage_advance(
     `infer_worktree=False`: its coordinator records the observed placement
     separately, and a worker's cwd is not evidence of where its stage runs.
 
-    `start_sha` is a **caller argument**, not a frontmatter field. The reference
-    implementation stamped a `phase_started_commit` key; adding one here is a
-    schema change this item's spec does not take, so the caller that knows where
-    the phase started supplies it. Omitted at the `execute` stage, it is derived
-    by `workspace.anchor.phase_start_sha` — merge-base first, then the spec's own
-    arms — which is a fallback derivation, not a schema change. Omitted at
-    `finish` it derives nothing: a derived range there sweeps in the whole
-    execute range, and a finish report claiming work it did not do is exactly
-    what this pipeline exists to prevent.
+    The execute baseline resolves in order: the `start_sha` argument, then the
+    placement's recorded `start_sha` (its `repo_stamps` entry for the gated
+    repository, else the scalar one). The commit gate uses only those two and
+    refuses `no-start-sha` when neither exists. Only the results *stub* falls
+    back further: at `execute` it derives one by
+    `workspace.anchor.phase_start_sha` -- merge-base first, then the spec's own
+    arms. At `finish` it derives nothing: a derived range there sweeps in the
+    whole execute range, and a finish report claiming work it did not do is
+    exactly what this pipeline exists to prevent.
 
     `repo` defaults to `resolve_item_repo` rather than to the layout's
     `repo_root`: in a split topology -- the workspace and the code in
@@ -195,8 +194,8 @@ def run_stage_advance(
 
     `dry_run=True` is okf-io's writer default throughout this workspace: the
     call plans and writes nothing -- not the page, not the stub, not the
-    pointer. The commit gate below is bound by the same rule: a dry run
-    inspects no worktree and refuses nothing.
+    pointer. The commit gate evaluates on a dry run too and reports its
+    refusal, but a dry run writes nothing.
 
     `before_apply`, when supplied on a live call, inspects the actual candidate
     with application fields empty before any domain write. Raising aborts the
@@ -204,7 +203,7 @@ def run_stage_advance(
     workspace. Dry runs never invoke it. Omitting it preserves CLI behavior.
 
     The callback sees the routed advance under the decision-owner lock, before
-    the live-only commit gate. That gate may still refuse or add diagnostics;
+    the commit gate. That gate may still refuse or add diagnostics;
     it cannot select a different transition after validation.
 
     Live advances hold the decision owner's lock across the read, hold
@@ -389,7 +388,7 @@ def _advance(
     candidate = StageAdvance(outcome=outcome, repo_note=repo_note, warnings=inference_warnings + drift_warnings)
     if not dry_run and before_apply is not None:
         before_apply(candidate)
-    if dry_run or outcome.plan.refusal is not None or outcome.plan.transition is None:
+    if outcome.plan.refusal is not None or outcome.plan.transition is None:
         return candidate
 
     new_phase = outcome.plan.transition.phase or old_phase
@@ -397,16 +396,32 @@ def _advance(
     assert item is not None
     warnings: tuple[str, ...] = ()
     if old_phase == "execute" and new_phase == "finish":
-        refusal, detail, warnings = _commit_gate(
-            item, _facts_root(item, stamped_worktree, resolved_repo), start_sha=start_sha, repo_note=repo_note
+        verdict = _commit_gate(
+            item,
+            repo=resolved_repo,
+            repo_note=repo_note,
+            repo_name=item_repo.name if item_repo is not None else None,
+            stamped_worktree=stamped_worktree,
+            explicit_start=start_sha,
+            git=provenance.gate_git(layout),
         )
-        if refusal is not None:
-            refused = replace(outcome.plan, refusal=refusal, changes=(), stamp_source=None, detail=detail, trigger=None)
+        warnings = (verdict.note,) if verdict.note else ()
+        if verdict.refusal is not None:
+            refused = replace(
+                outcome.plan,
+                refusal=verdict.refusal,
+                changes=(),
+                stamp_source=None,
+                detail=verdict.detail,
+                trigger=None,
+            )
             return StageAdvance(
                 outcome=replace(outcome, plan=refused, stamped=None, stamp_title=None, plan_row=False),
                 repo_note=repo_note,
                 warnings=inference_warnings + drift_warnings + warnings,
             )
+    if dry_run:
+        return replace(candidate, warnings=candidate.warnings + warnings)
 
     document = load_bundle(layout.bundle_dir, ignore=IGNORE).concepts[path]
     apply_advance(document, outcome.plan)
@@ -421,7 +436,12 @@ def _advance(
     facts_root = _facts_root(item, stamped_worktree, resolved_repo)
     if not return_ and facts_root is not None and old_phase in RESULTS_PHASES and new_phase != old_phase:
         effective_start_sha = _effective_start_sha(
-            start_sha, phase=old_phase, facts_root=facts_root, bundle_root=bundle.root, item=item
+            start_sha,
+            phase=old_phase,
+            facts_root=facts_root,
+            bundle_root=bundle.root,
+            item=item,
+            repo_name=item_repo.name if item_repo is not None else None,
         )
         if effective_start_sha is not None:
             facts = provenance.results_facts(
@@ -543,7 +563,7 @@ def _resolve_repo(
     *cwd*'s repository belongs to (`provenance.repository_of` -- a linked
     worktree of it counts). When none does, the repo is `None` with a note:
     the same degrade as a workspace that declares no repo, so inference is
-    skipped and the commit gate fails open. The cwd matcher never refuses.
+    skipped and the commit gate refuses `no-repo`. The cwd matcher never refuses.
     """
     declared = resolve_repos(layout)
 
@@ -596,92 +616,145 @@ def _affects_drift_warnings(bundle_root: Path, item: WorkItem) -> tuple[str, ...
     )
 
 
+@dataclass(frozen=True, slots=True)
+class GateVerdict:
+    """The execute -> finish gate's answer. `refusal is None` is a pass; `note`
+    explains a pass that evaluated nothing because the gate does not apply."""
+
+    refusal: RefusalReason | None
+    detail: str = ""
+    note: str | None = None
+
+
+def _gate_placement(item: WorkItem, repo_name: str | None) -> tuple[str | None, str | None]:
+    """`(worktree, start_sha)` recorded for the gated repository: its `repo_stamps`
+    entry when it has one, else the scalar placement."""
+    stamp = item.repo_stamps.get(repo_name) if repo_name is not None else None
+    if stamp is not None:
+        return stamp.worktree, stamp.start_sha
+    return item.worktree, item.start_sha
+
+
 def _commit_gate(
-    item: WorkItem, facts_root: Path | None, *, start_sha: str | None, repo_note: str | None
-) -> tuple[RefusalReason | None, str, tuple[str, ...]]:
-    """Whether the execute stage left its work somewhere git can see it.
+    item: WorkItem,
+    *,
+    repo: Path | None,
+    repo_note: str | None,
+    repo_name: str | None,
+    stamped_worktree: str | None,
+    explicit_start: str | None,
+    git: provenance.GitExecutable | provenance.GitFailure,
+) -> GateVerdict:
+    """Whether the execute stage left its work, and only its work, where git can see it.
 
-    Three independent signals, any of which refuses. **Uncommitted work**
-    reads `git status` scoped to `item.affects` and needs nothing but a
-    worktree -- which is the point: `start_sha` is a caller argument with no
-    frontmatter home, so a gate that could only speak when the coordinator
-    remembered to supply one would be silent in exactly the unattended run
-    this gate exists for. **Zero commits** reads the range and needs an
-    *explicit* `start_sha`; a derived one is not enough, because the
-    merge-base derivation answers `HEAD` on the main checkout and would refuse
-    every advance made from there. **Nothing touched** reads the same range's
-    file list: commits that net out to no change under `affects` are work the
-    stage cannot have landed where it said it would.
+    Fails **closed**. Every input the gate needs -- a code scope, a repository,
+    the recorded worktree, a runnable git, a baseline, a readable range -- is
+    either present or the advance refuses with its own code (D-004). The only
+    way past a refusal is `gw work advance --skip-gate <code> --reason ... --actor ...`,
+    which the ledger records. A `gw:workspace`-only item is the one pass that
+    evaluates nothing: it has no code surface, and its workspace checks run elsewhere.
 
-    Fails **open, loudly**. No repo, no `affects`, workspace-only `gw:workspace`, or a `git status` that
-    itself failed all return `(None, "", (warning,))`: `gw work advance` runs
-    against workspaces with no code repo at all, and a fail-closed unevaluable
-    gate would break the pipeline everywhere for a condition it cannot even
-    observe.
+    Order: no-affects, no-repo, worktree-missing, git-unavailable, then the three
+    evaluated signals -- uncommitted-work before the baseline is even needed,
+    then no-start-sha, range-unreadable, no-commits, no-affects-touched (most
+    specific last: an empty range has an empty file list too).
 
     False positives are accepted and recoverable -- unrelated dirt under an
     `affects` directory refuses an advance that would otherwise pass. The
-    refusal names every offending path, and committing or stashing them is
-    cheaper, and far more visible, than the silent data loss it replaces.
+    refusal names every offending path.
     """
-    if facts_root is None:
-        note = f" ({repo_note})" if repo_note else ""
-        return None, "", (f"{_GATE}: no code repository resolved{note}",)
     paths = code_affects(item.affects)
     if not paths:
         if touches_workspace(item.affects):
-            return None, "", (f"{_GATE}: workspace-only item (`gw:workspace`), no code surface to gate",)
-        return None, "", (f"{_GATE}: the item declares no `affects` paths to scope the read to",)
-    dirty = provenance.dirty_paths(facts_root, paths)
-    if dirty is None:
-        return None, "", (f"{_GATE}: `git status` could not be read in {facts_root}",)
+            return GateVerdict(
+                None, note=f"{_GATE_NOTE}: workspace-only item (`gw:workspace`), no code surface to gate"
+            )
+        return GateVerdict(
+            "no-affects",
+            "the item declares no code `affects` to scope the gate to; declare them, or mark a workspace-only "
+            "item with `gw:workspace`",
+        )
+    if repo is None:
+        note = f" ({repo_note})" if repo_note else ""
+        return GateVerdict("no-repo", f"no code repository resolved for {item.path}{note}")
+    recorded_worktree, recorded_start = _gate_placement(item, repo_name)
+    if stamped_worktree:
+        root = Path(stamped_worktree)
+    elif recorded_worktree:
+        root = Path(recorded_worktree)
+        if not root.is_dir():
+            return GateVerdict(
+                "worktree-missing",
+                f"{item.path} records worktree {recorded_worktree}, which no longer exists; the gate never "
+                "substitutes another checkout -- restore it or record the placement again",
+            )
+    else:
+        root = repo
+    if isinstance(git, provenance.GitFailure):
+        return GateVerdict("git-unavailable", f"no usable git ({git.cause}): {git.detail}")
+    dirty = provenance.strict_dirty_paths(root, paths, git=git)
+    if isinstance(dirty, provenance.GitFailure):
+        return GateVerdict(
+            "git-unavailable", f"`git status` could not be read in {root} ({dirty.cause}): {dirty.detail}"
+        )
     if dirty:
-        return (
+        return GateVerdict(
             "uncommitted-work",
             "the execute stage left uncommitted changes under `affects`: "
             + ", ".join(dirty)
             + " -- commit them (or stash what does not belong to this item), then advance again",
-            (),
         )
-    if not start_sha:
-        return None, "", (f"{_GATE}: no explicit `start_sha` to read the commit range from",)
-    facts = provenance.results_facts(facts_root, phase="execute", start_sha=start_sha, paths=paths, opened=item.opened)
-    if facts is None:
-        return None, "", (f"{_GATE}: no commit range readable from {start_sha}",)
+    start = explicit_start or recorded_start
+    if not start:
+        return GateVerdict(
+            "no-start-sha",
+            f"{item.path} has no recorded execute baseline (`start_sha`) and none was passed; record one with "
+            f"`gw work record-baseline {item.path}` before execute work starts, pass --start-sha, or, for an item "
+            f"that predates baselines, `gw work advance {item.path} --from execute --skip-gate no-start-sha "
+            '--reason "..." --actor <you>`',
+        )
+    resolved = provenance.strict_commit(root, start, git=git)
+    if isinstance(resolved, provenance.GitFailure):
+        return GateVerdict(
+            "range-unreadable", f"start_sha {start} does not resolve to a commit in {root}: {resolved.detail}"
+        )
+    facts = provenance.strict_range(root, start_sha=resolved, paths=paths, git=git)
+    if isinstance(facts, provenance.GitFailure):
+        return GateVerdict("range-unreadable", f"the range {start}..HEAD is unreadable in {root}: {facts.detail}")
     if not facts.commits:
-        return (
-            "no-commits",
-            f"the execute stage recorded no commits touching `affects` in {start_sha}..{facts.end_sha}",
-            (),
+        return GateVerdict(
+            "no-commits", f"the execute stage recorded no commits touching `affects` in {start}..{facts.end_sha}"
         )
-    # Evaluation order is uncommitted-work -> no-commits -> no-affects-touched,
-    # most-specific diagnosis last: an item with zero commits has an empty file
-    # list too, and should be told it committed nothing rather than that it
-    # touched nothing.
     if not facts.files:
-        return (
+        return GateVerdict(
             "no-affects-touched",
             "the execute stage committed work but touched nothing under this item's declared "
             f"surface ({', '.join(facts.scope)}); either the work landed outside `affects` or "
             "`affects` is wrong",
-            (),
         )
-    return None, "", ()
+    return GateVerdict(None)
 
 
 def _effective_start_sha(
-    explicit: str | None, *, phase: str | None, facts_root: Path, bundle_root: Path, item: WorkItem
+    explicit: str | None,
+    *,
+    phase: str | None,
+    facts_root: Path,
+    bundle_root: Path,
+    item: WorkItem,
+    repo_name: str | None,
 ) -> str | None:
     """The start of the range this stage covers, or `None` for no stub.
 
-    An explicit caller argument wins outright, at either results phase. Omitted,
-    only `execute` derives one: a merge-base or spec-anchor range at `finish`
-    sweeps in the whole execute range, so the finish report would claim work it
-    did not do — precisely the failure this epic exists to remove. At `finish`
-    the item declines to guess and requires the flag.
+    An explicit caller argument wins, then the placement's recorded baseline,
+    at either results phase. Otherwise only `execute` derives one: a derived
+    range at `finish` would sweep in the whole execute range.
     """
     if explicit:
         return explicit
+    _worktree, recorded = _gate_placement(item, repo_name)
+    if recorded:
+        return recorded
     if phase != "execute":
         return None
     spec_path = bundle_root / anchor.spec_ref(item)

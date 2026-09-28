@@ -101,26 +101,22 @@ def _execute_in_fork(layout: WorkspaceLayout, repo: Path, fork: Path, *, explici
     _git(fork, "commit", "-am", "execute work")
     commit = _git(fork, "rev-parse", "HEAD")
     assert commit != start
-    # Without a recorded worktree the gate reads main, where an explicit start
-    # would see zero commits. Only the control omits it, deliberately exercising
-    # the weaker absent-start warning so finish placement can be inspected.
+    # Without a recorded worktree the gate reads `repo`, which is main, where the
+    # range has zero commits. The control (no recorded placement) therefore
+    # gates the fork directly so finish placement can be inspected.
     advanced = stage.run_stage_advance(
         layout,
         CHILD,
         today=TODAY,
-        repo=repo,
-        start_sha=start if explicit_start else None,
+        repo=repo if explicit_start else fork,
+        start_sha=start,
         infer_worktree=False,
         cwd=fork,
         dry_run=False,
     )
     assert advanced.outcome.plan.refusal is None, advanced.outcome.plan.detail
     assert advanced.application is not None and advanced.application.ok
-    if explicit_start:
-        assert advanced.warnings == ()
-    else:
-        assert len(advanced.warnings) == 1
-        assert "no explicit `start_sha` to read the commit range from" in advanced.warnings[0]
+    assert advanced.warnings == ()
     return commit
 
 

@@ -29,6 +29,7 @@ def _page(
     type: str = "Feature",
     phase: str | None = "execute",
     work_status: str = "in-progress",
+    affects: str = "packages/a",
 ):
     page = layout.bundle_dir / f"{path}.md"
     page.parent.mkdir(parents=True, exist_ok=True)
@@ -36,7 +37,7 @@ def _page(
     page.write_text(
         f"---\ntype: {type}\ntitle: Held\ndescription: d\nstatus: stable\nwork_status: {work_status}\n"
         f"owner: pat\n{phase_line}effort: medium\nopened: 2026-08-01\nupdated: 2026-08-01\n"
-        "affects:\n- packages/a\n---\n\n## Summary\nd\n\n## Plan\n\n| Action | Done when | Rationale |\n"
+        f"affects:\n- {affects}\n---\n\n## Summary\nd\n\n## Plan\n\n| Action | Done when | Rationale |\n"
         "| --- | --- | --- |\n",
         encoding="utf-8",
         newline="",

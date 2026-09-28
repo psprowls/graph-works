@@ -49,6 +49,10 @@ assert_contains "$RELAY" "never its own worktree" "ownership rule: relay never r
 assert_contains "$RELAY" "the coordinator removes the relay's own worktree" "ownership rule: coordinator removes the deferred row"
 assert_absent "$RELAY" "never removes worktrees and never deletes branches" "old ownership rule is gone"
 assert_absent "$RELAY" "Preserve source branches and worktrees until final verification." "old preservation sentence is gone"
+assert_absent "$RELAY" "Add one line per removed, skipped and deferred row (path and" "worker_done body no longer takes appended per-row lines"
+assert_contains "$RELAY" "references/04-finish-cleanup.md" "relay writes a durable per-row cleanup report"
+assert_contains "$RELAY" "\`--report-path\` set to the file above" "relay's worker_done points at the cleanup report via --report-path"
+assert_contains "$RELAY" "required exactly-three-sentence" "relay's worker_done body stays exactly three sentences"
 
 AUTO=skills/auto-drive/SKILL.md
 echo "--- auto-drive"

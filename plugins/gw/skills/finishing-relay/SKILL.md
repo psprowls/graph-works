@@ -300,13 +300,18 @@ integration into the merge target; PR, hold and discard do not.
   uv run --package graph-works-core python <plugin>/skills/finishing-relay/references/finish-receipt.py cleanup <work-path> --workspace <workspace> --runner-cwd "$PWD"
   ```
   This session's own worktree comes back `deferred`; leave it for the
-  coordinator. Add one line per removed, skipped and deferred row (path and
-  branch) to the `worker_done` body. A refused plan is one line in that body,
-  never an escalation. The item has already resolved.
+  coordinator. Write one line per removed, skipped and deferred row (path,
+  branch, and reason for any skip or deferred) to
+  `<workspace>/okf/<work-path>/references/04-finish-cleanup.md` — a durable
+  report that survives this session's own worktree, unlike the `worker_done`
+  body. A refused plan is one line in that report, never an escalation. The
+  item has already resolved.
   Only after a successful advance, send `worker_done --outcome succeeded` (this session's own dispatch
-  preamble command, `--task-id`/`--dispatch-id` filled in from it) with a
-  body naming the merge target, the resolved-in reference, a one-line
-  summary of what shipped, and the cleanup lines above.
+  preamble command, `--task-id`/`--dispatch-id` filled in from it) with
+  `--report-path` set to the file above and the required exactly-three-sentence
+  body: name the merge target and the resolved-in reference, give a one-line
+  summary of what shipped, and summarize the cleanup counts (removed / skipped
+  / deferred) instead of listing rows.
 - **`pr` / `hold` / `discard`:** **no `gw work advance` call** — the item
   stays at `phase: finish` for a later attended pass. `pr` / `hold` / `discard` run no cleanup: nothing is removed and discard stays recorded, not executed.
   Send

@@ -411,3 +411,51 @@ def test_record_workspace_placement_rejects_disabled_workspace(embedded_ws):
             today=TODAY,
             repo="_workspace",
         )
+
+
+@pytest.mark.parametrize("change", ["phase", "stamp"])
+@pytest.mark.parametrize("timing", ["after_parent", "guard_capture"])
+def test_ancestor_change_before_child_guard_refuses(ws, monkeypatch, change, timing):
+    from graph_works_core.orchestrate import workspace_prepare as prepare
+
+    record = prepare.run_record_placement
+    guard = prepare.preparation_guard
+    page = ws.bundle_dir / f"{EPIC}.md"
+    edited = False
+
+    def edit_ancestor():
+        nonlocal edited
+        before = page.read_text(encoding="utf-8")
+        after = (
+            before.replace("phase: execute", "phase: finish")
+            if change == "phase"
+            else before.replace(branch_name(EPIC, "Epic"), "replacement-parent")
+        )
+        assert before != after
+        page.write_text(after, encoding="utf-8", newline="")
+        git(ws.root, "add", str(page))
+        git(ws.root, "commit", "-m", "Concurrent ancestor edit")
+        edited = True
+
+    def record_and_edit(*args, **kwargs):
+        result = record(*args, **kwargs)
+        if timing == "after_parent" and args[1] == EPIC and kwargs.get("dry_run") is False:
+            assert result.written
+            edit_ancestor()
+        return result
+
+    def capture_and_edit(layout, path, **kwargs):
+        if timing == "guard_capture" and path == CHILD:
+            edit_ancestor()
+        return guard(layout, path, **kwargs)
+
+    monkeypatch.setattr(prepare, "run_record_placement", record_and_edit)
+    monkeypatch.setattr(prepare, "preparation_guard", capture_and_edit)
+    result = run_prepare_workspace(ws, CHILD, today=TODAY, apply=True)
+    assert edited
+    assert result.refusal is not None
+    assert result.applied and result.placement is None
+    assert len(result.steps) == 1 and result.steps[0].owner_path == EPIC
+    assert result.steps[0].recorded and Path(result.steps[0].worktree).is_dir()
+    assert "_workspace:" in page.read_text(encoding="utf-8")
+    assert "_workspace:" not in (ws.bundle_dir / f"{CHILD}.md").read_text(encoding="utf-8")

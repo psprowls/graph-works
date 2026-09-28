@@ -129,12 +129,6 @@ def run_prepare_workspace(
     if item is None:
         return WorkspacePrepareResult(path, (), "unknown-path", f"unknown work item {path!r}", None, False)
     chain = workspace_chain(item, items)
-    owners, target = chain[:-1], chain[-1]
-    if target.phase not in _ITEM_PHASES or any(o.phase != "execute" for o in owners):
-        phases = ", ".join(f"{o.path}={o.phase}" for o in chain)
-        return WorkspacePrepareResult(
-            path, (), "not-entitled", f"needs item at execute/finish and owners at execute: {phases}", None, False
-        )
     worktrees_dir = str(layout.worktrees_dir.resolve())
 
     def observe() -> RepositoryContext:
@@ -142,11 +136,53 @@ def run_prepare_workspace(
         stamped = (Path(o.repo_stamps[WORKSPACE_REPO].worktree) for o in chain if WORKSPACE_REPO in o.repo_stamps)
         return observe_repository(workspace_path, paths=(*map(Path, planned), *stamped))
 
-    context = observe()
-    base = context.default_base
     steps: list[WorkspaceStep] = []
     applied = False
-    for owner in chain:
+    planned_chain = tuple(o.path for o in chain)
+    for index, owner_path in enumerate(planned_chain):
+        # Earlier steps legitimately stamped their pages. Re-read for this step,
+        # then bind entitlement, parent selection and the guard to that bundle.
+        bundle = load_bundle(layout.bundle_dir, ignore=IGNORE)
+        items = {i.path: i for i in load_items(bundle)}
+        item = items.get(path)
+        if item is None:
+            return WorkspacePrepareResult(
+                path, tuple(steps), "unknown-path", f"unknown work item {path!r}", None, applied
+            )
+        chain = workspace_chain(item, items)
+        if tuple(o.path for o in chain) != planned_chain:
+            return WorkspacePrepareResult(
+                path, tuple(steps), "stamp-refused", "workspace owner chain changed; replan", None, applied
+            )
+        if chain[-1].phase not in _ITEM_PHASES or any(o.phase != "execute" for o in chain[:-1]):
+            phases = ", ".join(f"{o.path}={o.phase}" for o in chain)
+            return WorkspacePrepareResult(
+                path,
+                tuple(steps),
+                "not-entitled",
+                f"needs item at execute/finish and owners at execute: {phases}",
+                None,
+                applied,
+            )
+        for parent, previous in zip(chain[:index], steps, strict=True):
+            stamp = parent.repo_stamps.get(WORKSPACE_REPO)
+            if apply and (
+                "repo_stamps" in parent.invalid_optional_fields
+                or stamp is None
+                or stamp.branch != previous.branch
+                or str(Path(stamp.worktree).resolve()) != previous.worktree
+            ):
+                return WorkspacePrepareResult(
+                    path,
+                    tuple(steps),
+                    "stamp-refused",
+                    f"{parent.path}: workspace parent placement changed; replan",
+                    None,
+                    applied,
+                )
+        owner = items[owner_path]
+        context = observe()
+        base = steps[-1].branch if steps else context.default_base
         document = bundle.concepts[owner.path]
         if "repo_stamps" in document.fm_raw and document.fm_raw["repo_stamps"] is None:
             return WorkspacePrepareResult(
@@ -206,7 +242,7 @@ def run_prepare_workspace(
         if preview.plan.refusal is not None:
             return WorkspacePrepareResult(path, tuple(steps), "stamp-refused", preview.plan.detail, None, applied)
         if apply and action != "verified":
-            guard = preparation_guard(layout, owner.path)
+            guard = preparation_guard(layout, owner.path, bundle=bundle)
             if action == "create":
                 parent_existed = Path(worktree).parent.exists()
                 added = probe_git(workspace_path, "worktree", "add", "-b", branch, worktree, base)
@@ -276,7 +312,6 @@ def run_prepare_workspace(
             step = replace(step, recorded=True)
             context = observe()
         steps.append(step)
-        base = branch
     return WorkspacePrepareResult(path, tuple(steps), None, "", None, applied)
 
 

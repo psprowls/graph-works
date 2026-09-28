@@ -378,15 +378,18 @@ def run_record_placement(
         return PlacementRecord(plan=plan, application=application, repo_note=own.note)
 
 
-def preparation_guard(layout: WorkspaceLayout, path: str) -> str:
+def preparation_guard(layout: WorkspaceLayout, path: str, *, bundle: Bundle | None = None) -> str:
     """Capture owner/ancestor bytes and repository configuration before provisioning.
 
     The opaque token is checked under the placement lock and from fresh reads
     under the bundle mutation lock immediately before effects. Provisioning
     itself never holds either lock. Ancestors bind inherited repo assignments;
     complete owner bytes bind phase, terminal state and every existing stamp.
+    Supply the planning bundle to bind the token to the same read as the decision.
     """
-    return _preparation_guard(layout, load_bundle(layout.bundle_dir, ignore=IGNORE), path)
+    return _preparation_guard(
+        layout, bundle if bundle is not None else load_bundle(layout.bundle_dir, ignore=IGNORE), path
+    )
 
 
 def _preparation_guard(layout: WorkspaceLayout, bundle: Bundle, path: str) -> str:

@@ -112,25 +112,81 @@ types: sync
 contracts:
     uv run lint-imports
 
-# Full test suite, every package.
+# Full test suite, every package -- workers-per-suite (`-n auto`) AND a bounded
+# number of packages running at once, because neither axis alone uses a dev
+# box's cores well: one package's suite rarely saturates them, and 15 serial
+# `uv run` invocations pay 15x process/import startup back to back.
+#
+# Independent checkouts of the same source with disjoint coverage targets, so
+# there is no state shared between the fanned-out recipes below -- but the two
+# axes multiply, and BOTH must stay bounded together. A first version ran all
+# 15 packages at once via `[parallel]`, each spawning `-n auto` (= host CPU
+# count) workers -- 120 pytest-xdist worker processes on an 8-core box. That
+# didn't just run slowly: xdist's own worker bookkeeping raced under the
+# overload and threw `KeyError: <WorkerController gwN>` mid-session, and a
+# separate suite's server-startup test timed out waiting on a CPU-starved host
+# -- six failures with no code at fault. `GW_TEST_JOBS` caps how many packages
+# run at once (default 3); `PYTEST_XDIST_AUTO_NUM_WORKERS` is set from it so
+# `-n auto` in every worker pool divides the host's CPUs across whatever's
+# running concurrently, instead of each pool claiming all of them. Raise
+# `GW_TEST_JOBS` on a bigger box; lower it (or set it to 1) if a run wedges.
 test:
-    uv run pytest
-    uv run --package code-graph-io pytest packages/code-graph-io/tests
-    uv run --package code-wiki-okf pytest packages/code-wiki-okf/tests
-    uv run --package work-tracker-okf pytest packages/work-tracker-okf/tests
-    uv run --package config-io pytest packages/config-io/tests
-    uv run --package plugin-fork-io pytest packages/plugin-fork-io/tests
-    uv run --package models-io --extra bedrock --extra vercel pytest packages/models-io/tests
-    uv run --package subagents-io pytest packages/subagents-io/tests
-    uv run --package doc-wiki-okf pytest packages/doc-wiki-okf/tests
-    uv run --package graph-works-core pytest packages/graph-works-core/tests
-    uv run --package workflow-local pytest packages/workflow-local/tests
-    uv run --package workflow-orca pytest packages/workflow-orca/tests
-    uv run --package graph-works-wire pytest packages/graph-works-wire/tests
-    uv run --package graph-works-cli pytest packages/graph-works-cli/tests
-    uv run --package graph-works-serve pytest packages/graph-works-serve/tests
+    #!/usr/bin/env bash
+    set -euo pipefail
+    jobs="${GW_TEST_JOBS:-3}"
+    ncpu=$(python3 -c "import os; print(os.cpu_count() or 1)")
+    workers=$(( ncpu / jobs )); [ "$workers" -ge 1 ] || workers=1
+    export PYTEST_XDIST_AUTO_NUM_WORKERS="$workers"
+    pkgs=(_test-okf _test-code-graph-io _test-code-wiki-okf _test-work-tracker-okf _test-config-io _test-plugin-fork-io _test-models-io _test-subagents-io _test-doc-wiki-okf _test-graph-works-core _test-workflow-local _test-workflow-orca _test-graph-works-wire _test-graph-works-cli _test-graph-works-serve)
+    printf '%s\n' "${pkgs[@]}" | xargs -P "$jobs" -I{} just {}
 
-# Branch coverage — GATED, per package.
+_test-okf:
+    uv run pytest -n auto
+_test-code-graph-io:
+    uv run --package code-graph-io pytest packages/code-graph-io/tests -n auto
+_test-code-wiki-okf:
+    uv run --package code-wiki-okf pytest packages/code-wiki-okf/tests -n auto
+_test-work-tracker-okf:
+    uv run --package work-tracker-okf pytest packages/work-tracker-okf/tests -n auto
+_test-config-io:
+    uv run --package config-io pytest packages/config-io/tests -n auto
+_test-plugin-fork-io:
+    uv run --package plugin-fork-io pytest packages/plugin-fork-io/tests -n auto
+_test-models-io:
+    uv run --package models-io --extra bedrock --extra vercel pytest packages/models-io/tests -n auto
+_test-subagents-io:
+    uv run --package subagents-io pytest packages/subagents-io/tests -n auto
+_test-doc-wiki-okf:
+    uv run --package doc-wiki-okf pytest packages/doc-wiki-okf/tests -n auto
+_test-graph-works-core:
+    uv run --package graph-works-core pytest packages/graph-works-core/tests -n auto
+_test-workflow-local:
+    uv run --package workflow-local pytest packages/workflow-local/tests -n auto
+_test-workflow-orca:
+    uv run --package workflow-orca pytest packages/workflow-orca/tests -n auto
+_test-graph-works-wire:
+    uv run --package graph-works-wire pytest packages/graph-works-wire/tests -n auto
+_test-graph-works-cli:
+    uv run --package graph-works-cli pytest packages/graph-works-cli/tests -n auto
+_test-graph-works-serve:
+    uv run --package graph-works-serve pytest packages/graph-works-serve/tests -n auto
+
+# Branch coverage — GATED, per package. Same bounded two-axis fan-out as
+# `test` (`-n auto` per package, `GW_COV_JOBS`-many packages at once, CPUs
+# split between them via `PYTEST_XDIST_AUTO_NUM_WORKERS`) -- see `test`'s
+# comment for why both axes have to be bounded together, and
+# `GW_COV_JOBS`/`GW_TEST_JOBS` are independent knobs only because `cov` and
+# `test` are never run in the same invocation.
+#
+# Each package's coverage recipe sets its own `COVERAGE_FILE` -- coverage.py's
+# default data file is `.coverage` in the CWD, and every one of these `uv run`
+# invocations shares the same CWD (the workspace root), regardless of which
+# package it covers. Serially that was invisible (each run finished, was
+# read, and was gone before the next one started); run concurrently, two
+# processes writing the same `.coverage` at once produced real, silent data
+# corruption -- packages reported as failing their coverage floor with numbers
+# that belonged to a different package's source tree entirely. Distinct data
+# files per package is the fix, not a smaller `GW_COV_JOBS`.
 #
 # okf-io / okf-ext hold the original 95% floor. The margin there is thin, and
 # `models.py` and `document.py` are where the slack went — they carry the debt.
@@ -139,32 +195,54 @@ test:
 # gate, not a second one). A failure here names only a global percentage, so
 # start with the lowest-covered module and read `term-missing`.
 cov:
-    uv run pytest --cov=okf_io --cov=okf_ext --cov-branch --cov-report=term-missing --cov-fail-under=95
-    uv run --package code-graph-io pytest packages/code-graph-io/tests --cov=code_graph_io --cov-branch --cov-report=term-missing --cov-fail-under=90
-    uv run --package code-wiki-okf pytest packages/code-wiki-okf/tests --cov=code_wiki_okf --cov-branch --cov-report=term-missing --cov-fail-under=95
-    uv run --package work-tracker-okf pytest packages/work-tracker-okf/tests --cov=work_tracker_okf --cov-branch --cov-report=term-missing --cov-fail-under=95
-    uv run --package config-io pytest packages/config-io/tests --cov=config_io --cov-branch --cov-report=term-missing --cov-fail-under=95
-    uv run --package plugin-fork-io pytest packages/plugin-fork-io/tests --cov=plugin_fork_io --cov-branch --cov-report=term-missing --cov-fail-under=95
-    uv run --package models-io --extra bedrock --extra vercel pytest packages/models-io/tests --cov=models_io --cov-branch --cov-report=term-missing --cov-fail-under=95
-    uv run --package subagents-io pytest packages/subagents-io/tests --cov=subagents_io --cov-branch --cov-report=term-missing --cov-fail-under=95
-    uv run --package doc-wiki-okf pytest packages/doc-wiki-okf/tests --cov=doc_wiki_okf --cov-branch --cov-report=term-missing --cov-fail-under=95
-    uv run --package graph-works-core pytest packages/graph-works-core/tests --cov=graph_works_core --cov-branch --cov-report=term-missing --cov-fail-under=95
-    just cov-workflow-local
-    uv run --package workflow-orca pytest packages/workflow-orca/tests --cov=workflow_orca --cov-branch --cov-report=term-missing --cov-fail-under=95
-    uv run --package graph-works-wire pytest packages/graph-works-wire/tests --cov=graph_works_wire --cov-branch --cov-report=term-missing --cov-fail-under=95
-    uv run --package graph-works-cli pytest packages/graph-works-cli/tests --cov=graph_works_cli --cov-branch --cov-report=term-missing --cov-fail-under=95
-    uv run --package graph-works-serve pytest packages/graph-works-serve/tests --cov=graph_works_serve --cov-branch --cov-report=term-missing --cov-fail-under=95
+    #!/usr/bin/env bash
+    set -euo pipefail
+    jobs="${GW_COV_JOBS:-3}"
+    ncpu=$(python3 -c "import os; print(os.cpu_count() or 1)")
+    workers=$(( ncpu / jobs )); [ "$workers" -ge 1 ] || workers=1
+    export PYTEST_XDIST_AUTO_NUM_WORKERS="$workers"
+    pkgs=(_cov-okf _cov-code-graph-io _cov-code-wiki-okf _cov-work-tracker-okf _cov-config-io _cov-plugin-fork-io _cov-models-io _cov-subagents-io _cov-doc-wiki-okf _cov-graph-works-core _cov-workflow-local _cov-workflow-orca _cov-graph-works-wire _cov-graph-works-cli _cov-graph-works-serve)
+    printf '%s\n' "${pkgs[@]}" | xargs -P "$jobs" -I{} just {}
+
+_cov-okf:
+    COVERAGE_FILE=.coverage.okf uv run pytest --cov=okf_io --cov=okf_ext --cov-branch --cov-report=term-missing --cov-fail-under=95 -n auto
+_cov-code-graph-io:
+    COVERAGE_FILE=.coverage.code-graph-io uv run --package code-graph-io pytest packages/code-graph-io/tests --cov=code_graph_io --cov-branch --cov-report=term-missing --cov-fail-under=90 -n auto
+_cov-code-wiki-okf:
+    COVERAGE_FILE=.coverage.code-wiki-okf uv run --package code-wiki-okf pytest packages/code-wiki-okf/tests --cov=code_wiki_okf --cov-branch --cov-report=term-missing --cov-fail-under=95 -n auto
+_cov-work-tracker-okf:
+    COVERAGE_FILE=.coverage.work-tracker-okf uv run --package work-tracker-okf pytest packages/work-tracker-okf/tests --cov=work_tracker_okf --cov-branch --cov-report=term-missing --cov-fail-under=95 -n auto
+_cov-config-io:
+    COVERAGE_FILE=.coverage.config-io uv run --package config-io pytest packages/config-io/tests --cov=config_io --cov-branch --cov-report=term-missing --cov-fail-under=95 -n auto
+_cov-plugin-fork-io:
+    COVERAGE_FILE=.coverage.plugin-fork-io uv run --package plugin-fork-io pytest packages/plugin-fork-io/tests --cov=plugin_fork_io --cov-branch --cov-report=term-missing --cov-fail-under=95 -n auto
+_cov-models-io:
+    COVERAGE_FILE=.coverage.models-io uv run --package models-io --extra bedrock --extra vercel pytest packages/models-io/tests --cov=models_io --cov-branch --cov-report=term-missing --cov-fail-under=95 -n auto
+_cov-subagents-io:
+    COVERAGE_FILE=.coverage.subagents-io uv run --package subagents-io pytest packages/subagents-io/tests --cov=subagents_io --cov-branch --cov-report=term-missing --cov-fail-under=95 -n auto
+_cov-doc-wiki-okf:
+    COVERAGE_FILE=.coverage.doc-wiki-okf uv run --package doc-wiki-okf pytest packages/doc-wiki-okf/tests --cov=doc_wiki_okf --cov-branch --cov-report=term-missing --cov-fail-under=95 -n auto
+_cov-graph-works-core:
+    COVERAGE_FILE=.coverage.graph-works-core uv run --package graph-works-core pytest packages/graph-works-core/tests --cov=graph_works_core --cov-branch --cov-report=term-missing --cov-fail-under=95 -n auto
+_cov-workflow-orca:
+    COVERAGE_FILE=.coverage.workflow-orca uv run --package workflow-orca pytest packages/workflow-orca/tests --cov=workflow_orca --cov-branch --cov-report=term-missing --cov-fail-under=95 -n auto
+_cov-graph-works-wire:
+    COVERAGE_FILE=.coverage.graph-works-wire uv run --package graph-works-wire pytest packages/graph-works-wire/tests --cov=graph_works_wire --cov-branch --cov-report=term-missing --cov-fail-under=95 -n auto
+_cov-graph-works-cli:
+    COVERAGE_FILE=.coverage.graph-works-cli uv run --package graph-works-cli pytest packages/graph-works-cli/tests --cov=graph_works_cli --cov-branch --cov-report=term-missing --cov-fail-under=95 -n auto
+_cov-graph-works-serve:
+    COVERAGE_FILE=.coverage.graph-works-serve uv run --package graph-works-serve pytest packages/graph-works-serve/tests --cov=graph_works_serve --cov-branch --cov-report=term-missing --cov-fail-under=95 -n auto
 
 # workflow-local's coverage arm. POSIX-only: the package refuses to construct on
 # Windows by design (D-002), so a line-coverage floor there measures a suite that
 # is 51 skips wide. `just test` still runs the suite on Windows, where the skips
 # and `test_windows_guard.py` are the signal.
 [unix]
-cov-workflow-local:
-    uv run --package workflow-local pytest packages/workflow-local/tests --cov=workflow_local --cov-branch --cov-report=term-missing --cov-fail-under=95
+_cov-workflow-local:
+    COVERAGE_FILE=.coverage.workflow-local uv run --package workflow-local pytest packages/workflow-local/tests --cov=workflow_local --cov-branch --cov-report=term-missing --cov-fail-under=95 -n auto
 
 [windows]
-cov-workflow-local:
+_cov-workflow-local:
     @echo "workflow-local: coverage gate skipped — POSIX-only backend (D-002); see test_windows_guard.py"
 
 # Scoped gate for ONE package -- lint, types (both platform arms), and the
@@ -241,7 +319,7 @@ check-pkg PKG: sync
     echo "--- types (win32)"
     uv run $PKGFLAG $EXTRA mypy --strict --platform win32 $SRC
     echo "--- cov"
-    uv run $PKGFLAG $EXTRA pytest $TESTPATH $MODULES --cov-branch --cov-report=term-missing --cov-fail-under=$FLOOR
+    COVERAGE_FILE=".coverage.{{PKG}}" uv run $PKGFLAG $EXTRA pytest $TESTPATH $MODULES --cov-branch --cov-report=term-missing --cov-fail-under=$FLOOR -n auto
 
 # Everything CI will run. `cov` runs every suite, so `test` is not repeated.
 #

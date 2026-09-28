@@ -84,7 +84,8 @@ def expand_wildcards(catalog: Sequence[ConfigEntry], *, store: ConfigStore) -> l
     """Concrete stored keys matching a wildcard catalog entry.
 
     Handles both wildcard shapes: `roles.*.<field>` (head plus a trailing
-    field) and `plugin.backend_overrides.*` (head, no field).
+    field, which may itself be dotted, as in `repositories.*.gate.full`) and
+    `plugin.backend_overrides.*` (head, no field).
     """
     raw = store.read_explicit()
     concrete: list[str] = []
@@ -99,7 +100,7 @@ def expand_wildcards(catalog: Sequence[ConfigEntry], *, store: ConfigStore) -> l
         for name, fields in block.items():
             if not field:
                 concrete.append(f"{head}.{name}")
-            elif isinstance(fields, dict) and field in fields:
+            elif isinstance(fields, dict) and dotted.has(fields, field):
                 concrete.append(f"{head}.{name}.{field}")
     return concrete
 

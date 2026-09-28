@@ -198,3 +198,22 @@ def test_resolve_all_expands_a_wildcard_key_that_exists_only_in_the_overlay():
 def test_a_plain_store_never_reports_the_local_origin():
     store = DictStore({"topic": "Committed"})
     assert resolve_key(CATALOG, "topic", store=store, environ={}).origin == "manifest"
+
+
+def test_expand_wildcards_handles_a_nested_field():
+    nested = (
+        ConfigEntry(key="repos.*.gate.full", type="str", default=None, description="d"),
+        ConfigEntry(key="repos.*.gate.scoped.command", type="str", default=None, description="d"),
+    )
+    store = DictStore(
+        {
+            "repos": {
+                "a": {"gate": {"full": "make", "scoped": {"command": "make {name}"}}},
+                "b": {"gate": "not a mapping"},
+                "c": {"path": "x"},
+            }
+        }
+    )
+    assert expand_wildcards(nested, store=store) == ["repos.a.gate.full", "repos.a.gate.scoped.command"]
+    got = resolve_key(nested, "repos.a.gate.scoped.command", store=store, environ={})
+    assert (got.value, got.origin) == ("make {name}", "manifest")

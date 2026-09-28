@@ -76,7 +76,10 @@ def test_workspace_only_launch_preserves_prepared_stamp(tmp_path: Path, phase: s
 
 @pytest.mark.parametrize("phase", ["design", "plan"])
 @pytest.mark.parametrize("nested", [False, True])
-def test_workspace_only_reader_uses_committed_workspace_lineage(tmp_path: Path, phase: str, nested: bool):
+@pytest.mark.parametrize("override", [False, True])
+def test_workspace_only_reader_uses_committed_workspace_lineage(
+    tmp_path: Path, phase: str, nested: bool, override: bool
+):
     items = (
         ((EPIC, "Epic", "in-progress"), (CHILD, "Feature", "accepted")) if nested else ((LONE, "Feature", "accepted"),)
     )
@@ -99,13 +102,13 @@ def test_workspace_only_reader_uses_committed_workspace_lineage(tmp_path: Path, 
         git(layout.root, "add", "workspace.yaml")
     workspace_only(layout, path)
     set_phase(layout, path, phase)
-    initial = run_orchestrate(layout, root)
+    initial = run_orchestrate(layout, root, repo=code if override else None)
     assert not initial.preparations
     assert [p.owner_path for p in initial.workspace_preparations] == ([EPIC] if nested else [])
     for request in initial.workspace_preparations:
         prepared = run_prepare_workspace(layout, request.owner_path, today=TODAY, apply=True)
         assert prepared.refusal is None
-    result = run_orchestrate(layout, root)
+    result = run_orchestrate(layout, root, repo=code if override else None)
     assert not result.preparations and not result.workspace_preparations
     (reader,) = result.dispatches
     assert reader.worktree.action == "pin-detached"
@@ -167,3 +170,30 @@ def test_workspace_reader_requires_verified_owner_but_reads_committed_dirty_tip(
     else:
         assert not result.dispatches
         assert any(b.path == CHILD and b.kind == "worktree-unprovable" for b in result.blocked)
+
+
+@pytest.mark.parametrize("phase", ["design", "plan"])
+@pytest.mark.parametrize("nested", [False, True])
+def test_code_reader_keeps_explicit_override_with_workspace_enabled(tmp_path: Path, phase: str, nested: bool):
+    items = (
+        ((EPIC, "Epic", "in-progress"), (CHILD, "Feature", "accepted")) if nested else ((LONE, "Feature", "accepted"),)
+    )
+    layout, code = workspace(tmp_path, *items)
+    path, root = (CHILD, EPIC) if nested else (LONE, LONE)
+    base = "main"
+    if nested:
+        anchor = tmp_path / "code-anchor"
+        base = "epic/code"
+        git(code, "worktree", "add", "-b", base, str(anchor), "main")
+        doc = load(layout.bundle_dir / f"{EPIC}.md")
+        doc.set("worktree", str(anchor))
+        doc.set("branch", base)
+        doc.save()
+    set_phase(layout, path, phase)
+    result = run_orchestrate(layout, root, repo=code)
+    (reader,) = result.dispatches
+    selected = result.plan.dispatch_repos[reader.key]
+    assert selected.path == code and selected.name is None and selected.source == "flag"
+    assert reader.worktree.action == "pin-detached"
+    assert reader.worktree.base_branch == base
+    assert reader.worktree.start_sha == git(code, "rev-parse", base)

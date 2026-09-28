@@ -1606,16 +1606,23 @@ def plan(
             continue
 
         if phase in READ_ONLY_PHASES:
+            reader_repos = item_repos
             if workspace_only:
                 # Read the workspace integration lineage without preparing any
                 # code anchor or claiming its mutable checkout.
                 item_repo, context = workspace_repo, workspace_context
+                if reader_repos is None:
+                    # Explicit code overrides have no named item map. Their
+                    # scalar placements still belong to code; workspace owner
+                    # provenance must come from the foreign _workspace stamp.
+                    override = ItemRepo(None, Path(code_repo) if code_repo else None, "flag")
+                    reader_repos = dict.fromkeys(by_path, override)
             source = _reader_source(
                 item,
                 root=root,
                 by_path=by_path,
                 item_repo=item_repo,
-                item_repos=item_repos,
+                item_repos=reader_repos,
                 context=context,
                 inventory=inventory,
                 exists=exists,
@@ -2405,9 +2412,19 @@ def run_orchestrate(
         # The explicit override retains singular scheduling and must not resolve
         # authored foreign assignments. Its accepted dispatches still carry the
         # same mandatory repository metadata as normally resolved dispatches.
+        # Workspace readers retain the repository that supplied their pinned SHA.
         computed = replace(
             computed,
-            dispatch_repos=MappingProxyType({dispatch.key: root_repo for dispatch in computed.dispatches}),
+            dispatch_repos=MappingProxyType(
+                {
+                    dispatch.key: ws_repo
+                    if ws_repo is not None
+                    and dispatch.phase in READ_ONLY_PHASES
+                    and computed.dispatch_repos.get(dispatch.key) == ws_repo
+                    else root_repo
+                    for dispatch in computed.dispatches
+                }
+            ),
         )
 
     decisions = _resolve_decisions(items, bundle.root, path)

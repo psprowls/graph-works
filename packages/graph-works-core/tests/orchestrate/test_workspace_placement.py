@@ -301,6 +301,33 @@ def test_live_workspace_stamp_does_not_make_sibling_affects_uncertain():
     assert not result.blocked
 
 
+def test_live_code_writer_blocks_workspace_only_reuse_of_its_content_checkout():
+    items, repos, contexts, ws = sibling_fixture()
+    shared = items[1].repo_stamps["_workspace"]
+    items = (
+        items[0],
+        items[1],
+        replace(items[2], affects=("gw:workspace",), repo_stamps={"_workspace": shared}),
+    )
+    ws = replace(ws, checkout_usable_by_path={path: True for path in ws.checkout_usable_by_path})
+    key = orchestrate.session_name(items[1].path, "Feature", "execute")
+    result = _ws_plan(items, ROOT, ws, item_repos=repos, repo_contexts=contexts, live=(key,))
+    assert not result.dispatches
+    assert [(b.path, b.kind) for b in result.blocked] == [(items[2].path, "worktree-pending")]
+    assert not result.workspace_preparations and not result.workspace_placements
+
+
+def test_disjoint_code_writers_cannot_share_a_workspace_content_checkout_in_one_plan():
+    items, repos, contexts, ws = sibling_fixture()
+    shared = items[1].repo_stamps["_workspace"]
+    items = (items[0], items[1], replace(items[2], repo_stamps={"_workspace": shared}))
+    ws = replace(ws, checkout_usable_by_path={path: True for path in ws.checkout_usable_by_path})
+    result = _ws_plan(items, ROOT, ws, item_repos=repos, repo_contexts=contexts)
+    assert [d.slug for d in result.dispatches] == [items[1].path]
+    assert [(b.path, b.kind) for b in result.blocked] == [(items[2].path, "worktree-pending")]
+    assert not result.workspace_preparations
+
+
 @pytest.mark.parametrize("live", [False, True])
 def test_real_workspace_claim_blocks_sibling_before_workspace_selection(live):
     items, repos, contexts, ws = sibling_fixture()

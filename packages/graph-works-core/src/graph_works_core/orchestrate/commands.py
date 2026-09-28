@@ -1582,6 +1582,20 @@ def plan(
                 )
                 continue
             content_root = selected_ws
+        content_claims = (
+            (Claim(WorktreeScope(content_root.worktree), "write", item.path),) if content_root is not None else ()
+        )
+        held = first_conflicts(content_claims, (*live_claims, *accepted_claims))
+        if held:
+            blocked.append(
+                BlockedItem(
+                    item.path,
+                    "worktree-pending",
+                    "workspace content checkout is occupied by another worker: "
+                    + "; ".join(sorted({f"{_scope_label(mine)} held by {theirs.owner}" for mine, theirs in held})),
+                )
+            )
+            continue
         workspace_only = workspace_enabled and touches_workspace(item.affects) and not code_affects(item.affects)
         if workspace_only and phase == "execute" and content_root is None:
             blocked.append(BlockedItem(item.path, "workspace-pending", "workspace-only item has no workspace branch"))
@@ -1840,9 +1854,11 @@ def plan(
             and has_integration_owner
             and not is_root
         )
-        claims = (*candidate_claims, *target_claims)
+        claims = (*candidate_claims, *target_claims, *content_claims)
         if action.path:
-            claims += (Claim(WorktreeScope(action.path), "write", item.path),)
+            action_claim = Claim(WorktreeScope(action.path), "write", item.path)
+            if action_claim not in content_claims:
+                claims += (action_claim,)
         _emit(
             item,
             phase,

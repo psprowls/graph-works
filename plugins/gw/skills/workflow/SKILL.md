@@ -307,6 +307,19 @@ applies after that outcome, re-run `gw work next <work-path> --json` to check
 the resulting state. Every held finish outcome skips Terminal handling and
 uses step 6's held-item hand-off.
 
+**Finish cleanup (attended).** After a `merge` or `confirm` advance that
+lands the item at `phase: done` / `work_status: resolved`, and before
+Terminal handling, run the cleanup plan with this session's cwd and execute
+it per `<plugin>/skills/finishing-relay/references/finish-cleanup.md`:
+
+```bash
+uv run --package graph-works-core python <plugin>/skills/finishing-relay/references/finish-receipt.py cleanup <work-path> --workspace <workspace> --runner-cwd "$PWD"
+```
+
+Name any `deferred` worktree for the user: "remove it from another directory with `git worktree remove <path>` (or `orca worktree rm`)".
+Held outcomes run no cleanup. The relay row stays "no advance" and adds nothing here: relay R5
+already cleaned up, and the coordinator removed its deferred worktree.
+
 Report lint findings from any advance — they are the item's health check,
 not noise. If the command errors with *effort required*, ask the user to size
 the item as in step 1 — never pick an effort yourself — then retry with the
@@ -403,6 +416,7 @@ assume the worker's current directory is the Graph Works source checkout.
 ```bash
 uv run --package graph-works-core python <plugin>/skills/finishing-relay/references/finish-receipt.py inspect <work-path> --workspace <workspace>
 uv run --package graph-works-core python <plugin>/skills/finishing-relay/references/finish-receipt.py record <work-path> --workspace <workspace> --repo <name>
+uv run --package graph-works-core python <plugin>/skills/finishing-relay/references/finish-receipt.py cleanup <work-path> --workspace <workspace> --runner-cwd <cwd>
 ```
 
 Inspect before any integration. After each repository's merge and merged-result
@@ -416,7 +430,9 @@ that receipt entry in one locked step; do not run `record` for it. A
 A `merge-failed` refusal holds the entire finish.
 `record` commits the receipt itself; do not commit the workspace.
 `record` derives commit evidence itself; never hand-author completion
-claims. Preserve source branches and worktrees until final verification.
+claims. Preserve source branches and worktrees until the item resolves: the
+cleanup plan, run only after the resolved advance, is the only thing that
+ends that preservation.
 
 If a later repository fails, hold the entire finish and report already verified
 entries. If a merge succeeded but receipt persistence failed, run `record` again:
@@ -429,4 +445,5 @@ Run `inspect` again after recording every target. Only `complete: true` authoriz
 the single final advance; use its `resolved_in` verbatim and
 `gw work advance <work-path> --from finish --no-infer-worktree --resolved-in <resolved_in>`
 (with the required Release date when applicable). An incomplete inspection exits
-nonzero and names blockers. No helper mode merges or advances.
+nonzero and names blockers. No helper mode merges, advances or removes
+anything; `cleanup` only prints the plan.

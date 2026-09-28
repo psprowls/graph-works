@@ -106,7 +106,7 @@ def bare_next() -> object:
     return result
 
 
-def advance(*, applied: bool) -> object:
+def advance(*, applied: bool, bypass: bool = False) -> object:
     plan = ns(
         changes=(
             ns(key="updated", before=None, after=date(2026, 9, 1)),
@@ -130,6 +130,9 @@ def advance(*, applied: bool) -> object:
         results_path=Path("/r/results.json") if applied else None,
         pointer_path=Path("/r/pointer") if applied else None,
         repo_note=None if applied else "note",
+        gate_bypass=ns(code="no-start-sha", reason="r", actor="pat", detail="d", decision_id="D-001")
+        if bypass
+        else None,
     )
 
 

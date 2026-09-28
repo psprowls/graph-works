@@ -164,7 +164,7 @@ def test_next_advance_and_orchestrate_map_failures(
         ("run_next", lambda: main.next_stage("work/a", False, "", False)),
         (
             "run_stage_advance",
-            lambda: main.advance("work/a", "", "", "", "", "", "", False, "", False, False, "", False),
+            lambda: main.advance("work/a", "", "", "", "", "", "", False, "", False, "", "", "", False, "", False),
         ),
         ("run_orchestrate", lambda: main.orchestrate("work/a", "", "", False)),
     ):
@@ -197,12 +197,17 @@ def test_advance_output_policy_branches(monkeypatch: pytest.MonkeyPatch, capsys:
         "commit": None,
     }
     monkeypatch.setattr(wire_work, "advance_payload", lambda *args: payload)
-    main.advance("work/a", "", "", "", "", "", "", False, "", False, False, "", True)
+    main.advance("work/a", "", "", "", "", "", "", False, "", False, "", "", "", False, "", True)
     assert "note" in capsys.readouterr().err
-    main.advance("work/a", "", "", "", "", "", "", False, "", False, True, "", False)
+    main.advance("work/a", "", "", "", "", "", "", False, "", False, "", "", "", True, "", False)
     assert "preview" in capsys.readouterr().out
     payload["refusal"] = {"reason": "bad", "detail": "why"}
-    assert _exit_code(lambda: main.advance("work/a", "", "", "", "", "", "", False, "", False, False, "", False)) == 1
+    assert (
+        _exit_code(
+            lambda: main.advance("work/a", "", "", "", "", "", "", False, "", False, "", "", "", False, "", False)
+        )
+        == 1
+    )
 
 
 def test_regen_index_all_output_policies(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
@@ -415,5 +420,5 @@ def test_advance_forwards_no_start_sha_as_none(monkeypatch: pytest.MonkeyPatch) 
             "repo_note": None,
         },
     )
-    main.advance("work/a", "", "", "", "", "", "", False, "", False, True, "", False)
+    main.advance("work/a", "", "", "", "", "", "", False, "", False, "", "", "", True, "", False)
     assert seen["start_sha"] is None

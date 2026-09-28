@@ -63,6 +63,17 @@ def test_mutation_payloads_include_commit_outcome() -> None:
     assert work.overturn_payload(overturn(applied=False))["commit"] is None
 
 
+def test_advance_projects_a_gate_bypass() -> None:
+    assert work.advance_payload(advance(applied=True), "work/a")["gate_bypass"] is None
+    assert work.advance_payload(advance(applied=True, bypass=True), "work/a")["gate_bypass"] == {
+        "code": "no-start-sha",
+        "reason": "r",
+        "actor": "pat",
+        "detail": "d",
+        "decision_id": "D-001",
+    }
+
+
 def test_next_projects_normalization_commits() -> None:
     outcome = CommitOutcome("committed", None, "workspace: normalize", ("okf/work/a.md",), None)
     result = next_result(full=True)

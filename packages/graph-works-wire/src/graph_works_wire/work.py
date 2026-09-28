@@ -574,6 +574,15 @@ def advance_payload(result: StageAdvance, path: str) -> dict[str, Any]:
         "results_path": None if result.results_path is None else str(result.results_path),
         "pointer_path": None if result.pointer_path is None else str(result.pointer_path),
         "repo_note": result.repo_note,
+        "gate_bypass": None
+        if result.gate_bypass is None
+        else {
+            "code": result.gate_bypass.code,
+            "reason": result.gate_bypass.reason,
+            "actor": result.gate_bypass.actor,
+            "detail": result.gate_bypass.detail,
+            "decision_id": result.gate_bypass.decision_id,
+        },
     }
 
 

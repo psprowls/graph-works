@@ -388,6 +388,11 @@ def advance(
         "", "--start-sha", help="Where this phase started; required for a finish-stage results stub."
     ),
     return_: bool = typer.Option(False, "--return", help="Send an item at `finish` back to `execute`."),
+    skip_gate: str = typer.Option(
+        "", "--skip-gate", help="Bypass exactly this execute -> finish gate refusal code (humans only)."
+    ),
+    reason: str = typer.Option("", "--reason", help="Why the gate is bypassed; recorded in the decision ledger."),
+    actor: str = typer.Option("", "--actor", help="Who bypasses the gate; recorded in the decision ledger."),
     dry_run: bool = typer.Option(False, "--dry-run", help="Print the plan instead of writing."),
     workspace: str = typer.Option("", "--workspace", help="Workspace path."),
     json_output: bool = rendering.json_option("Emit the advance as JSON."),
@@ -415,6 +420,11 @@ def advance(
     before the commit gate existed, that the relay put on hold, or that a
     later stage-gate sends back. It is refused from any other phase, and is
     mutually exclusive with `--resolved-in`.
+
+    `--skip-gate CODE --reason TEXT --actor HANDLE` bypasses exactly the refusal
+    this advance's execute -> finish gate returns, and records an answered
+    decision in the item's decision ledger in the same write. Supervised
+    workers never pass it; a human does.
     """
     warn_if_stale_routing()
     layout = resolve_workspace(workspace)
@@ -433,6 +443,9 @@ def advance(
             infer_worktree=not no_infer_worktree,
             start_sha=start_sha or None,
             return_=return_,
+            skip_gate=skip_gate or None,
+            skip_reason=reason or None,
+            actor=actor or None,
             dry_run=dry_run,
         )
     except WorkspaceError as exc:

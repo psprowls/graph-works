@@ -1308,3 +1308,62 @@ def test_prepare_workspace_partial_failure_retains_effects_in_envelope(workspace
     payload = json.loads(actual.stdout)["error"]["payload"]
     assert payload["applied"] and payload["placement"] is None
     assert payload["refusal"]["detail"] == "commit failed"
+
+
+def _execute_item_without_baseline(workspace: Path) -> str:
+    """A filed item moved to `execute` with code `affects`, over a clean declared repo and no `start_sha`."""
+    code = workspace.parent / "code-bypass"
+    (code / "packages/a").mkdir(parents=True)
+    (code / "packages/a/x.py").write_text("one\n", encoding="utf-8")
+    for args in (
+        ("init", "-b", "main"),
+        ("config", "user.name", "Test"),
+        ("config", "user.email", "test@example.com"),
+        ("add", "."),
+        ("commit", "-m", "first"),
+    ):
+        subprocess.run(["git", *args], cwd=code, check=True, capture_output=True)
+    layout = resolve_workspace(str(workspace))
+    layout.manifest_path.write_text(
+        f"version: 1\nrepositories:\n  code:\n    path: {json.dumps(str(code))}\n", encoding="utf-8"
+    )
+    result = runner.invoke(
+        app,
+        [
+            "work",
+            "file",
+            "--title",
+            "Bypassed",
+            "--kind",
+            "Feature",
+            "--summary",
+            "d",
+            "--affects",
+            "packages/a",
+            "--workspace",
+            str(workspace),
+            "--json",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    path = str(json.loads(result.stdout)["path"])
+    page = workspace / "okf" / f"{path}.md"
+    text = page.read_text(encoding="utf-8")
+    assert "work_status: open\n" in text
+    text = text.replace("work_status: open\n", "work_status: in-progress\nphase: execute\n", 1)
+    text = text.replace("phase: design\n", "")
+    page.write_text(text, encoding="utf-8", newline="")
+    return path
+
+
+def test_advance_skip_gate_bypasses_one_refusal_and_reports_it(workspace: Path) -> None:
+    path = _execute_item_without_baseline(workspace)
+    base = ["work", "advance", path, "--workspace", str(workspace), "--json"]
+    refused = runner.invoke(app, [*base, "--skip-gate", "no-start-sha"])
+    assert refused.exit_code != 0
+    assert "gate-bypass-invalid" in refused.stderr
+    bypassed = runner.invoke(app, [*base, "--skip-gate", "no-start-sha", "--reason", "r", "--actor", "pat"])
+    assert bypassed.exit_code == 0, bypassed.output
+    payload = json.loads(bypassed.stdout)
+    assert payload["gate_bypass"]["code"] == "no-start-sha"
+    assert payload["gate_bypass"]["actor"] == "pat" and payload["gate_bypass"]["decision_id"]

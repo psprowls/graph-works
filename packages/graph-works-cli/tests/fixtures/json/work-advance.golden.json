@@ -34,5 +34,6 @@
   "refusal": null,
   "results_path": null,
   "pointer_path": "<tmp>/works/.gw/cache/active-work.json",
-  "repo_note": "<tmp>/works/workspace.yaml: declares no repositories, so no code repo was resolved"
+  "repo_note": "<tmp>/works/workspace.yaml: declares no repositories, so no code repo was resolved",
+  "gate_bypass": null
 }

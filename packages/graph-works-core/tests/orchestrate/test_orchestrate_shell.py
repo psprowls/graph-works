@@ -585,6 +585,11 @@ def _code_repo(tmp_path: Path) -> tuple[Path, str]:
     return repo, fork
 
 
+def _dirty(repo: Path) -> None:
+    """An uncommitted change under `packages/a`, so the commit gate refuses `uncommitted-work`."""
+    (repo / "packages/a/x.py").write_text("dirty\n", encoding="utf-8")
+
+
 def _ready(layout, path: str, *, phase: str = "execute", **kwargs) -> None:
     """An item mid-stage, ready to complete `phase` without further gates:
     `work_status="in-progress"` so the execute branch's on_dispatch (mark

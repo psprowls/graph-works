@@ -24,6 +24,7 @@ from pathlib import Path
 from types import MappingProxyType
 
 from okf_io import Bundle, load_bundle
+from work_tracker_okf import decisions as _decisions
 from work_tracker_okf.advance import COMMIT_GATE_REFUSALS as COMMIT_GATE_REFUSALS
 from work_tracker_okf.advance import ExpectedPhase as ExpectedPhase
 from work_tracker_okf.advance import RefusalReason
@@ -39,7 +40,13 @@ from work_tracker_okf.sources import upsert
 
 from graph_works_core.workspace import anchor, provenance
 from graph_works_core.workspace.commits import WorkspaceCommit, commit_mode, item_stem
-from graph_works_core.workspace.decision_owner import hold_for, hold_in, locked_decision_owner
+from graph_works_core.workspace.decision_owner import (
+    DecisionOwner,
+    decision_context,
+    hold_for,
+    hold_in,
+    locked_decision_owner,
+)
 from graph_works_core.workspace.errors import WorkspaceError
 from graph_works_core.workspace.finish import finish_read_guard, inspect_finish
 from graph_works_core.workspace.layout import WorkspaceLayout
@@ -60,6 +67,18 @@ RESULTS_PHASES: frozenset[str] = frozenset({"execute", "finish"})
 #: The prefix of the one gate note (a workspace-only pass), so a reader grepping
 #: the coordinator's output finds it with one string.
 _GATE_NOTE = "execute -> finish gate"
+
+
+@dataclass(frozen=True, slots=True)
+class GateBypass:
+    """An attributed, per-code bypass of the execute -> finish gate. `decision_id`
+    is the ledger entry it wrote; `None` on a dry run."""
+
+    code: str
+    reason: str
+    actor: str
+    detail: str
+    decision_id: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -95,6 +114,7 @@ class StageAdvance:
     repo_note: str | None = None
     application: MutationApplication | None = None
     warnings: tuple[str, ...] = ()
+    gate_bypass: GateBypass | None = None
 
     @property
     def changed(self) -> bool:
@@ -135,6 +155,9 @@ def run_stage_advance(
     repo_name: str | None = None,
     start_sha: str | None = None,
     return_: bool = False,
+    skip_gate: str | None = None,
+    skip_reason: str | None = None,
+    actor: str | None = None,
     dry_run: bool = True,
     before_apply: Callable[[StageAdvance], None] | None = None,
 ) -> StageAdvance:
@@ -197,6 +220,18 @@ def run_stage_advance(
     pointer. The commit gate evaluates on a dry run too and reports its
     refusal, but a dry run writes nothing.
 
+    `skip_gate` bypasses one execute -> finish gate refusal, attributed. It is
+    accepted only when this invocation's gate refuses with exactly that code;
+    the gate then stops there, so signals after the bypassed one are not
+    evaluated -- the ledger entry says which code was bypassed and why.
+    Validation refusals, in order: a missing or blank `skip_reason` or `actor`,
+    or a code outside `COMMIT_GATE_REFUSALS` -> `gate-bypass-invalid`; no
+    execute -> finish gate on this advance, or the gate passed ->
+    `gate-bypass-unused`; a different refusal -> `gate-bypass-mismatch`; a
+    ledger plan refusal -> `gate-bypass-unrecorded`. The ledger entry (in the
+    decision owner's ledger) and the phase transition are one
+    `WorkMutationPlan`, so a failed apply writes neither.
+
     `before_apply`, when supplied on a live call, inspects the actual candidate
     with application fields empty before any domain write. Raising aborts the
     call; exceptions propagate. The callback must not mutate the candidate or
@@ -242,6 +277,10 @@ def run_stage_advance(
             repo_name=repo_name,
             start_sha=start_sha,
             return_=return_,
+            skip_gate=skip_gate,
+            skip_reason=skip_reason,
+            actor=actor,
+            decision_owner_=None,
             before_apply=before_apply,
         )
     # The whole read -> route -> gate -> write sequence shares hold filing's
@@ -271,6 +310,10 @@ def run_stage_advance(
             repo_name=repo_name,
             start_sha=start_sha,
             return_=return_,
+            skip_gate=skip_gate,
+            skip_reason=skip_reason,
+            actor=actor,
+            decision_owner_=context.owner,
             before_apply=before_apply,
         )
 
@@ -296,6 +339,10 @@ def _advance(
     repo_name: str | None,
     start_sha: str | None,
     return_: bool,
+    skip_gate: str | None,
+    skip_reason: str | None,
+    actor: str | None,
+    decision_owner_: DecisionOwner | None,
     dry_run: bool,
     before_apply: Callable[[StageAdvance], None] | None,
 ) -> StageAdvance:
@@ -388,6 +435,21 @@ def _advance(
     candidate = StageAdvance(outcome=outcome, repo_note=repo_note, warnings=inference_warnings + drift_warnings)
     if not dry_run and before_apply is not None:
         before_apply(candidate)
+    if skip_gate is not None:
+        if not (skip_reason or "").strip() or not (actor or "").strip():
+            return replace(
+                candidate,
+                outcome=_refuse(outcome, "gate-bypass-invalid", "--skip-gate needs a nonempty --reason and --actor"),
+            )
+        if skip_gate not in COMMIT_GATE_REFUSALS:
+            return replace(
+                candidate,
+                outcome=_refuse(
+                    outcome,
+                    "gate-bypass-invalid",
+                    f"{skip_gate!r} is not a bypassable gate code; one of {sorted(COMMIT_GATE_REFUSALS)}",
+                ),
+            )
     if outcome.plan.refusal is not None or outcome.plan.transition is None:
         return candidate
 
@@ -395,7 +457,13 @@ def _advance(
 
     assert item is not None
     warnings: tuple[str, ...] = ()
-    if old_phase == "execute" and new_phase == "finish":
+    bypass: GateBypass | None = None
+    gated = old_phase == "execute" and new_phase == "finish"
+    if skip_gate is not None and not gated:
+        return replace(
+            candidate, outcome=_refuse(outcome, "gate-bypass-unused", "no execute -> finish gate runs on this advance")
+        )
+    if gated:
         verdict = _commit_gate(
             item,
             repo=resolved_repo,
@@ -406,22 +474,54 @@ def _advance(
             git=provenance.gate_git(layout),
         )
         warnings = (verdict.note,) if verdict.note else ()
-        if verdict.refusal is not None:
-            refused = replace(
-                outcome.plan,
-                refusal=verdict.refusal,
-                changes=(),
-                stamp_source=None,
-                detail=verdict.detail,
-                trigger=None,
-            )
+        if skip_gate is not None:
+            if verdict.refusal is None:
+                return replace(
+                    candidate,
+                    outcome=_refuse(outcome, "gate-bypass-unused", "the gate passed; there is nothing to bypass"),
+                )
+            if verdict.refusal != skip_gate:
+                return replace(
+                    candidate,
+                    outcome=_refuse(
+                        outcome,
+                        "gate-bypass-mismatch",
+                        f"the gate refused {verdict.refusal} ({verdict.detail}); "
+                        f"--skip-gate {skip_gate} bypasses only that code",
+                    ),
+                )
+            assert skip_reason is not None and actor is not None
+            bypass = GateBypass(skip_gate, skip_reason.strip(), actor.strip(), verdict.detail)
+        elif verdict.refusal is not None:
             return StageAdvance(
-                outcome=replace(outcome, plan=refused, stamped=None, stamp_title=None, plan_row=False),
+                outcome=_refuse(outcome, verdict.refusal, verdict.detail),
                 repo_note=repo_note,
                 warnings=inference_warnings + drift_warnings + warnings,
             )
+    owner_ctx = decision_owner_
+    ledger_plan: _decisions.DecisionPlan | None = None
+    if bypass is not None:
+        owner_ctx = owner_ctx or decision_context(layout, path).owner
+        ledger_plan = _decisions.plan_append(
+            owner_ctx.ledger,
+            question=f"Bypass the execute -> finish `{bypass.code}` gate for {path}?",
+            status="answered",
+            answer=f"Bypassed by {bypass.actor}: {bypass.reason}",
+            rationale=f"Gate refusal: {bypass.detail}",
+            if_wrong=None,
+            affects=(path,),
+            on=today,
+            decided_by=bypass.actor,
+        )
+        if ledger_plan.refusal is not None:
+            return replace(
+                candidate,
+                outcome=_refuse(
+                    outcome, "gate-bypass-unrecorded", f"the bypass could not be recorded: {ledger_plan.detail}"
+                ),
+            )
     if dry_run:
-        return replace(candidate, warnings=candidate.warnings + warnings)
+        return replace(candidate, warnings=candidate.warnings + warnings, gate_bypass=bypass)
 
     document = load_bundle(layout.bundle_dir, ignore=IGNORE).concepts[path]
     apply_advance(document, outcome.plan)
@@ -465,7 +565,7 @@ def _advance(
 
     page_member = item_page(path).rel
     page_before = (bundle.root / page_member).read_bytes()
-    writes = [PlannedWrite(page_member, hashlib.sha256(page_before).hexdigest(), document.serialize().encode("utf-8"))]
+    writes: list[PlannedWrite] = []
     mkdirs: tuple[str, ...] = ()
     conditions: tuple[DirectoryPrecondition, ...] = ()
     if result_member is not None and result_bytes is not None:
@@ -485,6 +585,44 @@ def _advance(
         mkdirs = (parent,)
         if not (bundle.root / parent).exists():
             conditions = (DirectoryPrecondition(parent, None),)
+
+    # The bypass entry rides in the same mutation as the phase change: one
+    # apply writes both or neither.
+    validate_paths: tuple[str, ...] = (path,)
+    if bypass is not None and ledger_plan is not None and owner_ctx is not None:
+        ledger_member = owner_ctx.ledger.relative_to(bundle.root).as_posix()
+        ledger_before = owner_ctx.ledger.read_bytes() if owner_ctx.ledger.exists() else None
+        ledger_text = _decisions.render(_decisions.parse(ledger_plan.snapshot.text).preamble, ledger_plan.after)
+        writes.append(
+            PlannedWrite(
+                ledger_member,
+                hashlib.sha256(ledger_before).hexdigest() if ledger_before is not None else None,
+                ledger_text.encode("utf-8"),
+            )
+        )
+        ledger_parent = Path(ledger_member).parent.as_posix()
+        if ledger_parent not in mkdirs:
+            mkdirs = (*mkdirs, ledger_parent)
+            if not (bundle.root / ledger_parent).exists():
+                conditions = (*conditions, DirectoryPrecondition(ledger_parent, None))
+        if owner_ctx.owner_path == path:
+            upsert(document, _decisions.ledger_ref(path), title="Decisions")
+        else:
+            owner_member = item_page(owner_ctx.owner_path).rel
+            owner_before = (bundle.root / owner_member).read_bytes()
+            owner_document = load_bundle(layout.bundle_dir, ignore=IGNORE).concepts[owner_ctx.owner_path]
+            upsert(owner_document, _decisions.ledger_ref(owner_ctx.owner_path), title="Decisions")
+            writes.append(
+                PlannedWrite(
+                    owner_member, hashlib.sha256(owner_before).hexdigest(), owner_document.serialize().encode("utf-8")
+                )
+            )
+            validate_paths = (path, owner_ctx.owner_path)
+        assert ledger_plan.primary is not None
+        bypass = replace(bypass, decision_id=ledger_plan.primary.id)
+    writes.insert(
+        0, PlannedWrite(page_member, hashlib.sha256(page_before).hexdigest(), document.serialize().encode("utf-8"))
+    )
     mutation = WorkMutationPlan(
         root=bundle.root,
         operation="file",
@@ -496,7 +634,7 @@ def _advance(
         mkdirs=mkdirs,
         warnings=(),
         refusals=(),
-        validate_paths=(path,),
+        validate_paths=validate_paths,
         directory_preconditions=conditions,
     )
 
@@ -514,7 +652,12 @@ def _advance(
     transition = outcome.plan.transition
     resolved = transition is not None and transition.work_status == "resolved"
     subject = f"workspace: advance {item_stem(path)} {old_phase or 'none'} -> {new_phase or 'none'}"
-    workspace_commit = WorkspaceCommit(subject + (" (resolved)" if resolved else ""), items=(path,))
+    commit_items: tuple[str, ...] = (path,)
+    if bypass is not None:
+        subject += f" (gate bypass {bypass.code})"
+        if owner_ctx is not None and owner_ctx.owner_path != path:
+            commit_items = (path, owner_ctx.owner_path)
+    workspace_commit = WorkspaceCommit(subject + (" (resolved)" if resolved else ""), items=commit_items)
     application = apply_mutation(
         layout,
         mutation,
@@ -543,7 +686,13 @@ def _advance(
         repo_note=repo_note,
         application=application,
         warnings=inference_warnings + drift_warnings + warnings,
+        gate_bypass=bypass if application.ok else None,
     )
+
+
+def _refuse(outcome: AdvanceOutcome, reason: RefusalReason, detail: str) -> AdvanceOutcome:
+    refused = replace(outcome.plan, refusal=reason, changes=(), stamp_source=None, detail=detail, trigger=None)
+    return replace(outcome, plan=refused, stamped=None, stamp_title=None, plan_row=False)
 
 
 def _resolve_repo(

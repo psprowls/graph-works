@@ -38,6 +38,8 @@ from work_tracker_okf.paths import MANAGED_ARTIFACTS, artifact_ref, item_page
 from work_tracker_okf.results import render as render_results
 from work_tracker_okf.sources import upsert
 
+from graph_works_core.orchestrate import gate_git
+from graph_works_core.orchestrate.gate_receipts import GateMatch, find_satisfying
 from graph_works_core.workspace import anchor, provenance
 from graph_works_core.workspace.commits import WorkspaceCommit, commit_mode, item_stem
 from graph_works_core.workspace.decision_owner import (
@@ -49,6 +51,7 @@ from graph_works_core.workspace.decision_owner import (
 )
 from graph_works_core.workspace.errors import WorkspaceError
 from graph_works_core.workspace.finish import finish_read_guard, inspect_finish
+from graph_works_core.workspace.gate_config import repo_gate
 from graph_works_core.workspace.layout import WorkspaceLayout
 from graph_works_core.workspace.repos import (
     ItemRepo,
@@ -115,6 +118,7 @@ class StageAdvance:
     application: MutationApplication | None = None
     warnings: tuple[str, ...] = ()
     gate_bypass: GateBypass | None = None
+    gate_receipt: GateMatch | None = None
 
     @property
     def changed(self) -> bool:
@@ -460,6 +464,7 @@ def _advance(
     assert item is not None
     warnings: tuple[str, ...] = ()
     bypass: GateBypass | None = None
+    gate_receipt: GateMatch | None = None
     gated = old_phase == "execute" and new_phase == "finish"
     if skip_gate is not None and not gated:
         return replace(
@@ -476,7 +481,15 @@ def _advance(
             explicit_start=start_sha,
             git=provenance.gate_git(layout),
         )
+        if verdict.refusal is None and verdict.root is not None:
+            verdict = _receipt_gate(
+                layout,
+                item,
+                verdict.root,
+                item_repo.name if item_repo is not None else _repo_name_of(layout, resolved_repo),
+            )
         warnings = (verdict.note,) if verdict.note else ()
+        gate_receipt = verdict.receipt
         if skip_gate is not None:
             if verdict.refusal is None:
                 return replace(
@@ -524,7 +537,7 @@ def _advance(
                 ),
             )
     if dry_run:
-        return replace(candidate, warnings=candidate.warnings + warnings, gate_bypass=bypass)
+        return replace(candidate, warnings=candidate.warnings + warnings, gate_bypass=bypass, gate_receipt=gate_receipt)
 
     document = load_bundle(layout.bundle_dir, ignore=IGNORE).concepts[path]
     apply_advance(document, outcome.plan)
@@ -690,6 +703,7 @@ def _advance(
         application=application,
         warnings=inference_warnings + drift_warnings + warnings,
         gate_bypass=bypass if application.ok else None,
+        gate_receipt=gate_receipt,
     )
 
 
@@ -776,6 +790,8 @@ class GateVerdict:
     refusal: RefusalReason | None
     detail: str = ""
     note: str | None = None
+    root: Path | None = None
+    receipt: GateMatch | None = None
 
 
 def _gate_placement(item: WorkItem, repo_name: str | None) -> tuple[str | None, str | None]:
@@ -886,7 +902,47 @@ def _commit_gate(
             f"surface ({', '.join(facts.scope)}); either the work landed outside `affects` or "
             "`affects` is wrong",
         )
-    return GateVerdict(None)
+    return GateVerdict(None, root=root)
+
+
+def _repo_name_of(layout: WorkspaceLayout, repo: Path | None) -> str | None:
+    if repo is None:  # pragma: no cover -- the commit gate refuses `no-repo` before a receipt is consulted
+        return None
+    return next(
+        (name for name, path in declared_repositories(layout).items() if path.resolve() == repo.resolve()), None
+    )
+
+
+def _receipt_gate(layout: WorkspaceLayout, item: WorkItem, root: Path, repo_name: str | None) -> GateVerdict:
+    """Execute -> finish needs a green full-gate receipt for the tree being handed over.
+
+    Runs only after the commit gate passed on a code item, so the tree is clean and committed.
+    """
+    if repo_name is None:
+        return GateVerdict("no-gate-configured", f"{item.path}: its repository is not a declared repository")
+    gate = repo_gate(layout, repo_name)
+    if gate.full is None:
+        return GateVerdict(
+            "no-gate-configured",
+            f"set repositories.{repo_name}.gate.full in {layout.manifest_path}, then run "
+            f"`gw work gate run {item.path}`",
+        )
+    git = provenance.gate_git(layout)
+    if isinstance(git, provenance.GitFailure):
+        return GateVerdict("git-unavailable", f"no usable git ({git.cause}): {git.detail}")
+    try:
+        snap = gate_git.snapshot(root, git=git)
+    except gate_git.GitUnavailable as exc:
+        return GateVerdict("git-unavailable", str(exc))
+    lookup = find_satisfying(layout.bundle_dir, repo=repo_name, tree=snap.tree, command=gate.full)
+    if lookup.match is None:
+        return GateVerdict(
+            "no-gate-receipt",
+            f"no green `{gate.full}` receipt for tree {snap.tree} in {repo_name}; run "
+            f"`gw work gate run {item.path}` then `gw work gate wait {item.path}`",
+        )
+    note = "; ".join((f"gate receipt: {lookup.match.owner} run {lookup.match.run.run_id}", *lookup.warnings))
+    return GateVerdict(None, note=note, receipt=lookup.match)
 
 
 def _effective_start_sha(

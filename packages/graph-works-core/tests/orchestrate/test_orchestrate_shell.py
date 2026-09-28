@@ -8,6 +8,7 @@ from datetime import date
 from pathlib import Path
 
 import pytest
+from _gate_helpers import gate_ready
 from _transaction_helpers import _git, _init_git
 from graph_works_core import apply_init, plan_init
 from graph_works_core.orchestrate import commands as orchestrate
@@ -673,6 +674,7 @@ def test_an_explicit_start_sha_writes_the_execute_results_stub(tmp_path: Path) -
     repo, fork = _code_repo(tmp_path / "c")
     path = "work/feature-a"
     _ready(layout, path)
+    gate_ready(layout, repo, path)
     result = stage.run_stage_advance(layout, path, today=TODAY, repo=repo, start_sha=fork, dry_run=False)
     assert result.results_path is not None and result.results_path.is_file()
     assert "Execute — results" in result.results_path.read_text(encoding="utf-8")
@@ -684,6 +686,7 @@ def test_the_execute_stage_reads_the_recorded_baseline_with_no_flag(tmp_path: Pa
     repo, fork = _code_repo(tmp_path / "c")
     path = "work/feature-a"
     _ready(layout, path, extra=f"start_sha: {fork}\n")
+    gate_ready(layout, repo, path)
     result = stage.run_stage_advance(layout, path, today=TODAY, repo=repo, dry_run=False)
     assert result.results_path is not None and result.results_path.is_file()
 
@@ -817,6 +820,7 @@ def test_dirt_outside_the_declared_affects_does_not_refuse(tmp_path: Path) -> No
     path = "work/feature-a"
     _ready(layout, path)
     _dirty(repo, "elsewhere/unrelated.py")
+    gate_ready(layout, repo, path)
     result = stage.run_stage_advance(layout, path, today=TODAY, repo=repo, start_sha=fork, dry_run=False)
     assert result.outcome.plan.refusal is None
 
@@ -837,6 +841,7 @@ def test_a_clean_execute_stage_with_commits_advances_unchanged(tmp_path: Path) -
     repo, fork = _code_repo(tmp_path / "c")
     path = "work/feature-a"
     _ready(layout, path)
+    gate_ready(layout, repo, path)
     result = stage.run_stage_advance(layout, path, today=TODAY, repo=repo, start_sha=fork, dry_run=False)
     assert result.outcome.plan.refusal is None
     assert result.outcome.written
@@ -934,6 +939,7 @@ def test_a_recorded_baseline_is_read_without_a_flag(tmp_path: Path) -> None:
     repo, fork = _code_repo(tmp_path / "c")
     path = "work/feature-a"
     _ready(layout, path, extra=f"start_sha: {fork}\n")
+    gate_ready(layout, repo, path)
     result = stage.run_stage_advance(layout, path, today=TODAY, repo=repo, dry_run=False)
     assert result.outcome.plan.refusal is None and result.outcome.written
 
@@ -1169,6 +1175,7 @@ def test_commits_touching_the_declared_scope_advance(tmp_path: Path) -> None:
     repo, fork = _code_repo(tmp_path / "c")
     path = "work/feature-a"
     _ready(layout, path)
+    gate_ready(layout, repo, path)
     result = stage.run_stage_advance(layout, path, today=TODAY, repo=repo, start_sha=fork, dry_run=False)
     assert result.outcome.plan.refusal is None
     assert result.outcome.plan.transition is not None

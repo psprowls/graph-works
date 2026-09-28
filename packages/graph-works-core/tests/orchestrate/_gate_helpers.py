@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -54,15 +55,14 @@ def fake_clock_at(wall: datetime, *, step: float = 0.0) -> WaitClock:
 CLOCK = fake_clock(step=1.0)
 
 
-def mint_receipt(env, *, tree, owner=None, exit=0, scope="full", command="true") -> None:
-    owner = owner or env.path
-    target = env.layout.bundle_dir / owner / "references" / "03-gate-receipts.md"
+def write_receipt(bundle_dir: Path, owner: str, *, worktree, tree, scope="full", command="true", exit=0) -> None:
+    target = bundle_dir / owner / "references" / "03-gate-receipts.md"
     runs = list(parse_gate_receipt(target.read_text(encoding="utf-8"))[1]) if target.exists() else []
     runs.append(
         GateRun(
             run_id=f"20260928T12000{len(runs)}Z-0000000{len(runs)}",
             repo="code",
-            worktree=str(env.repo),
+            worktree=str(worktree),
             head="b" * 40,
             tree=tree,
             clean=True,
@@ -79,6 +79,29 @@ def mint_receipt(env, *, tree, owner=None, exit=0, scope="full", command="true")
     )
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text(render_receipt(owner, runs, created="2026-09-28"), encoding="utf-8", newline="\n")
+
+
+def mint_receipt(env, *, tree, owner=None, exit=0, scope="full", command="true") -> None:
+    write_receipt(
+        env.layout.bundle_dir, owner or env.path, worktree=env.repo, tree=tree, scope=scope, command=command, exit=exit
+    )
+
+
+def gate_ready(layout, declared: Path, item: str, *, tree_of: Path | None = None) -> None:
+    """Declare *declared* as repository `code` with a full gate, and mint a green receipt for
+    the current tree of *tree_of* (default: *declared*) -- for tests that advance a clean item
+    past execute -> finish and are not about the gate."""
+    import subprocess
+
+    text = layout.manifest_path.read_text(encoding="utf-8")
+    block = f"repositories:\n  code:\n    path: {json.dumps(str(declared))}\n    gate:\n      full: 'true'\n"
+    text = re.sub(r"^repositories:.*(?:\n[ ].*)*\n", block, text, count=1, flags=re.MULTILINE)
+    layout.manifest_path.write_text(text, encoding="utf-8", newline="\n")
+    root = tree_of or declared
+    tree = subprocess.run(
+        ["git", "rev-parse", "HEAD^{tree}"], cwd=root, capture_output=True, text=True, check=True
+    ).stdout.strip()
+    write_receipt(layout.bundle_dir, item, worktree=root, tree=tree)
 
 
 def start(env) -> Path:

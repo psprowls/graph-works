@@ -11,6 +11,7 @@ from datetime import date
 from pathlib import Path
 
 import pytest
+from _gate_helpers import gate_ready
 from graph_works_core import apply_init, plan_init
 from graph_works_core.orchestrate import commands as orchestrate
 from graph_works_core.orchestrate import placement
@@ -104,6 +105,7 @@ def _execute_in_fork(layout: WorkspaceLayout, repo: Path, fork: Path, *, explici
     # Without a recorded worktree the gate reads `repo`, which is main, where the
     # range has zero commits. The control (no recorded placement) therefore
     # gates the fork directly so finish placement can be inspected.
+    gate_ready(layout, repo if explicit_start else fork, CHILD, tree_of=fork)
     advanced = stage.run_stage_advance(
         layout,
         CHILD,
@@ -116,7 +118,7 @@ def _execute_in_fork(layout: WorkspaceLayout, repo: Path, fork: Path, *, explici
     )
     assert advanced.outcome.plan.refusal is None, advanced.outcome.plan.detail
     assert advanced.application is not None and advanced.application.ok
-    assert advanced.warnings == ()
+    assert all(w.startswith("gate receipt: ") for w in advanced.warnings)
     return commit
 
 

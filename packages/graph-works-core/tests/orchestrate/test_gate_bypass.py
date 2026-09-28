@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+from _gate_helpers import gate_ready
 from graph_works_core.orchestrate import stage_advance as stage
 from test_orchestrate_shell import TODAY, _code_repo, _dirty, _initialized_workspace, _ready
 from work_tracker_okf import decisions as _decisions
@@ -68,6 +69,7 @@ def test_a_mismatched_bypass_code_refuses_and_writes_nothing(tmp_path: Path) -> 
 
 def test_a_bypass_of_a_passing_gate_is_unused(tmp_path: Path) -> None:
     layout, repo, fork = _setup(tmp_path)
+    gate_ready(layout, repo, PATH)
     result = stage.run_stage_advance(
         layout,
         PATH,

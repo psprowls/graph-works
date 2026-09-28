@@ -58,7 +58,7 @@ assert_contains "$AUTO" "only when \`gw work next <path> --json\` reports \`work
 assert_contains "$AUTO" "including the relay's \`deferred\` row" "coordinator removes the relay's deferred worktree"
 assert_contains "$AUTO" "under one confirmation" "wrap-up sweep has one confirmation"
 assert_contains "$AUTO" "orca terminal close --terminal <handle>" "wrap-up closes retained terminals"
-assert_contains "$AUTO" "git -C <repo> rev-list --count @{upstream}..<target_branch>" "wrap-up checks unpushed target branches"
+assert_contains "$AUTO" 'rev-list --count "<target_branch>@{upstream}..<target_branch>"' "wrap-up checks unpushed target branches using the named branch's own upstream"
 assert_contains "$AUTO" "Wrap-up never pushes." "wrap-up never pushes"
 
 WF=skills/workflow/SKILL.md

@@ -1221,6 +1221,9 @@ It reads `payload` (`taskId`, `dispatchId`, `outcome`) and checks Orca's
   as §2.5.2 does; never parse the dispatch key. A row whose `display_name` is
   missing or does not split cannot be resolved: say so in one line and
   continue — the read is best-effort, never a reason to hold the delivery
+  → if the settled dispatch's phase was `finish`, then after `worker-release` run **Finish cleanup** (below)
+  — the same `display_name` split resolves the work path; it is best-effort
+  and never holds the delivery
   → nothing else; the next cycle's plan (§2.2) picks up the new state
   naturally.
 
@@ -1574,6 +1577,23 @@ report worth writing.
 What this does and does not claim: it makes an omission visible to a human at
 the moment the worker settles, and gates nothing. It cannot repair a model
 that marks a box `- [x]` dishonestly.
+
+### Finish cleanup (finish dispatches only)
+
+Runs from the Success branch only — on `accepted-success`, after §2.1's
+`settled` result and after `worker-release`, never on `claimed-unconfirmed`.
+
+1. Run `gw work next <path> --json`. Continue only when `gw work next <path> --json` reports `work_status: resolved`
+   (with `phase: done`). A finish that held (`pr` / `hold` / `discard`) runs
+   nothing.
+2. From the coordinator's own cwd, which is outside every item worktree, run
+   `finish-receipt.py cleanup <path> --workspace <workspace> --runner-cwd "$PWD"`
+   and execute the plan per
+   [finish-cleanup.md](../finishing-relay/references/finish-cleanup.md),
+   including the relay's `deferred` row: from here it is an ordinary
+   `remove` row, because the relay's terminal is already released.
+3. Print one line per removed or skipped row. A refusal is one line. Nothing
+   here changes item state, retries, or holds the delivery.
 
 ### Failure question
 
@@ -2035,10 +2055,38 @@ new checkout to repair the receipt.
    A `recovery-inspection` row carrying `recovery` is unresolved: print its
    task/dispatch IDs, record path, checkpoint and reason, and stop without
    reporting verified completion.
-2. Run §2.5.3 once more: refresh step 1's full task-list, worker-list and
+2. **Sweep leftovers under one confirmation.** Build one list:
+   - **Retained dispatches:** every dispatch whose `worker-release` in step 1
+     reported `retained`, with its terminal handle. A `recovery-inspection`
+     row never appears here; step 1 already stopped on it.
+   - **Leftover rows:** for every resolved item in the run's subtree, run
+     `finish-receipt.py cleanup <path> --workspace <workspace> --runner-cwd "$PWD"`
+     and collect its `remove` rows. Normally empty, because the Success
+     branch already cleaned up; this catches crashes and restarts.
+   - **The epic anchor:** only when the root item resolved — its own
+     `cleanup` plan covers the anchor.
+
+   Present the whole list with one `AskUserQuestion` (*remove all* /
+   *leave them*): everything goes under one confirmation, never one question per
+   row. On *remove all*, close each retained terminal with
+   `orca terminal close --terminal <handle>`, and execute every row per
+   [finish-cleanup.md](../finishing-relay/references/finish-cleanup.md). On
+   *leave them*, print the list as the run's leftovers. An empty list asks
+   nothing.
+
+   Then print the **unpushed warning**, report-only. For every repository in
+   the run's finish targets plus the workspace repository (the workspace's
+   own Git checkout, resolved separately from `repositories.<repo>` code
+   checkouts), run `git -C <repo> rev-list --count "<target_branch>@{upstream}..<target_branch>"`
+   — the named target branch's own upstream, not the repo's currently
+   checked-out branch, quoted because bare `@{upstream}..<target_branch>` is
+   wrong when the checkout differs. When it is greater than 0, print the
+   repo, the branch and the ahead count. When the branch has no upstream (the
+   command fails), print `<repo> <branch>: no upstream`. Wrap-up never pushes.
+3. Run §2.5.3 once more: refresh step 1's full task-list, worker-list and
    classifier output after its release/close mutations, so a finished run
    leaves no stale `in-review` card.
-3. Print a run summary: items resolved, branches merged back (from each
+4. Print a run summary: items resolved, branches merged back (from each
    settled dispatch's `merge_target`), **auto-answered merges as their own
    line item** — the §4.3 step 0 children, listed separately from the
    questions a human actually answered, so a run that merged twelve children
@@ -2057,18 +2105,18 @@ new checkout to repair the receipt.
    dispatch record's `reroutes` entry. Restart rows carry only `reason` and
    `at` under `reroute`, so do not invent override fields or add them to the
    public classifier schema. Keep these entries separate from human skips.
-4. Print the §2.5 decision lines one final time from the terminal plan's
+5. Print the §2.5 decision lines one final time from the terminal plan's
    JSON. §2.3 routes a terminal plan straight here without running §2.5, so
    without this an `assumed` decision nobody ever confirmed would go
    unmentioned at the end of the run — "epic finished with assumed decisions
    nobody looked at" is exactly the silent failure the ledger exists to
    prevent. Printing costs nothing; skip only when both lists are empty.
-5. **Dirty-workspace check.** Run `git -C <workspace> status --porcelain -- okf/work`.
+6. **Dirty-workspace check.** Run `git -C <workspace> status --porcelain -- okf/work`.
    Non-empty → print one warning line listing the dirty paths (a verb whose commit
    failed, or a hook that timed out). Never commit them yourself. Dirty reference
    files for the owning item are swept by its next committing same-item gw verb;
    for other dirty paths, retry the owning operation or run a gw verb that writes those exact paths.
-6. Stop. The coordinator performs no merge at wrap-up. A root Epic or Release
+7. Stop. The coordinator performs no merge at wrap-up. A root Epic or Release
    with a scalar branch or foreign `repo_stamps` owns integration targets, so
    orchestration emits a finish dispatch. The worker consumes every
    `finish_targets` entry, records each successful repository integration and

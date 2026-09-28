@@ -423,3 +423,13 @@ def render_reconcile(payload: dict[str, Any]) -> None:
         typer.echo(f"  diff: {payload['diff_command']}")
     for warning in payload["warnings"]:
         warn(warning)
+
+
+def render_prepare_workspace(payload: dict[str, Any]) -> None:
+    """Render the ordered workspace preparation plan or applied steps."""
+    prefix = "" if payload["applied"] else "would "
+    for step in payload["steps"]:
+        typer.echo(
+            f"[ok] {step['owner_path']}: {prefix}{step['action']} {step['branch']} "
+            f"at {step['worktree']} (from {step['base_branch']})"
+        )

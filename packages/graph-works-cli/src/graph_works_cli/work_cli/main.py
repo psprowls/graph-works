@@ -27,6 +27,7 @@ from graph_works_core.orchestrate.placement import ReaderObservation, run_record
 from graph_works_core.orchestrate.reroute import run_reroute
 from graph_works_core.orchestrate.stage_advance import ExpectedPhase, run_stage_advance
 from graph_works_core.orchestrate.wait import WaitClock, WaitFailed, run_wait
+from graph_works_core.orchestrate.workspace_prepare import run_prepare_workspace
 from graph_works_core.work import commands as work
 from graph_works_core.workspace.config import WorkspaceConfig, load_workspace_config
 from graph_works_core.workspace.errors import WorkspaceConfigError, WorkspaceError
@@ -986,3 +987,39 @@ def adopt(
     except (OSError, ValueError) as exc:
         rendering.fail(str(exc), reason="io", cause=exc)
     _finish_path_mutation(wire_work.path_mutation_payload(result), dry_run=dry_run, json_output=json_output)
+
+
+@work_app.command(name="prepare-workspace")
+def prepare_workspace(
+    path: str = typer.Argument(..., help="Extensionless bundle-relative canonical concept path."),
+    apply: bool = typer.Option(False, "--apply", help="Create and record; without it, print the plan."),
+    workspace: str = typer.Option("", "--workspace", help="Workspace path."),
+    json_output: bool = rendering.json_option("Emit the preparation as JSON."),
+) -> None:
+    """Create PATH's gw-owned workspace worktree and branch, outermost owner first.
+
+    Plans by default. With `--apply`, runs `git worktree add` under
+    `<worktrees_dir>/workspace/<stem>` and records `repo_stamps[_workspace]`.
+    Idempotent. A workspace that is not its own git toplevel, or has
+    `workflow.workspace_commits: off`, prints a note and does nothing.
+    """
+    layout = resolve_workspace(workspace)
+    try:
+        result = run_prepare_workspace(layout, path, today=_today(), apply=apply)
+    except WorkspaceError as exc:
+        rendering.fail(str(exc), reason="workspace", code=exit_codes.SCHEMA_MISMATCH, cause=exc)
+    except OSError as exc:
+        rendering.fail(str(exc), reason="io", cause=exc)
+    payload = wire_work.prepare_workspace_payload(result)
+    if payload["refusal"] is not None:
+        rendering.fail(
+            f"{path}: refused ({payload['refusal']['reason']}) — {payload['refusal']['detail']}",
+            reason="refused",
+            payload=payload,
+        )
+    if json_output:
+        rendering.emit(payload)
+    else:
+        rendering.render_prepare_workspace(payload)
+    if payload["note"]:
+        rendering.warn(payload["note"])

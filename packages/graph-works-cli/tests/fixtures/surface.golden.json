@@ -2470,6 +2470,7 @@
         "lint",
         "next",
         "orchestrate",
+        "prepare-workspace",
         "reconcile-context",
         "record-placement",
         "record-reader",
@@ -4124,6 +4125,62 @@
       "path": [
         "work",
         "orchestrate"
+      ]
+    },
+    {
+      "name": "gw work prepare-workspace",
+      "help": "Create PATH's gw-owned workspace worktree and branch, outermost owner first.\n\nPlans by default. With `--apply`, runs `git worktree add` under\n`<worktrees_dir>/workspace/<stem>` and records `repo_stamps[_workspace]`.\nIdempotent. A workspace that is not its own git toplevel, or has\n`workflow.workspace_commits: off`, prints a note and does nothing.",
+      "short_help": "Create PATH's gw-owned workspace worktree and branch, outermost owner first.",
+      "usage": [
+        "[OPTIONS]",
+        "{path}"
+      ],
+      "arguments": [
+        {
+          "name": "path",
+          "required": true,
+          "nargs": 1
+        }
+      ],
+      "options": [
+        {
+          "name": "apply",
+          "opts": [
+            "--apply"
+          ],
+          "secondary_opts": [],
+          "help": "Create and record; without it, print the plan.",
+          "required": false,
+          "default": false,
+          "is_flag": true
+        },
+        {
+          "name": "workspace",
+          "opts": [
+            "--workspace"
+          ],
+          "secondary_opts": [],
+          "help": "Workspace path.",
+          "required": false,
+          "default": "",
+          "is_flag": false
+        },
+        {
+          "name": "json_output",
+          "opts": [
+            "--json"
+          ],
+          "secondary_opts": [],
+          "help": "Emit the preparation as JSON.",
+          "required": false,
+          "default": false,
+          "is_flag": true
+        }
+      ],
+      "commands": [],
+      "path": [
+        "work",
+        "prepare-workspace"
       ]
     },
     {

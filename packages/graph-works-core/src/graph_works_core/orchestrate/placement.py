@@ -59,6 +59,7 @@ from graph_works_core.workspace.errors import WorkspaceError
 from graph_works_core.workspace.layout import WorkspaceLayout
 from graph_works_core.workspace.repos import ItemRepo, declared_repositories, resolve_item_repo, resolve_repos
 from graph_works_core.workspace.transactions import MutationApplication, apply_mutation, commit_pending
+from graph_works_core.workspace.workspace_branch import WORKSPACE_REPO, workspace_repo
 
 READER_RECEIPT_SCHEMA = "gw-reader-receipt"
 
@@ -244,12 +245,17 @@ def _prepare_placement(
     own: ItemRepo | None = None
     target: str | None = None
     if repo and path in by_path:
-        declared = declared_repositories(layout)
-        if repo not in declared:
-            raise WorkspaceError(
-                f"{path}: --repo {repo!r} names no declared repository in {layout.manifest_path}; "
-                f"declared: {sorted(declared)}"
-            )
+        if repo == WORKSPACE_REPO:
+            workspace, note = workspace_repo(layout)
+            if workspace is None:
+                raise WorkspaceError(f"{path}: --repo {WORKSPACE_REPO} but {note}")
+        else:
+            declared = declared_repositories(layout)
+            if repo not in declared:
+                raise WorkspaceError(
+                    f"{path}: --repo {repo!r} names no declared repository in {layout.manifest_path}; "
+                    f"declared: {sorted(declared)}"
+                )
         own = resolve_item_repo(layout, by_path[path], by_path, repo_name=repo_name)
         target = None if own.name == repo else repo
     plan = plan_placement(

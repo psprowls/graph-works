@@ -24,6 +24,7 @@ from graph_works_core.orchestrate.placement import PlacementRecord, ReaderRecord
 from graph_works_core.orchestrate.reroute import RerouteResult
 from graph_works_core.orchestrate.stage_advance import StageAdvance
 from graph_works_core.orchestrate.wait import WaitResult
+from graph_works_core.orchestrate.workspace_prepare import WorkspacePrepareResult
 from graph_works_core.work.commands import (
     ActiveWorkTouch,
     ChildRollup,
@@ -1026,4 +1027,28 @@ def reconcile_payload(context: ReconcileContext) -> dict[str, Any]:
         "has_open_decision": context.has_open_decision,
         "diff_command": context.diff_command,
         "warnings": list(context.warnings),
+    }
+
+
+def prepare_workspace_payload(result: WorkspacePrepareResult) -> dict[str, Any]:
+    """Ordered workspace preparations, including effects before a refusal."""
+    placement = result.placement
+    return {
+        "path": result.path,
+        "applied": result.applied,
+        "note": result.note,
+        "refusal": None if result.refusal is None else {"reason": result.refusal, "detail": result.detail},
+        "steps": [
+            {
+                "owner_path": step.owner_path,
+                "owner_phase": step.owner_phase,
+                "worktree": step.worktree,
+                "branch": step.branch,
+                "base_branch": step.base_branch,
+                "action": step.action,
+                "recorded": step.recorded,
+            }
+            for step in result.steps
+        ],
+        "placement": None if placement is None else {"worktree": placement.worktree, "branch": placement.branch},
     }

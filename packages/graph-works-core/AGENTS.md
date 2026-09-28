@@ -96,7 +96,8 @@ name doesn't collide with the vertical's own name, otherwise a flat module
 like `lint_drift/lint.py`), its own prompts, and nothing else reaches across
 verticals except through `workspace/` — `orchestrate` is the exception,
 split across `commands.py`, `stage_advance.py` and `placement.py` for planning,
-stage advancement and observed placement; see "The dispatch seam" in the README.
+stage advancement and observed placement; `workspace_prepare.py` plans or creates/adopts
+workspace worktrees outermost first and records committed, guarded stamps. See "The dispatch seam" in the README.
 
 `wiki_page/` — `run_page_read`: one page with outlinks, backlinks and broken links; `run_wiki_citations` (`citations.py`): the page's `path:N` inline-code citations with body-relative lines, resolved against `workspace.repo_files`; no cache.
 

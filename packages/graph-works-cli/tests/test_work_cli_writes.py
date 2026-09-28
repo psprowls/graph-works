@@ -1210,3 +1210,101 @@ def test_record_reader_maps_core_exceptions(
         assert error["reason"] == reason and error["payload"] is None
     else:
         assert result.stdout == ""
+
+
+def test_prepare_workspace_plans_applies_replays_and_refuses(workspace: Path) -> None:
+    epic = file_item(workspace, "Prepare epic", kind="Epic")
+    child = file_item(workspace, "Prepare child", parent=epic)
+    for path in (epic, child):
+        page = workspace / "okf" / f"{path}.md"
+        doc = load(page)
+        doc.set("phase", "execute")
+        doc.set("work_status", "in-progress")
+        doc.set("owner", "pat")
+        page.write_text(doc.serialize(), encoding="utf-8", newline="")
+    for args in (
+        ("init", "-b", "main"),
+        ("config", "user.name", "Test"),
+        ("config", "user.email", "test@example.com"),
+        ("add", "."),
+        ("commit", "-m", "Initial"),
+    ):
+        subprocess.run(["git", "-C", str(workspace), *args], check=True, capture_output=True)
+    args = ["work", "prepare-workspace", child, "--workspace", str(workspace), "--json"]
+    plan = runner.invoke(app, args)
+    assert plan.exit_code == 0, plan.output
+    assert json.loads(plan.stdout)["applied"] is False
+    applied = runner.invoke(app, [*args, "--apply"])
+    assert applied.exit_code == 0, applied.output
+    payload = json.loads(applied.stdout)
+    assert payload["applied"] and len(payload["steps"]) == 2
+    assert all(step["recorded"] for step in payload["steps"])
+    replay = runner.invoke(app, [*args, "--apply"])
+    assert replay.exit_code == 0, replay.output
+    assert json.loads(replay.stdout)["applied"] is False
+    page = workspace / "okf" / f"{child}.md"
+    page.write_text(
+        page.read_text(encoding="utf-8").replace("phase: execute", "phase: design"), encoding="utf-8", newline=""
+    )
+    refused = runner.invoke(app, args)
+    assert refused.exit_code != 0
+    assert json.loads(refused.stdout)["error"]["reason"] == "refused"
+
+
+def test_prepare_workspace_disabled_note_and_human_output(workspace: Path) -> None:
+    result = runner.invoke(app, ["work", "prepare-workspace", "work/missing", "--workspace", str(workspace)])
+    assert result.exit_code == 0, result.output
+    assert "workspace placement disabled" in result.stderr
+
+
+@pytest.mark.parametrize(
+    "error, reason", [(OSError("read failed"), "io"), (work_main.WorkspaceError("invalid config"), "workspace")]
+)
+def test_prepare_workspace_errors_use_json_envelope(workspace, monkeypatch, error, reason):
+    def fail(*args, **kwargs):
+        raise error
+
+    monkeypatch.setattr(work_main, "run_prepare_workspace", fail)
+    result = runner.invoke(app, ["work", "prepare-workspace", "work/a", "--workspace", str(workspace), "--json"])
+    assert result.exit_code != 0
+    assert json.loads(result.stdout)["error"]["reason"] == reason
+
+
+@pytest.mark.parametrize("applied", [False, True])
+def test_prepare_workspace_human_steps(workspace, monkeypatch, applied):
+    from graph_works_core.orchestrate.workspace_prepare import WorkspacePrepareResult, WorkspaceStep
+
+    result = WorkspacePrepareResult(
+        "work/a",
+        (WorkspaceStep("work/a", "execute", "/wt/a", "feature/a", "main", "create", applied),),
+        None,
+        "",
+        None,
+        applied,
+    )
+    monkeypatch.setattr(work_main, "run_prepare_workspace", lambda *a, **kw: result)
+    actual = runner.invoke(app, ["work", "prepare-workspace", "work/a", "--workspace", str(workspace)])
+    assert actual.exit_code == 0, actual.output
+    assert ("would create" if not applied else ": create") in actual.stdout
+    assert "(from main)" in actual.stdout
+
+
+def test_prepare_workspace_partial_failure_retains_effects_in_envelope(workspace, monkeypatch):
+    from graph_works_core.orchestrate.workspace_prepare import WorkspacePrepareResult, WorkspaceStep
+
+    result = WorkspacePrepareResult(
+        "work/a/children/b",
+        (WorkspaceStep("work/a", "execute", "/wt/a", "epic/a", "main", "create", True),),
+        "stamp-refused",
+        "commit failed",
+        None,
+        True,
+    )
+    monkeypatch.setattr(work_main, "run_prepare_workspace", lambda *a, **kw: result)
+    actual = runner.invoke(
+        app, ["work", "prepare-workspace", "work/a/children/b", "--workspace", str(workspace), "--apply", "--json"]
+    )
+    assert actual.exit_code != 0
+    payload = json.loads(actual.stdout)["error"]["payload"]
+    assert payload["applied"] and payload["placement"] is None
+    assert payload["refusal"]["detail"] == "commit failed"

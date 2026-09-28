@@ -15,6 +15,7 @@ from graph_works_core.orchestrate.dispatch_record import Overrides
 from graph_works_core.orchestrate.placement import ReaderRecord
 from graph_works_core.orchestrate.reroute import RerouteResult
 from graph_works_core.orchestrate.wait import Absorbed, WaitResult
+from graph_works_core.orchestrate.workspace_prepare import WorkspacePrepareResult, WorkspaceStep
 from graph_works_core.work.commands import DispatchExplanation, ItemRead, ItemSource
 from graph_works_core.work.reconcile import CitedDecision, CommitRef, LandedSibling, ReconcileContext
 from graph_works_core.workspace.dispatch import packaged_rule, resolve_dispatch
@@ -564,6 +565,32 @@ WORK: dict[str, tuple[Callable[[], object], ...]] = {
             )
         )
         for refusal in (None, "unknown-path")
+    ),
+    "work.prepare_workspace_payload": (
+        lambda: work.prepare_workspace_payload(WorkspacePrepareResult("work/a", (), None, "", "disabled", False)),
+        lambda: work.prepare_workspace_payload(
+            WorkspacePrepareResult("work/a", (), "not-entitled", "design", None, False)
+        ),
+        lambda: work.prepare_workspace_payload(
+            WorkspacePrepareResult(
+                "work/a",
+                (WorkspaceStep("work/a", "execute", "/wt/a", "feature/a", "main", "create", True),),
+                None,
+                "",
+                None,
+                True,
+            )
+        ),
+        lambda: work.prepare_workspace_payload(
+            WorkspacePrepareResult(
+                "work/a/children/b",
+                (WorkspaceStep("work/a", None, "/wt/a", "epic/a", "main", "adopt", True),),
+                "stamp-refused",
+                "commit failed",
+                None,
+                True,
+            )
+        ),
     ),
     "work.placement_payload": (
         lambda: work.placement_payload(placement(applied=True)),

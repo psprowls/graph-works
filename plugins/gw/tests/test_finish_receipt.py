@@ -50,5 +50,36 @@ class Adapter(unittest.TestCase):
             MAIN(['record', 'work/epic-a', '--workspace', '/wiki'])
         self.assertEqual(raised.exception.code, 2)
 
+    def test_cleanup_mode(self):
+        for refusal, code in [(None, 0), ('not resolved', 1)]:
+            @dataclass
+            class Plan:
+                rows: tuple = ()
+                refusal: str | None = None
+            discovery = types.ModuleType('graph_works_core.workspace.discovery')
+            discovery.resolve = Mock(return_value='layout')
+            finish = types.ModuleType('graph_works_core.workspace.finish')
+            finish.plan_finish_cleanup = Mock(return_value=Plan(refusal=refusal))
+            record = types.ModuleType('graph_works_core.orchestrate.finish_receipt')
+            output = io.StringIO()
+            with patch.dict(sys.modules, {m.__name__: m for m in (discovery, finish, record)}), \
+                 patch('subprocess.run', side_effect=AssertionError('cleanup never executes')), \
+                 contextlib.redirect_stdout(output):
+                status = MAIN(['cleanup', 'work/epic-a', '--workspace', '/wiki', '--runner-cwd', '/elsewhere'])
+            self.assertEqual(status, code)
+            self.assertEqual(json.loads(output.getvalue())['refusal'], refusal)
+            finish.plan_finish_cleanup.assert_called_once_with('layout', 'work/epic-a', runner_cwd=Path('/elsewhere'))
+
+    def test_cleanup_runner_cwd_defaults_to_cwd(self):
+        discovery = types.ModuleType('graph_works_core.workspace.discovery')
+        discovery.resolve = Mock(return_value='layout')
+        finish = types.ModuleType('graph_works_core.workspace.finish')
+        finish.plan_finish_cleanup = Mock(return_value=Result())
+        record = types.ModuleType('graph_works_core.orchestrate.finish_receipt')
+        with patch.dict(sys.modules, {m.__name__: m for m in (discovery, finish, record)}), \
+             contextlib.redirect_stdout(io.StringIO()):
+            MAIN(['cleanup', 'work/epic-a', '--workspace', '/wiki'])
+        self.assertEqual(finish.plan_finish_cleanup.call_args.kwargs['runner_cwd'], Path.cwd())
+
 if __name__ == '__main__':
     unittest.main()

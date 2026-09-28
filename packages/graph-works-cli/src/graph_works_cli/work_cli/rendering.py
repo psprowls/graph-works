@@ -433,3 +433,13 @@ def render_prepare_workspace(payload: dict[str, Any]) -> None:
             f"[ok] {step['owner_path']}: {prefix}{step['action']} {step['branch']} "
             f"at {step['worktree']} (from {step['base_branch']})"
         )
+
+
+def render_merge_workspace(payload: dict[str, Any]) -> None:
+    """Render the planned or applied integration and its receipt."""
+    action = "merged" if payload["applied"] else "would merge"
+    typer.echo(f"[ok] {payload['path']}: {action} {payload['source_branch']} into {payload['target_branch']}")
+    if payload["merge_commit"]:
+        typer.echo(f"  merge commit: {payload['merge_commit']}")
+    if payload["receipt_path"]:
+        typer.echo(f"  receipt: {payload['receipt_path']}")

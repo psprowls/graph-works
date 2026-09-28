@@ -12,6 +12,7 @@ from types import SimpleNamespace as ns
 from graph_works_core.orchestrate.asks import AskAnswerResult, AskResult
 from graph_works_core.orchestrate.dispatch import DispatchFailure, DispatchResult, ObservedPlacement
 from graph_works_core.orchestrate.dispatch_record import Overrides
+from graph_works_core.orchestrate.merge_workspace import MergeWorkspaceResult
 from graph_works_core.orchestrate.placement import ReaderRecord
 from graph_works_core.orchestrate.reroute import RerouteResult
 from graph_works_core.orchestrate.wait import Absorbed, WaitResult
@@ -565,6 +566,20 @@ WORK: dict[str, tuple[Callable[[], object], ...]] = {
             )
         )
         for refusal in (None, "unknown-path")
+    ),
+    "work.merge_workspace_payload": (
+        lambda: work.merge_workspace_payload(
+            MergeWorkspaceResult("work/a", "feature", "main", None, "", None, None, False)
+        ),
+        lambda: work.merge_workspace_payload(
+            MergeWorkspaceResult("work/a", "feature", "main", None, "", "abc", "receipt.md", True)
+        ),
+        lambda: work.merge_workspace_payload(
+            MergeWorkspaceResult("work/a", None, None, "disabled", "off", None, None, False)
+        ),
+        lambda: work.merge_workspace_payload(
+            MergeWorkspaceResult("work/a", "feature", "main", "receipt-refused", "retry", "abc", "receipt.md", True)
+        ),
     ),
     "work.prepare_workspace_payload": (
         lambda: work.prepare_workspace_payload(WorkspacePrepareResult("work/a", (), None, "", "disabled", False)),

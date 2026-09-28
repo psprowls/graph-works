@@ -87,6 +87,7 @@ EXPECTED: set[str] = {
     "work.path_mutation_payload",
     "work.placement_payload",
     "work.prepare_workspace_payload",
+    "work.merge_workspace_payload",
     "work.reader_receipt_payload",
     "work.reconcile_payload",
     "work.regen_index_payload",

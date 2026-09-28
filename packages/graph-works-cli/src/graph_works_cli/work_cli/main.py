@@ -23,6 +23,7 @@ import typer
 from graph_works_core.archive.commands import run_archive, stranded_warnings
 from graph_works_core.orchestrate.commands import run_orchestrate
 from graph_works_core.orchestrate.dispatch import run_dispatch
+from graph_works_core.orchestrate.merge_workspace import run_merge_workspace
 from graph_works_core.orchestrate.placement import ReaderObservation, run_record_placement, run_record_reader
 from graph_works_core.orchestrate.reroute import run_reroute
 from graph_works_core.orchestrate.stage_advance import ExpectedPhase, run_stage_advance
@@ -1023,3 +1024,35 @@ def prepare_workspace(
         rendering.render_prepare_workspace(payload)
     if payload["note"]:
         rendering.warn(payload["note"])
+
+
+@work_app.command(name="merge-workspace")
+def merge_workspace(
+    path: str = typer.Argument(..., help="Extensionless bundle-relative canonical concept path."),
+    apply: bool = typer.Option(False, "--apply", help="Merge and record; without it, print the plan."),
+    workspace: str = typer.Option("", "--workspace", help="Workspace path."),
+    json_output: bool = rendering.json_option("Emit the merge result as JSON."),
+) -> None:
+    """Merge PATH's workspace branch into workspace main and record its receipt.
+
+    The one sanctioned non-verb commit on workspace main; a conflict aborts and
+    refuses, holding the finish. Plans by default; only --apply changes Git.
+    """
+    layout = resolve_workspace(workspace)
+    try:
+        result = run_merge_workspace(layout, path, today=_today(), apply=apply)
+    except WorkspaceError as exc:
+        rendering.fail(str(exc), reason="workspace", code=exit_codes.SCHEMA_MISMATCH, cause=exc)
+    except OSError as exc:
+        rendering.fail(str(exc), reason="io", cause=exc)
+    payload = wire_work.merge_workspace_payload(result)
+    if payload["refusal"] is not None:
+        rendering.fail(
+            f"{path}: refused ({payload['refusal']['reason']}) — {payload['refusal']['detail']}",
+            reason="refused",
+            payload=payload,
+        )
+    if json_output:
+        rendering.emit(payload)
+    else:
+        rendering.render_merge_workspace(payload)

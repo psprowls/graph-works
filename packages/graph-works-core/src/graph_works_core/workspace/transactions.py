@@ -36,7 +36,8 @@ import sys
 import uuid
 from collections import Counter
 from collections.abc import Callable, Iterator, Mapping, Sequence
-from contextlib import ExitStack, contextmanager, suppress
+from contextlib import ExitStack, contextmanager, nullcontext, suppress
+from contextvars import ContextVar
 from dataclasses import dataclass, replace
 from datetime import date
 from fnmatch import fnmatchcase
@@ -67,6 +68,31 @@ from graph_works_core.workspace.commits import (
     plan_paths,
 )
 from graph_works_core.workspace.layout import WorkspaceLayout
+
+_HELD_BUNDLE_LOCKS: ContextVar[frozenset[str]] = ContextVar("_HELD_BUNDLE_LOCKS", default=frozenset())
+
+
+@contextmanager
+def held_bundle_lock(layout: WorkspaceLayout) -> Iterator[None]:
+    """Hold the mutation lock across Git effects and mutations in this context.
+
+    Call only inside decision-owner ownership: lock order is owner then bundle.
+    Nested callers reuse this hold; other threads and processes still wait.
+    """
+    key = str(layout.bundle_dir.resolve())
+    if key in _HELD_BUNDLE_LOCKS.get():
+        yield
+        return
+    root = _open_root(layout.bundle_dir)
+    try:
+        with _bundle_root_lock(root):
+            token = _HELD_BUNDLE_LOCKS.set(_HELD_BUNDLE_LOCKS.get() | {key})
+            try:
+                yield
+            finally:
+                _HELD_BUNDLE_LOCKS.reset(token)
+    finally:
+        root.close()
 
 
 @dataclass(frozen=True, slots=True)
@@ -3172,7 +3198,11 @@ def apply_mutation(
     try:
         with ExitStack() as stack:
             try:
-                stack.enter_context(_bundle_root_lock(root, timeout=lock_timeout))
+                stack.enter_context(
+                    nullcontext()
+                    if str(layout.bundle_dir.resolve()) in _HELD_BUNDLE_LOCKS.get()
+                    else _bundle_root_lock(root, timeout=lock_timeout)
+                )
             except anchors.LockTimeout:
                 return _application(
                     EMPTY_TRANSACTION_ID,
@@ -3214,7 +3244,11 @@ def commit_pending(
     root = _open_root(layout.bundle_dir)
     try:
         try:
-            with _bundle_root_lock(root, timeout=lock_timeout):
+            with (
+                nullcontext()
+                if str(layout.bundle_dir.resolve()) in _HELD_BUNDLE_LOCKS.get()
+                else _bundle_root_lock(root, timeout=lock_timeout)
+            ):
                 return commit_workspace(layout, commit, (), mode=mode)
         except anchors.LockTimeout:
             return CommitOutcome("failed", None, commit.subject, (), LOCK_TIMEOUT_FAILURE)
@@ -3229,5 +3263,6 @@ __all__ = [
     "MutationApplication",
     "apply_mutation",
     "commit_pending",
+    "held_bundle_lock",
     "only_stale_inventory",
 ]

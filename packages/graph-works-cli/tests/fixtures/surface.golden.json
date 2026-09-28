@@ -2468,6 +2468,7 @@
         "file",
         "ingest-queue",
         "lint",
+        "merge-workspace",
         "next",
         "orchestrate",
         "prepare-workspace",
@@ -3991,6 +3992,62 @@
       "path": [
         "work",
         "lint"
+      ]
+    },
+    {
+      "name": "gw work merge-workspace",
+      "help": "Merge PATH's workspace branch into workspace main and record its receipt.\n\nThe one sanctioned non-verb commit on workspace main; a conflict aborts and\nrefuses, holding the finish. Plans by default; only --apply changes Git.",
+      "short_help": "Merge PATH's workspace branch into workspace main and record its receipt.",
+      "usage": [
+        "[OPTIONS]",
+        "{path}"
+      ],
+      "arguments": [
+        {
+          "name": "path",
+          "required": true,
+          "nargs": 1
+        }
+      ],
+      "options": [
+        {
+          "name": "apply",
+          "opts": [
+            "--apply"
+          ],
+          "secondary_opts": [],
+          "help": "Merge and record; without it, print the plan.",
+          "required": false,
+          "default": false,
+          "is_flag": true
+        },
+        {
+          "name": "workspace",
+          "opts": [
+            "--workspace"
+          ],
+          "secondary_opts": [],
+          "help": "Workspace path.",
+          "required": false,
+          "default": "",
+          "is_flag": false
+        },
+        {
+          "name": "json_output",
+          "opts": [
+            "--json"
+          ],
+          "secondary_opts": [],
+          "help": "Emit the merge result as JSON.",
+          "required": false,
+          "default": false,
+          "is_flag": true
+        }
+      ],
+      "commands": [],
+      "path": [
+        "work",
+        "merge-workspace"
       ]
     },
     {

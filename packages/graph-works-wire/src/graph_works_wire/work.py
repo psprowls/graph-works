@@ -19,6 +19,7 @@ from graph_works_core.guidance.assembly import Guidance
 from graph_works_core.orchestrate.asks import AskAnswerResult, AskResult
 from graph_works_core.orchestrate.commands import OrchestrateResult
 from graph_works_core.orchestrate.dispatch import DispatchFailure, DispatchResult, ObservedPlacement
+from graph_works_core.orchestrate.merge_workspace import MergeWorkspaceResult
 from graph_works_core.orchestrate.orca_port import OrcaMessage
 from graph_works_core.orchestrate.placement import PlacementRecord, ReaderRecord
 from graph_works_core.orchestrate.reroute import RerouteResult
@@ -1051,4 +1052,17 @@ def prepare_workspace_payload(result: WorkspacePrepareResult) -> dict[str, Any]:
             for step in result.steps
         ],
         "placement": None if placement is None else {"worktree": placement.worktree, "branch": placement.branch},
+    }
+
+
+def merge_workspace_payload(result: MergeWorkspaceResult) -> dict[str, Any]:
+    """Workspace integration, including a merge whose receipt was refused."""
+    return {
+        "path": result.path,
+        "source_branch": result.source_branch,
+        "target_branch": result.target_branch,
+        "applied": result.applied,
+        "merge_commit": result.merge_commit,
+        "receipt_path": result.receipt_path,
+        "refusal": None if result.refusal is None else {"reason": result.refusal, "detail": result.detail},
     }

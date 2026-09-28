@@ -27,6 +27,7 @@ from graph_works_core.orchestrate.orca_port import OrcaPort
 from graph_works_core.orchestrate.placement import PlacementRecord, run_record_placement, run_record_reader
 from graph_works_core.workspace.layout import WorkspaceLayout
 from graph_works_core.workspace.provenance import probe_git
+from graph_works_core.workspace.workspace_branch import WORKSPACE_REPO
 
 FAILURE_REASONS: frozenset[str] = frozenset(
     {
@@ -829,6 +830,7 @@ def _record(c: _Dispatch) -> None:
     assert observed is not None and observed.path is not None and observed.branch is not None
 
     path, branch = observed.path, observed.branch
+    selected_repo = (c.item.get("repo") or {}).get("name")
 
     def apply(dry_run: bool) -> PlacementRecord:
         return run_record_placement(
@@ -839,7 +841,8 @@ def _record(c: _Dispatch) -> None:
             worktree=path,
             branch=branch,
             today=c.today,
-            repo_name=(c.item.get("repo") or {}).get("name"),
+            repo_name=None if selected_repo == WORKSPACE_REPO else selected_repo,
+            repo=WORKSPACE_REPO if selected_repo == WORKSPACE_REPO else None,
             dry_run=dry_run,
         )
 

@@ -588,6 +588,9 @@ def _reader_source(
     owner = enclosing_owner(item, by_path)
     if owner is None and (item.path != root or item.parent_path is not None):
         return _Refusal("worktree-unprovable", "cannot prove the reader's integration owner")
+    if owner is None and item_repo is not None and item_repo.name == WORKSPACE_REPO:
+        assert context is not None
+        return None, context.default_base
     source = owner if owner is not None else item
     if context is not None:
         assert item_repos is not None and item_repo is not None
@@ -1603,6 +1606,10 @@ def plan(
             continue
 
         if phase in READ_ONLY_PHASES:
+            if workspace_only:
+                # Read the workspace integration lineage without preparing any
+                # code anchor or claiming its mutable checkout.
+                item_repo, context = workspace_repo, workspace_context
             source = _reader_source(
                 item,
                 root=root,

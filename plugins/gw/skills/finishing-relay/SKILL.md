@@ -37,8 +37,10 @@ Enter the Escalation path and hold the finish stage until targets are verified.
 For every entry in the supplied `finish_targets` list, run that repository's test suite (same discovery approach as
 `finishing-a-development-branch` Step 1 — `npm test` / `cargo test` /
 `pytest` / `go test ./...`, whichever the repo uses).
-The `_workspace` target has no test suite; its merged-result check is `gw lint`
-on the workspace.
+The `_workspace` target has no test suite; its merged-result check is
+`gw wiki lint --workspace <main workspace>` for main integration, or
+`gw wiki lint --workspace <anchor worktree>` for epic integration.
+Keep `GRAPH_WORKS_DIR` on the main workspace for work and receipt verbs.
 
 **If tests fail:** do not stop silently and do not present options. Enter
 the **Escalation path** (below) with the failure output in the escalation
@@ -184,10 +186,12 @@ what already integrated. Cross-repository atomicity is not promised.
   `gw work merge-workspace <work-path> --apply --json` and never record its
   receipt separately: the verb merges and records it in one locked step.
   A refusal enters the Escalation path and holds the entire finish. Run
-  `gw lint` on the merged workspace; a failure also enters Escalation.
+  `gw wiki lint --workspace <main workspace>` on the merged main checkout;
+  a failure also enters Escalation.
   For `_workspace` → an epic anchor, run
   `git -C <anchor worktree> merge <source_branch>`, check the merged result
-  with `gw lint` on the workspace, then run
+  with `gw wiki lint --workspace <anchor worktree>` on that merged anchor
+  checkout, then run
   `finish-receipt.py record <work-path> --workspace <workspace> --repo _workspace`.
   A conflict, failed lint, or refusal enters the Escalation path. For code
   repositories, run:

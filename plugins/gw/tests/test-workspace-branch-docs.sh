@@ -21,4 +21,11 @@ need skills/workflow/SKILL.md 'Workspace content root:'
 need skills/workflow/SKILL.md 'gw work merge-workspace <work-path> --apply'
 need skills/finishing-relay/SKILL.md 'gw work merge-workspace <work-path> --apply'
 need skills/finishing-relay/SKILL.md 'record --repo _workspace'
+need skills/finishing-relay/SKILL.md 'gw wiki lint --workspace <main workspace>'
+need skills/finishing-relay/SKILL.md 'gw wiki lint --workspace <anchor worktree>'
+need skills/finishing-relay/SKILL.md 'Keep `GRAPH_WORKS_DIR` on the main workspace for work and receipt verbs.'
+if grep -qF -- '`gw lint`' "$PLUGIN_ROOT/skills/finishing-relay/SKILL.md"; then
+    echo '  [FAIL] nonexistent root lint command'
+    FAILURES=$((FAILURES + 1))
+fi
 [ "$FAILURES" -eq 0 ] || { echo "$FAILURES failure(s)"; exit 1; }

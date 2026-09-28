@@ -177,7 +177,11 @@ def run_record_reader(
     target = reader_receipt_path(layout, path, observation.dispatch_id)
 
     def decide(items: Sequence[WorkItem]) -> ReaderRecord:
-        if observation.repo not in declared_repositories(layout):
+        if observation.repo == WORKSPACE_REPO:
+            workspace, note = workspace_repo(layout)
+            if workspace is None:
+                raise WorkspaceError(f"{path}: repo {WORKSPACE_REPO} but {note}")
+        elif observation.repo not in declared_repositories(layout):
             raise WorkspaceError(f"{path}: repo {observation.repo!r} names no declared repository")
         plan = plan_reader_receipt(items, path, root=root, phase=phase, observation=observation)
         receipt_path = None if plan.refusal == "unknown-path" else target

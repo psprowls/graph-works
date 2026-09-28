@@ -164,13 +164,21 @@ def test_stamped_execute_dispatches_with_the_content_root_line():
 
 
 @pytest.mark.parametrize("phase", ["design", "plan"])
-def test_readers_get_no_workspace(phase):
+@pytest.mark.parametrize("tips_known", [False, True])
+def test_readers_get_no_mutable_workspace_and_require_workspace_tip(phase, tips_known):
     lone = _item("work/feature-lone", phase=phase, affects=("gw:workspace",))
-    result = _ws_plan((lone,), lone.path, ws_context())
+    context = replace(ws_context(), branch_tips={"main": "a" * 40}, branch_tips_known=tips_known)
+    result = _ws_plan((lone,), lone.path, context)
     assert not result.workspace_preparations and not result.workspace_placements
+    if not tips_known:
+        assert not result.dispatches
+        assert [b.kind for b in result.blocked] == ["worktree-unprovable"]
+        return
     (dispatch,) = result.dispatches
     assert "Workspace content root" not in dispatch.prompt
     assert dispatch.worktree.action == "pin-detached"
+    assert dispatch.worktree.start_sha == "a" * 40
+    assert result.dispatch_repos[dispatch.key] == WS_REPO
 
 
 @pytest.mark.parametrize("missing", ["workspace_repo", "workspace_context", "workspace_worktrees_dir", "all"])

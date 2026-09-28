@@ -327,6 +327,10 @@ hand. `today` is always injected; nothing in this package reads the clock.
   time, and records a reader receipt (`_record_reader`) instead of a
   placement stamp. Readers claim no mutable checkout, including historical
   stamps, and hold no `affects` claims (`claims_for`).
+  Epic/Release roots at design and plan also use this detached reader path;
+  their repository and workspace anchors are prepared when they enter execute,
+  before a child reaches execute. They never dispatch `create-top-level` for
+  the owner anchor.
 
 - **Reader receipts are observations, not placement stamps.**
   `orchestrate.placement.run_record_reader` backs `gw work record-reader` and

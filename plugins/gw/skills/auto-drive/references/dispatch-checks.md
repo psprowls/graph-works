@@ -346,7 +346,7 @@ matches or resolves rules. Treat model IDs and effort strings as opaque.
       Independent items continue only where live-key and hold rules already
       allow. `unknown-path`, `unknown-root`, `outside-root`, `invalid-item`,
       `invalid-phase`, `invalid-pair`, `terminal`, `entry-unprovable` and
-      `read-only-descendant` are the same inspection halt: each means the
+      `read-only-descendant` and `read-only-owner` are the same inspection halt: each means the
       coordinator's own reading of this dispatch is wrong.
 
    6. **Application failed or other non-success.** Every other non-success,

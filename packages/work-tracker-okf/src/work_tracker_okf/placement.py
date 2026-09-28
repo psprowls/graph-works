@@ -10,8 +10,9 @@ A placement plan never carries a routing transition. Recording where a stage
 runs is a fact about a dispatch, not a stage completion, which is why this is
 not an `advance` flag: `advance` always applies the next transition.
 
-Entitlement follows the stamp's meaning. The orchestration **root** may
-record an integration anchor at every dispatchable phase. A **descendant**
+Entitlement follows the stamp's meaning. The orchestration **root** is
+recorded at every phase, except an Epic/Release root, which is recorded only
+at execute and finish. A **descendant**
 records code placement only at `execute` and `finish`. These stamps select
 later code checkouts; a design/plan reader's dedicated detached checkout must
 never replace them, even for a root reader.
@@ -48,6 +49,7 @@ PlacementRefusal = Literal[
     "invalid-phase",
     "invalid-pair",
     "read-only-descendant",
+    "read-only-owner",
     "terminal",
     "entry-unprovable",
     "phase-mismatch",
@@ -242,6 +244,12 @@ def plan_placement(
     if item.work_status in TERMINAL_STATUSES or item.work_status == "mitigated" or item.phase == "done":
         return refused(
             "terminal", f"{path} is {item.work_status} at phase {item.phase!r}; nothing is dispatched", item.phase
+        )
+    if path == root and item.type in {"Epic", "Release"} and phase not in CODE_PHASES:
+        return refused(
+            "read-only-owner",
+            f"{path} is an {item.type} reading at {phase}; its anchors are recorded by execute-time preparation",
+            item.phase,
         )
     current = item.phase if item.phase is not None else _entry_phase(items, item)
     if current is None:

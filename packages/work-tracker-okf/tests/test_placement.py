@@ -97,18 +97,27 @@ def test_the_refusal_vocabulary_is_closed() -> None:
         "invalid-phase",
         "invalid-pair",
         "read-only-descendant",
+        "read-only-owner",
         "terminal",
         "entry-unprovable",
         "phase-mismatch",
     } == PLACEMENT_REFUSALS
 
 
-@pytest.mark.parametrize("phase", ["design", "plan", "execute", "finish"])
-def test_the_root_may_record_at_every_phase(phase: str) -> None:
+@pytest.mark.parametrize("phase", ["execute", "finish"])
+def test_the_root_may_record_at_code_phases(phase: str) -> None:
     items = tuple(replace(item, phase=phase) if item.path == EPIC else item for item in _vault())
     plan = _plan(items, EPIC, root=EPIC, phase=phase)
     assert plan.refusal is None, plan.detail
     assert plan.changes == (("worktree", WT), ("branch", BR), ("updated", TODAY))
+
+
+@pytest.mark.parametrize("phase", ["design", "plan"])
+def test_epic_root_refuses_scalar_placement_as_a_reader(phase: str) -> None:
+    items = tuple(replace(item, phase=phase) if item.path == EPIC else item for item in _vault())
+    plan = _plan(items, EPIC, root=EPIC, phase=phase)
+    assert plan.refusal == "read-only-owner"
+    assert plan.changes == ()
 
 
 @pytest.mark.parametrize("phase", ["execute", "finish"])

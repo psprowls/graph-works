@@ -41,7 +41,7 @@ def test_foreign_siblings_prepare_once_and_reserve_no_workers():
     assert {b.kind for b in result.blocked} == {"worktree-pending"}
 
 
-def test_dependencies_prevent_preparation():
+def test_dependencies_do_not_delay_owner_execute_preparation():
     items, repos, contexts = fixture()
     items = (
         items[0],
@@ -52,7 +52,7 @@ def test_dependencies_prevent_preparation():
         _item("work/feature-wait"),
     )
     result = _plan(items, ROOT, item_repos=repos, repo_contexts=contexts)
-    assert not result.preparations
+    assert [p.owner_path for p in result.preparations] == [ROOT]
     assert not result.dispatches
 
 
@@ -60,7 +60,7 @@ def test_read_only_foreign_children_refuse_without_integration_stamp():
     items, repos, contexts = fixture(phase="plan")
     contexts["git-code"] = replace(contexts["git-code"], branch_tips={"trunk": "0" * 40})
     result = _plan(items, ROOT, item_repos=repos, repo_contexts=contexts)
-    assert not result.preparations
+    assert [p.owner_path for p in result.preparations] == [ROOT]
     assert not result.dispatches
     assert {(b.path, b.kind) for b in result.blocked} == {
         (CHILD, "worktree-unprovable"),

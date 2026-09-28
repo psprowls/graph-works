@@ -106,6 +106,7 @@ _UNKNOWN_TYPE_SEGMENT = "work"
 
 #: The phases a stage can be dispatched at. `done` is terminal.
 DISPATCH_PHASES: frozenset[str] = frozenset(PHASES - {"done"})
+OWNER_TYPES: frozenset[str] = frozenset({"Epic", "Release"})
 
 #: The plugin skill a dispatched worker runs. Named rather than inlined so the
 #: namespace has one grep-able home when the fork lands. It is a skill, not a
@@ -1801,6 +1802,13 @@ def plan(
                 inventory=local_inventory,
                 code_repo=local_code_repo,
             )
+        if isinstance(action, WorktreeAction) and action.action == "create-top-level" and item.type in OWNER_TYPES:
+            blocked.append(
+                BlockedItem(
+                    item.path, "worktree-unprovable", "Epic/Release anchors are prepared at execute, never minted"
+                )
+            )
+            continue
         if isinstance(action, _Refusal):
             # Consumes no slot and claims no worktree: a refused item is not a
             # dispatch that failed, it is a dispatch that was never made.
@@ -1871,6 +1879,49 @@ def plan(
             claims=claims,
             content_root=content_root,
         )
+
+    # An owner entering execute needs its integration anchors even while all
+    # children are still readers. The children retain their own refusal path.
+    owners = [i for i in ((root_item,) if root_item else ()) + tuple(_descendants(items, root))]
+    for owner in owners:
+        if (
+            owner.type not in OWNER_TYPES
+            or owner.phase != "execute"
+            or owner.work_status in TERMINAL_STATUSES
+            or owner.path in repo_refusals
+            or owner.path in holds
+        ):
+            continue
+        if item_repos is not None and repo_contexts:
+            needed: dict[str, tuple[ItemRepo, RepositoryContext]] = {}
+            for member in _descendants(items, owner.path):
+                if (
+                    member.work_status in TERMINAL_STATUSES
+                    or member.phase == "done"
+                    or (touches_workspace(member.affects) and not code_affects(member.affects))
+                ):
+                    continue
+                member_repo = item_repos.get(member.path)
+                member_context = (
+                    contexts_by_path.get(str(member_repo.path)) if member_repo and member_repo.path else None
+                )
+                if member_repo is not None and member_context is not None:
+                    needed.setdefault(member_context.identity, (member_repo, member_context))
+            for identity, (member_repo, member_context) in needed.items():
+                selected = select_anchor(
+                    owner, items=by_path, repos=item_repos, repo=member_repo, context=member_context, prepare=True
+                )
+                if isinstance(selected, AnchorPreparation) and (
+                    selected.worktree.path is not None or provisions_worktrees
+                ):
+                    preparations.setdefault((selected.owner_path, identity), selected)
+        if workspace_enabled:
+            assert workspace_context is not None and workspace_worktrees_dir is not None
+            selected_ws = select_workspace(
+                owner, items=by_path, context=workspace_context, worktrees_dir=workspace_worktrees_dir
+            )
+            if isinstance(selected_ws, WorkspacePreparation):
+                workspace_preparations.setdefault(selected_ws.owner_path, selected_ws)
 
     return OrchestratePlan(
         path=root,

@@ -1584,7 +1584,7 @@ def test_foreign_anchor_adoption_stamp_and_replan_use_real_repository(tmp_path: 
     page = layout.bundle_dir / f"{child}.md"
     before = page.read_bytes()
     readonly = orchestrate.run_orchestrate(layout, owner)
-    assert not readonly.preparations
+    assert [(p.owner_path, p.repo.name) for p in readonly.preparations] == [(owner, "code")]
     assert not readonly.dispatches
     assert _kinds(readonly)[child] == "worktree-unprovable"
     assert page.read_bytes() == before

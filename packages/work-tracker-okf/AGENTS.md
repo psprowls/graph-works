@@ -118,10 +118,11 @@ managed-artifact and dependency-graph code from inventing ad hoc path joins.
   repository other than the item's own — the scalar pair keeps meaning "own".
   `plan_placement(repo=)` is passed a name only for a foreign repository.
 - Placement stamps describe code/integration checkouts only. The existing
-  `plan_placement` API permits root anchor recording at any dispatchable phase
-  and descendant recording only at `execute`/`finish`; detached `HEAD` remains
-  an invalid branch. A root reader does not turn its detached checkout into an
-  anchor stamp.
+  `plan_placement` permits Epic/Release root anchor recording only at
+  `execute`/`finish`, and descendant recording only at those phases; a lone
+  Feature/Bug root may still record at any dispatchable phase. Detached `HEAD`
+  remains an invalid branch. A root reader does not turn its detached checkout
+  into an anchor stamp.
 - `placement.plan_reader_receipt` instead validates a `ReaderObservation` for
   `design`/`plan`, for roots and descendants alike. It checks phase eligibility,
   subtree membership, attempt identity, absolute path and a full lowercase

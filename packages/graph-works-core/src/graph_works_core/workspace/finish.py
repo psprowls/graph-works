@@ -94,14 +94,30 @@ def resolve_finish_targets(
     candidates: list[tuple[ItemRepo, str | None, str | None]] = []
     try:
         declared = declared_repositories(layout)
+        outer = enclosing_owner(item, by_path)
+        outer_repo = (single_repo or resolve_item_repo(layout, outer, by_path)) if outer is not None else None
         if item.branch or item.worktree:
             candidates.append((single_repo or resolve_item_repo(layout, item, by_path), item.worktree, item.branch))
         elif not item.repo_stamps and item.type not in {"Epic", "Release"}:
-            # Main-mode leaves may finish without owning a dedicated branch.
-            # The declared checkout is the compatibility location, but its
-            # current branch must be observed rather than inferred from trunk.
             own_repo = single_repo or resolve_item_repo(layout, item, by_path)
-            if own_repo.path is None:
+            if outer is not None:
+                # A descendant's source is the enclosing anchor it finishes
+                # into, not the declared checkout; the declared checkout may
+                # sit on an unrelated branch (e.g. trunk) with no ancestry
+                # relationship to the anchor.
+                outer_stamp = outer.repo_stamps.get(own_repo.name) if own_repo.name is not None else None
+                own = outer_repo is not None and outer_repo.name == own_repo.name
+                anchor_worktree, anchor_branch = (
+                    (outer.worktree, outer.branch)
+                    if own
+                    else ((outer_stamp.worktree, outer_stamp.branch) if outer_stamp else (None, None))
+                )
+                candidates.append((own_repo, anchor_worktree, anchor_branch))
+            elif own_repo.path is None:
+                # Main-mode leaves may finish without owning a dedicated
+                # branch. The declared checkout is the compatibility
+                # location, but its current branch must be observed rather
+                # than inferred from trunk.
                 occupancy_known = False
                 blockers.append(f"{path}: no repository checkout can be verified for unstamped finish")
             else:
@@ -119,8 +135,6 @@ def resolve_finish_targets(
                 blockers.append(f"{path}: stamped repo {name!r} is not declared")
             else:
                 candidates.append((ItemRepo(name, declared[name], "frontmatter"), stamp.worktree, stamp.branch))
-        outer = enclosing_owner(item, by_path)
-        outer_repo = (single_repo or resolve_item_repo(layout, outer, by_path)) if outer is not None else None
     except WorkspaceError as exc:
         return FinishPlan((), (str(exc),))
     for repo, worktree, branch in candidates:

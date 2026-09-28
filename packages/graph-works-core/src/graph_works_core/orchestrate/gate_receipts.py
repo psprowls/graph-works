@@ -180,6 +180,18 @@ def find_satisfying(bundle_root: Path, *, repo: str, tree: str, command: str) ->
     return ReceiptLookup(found[0] if found else None, tuple(warnings))
 
 
+def any_for_tree(bundle_root: Path, *, repo: str, tree: str) -> bool:
+    """Whether any item's receipt holds a run (of any outcome) for this repo and tree."""
+    for path in sorted(bundle_root.glob(RECEIPT_GLOB)):
+        try:
+            _, runs = parse_gate_receipt(path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeError, ValueError):
+            continue
+        if any(run.repo == repo and run.tree == tree for run in runs):
+            return True
+    return False
+
+
 TERMINAL = frozenset({"resolved", "wontfix", "superseded"})
 
 
@@ -276,6 +288,7 @@ __all__ = [
     "GateRun",
     "GateScope",
     "ReceiptLookup",
+    "any_for_tree",
     "find_satisfying",
     "parse_gate_receipt",
     "record_gate_run",

@@ -158,3 +158,13 @@ def test_strict_parser_rejects_a_non_mapping_run_and_bad_header() -> None:
         gr.parse_gate_receipt(
             gr.render_receipt("work/a", [], created="2026-09-28").replace("receipt_version: 1", "receipt_version: 2")
         )
+
+
+def test_any_for_tree_sees_red_receipts_but_not_other_trees(tmp_path: Path) -> None:
+    _write(tmp_path, "work/a", [replace(RUN, exit=1)])
+    assert gr.any_for_tree(tmp_path, repo="code", tree=TREE)
+    assert not gr.any_for_tree(tmp_path, repo="code", tree="c" * 40)
+    assert not gr.any_for_tree(tmp_path, repo="other", tree=TREE)
+    (tmp_path / "work/b/references").mkdir(parents=True)
+    (tmp_path / "work/b/references/03-gate-receipts.md").write_bytes(b"\xff")
+    assert gr.any_for_tree(tmp_path, repo="code", tree=TREE)

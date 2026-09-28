@@ -324,6 +324,10 @@ def _changes(
     changes = [
         FieldChange(key, before, after) for key, before, after in candidates if after is not None and after != before
     ]
+    # A changed placement never retains the prior baseline (the `plan_placement` rule).
+    placement_changed = any(change.key in ("worktree", "branch") for change in changes)
+    if placement_changed and item.start_sha is not None:
+        changes.append(FieldChange("start_sha", item.start_sha, None))
     # `updated` is written as a `date`, not an ISO string (C3-J): ruamel quotes
     # a `str` that would re-parse as a date, and every authored page is bare.
     if item.updated != today.isoformat():
@@ -340,7 +344,10 @@ def apply(document: Document, plan: AdvancePlan) -> None:
     """
     assert plan.refusal is None, f"refused plan ({plan.refusal}) must not be applied"
     for change in plan.changes:
-        document.set(change.key, change.after)
+        if change.after is None:
+            document.delete(change.key)
+        else:
+            document.set(change.key, change.after)
 
 
 __all__ = [

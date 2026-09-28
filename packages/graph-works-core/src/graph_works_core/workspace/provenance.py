@@ -18,7 +18,6 @@ matching `work-tracker-okf`'s `today=` convention: the caller that knows what
 
 from __future__ import annotations
 
-import functools
 import json
 import os
 import shutil
@@ -143,9 +142,23 @@ def resolve_git(configured: str | None, *, environ: Mapping[str, str]) -> GitExe
     return _validated(candidate, source)
 
 
-@functools.lru_cache(maxsize=16)
+_VALIDATED: dict[tuple[str, str], GitExecutable] = {}
+
+
 def _validated(executable: str, source: Literal["config", "env", "path"]) -> GitExecutable | GitFailure:
-    """`git --version` once per process per executable."""
+    """`git --version` once per process per executable. Only a success is
+    remembered: a failure is re-probed on the next call."""
+    key = (executable, source)
+    cached = _VALIDATED.get(key)
+    if cached is not None:
+        return cached
+    probed = _probe_version(executable, source)
+    if isinstance(probed, GitExecutable):
+        _VALIDATED[key] = probed
+    return probed
+
+
+def _probe_version(executable: str, source: Literal["config", "env", "path"]) -> GitExecutable | GitFailure:
     if not Path(executable).is_file():
         return GitFailure("missing", f"{source} git {executable!r} does not exist")
     outcome = probe_git(Path(executable).parent, "--version", executable=executable, timeout=_GIT_TIMEOUT_SECONDS)
@@ -264,7 +277,7 @@ def _absolute(raw: str, cwd: Path) -> Path | None:
         return None
 
 
-def worktree_state(cwd: Path, repo: Path) -> tuple[str, str] | None:
+def worktree_state(cwd: Path, repo: Path, *, git: GitExecutable | GitFailure | None = None) -> tuple[str, str] | None:
     """`(toplevel, branch)` when *cwd* is a linked worktree of *repo*, else `None`.
 
     `--git-dir` differs from `--git-common-dir` in a linked worktree -- but also
@@ -283,24 +296,33 @@ def worktree_state(cwd: Path, repo: Path) -> tuple[str, str] | None:
     A detached HEAD returns `None`; there is no branch worth recording, and the
     finish stage creates one anyway.
     """
-    git_dir_raw = run_git(cwd, "rev-parse", "--git-dir")
-    common_raw = run_git(cwd, "rev-parse", "--git-common-dir")
+    resolved = git if git is not None else resolve_git(None, environ=os.environ)
+    if isinstance(resolved, GitFailure):
+        return None
+    executable = resolved
+
+    def _read(where: Path, *args: str) -> str | None:
+        outcome = probe_git(where, *args, executable=executable.path)
+        return outcome.stdout if outcome.returncode == 0 else None
+
+    git_dir_raw = _read(cwd, "rev-parse", "--git-dir")
+    common_raw = _read(cwd, "rev-parse", "--git-common-dir")
     if git_dir_raw is None or common_raw is None:
         return None
     git_dir = _absolute(git_dir_raw, cwd)
     common = _absolute(common_raw, cwd)
     if git_dir is None or common is None or git_dir == common:
         return None
-    if (run_git(cwd, "rev-parse", "--show-superproject-working-tree") or "").strip():
+    if (_read(cwd, "rev-parse", "--show-superproject-working-tree") or "").strip():
         return None
-    repo_common_raw = run_git(Path(repo), "rev-parse", "--git-common-dir")
+    repo_common_raw = _read(Path(repo), "rev-parse", "--git-common-dir")
     if repo_common_raw is None:
         return None
     repo_common = _absolute(repo_common_raw, Path(repo))
     if repo_common is None or repo_common != common:
         return None
-    top = run_git(cwd, "rev-parse", "--show-toplevel")
-    branch = run_git(cwd, "branch", "--show-current")
+    top = _read(cwd, "rev-parse", "--show-toplevel")
+    branch = _read(cwd, "branch", "--show-current")
     if top is None or branch is None or not branch.strip():
         return None
     return top.strip(), branch.strip()

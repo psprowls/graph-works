@@ -182,11 +182,11 @@ def run_stage_advance(
 
     The execute baseline resolves in order: the `start_sha` argument, then the
     placement's recorded `start_sha` (its `repo_stamps` entry for the gated
-    repository, else the scalar one). The commit gate uses only those two and
+    repository when that entry carries one, else the scalar one). The commit gate uses only those two and
     refuses `no-start-sha` when neither exists. Only the results *stub* falls
     back further: at `execute` it derives one by
     `workspace.anchor.phase_start_sha` -- merge-base first, then the spec's own
-    arms. At `finish` it derives nothing: a derived range there sweeps in the
+    arms. At `finish` it uses only an explicit argument and derives nothing: a derived range there sweeps in the
     whole execute range, and a finish report claiming work it did not do is
     exactly what this pipeline exists to prevent.
 
@@ -359,6 +359,7 @@ def _advance(
     inference_warnings: tuple[str, ...] = ()
     stamped_worktree: str | None = None
     stamped_branch: str | None = None
+    inferred = False
     if worktree and branch:
         stamped_worktree, stamped_branch = worktree, branch
     elif infer_worktree and item is not None and resolved_repo is not None and _infers_from_cwd(item):
@@ -375,9 +376,10 @@ def _advance(
         else:
             recorded = item.worktree
             if not recorded or not Path(recorded).is_dir():
-                detected = provenance.worktree_state(here, resolved_repo)
+                detected = provenance.worktree_state(here, resolved_repo, git=provenance.gate_git(layout))
                 if detected is not None:
                     stamped_worktree, stamped_branch = detected
+                    inferred = True
 
     finish_guard: str | None = None
     finish_blockers: tuple[str, ...] = ()
@@ -470,6 +472,7 @@ def _advance(
             repo_note=repo_note,
             repo_name=item_repo.name if item_repo is not None else None,
             stamped_worktree=stamped_worktree,
+            worktree_inferred=inferred,
             explicit_start=start_sha,
             git=provenance.gate_git(layout),
         )
@@ -777,10 +780,11 @@ class GateVerdict:
 
 def _gate_placement(item: WorkItem, repo_name: str | None) -> tuple[str | None, str | None]:
     """`(worktree, start_sha)` recorded for the gated repository: its `repo_stamps`
-    entry when it has one, else the scalar placement."""
+    entry when it has one *with* a `start_sha`, else the scalar placement. A
+    stamp without a baseline still supplies its worktree."""
     stamp = item.repo_stamps.get(repo_name) if repo_name is not None else None
     if stamp is not None:
-        return stamp.worktree, stamp.start_sha
+        return stamp.worktree, stamp.start_sha or item.start_sha
     return item.worktree, item.start_sha
 
 
@@ -793,6 +797,7 @@ def _commit_gate(
     stamped_worktree: str | None,
     explicit_start: str | None,
     git: provenance.GitExecutable | provenance.GitFailure,
+    worktree_inferred: bool = False,
 ) -> GateVerdict:
     """Whether the execute stage left its work, and only its work, where git can see it.
 
@@ -827,7 +832,7 @@ def _commit_gate(
         note = f" ({repo_note})" if repo_note else ""
         return GateVerdict("no-repo", f"no code repository resolved for {item.path}{note}")
     recorded_worktree, recorded_start = _gate_placement(item, repo_name)
-    if stamped_worktree:
+    if stamped_worktree and not (worktree_inferred and recorded_worktree and not Path(recorded_worktree).is_dir()):
         root = Path(stamped_worktree)
     elif recorded_worktree:
         root = Path(recorded_worktree)
@@ -895,17 +900,18 @@ def _effective_start_sha(
 ) -> str | None:
     """The start of the range this stage covers, or `None` for no stub.
 
-    An explicit caller argument wins, then the placement's recorded baseline,
-    at either results phase. Otherwise only `execute` derives one: a derived
-    range at `finish` would sweep in the whole execute range.
+    An explicit caller argument wins. At `execute`, the placement's recorded
+    baseline comes next, then a derived one. At `finish` nothing else applies:
+    the recorded baseline is the *execute* range's start, and a finish stub
+    built on it would claim the execute commits.
     """
     if explicit:
         return explicit
+    if phase != "execute":
+        return None
     _worktree, recorded = _gate_placement(item, repo_name)
     if recorded:
         return recorded
-    if phase != "execute":
-        return None
     spec_path = bundle_root / anchor.spec_ref(item)
     spec_text = spec_path.read_text(encoding="utf-8") if spec_path.is_file() else ""
     return anchor.phase_start_sha(facts_root, spec_path, spec_text)

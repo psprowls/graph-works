@@ -641,6 +641,28 @@ def test_advance_does_not_rewrite_an_unchanged_worktree() -> None:
     assert "worktree" not in _keys(_plan_for(items, "x", worktree="/tmp/wt/x"))
 
 
+def test_advance_drops_the_recorded_start_sha_when_the_placement_changes() -> None:
+    sha = "a" * 40
+    items = (
+        make_item(
+            "x",
+            type="Feature",
+            work_status="open",
+            phase="design",
+            effort="medium",
+            worktree="/tmp/wt/x",
+            branch="feature/x",
+            start_sha=sha,
+        ),
+    )
+    plan = _plan_for(items, "x", worktree="/tmp/wt/y", branch="feature/y")
+    assert {change.key: change.after for change in plan.changes}["start_sha"] is None
+    document = parse("---\nworktree: /tmp/wt/x\nbranch: feature/x\nstart_sha: " + sha + "\n---\n\nbody\n")
+    apply(document, plan)
+    assert "start_sha" not in document.fm_data()
+    assert "start_sha" not in _keys(_plan_for(items, "x", worktree="/tmp/wt/x", branch="feature/x"))
+
+
 # --- the way home ---------------------------------------------------------
 
 

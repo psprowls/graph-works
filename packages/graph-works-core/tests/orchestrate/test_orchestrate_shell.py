@@ -778,7 +778,7 @@ def test_a_recorded_baseline_is_used_for_the_stub_before_any_derivation(tmp_path
     _ready(layout, path, extra=f"start_sha: {fork}\n")
     monkeypatch.setattr(stage.anchor, "phase_start_sha", lambda *args: pytest.fail("derived despite a baseline"))
     start = stage._effective_start_sha(
-        None, phase="finish", facts_root=repo, bundle_root=layout.bundle_dir, item=_item(layout, path), repo_name=None
+        None, phase="execute", facts_root=repo, bundle_root=layout.bundle_dir, item=_item(layout, path), repo_name=None
     )
     assert start == fork
 
@@ -911,7 +911,7 @@ def test_a_configured_broken_git_refuses_git_unavailable(tmp_path: Path) -> None
     broken.write_text("#!/bin/sh\necho 'xcrun: error: license' >&2\nexit 69\n", encoding="utf-8", newline="\n")
     broken.chmod(0o755)
     layout.local_manifest_path.write_text(f"toolchain:\n  git: {broken}\n", encoding="utf-8", newline="\n")
-    stage.provenance._validated.cache_clear()
+    stage.provenance._VALIDATED.clear()
     path = "work/feature-a"
     _ready(layout, path)
     result = stage.run_stage_advance(layout, path, today=TODAY, repo=repo, start_sha=fork, dry_run=False)
@@ -966,6 +966,41 @@ def test_a_missing_recorded_worktree_refuses_instead_of_reading_the_repo(tmp_pat
     _ready(layout, path, extra=f"worktree: {tmp_path / 'gone'}\nbranch: feature/a\nstart_sha: {fork}\n")
     result = stage.run_stage_advance(layout, path, today=TODAY, repo=repo, infer_worktree=False, dry_run=False)
     _refused_inertly(layout, path, result, "worktree-missing")
+
+
+def test_a_missing_recorded_worktree_refuses_even_when_inference_finds_another_checkout(tmp_path: Path) -> None:
+    import subprocess
+
+    layout = _initialized_workspace(tmp_path)
+    repo, fork = _code_repo(tmp_path / "c")
+    other = tmp_path / "other"
+    subprocess.run(["git", "worktree", "add", "-b", "feature/b", str(other)], cwd=repo, check=True, capture_output=True)
+    path = "work/feature-a"
+    _ready(layout, path, extra=f"worktree: {tmp_path / 'gone'}\nbranch: feature/a\nstart_sha: {fork}\n")
+    result = stage.run_stage_advance(layout, path, today=TODAY, repo=repo, cwd=other, dry_run=False)
+    _refused_inertly(layout, path, result, "worktree-missing")
+
+
+def test_a_foreign_stamp_without_a_baseline_falls_back_to_the_scalar_one(tmp_path: Path) -> None:
+    layout = _initialized_workspace(tmp_path)
+    repo, fork = _code_repo(tmp_path / "c")
+    path = "work/feature-a"
+    _ready(
+        layout,
+        path,
+        extra=f"start_sha: {fork}\nrepo_stamps:\n  code:\n    worktree: {repo}\n    branch: feature/a\n",
+    )
+    item = stage.load_items(stage.load_bundle(layout.bundle_dir, ignore=stage.IGNORE))[0]
+    assert stage._gate_placement(item, "code") == (str(repo), fork)
+
+
+def test_finish_never_claims_the_recorded_execute_baseline(tmp_path: Path) -> None:
+    layout = _initialized_workspace(tmp_path)
+    repo, fork = _code_repo(tmp_path / "c")
+    path = "work/feature-a"
+    _ready(layout, path, phase="finish", extra=f"start_sha: {fork}\n")
+    result = stage.run_stage_advance(layout, path, today=TODAY, repo=repo, resolved_in="pr-1", dry_run=False)
+    assert result.results_path is None
 
 
 def test_a_foreign_stamp_supplies_its_own_baseline(tmp_path: Path) -> None:
@@ -1249,7 +1284,7 @@ def _stamping_workspace(tmp_path: Path, epic_phase: str = "execute"):
 
 
 def _detects(monkeypatch, pair=("/wt/detected", "detected/branch")) -> None:
-    monkeypatch.setattr(stage.provenance, "worktree_state", lambda cwd, repo: pair)
+    monkeypatch.setattr(stage.provenance, "worktree_state", lambda cwd, repo, **_: pair)
 
 
 def _captured_repo_roots(monkeypatch) -> list[Path | None]:

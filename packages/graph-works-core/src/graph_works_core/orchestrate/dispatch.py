@@ -749,10 +749,9 @@ def _writer_baseline(c: _Dispatch, path: Path, branch: str, *, creation: bool, p
             )
         return created
     fork = strict_git(path, "merge-base", "HEAD", c.item["worktree"]["base_branch"], git=git)
+    # merge-base(HEAD, base) equal to the pre-launch tip already proves it is an ancestor of HEAD.
     if isinstance(fork, str) and fork.strip() == pre_launch:
-        ancestor = probe_git(path, "merge-base", "--is-ancestor", pre_launch, "HEAD")
-        if ancestor.returncode == 0:
-            return pre_launch
+        return pre_launch
     raise _Stop("placement-mismatch", f"cannot prove where branch {branch} started")
 
 

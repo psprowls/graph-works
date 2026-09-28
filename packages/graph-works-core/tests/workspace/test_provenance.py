@@ -480,15 +480,30 @@ posix_only = pytest.mark.skipif(sys.platform == "win32", reason="fake executable
 
 @pytest.fixture(autouse=True)
 def _fresh_git_cache():
-    provenance._validated.cache_clear()
+    provenance._VALIDATED.clear()
     yield
-    provenance._validated.cache_clear()
+    provenance._VALIDATED.clear()
 
 
 def _fake(path: Path, body: str) -> Path:
     path.write_text("#!/bin/sh\n" + body + "\n", encoding="utf-8", newline="\n")
     path.chmod(path.stat().st_mode | stat.S_IXUSR)
     return path
+
+
+@posix_only
+def test_a_failed_version_probe_is_not_cached(tmp_path):
+    fake = _fake(tmp_path / "flaky-git", "exit 3")
+    first = provenance.resolve_git(str(fake), environ={"PATH": ""})
+    assert isinstance(first, provenance.GitFailure)
+    _fake(fake, 'echo "git version 2.0.0"')
+    second = provenance.resolve_git(str(fake), environ={"PATH": ""})
+    assert isinstance(second, provenance.GitExecutable)
+
+
+def test_worktree_state_runs_the_git_it_is_given(tmp_path):
+    failure = provenance.GitFailure("missing", "no git")
+    assert provenance.worktree_state(tmp_path, tmp_path, git=failure) is None
 
 
 @posix_only

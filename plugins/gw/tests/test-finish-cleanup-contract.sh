@@ -72,6 +72,10 @@ assert_contains "$AUTO" 'If a terminal close fails or cannot be verified, skip i
 assert_contains "$AUTO" 'rev-list --count "<target_branch>@{upstream}..<target_branch>"' "wrap-up checks unpushed target branches using the named branch's own upstream"
 assert_contains "$AUTO" 'print the command failure verbatim' "unpushed warning reports command failures truthfully"
 assert_contains "$AUTO" "Wrap-up never pushes." "wrap-up never pushes"
+assert_contains "$AUTO" "**Unresolved-release items:**" "wrap-up separates unresolved-release items from leftover rows"
+assert_contains "$AUTO" "never eligible for automatic removal" "unresolved-release items are never auto-removable"
+assert_matches "$AUTO" "not.*Unresolved-release items.*own dispatch" "leftover rows collection is gated on release evidence"
+assert_contains "$AUTO" "**Unresolved-release items never execute, under either answer**" "wrap-up confirmation never executes unresolved-release items"
 
 WF=skills/workflow/SKILL.md
 echo "--- workflow"

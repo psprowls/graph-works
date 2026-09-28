@@ -2065,7 +2065,20 @@ new checkout to repair the receipt.
    - **Retained dispatches:** every dispatch whose `worker-release` in step 1
      reported `retained`, with its terminal handle. A `recovery-inspection`
      row never appears here; step 1 already stopped on it.
-   - **Leftover rows:** for every resolved item in the run's subtree, run
+   - **Unresolved-release items:** every resolved item in the run's subtree
+     whose own dispatch was tracked by step 1's refreshed classifier but did
+     **not** reach a `done` release action (`released` / `already_released`)
+     and is not already in **Retained dispatches** — i.e. its release action
+     was `follow-receipt` (`release_pending` / `release_unknown`) or the row
+     stopped as `recovery-inspection`. There is no positive evidence its
+     terminal is closed, and the release rule forbids `terminal close` for
+     `release_pending` / `release_unknown` outright, so these items are
+     never eligible for automatic removal. List them by path and dispatch id
+     without computing a cleanup plan for them.
+   - **Leftover rows:** for every resolved item in the run's subtree that is
+     *not* in **Unresolved-release items** — i.e. its own dispatch (if this
+     run tracks one) reached release action `done`, or no dispatch for it is
+     tracked by this run at all — run
      `finish-receipt.py cleanup <path> --workspace <workspace> --runner-cwd "$PWD"`
      and collect its `remove` rows. Normally empty, because the Success
      branch already cleaned up; this catches crashes and restarts.
@@ -2074,7 +2087,10 @@ new checkout to repair the receipt.
 
    Present the whole list with one `AskUserQuestion` (*remove all* /
    *leave them*): everything goes under one confirmation, never one question per
-   row. On *remove all*, close each retained terminal with
+   row. **Unresolved-release items never execute, under either answer** — print
+   them as-is, both in the question and in the leftover report; *remove all*
+   authorizes only the Retained-dispatches and Leftover-rows entries. On
+   *remove all*, close each retained terminal with
    `orca terminal close --terminal <handle>` and positively verify each terminal is closed before executing its rows
    (use the close receipt and fresh terminal readback). If a terminal close fails or cannot be verified, skip its affected rows;
    when its worktree cannot be matched to rows with confidence, retain those rows too.

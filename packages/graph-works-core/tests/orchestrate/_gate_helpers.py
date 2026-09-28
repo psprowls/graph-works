@@ -40,6 +40,17 @@ def fake_clock(*, step: float) -> WaitClock:
     return WaitClock(wall=lambda: NOW, monotonic=monotonic)
 
 
+def fake_clock_at(wall: datetime, *, step: float = 0.0) -> WaitClock:
+    """A clock pinned at *wall*; `monotonic` advances *step* per read."""
+    state = {"t": 0.0}
+
+    def monotonic() -> float:
+        state["t"] += step
+        return state["t"]
+
+    return WaitClock(wall=lambda: wall, monotonic=monotonic)
+
+
 CLOCK = fake_clock(step=1.0)
 
 

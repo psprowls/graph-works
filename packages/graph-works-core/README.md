@@ -16,6 +16,8 @@ lets the durability tier and the work vertical both depend on locking without
 either carrying its own platform seam. See `gw util platform` for the live,
 per-capability answer on the running host.
 
+`orchestrate/gate.py` starts the gate runner detached: `start_new_session=True` on POSIX, `CREATE_NEW_PROCESS_GROUP | DETACHED_PROCESS` on Windows. `orchestrate/gate_runner.py` runs the configured gate command through `sh -c` on POSIX and `%COMSPEC% /c` on Windows, so a gate command must be written for the shell of the host that runs it. Runner liveness is a held `okf_ext.locking` lock, never a signal to a pid.
+
 ## The layout
 
 ```

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from datetime import timedelta
 
 from _gate_helpers import NOW, mint_receipt, raise_, snapshot_dirs
 from conftest import git, make_repo
@@ -40,7 +41,8 @@ def test_concurrent_run_for_same_tree_shares_one_run(env):
 
 def test_a_dead_pending_run_does_not_block_a_new_one(env):
     first = run_gate_run(env.layout, env.path, now=NOW, token="aaaaaaaa", spawn=env.spawn)
-    second = run_gate_run(env.layout, env.path, now=NOW, token="bbbbbbbb", spawn=env.spawn)
+    later = NOW + timedelta(minutes=5)  # past the start grace, with no runner lock held
+    second = run_gate_run(env.layout, env.path, now=later, token="bbbbbbbb", spawn=env.spawn)
     assert second.status == "started" and second.run_id != first.run_id
 
 

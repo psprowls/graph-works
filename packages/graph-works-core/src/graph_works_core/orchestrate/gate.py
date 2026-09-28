@@ -5,12 +5,15 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+import subprocess
+import sys
+import time
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime, timedelta
 from fnmatch import fnmatchcase
 from pathlib import Path, PurePosixPath
-from typing import Literal
+from typing import Any, Literal
 
 from okf_ext.locking import locked
 from okf_io import load_bundle
@@ -18,7 +21,15 @@ from work_tracker_okf.affects import code_affects
 from work_tracker_okf.items import IGNORE, WorkItem, load_items
 
 from graph_works_core.orchestrate import gate_git
-from graph_works_core.orchestrate.gate_receipts import GateMatch, GateScope, any_for_tree, find_satisfying
+from graph_works_core.orchestrate.gate_receipts import (
+    GateMatch,
+    GateRun,
+    GateScope,
+    any_for_tree,
+    find_satisfying,
+    record_gate_run,
+)
+from graph_works_core.orchestrate.wait import WaitClock
 from graph_works_core.workspace import provenance
 from graph_works_core.workspace.commits import item_stem
 from graph_works_core.workspace.errors import WorkspaceError
@@ -105,6 +116,10 @@ class GateCheckResult:
 
 Spawn = Callable[[Path], None]
 
+WINDOWS_DETACHED_FLAGS = 0x00000200 | 0x00000008  # CREATE_NEW_PROCESS_GROUP | DETACHED_PROCESS
+RUNNER_START_TIMEOUT = 10.0
+START_GRACE = timedelta(seconds=30)
+
 
 def runs_dir(layout: WorkspaceLayout, path: str) -> Path:
     return layout.cache_dir / "gate-runs" / hashlib.sha256(path.encode("utf-8")).hexdigest()[:16]
@@ -123,6 +138,29 @@ def _alive(record_path: Path) -> bool:
             return False
     except OSError:
         return True
+
+
+def _parse_started(value: object) -> datetime | None:
+    if not isinstance(value, str):
+        return None
+    try:
+        return datetime.fromisoformat(value)
+    except ValueError:
+        return None
+
+
+def _live(record_path: Path, data: dict[str, Any], now: datetime) -> bool:
+    """Alive: the runner holds its lock, or it was spawned moments ago and has not taken it yet.
+
+    The grace closes the window between the record being written and the detached
+    runner's lock acquire; a spawn-failed record carries a `result`, so it never qualifies.
+    """
+    if _alive(record_path):
+        return True
+    if data.get("runner_started") or data.get("result") is not None:
+        return False
+    started = _parse_started(data.get("started"))
+    return started is not None and timedelta(0) <= now - started <= START_GRACE
 
 
 def _check_refusal(reason: GateRefusal, detail: str, *, tree: str | None = None) -> GateCheckResult:
@@ -174,7 +212,7 @@ def resolve_target(layout: WorkspaceLayout, path: str, *, worktree: Path | None)
     return resolved if isinstance(resolved, GateCheckResult) else resolved[0]
 
 
-def _existing_run(directory: Path, request: dict[str, object]) -> str | None:
+def _existing_run(directory: Path, request: dict[str, object], now: datetime) -> str | None:
     for record_path in sorted(directory.glob("*.json")):
         try:
             data = json.loads(record_path.read_text(encoding="utf-8"))
@@ -182,7 +220,7 @@ def _existing_run(directory: Path, request: dict[str, object]) -> str | None:
             continue
         if not isinstance(data, dict) or data.get("result") is not None:
             continue
-        if all(data.get(key) == value for key, value in request.items()) and _alive(record_path):
+        if all(data.get(key) == value for key, value in request.items()) and _live(record_path, data, now):
             run_id = data.get("run_id")
             if isinstance(run_id, str):
                 return run_id
@@ -264,7 +302,7 @@ def run_gate_run(
     }
     record_path = directory / f"{run_id}.json"
     with locked(directory / ".dir.lock"):
-        joined = _existing_run(directory, request)
+        joined = _existing_run(directory, request, now)
         if joined is not None:
             return GateRunResult("running", None, "", joined, None, command, names, log_path, lookup.warnings)
         with record_path.open("x", encoding="utf-8", newline="\n") as handle:
@@ -300,3 +338,157 @@ def run_gate_check(layout: WorkspaceLayout, path: str, *, worktree: Path | None 
     seen = any_for_tree(layout.bundle_dir, repo=target.repo, tree=target.tree)
     detail = "only red/scoped/stale receipts" if seen else "no receipt"
     return GateCheckResult("unsatisfied", None, detail, None, target.tree, lookup.warnings)
+
+
+def gate_run_from_record(record: dict[str, Any], result: dict[str, Any]) -> GateRun:
+    """The receipt entry a finished pending record stands for."""
+    return GateRun(
+        run_id=record["run_id"],
+        repo=record["repo"],
+        worktree=record["worktree"],
+        head=record["head"],
+        tree=record["tree"],
+        clean=True,
+        tree_changed=bool(result["tree_changed"]),
+        scope=record["scope"],
+        command=record["command"],
+        names=tuple(record.get("names", ())),
+        exit=int(result["exit"]),
+        log_path=record["log_path"],
+        log_tail=str(result["log_tail"]),
+        started=record["started"],
+        duration_s=float(result["duration_s"]),
+    )
+
+
+def spawn_runner(record_path: Path) -> None:
+    """Start the detached runner, then wait for it to confirm it holds its lock."""
+    record = json.loads(record_path.read_text(encoding="utf-8"))
+    log_path = Path(record["log_path"])
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    argv = [sys.executable, "-m", "graph_works_core.orchestrate.gate_runner", str(record_path)]
+    with log_path.open("ab") as log:
+        options: dict[str, Any] = {
+            "stdin": subprocess.DEVNULL,
+            "stdout": log,
+            "stderr": subprocess.STDOUT,
+            "cwd": record["worktree"],
+            "close_fds": True,
+        }
+        if sys.platform == "win32":
+            options["creationflags"] = WINDOWS_DETACHED_FLAGS
+        else:
+            options["start_new_session"] = True
+        subprocess.Popen(argv, **options)
+    _await_runner_started(record_path, RUNNER_START_TIMEOUT)
+
+
+def _await_runner_started(record_path: Path, timeout: float) -> None:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if json.loads(record_path.read_text(encoding="utf-8")).get("runner_started"):
+            return
+        time.sleep(0.05)
+    raise OSError(f"gate runner did not start within {timeout:.0f}s ({record_path})")
+
+
+@dataclass(frozen=True, slots=True)
+class GateWaitResult:
+    status: Literal["finished", "running", "orphaned"] | None
+    refusal: GateRefusal | None
+    detail: str
+    run_id: str | None
+    exit: int | None
+    recorded: bool
+    log_path: str | None
+    log_tail: str | None
+    receipt_path: str | None
+
+
+def _wait_refusal(detail: str) -> GateWaitResult:
+    return GateWaitResult(None, "no-run", detail, None, None, False, None, None, None)
+
+
+def _read_record(record_path: Path) -> dict[str, Any] | None:
+    try:
+        data = json.loads(record_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, ValueError):
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def _choose_record(directory: Path, run_id: str | None) -> Path | None:
+    if run_id is not None:
+        chosen = directory / f"{run_id}.json"
+        return chosen if chosen.is_file() else None
+    ranked: list[tuple[str, str, Path]] = []
+    for candidate in directory.glob("*.json"):
+        data = _read_record(candidate)
+        if data is not None:
+            ranked.append((str(data.get("started", "")), str(data.get("run_id", "")), candidate))
+    return max(ranked)[2] if ranked else None
+
+
+def _mark_recorded(record_path: Path) -> None:
+    data = _read_record(record_path)
+    if data is None:
+        return
+    data["recorded"] = True
+    temp = record_path.with_name(f".{record_path.name}.{time.monotonic_ns()}.tmp")
+    temp.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8", newline="\n")
+    temp.replace(record_path)
+
+
+def run_gate_wait(
+    layout: WorkspaceLayout,
+    path: str,
+    *,
+    run_id: str | None,
+    timeout: float,
+    clock: WaitClock,
+    sleep: Callable[[float], None],
+    today: date,
+) -> GateWaitResult:
+    """Report a gate run's outcome, waiting up to *timeout* seconds. Never starts a run."""
+    record_path = _choose_record(runs_dir(layout, path), run_id)
+    if record_path is None:
+        return _wait_refusal(f"{path}: no gate run to wait for")
+    deadline = clock.monotonic() + timeout
+    while True:
+        data = _read_record(record_path)
+        if data is None:
+            return _wait_refusal(f"{record_path}: unreadable pending record")
+        rid = str(data.get("run_id"))
+        log_path = data.get("log_path")
+        log_path = log_path if isinstance(log_path, str) else None
+        result = data.get("result")
+        alive = _live(record_path, data, clock.wall())
+        if isinstance(result, dict):
+            code = result.get("exit")
+            if not isinstance(code, int):
+                return GateWaitResult(
+                    "orphaned", None, str(result.get("error", "runner failed")), rid, None, False, log_path, None, None
+                )
+            recorded = bool(data.get("recorded"))
+            receipt_path = f"{path}/references/03-gate-receipts.md" if recorded else None
+            detail = ""
+            if not recorded and not alive:
+                outcome = record_gate_run(layout, path, gate_run_from_record(data, result), today=today)
+                if outcome.refusal is None:
+                    _mark_recorded(record_path)
+                    recorded, receipt_path = True, outcome.receipt_path
+                else:
+                    detail = outcome.detail or outcome.refusal
+            if recorded or not alive:
+                tail = result.get("log_tail")
+                return GateWaitResult(
+                    "finished", None, detail, rid, code, recorded, log_path,
+                    tail if isinstance(tail, str) else None, receipt_path,
+                )  # fmt: skip
+        elif not alive:
+            return GateWaitResult("orphaned", None, "runner is not alive and left no result", rid, None, False,
+                                  log_path, None, None)  # fmt: skip
+        remaining = deadline - clock.monotonic()
+        if remaining <= 0:
+            return GateWaitResult("running", None, "", rid, None, False, log_path, None, None)
+        sleep(min(2.0, remaining))

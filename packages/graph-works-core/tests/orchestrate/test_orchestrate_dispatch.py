@@ -612,6 +612,7 @@ def test_parent_resolution_is_explicit_and_safe(env, case, monkeypatch):
         ],
         "repo_id": "repo1",
         "parent_worktree_id": "parent" if case == "child" else None,
+        "start_sha": git(env[3], "rev-parse", "main").stdout.strip(),
     }
 
 
@@ -680,7 +681,8 @@ def test_record_write_and_verification_failures(env, monkeypatch, case):
         if case == "exception":
             raise OSError("disk failed")
         if case == "application":
-            return SimpleNamespace(plan=SimpleNamespace(refusal=None), application=SimpleNamespace(ok=False))
+            plan = SimpleNamespace(refusal=None, changed=False, start_after=None)
+            return SimpleNamespace(plan=plan, application=SimpleNamespace(ok=False))
         result = original(*args, **kwargs)
         if kwargs["dry_run"]:
             return SimpleNamespace(plan=SimpleNamespace(refusal=None, changed=True))
@@ -1391,3 +1393,101 @@ def test_reader_resume_restores_the_detached_placement(reader_env, monkeypatch):
     assert result.failure.reason == "recovery-inspection"
     assert result.placement is not None and result.placement.start_sha == sha and result.placement.branch is None
     assert result.recorded == "reader-receipt"
+
+
+def head(path, ref="HEAD"):
+    return git(path, "rev-parse", ref).stdout.strip()
+
+
+def commit(path, message="work"):
+    git(path, "-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "--allow-empty", "-m", message)
+
+
+def item_text(env):
+    return (env[0].bundle_dir / "work/x.md").read_text(encoding="utf-8")
+
+
+def on_start(port, action):
+    original = port.worker_start
+
+    def start(*args, **kwargs):
+        action()
+        return original(*args, **kwargs)
+
+    port.worker_start = start
+
+
+def test_reuse_dispatch_records_the_pre_launch_head_not_the_worker_head(env):
+    _, plan, port, _, wt = env
+    plan["dispatches"][0]["worktree"].update(action="reuse", path=str(wt))
+    before = head(wt)
+    on_start(port, lambda: commit(wt))
+    assert head(wt) == before
+    result = run(env)
+    assert result.ok, result.failure
+    assert head(wt) != before
+    text = item_text(env)
+    assert f"start_sha: {before}" in text
+    assert head(wt) not in text
+    assert run(env).ok
+    assert item_text(env) == text
+
+
+def test_creation_dispatch_records_the_branch_creation_commit(env):
+    _, _, port, repo, wt = env
+    git(repo, "worktree", "remove", "--force", str(wt))
+    git(repo, "branch", "-D", "feature/x")
+    base = head(repo, "main")
+    new = wt.parent / "wt-new"
+    port.worktrees["id:wt1"]["path"] = str(new)
+
+    def create():
+        git(repo, "worktree", "add", "-b", "feature/x", str(new), "main")
+        commit(new)
+
+    on_start(port, create)
+    result = run(env)
+    assert result.ok, result.failure
+    assert f"start_sha: {base}" in item_text(env)
+
+
+def test_creation_dispatch_whose_base_moved_is_a_placement_mismatch(env):
+    _, _, port, repo, wt = env
+    git(repo, "worktree", "remove", "--force", str(wt))
+    git(repo, "branch", "-D", "feature/x")
+    new = wt.parent / "wt-new"
+    port.worktrees["id:wt1"]["path"] = str(new)
+
+    def create():
+        commit(repo, "moved")
+        git(repo, "worktree", "add", "-b", "feature/x", str(new), "main")
+        commit(new)
+        git(repo, "reflog", "expire", "--expire=now", "--all")
+
+    on_start(port, create)
+    failure(run(env), "settle", "placement-mismatch", "task_1", "ctx_1")
+
+
+def test_a_reuse_dispatch_keeps_an_existing_baseline(env):
+    layout, plan, _, _, wt = env
+    plan["dispatches"][0]["worktree"].update(action="reuse", path=str(wt))
+    old = head(wt)
+    page = layout.bundle_dir / "work/x.md"
+    page.write_text(
+        item_text(env).replace(
+            "affects: []\n", f"affects: []\nworktree: {wt}\nbranch: feature/x\nstart_sha: {old}\n", 1
+        ),
+        encoding="utf-8",
+        newline="\n",
+    )
+    commit(wt)
+    result = run(env)
+    assert result.ok, result.failure
+    assert f"start_sha: {old}" in item_text(env)
+
+
+def test_a_code_phase_record_without_a_provable_baseline_is_unrecorded(env, monkeypatch):
+    _, _, port, _, _ = env
+    monkeypatch.setattr(d, "strict_commit", lambda *a, **k: d.GitFailure("nonzero", "boom"))
+    failure(run(env), "place", "placement-refused")
+    assert "worker_start" not in port.names()

@@ -26,7 +26,7 @@ from graph_works_core.orchestrate import dispatch_record as dr
 from graph_works_core.orchestrate.orca_port import OrcaPort
 from graph_works_core.orchestrate.placement import PlacementRecord, run_record_placement, run_record_reader
 from graph_works_core.workspace.layout import WorkspaceLayout
-from graph_works_core.workspace.provenance import probe_git
+from graph_works_core.workspace.provenance import GitFailure, gate_git, probe_git, strict_commit, strict_git
 from graph_works_core.workspace.workspace_branch import WORKSPACE_REPO
 
 FAILURE_REASONS: frozenset[str] = frozenset(
@@ -600,11 +600,16 @@ def _place(c: _Dispatch) -> tuple[dict[str, Any], tuple[str, ...]]:
         placed = _prepare_reader(c, placement_file)
         dr.write_json_atomic(placement_file, placed)
         return placed, ()
+    git = gate_git(c.layout)
+    if isinstance(git, GitFailure):
+        raise _Stop("placement-refused", f"git-unavailable ({git.cause}): {git.detail}")
     if action in ("reuse", "main"):
         argv = ["--worktree", f"path:{_text(wt.get('path'), 'worktree path')}"]
+        baseline = strict_commit(Path(_text(wt.get("path"), "worktree path")), "HEAD", git=git)
     else:
         branch, base = _text(wt.get("branch"), "branch"), _text(wt.get("base_branch"), "base_branch")
         repo_path = _text((c.item.get("repo") or {}).get("path"), "code repository path")
+        baseline = strict_commit(Path(repo_path), base, git=git)
         repo_id = _orca_repo_id(c, repo_path)
         parent_path = wt.get("parent_path")
         if parent_path is not None:
@@ -628,7 +633,15 @@ def _place(c: _Dispatch) -> tuple[dict[str, Any], tuple[str, ...]]:
             else:
                 parent_id = parent["id"]
         argv = ["--worktree", "new-top-level", "--name", branch, "--base-branch", base, "--repo", f"id:{repo_id}"]
-    placed = {"action": action, "placement_argv": argv, "repo_id": repo_id, "parent_worktree_id": parent_id}
+    if isinstance(baseline, GitFailure):
+        raise _Stop("placement-refused", f"cannot read the pre-launch baseline: {baseline.detail}")
+    placed = {
+        "action": action,
+        "placement_argv": argv,
+        "repo_id": repo_id,
+        "parent_worktree_id": parent_id,
+        "start_sha": baseline,
+    }
     dr.write_json_atomic(placement_file, placed)
     return placed, tuple(notes)
 
@@ -711,6 +724,38 @@ def _launch(c: _Dispatch) -> None:
     c.mark("done", result=known, dispatch_id=start["dispatch_id"])
 
 
+def _writer_baseline(c: _Dispatch, path: Path, branch: str, *, creation: bool, pre_launch: str) -> str:
+    """The commit this writer's work starts from, proved rather than assumed.
+
+    Existing checkouts: the HEAD read before launch (`_place`). New branches:
+    the branch's creation commit from its reflog; without a reflog, the
+    pre-launch base tip only when it is exactly where the branch forked.
+    """
+    if not pre_launch:
+        raise _Stop("placement-mismatch", "no pre-launch baseline was captured for this attempt")
+    if not creation:
+        return pre_launch
+    git = gate_git(c.layout)
+    if isinstance(git, GitFailure):
+        raise _Stop("placement-mismatch", f"git-unavailable ({git.cause}): {git.detail}")
+    log = strict_git(path, "reflog", "show", "--format=%H", f"refs/heads/{branch}", "--", git=git)
+    entries = log.split() if isinstance(log, str) else []
+    if entries:
+        created = entries[-1]
+        if created != pre_launch:
+            raise _Stop(
+                "placement-mismatch",
+                f"branch {branch} was created at {created}, not the pre-launch base tip {pre_launch}",
+            )
+        return created
+    fork = strict_git(path, "merge-base", "HEAD", c.item["worktree"]["base_branch"], git=git)
+    if isinstance(fork, str) and fork.strip() == pre_launch:
+        ancestor = probe_git(path, "merge-base", "--is-ancestor", pre_launch, "HEAD")
+        if ancestor.returncode == 0:
+            return pre_launch
+    raise _Stop("placement-mismatch", f"cannot prove where branch {branch} started")
+
+
 def _settle(c: _Dispatch) -> None:
     assert c.result.dispatch_id is not None
     launched = c.attempt.steps["launch"].result or {}
@@ -772,6 +817,9 @@ def _settle(c: _Dispatch) -> None:
         branch = branch_probe.stdout.strip()
         if branch_probe.returncode != 0 or not branch or branch != row["branch"]:
             raise _Stop("placement-mismatch", "Git branch disagrees with observed worktree branch")
+        start_sha = _writer_baseline(
+            c, Path(path), branch, creation=creation, pre_launch=str(placed.get("start_sha") or "")
+        )
     place_step = c.attempt.steps["place"].result or {}
     notes = tuple(place_step.get("notes", ()))
     if creation and row["display_name"] != wt["branch"]:
@@ -832,7 +880,9 @@ def _record(c: _Dispatch) -> None:
     path, branch = observed.path, observed.branch
     selected_repo = (c.item.get("repo") or {}).get("name")
 
-    def apply(dry_run: bool) -> PlacementRecord:
+    code_phase = c.item["phase"] in ("execute", "finish") and selected_repo != WORKSPACE_REPO
+
+    def apply(dry_run: bool, start_sha: str | None) -> PlacementRecord:
         return run_record_placement(
             c.layout,
             c.item["path"],
@@ -843,15 +893,20 @@ def _record(c: _Dispatch) -> None:
             today=c.today,
             repo_name=None if selected_repo == WORKSPACE_REPO else selected_repo,
             repo=WORKSPACE_REPO if selected_repo == WORKSPACE_REPO else None,
+            start_sha=start_sha,
+            require_start_sha=code_phase and dry_run is False,
             dry_run=dry_run,
         )
 
-    written = apply(False)
+    preview = apply(True, None)
+    keep = preview.plan.refusal is None and not preview.plan.changed and preview.plan.start_after is not None
+    candidate = None if keep or not code_phase else observed.start_sha
+    written = apply(False, candidate)
     if written.plan.refusal is not None:
         raise _Stop("placement-unrecorded", str(written.plan.detail), refusal=written.plan.refusal)
     if written.application is not None and not written.application.ok:
         raise _Stop("placement-unrecorded", "placement application failed")
-    verified = apply(True)
+    verified = apply(True, candidate)
     if verified.plan.refusal is not None or verified.plan.changed:
         raise _Stop("placement-unrecorded", "verification failed", refusal=verified.plan.refusal)
     c.result = replace(c.result, recorded="recorded" if written.written else "unchanged")

@@ -151,6 +151,23 @@ def test_deleted_branch_with_unmerged_detached_head_is_skipped(tmp_path):
     assert (row.action, row.reason) == ("skip", "unmerged")
 
 
+def test_existing_merged_branch_with_unmerged_detached_head_is_skipped(tmp_path):
+    layout, _, worktrees, _ = setup(tmp_path)
+    git(worktrees["code"], "switch", "--detach")
+    git(worktrees["code"], "commit", "--allow-empty", "-m", "post-merge detached work")
+    row = by_repo(plan(layout))["code"]
+    assert (row.action, row.reason) == ("skip", "unmerged")
+    assert row.worktree == str(worktrees["code"].resolve())
+    assert row.branch == "feature"
+
+
+def test_existing_merged_branch_with_merged_detached_head_is_removable(tmp_path):
+    layout, _, worktrees, _ = setup(tmp_path)
+    git(worktrees["code"], "switch", "--detach")
+    row = by_repo(plan(layout))["code"]
+    assert (row.action, row.reason) == ("remove", "")
+
+
 def test_main_checkout_and_target_branch_are_protected(tmp_path):
     layout, repos, worktrees, page = setup(tmp_path)
     page.write_text(

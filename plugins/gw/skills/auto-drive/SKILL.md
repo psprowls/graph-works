@@ -1221,9 +1221,11 @@ It reads `payload` (`taskId`, `dispatchId`, `outcome`) and checks Orca's
   as §2.5.2 does; never parse the dispatch key. A row whose `display_name` is
   missing or does not split cannot be resolved: say so in one line and
   continue — the read is best-effort, never a reason to hold the delivery
-  → if the settled dispatch's phase was `finish`, then after `worker-release` run **Finish cleanup** (below)
-  — the same `display_name` split resolves the work path; it is best-effort
-  and never holds the delivery
+  → if the settled dispatch's phase was `finish`, then after `worker-release`
+  run **Finish cleanup** (below) only when the release classifier action is
+  `done`. For every other action, skip Finish cleanup and report the retained
+  or uncertain terminal for wrap-up. The same `display_name` split resolves
+  the work path; it is best-effort and never holds the delivery
   → nothing else; the next cycle's plan (§2.2) picks up the new state
   naturally.
 
@@ -1581,17 +1583,21 @@ that marks a box `- [x]` dishonestly.
 ### Finish cleanup (finish dispatches only)
 
 Runs from the Success branch only — on `accepted-success`, after §2.1's
-`settled` result and after `worker-release`, never on `claimed-unconfirmed`.
+`settled` result and after `worker-release`, and only when the release
+classifier action is `done` (`released` or `already_released`); never on
+`claimed-unconfirmed`. For every other classifier action, skip Finish cleanup
+and report the retained or uncertain terminal for wrap-up's confirmed sweep.
 
 1. Run `gw work next <path> --json`. Continue only when `gw work next <path> --json` reports `work_status: resolved`
    (with `phase: done`). A finish that held (`pr` / `hold` / `discard`) runs
    nothing.
-2. From the coordinator's own cwd, which is outside every item worktree, run
+2. From the coordinator's own cwd, run
    `finish-receipt.py cleanup <path> --workspace <workspace> --runner-cwd "$PWD"`
    and execute the plan per
    [finish-cleanup.md](../finishing-relay/references/finish-cleanup.md),
-   including the relay's `deferred` row: from here it is an ordinary
-   `remove` row, because the relay's terminal is already released.
+   including the relay's `deferred` row when it now returns `remove`: its
+   terminal is already released. If the coordinator cwd is inside an item worktree, its row comes back `deferred`;
+   leave it for a later sweep from another directory.
 3. Print one line per removed or skipped row. A refusal is one line. Nothing
    here changes item state, retries, or holds the delivery.
 
@@ -2069,7 +2075,10 @@ new checkout to repair the receipt.
    Present the whole list with one `AskUserQuestion` (*remove all* /
    *leave them*): everything goes under one confirmation, never one question per
    row. On *remove all*, close each retained terminal with
-   `orca terminal close --terminal <handle>`, and execute every row per
+   `orca terminal close --terminal <handle>` and positively verify each terminal is closed before executing its rows
+   (use the close receipt and fresh terminal readback). If a terminal close fails or cannot be verified, skip its affected rows;
+   when its worktree cannot be matched to rows with confidence, retain those rows too.
+   Then execute the remaining rows per
    [finish-cleanup.md](../finishing-relay/references/finish-cleanup.md). On
    *leave them*, print the list as the run's leftovers. An empty list asks
    nothing.
@@ -2081,8 +2090,9 @@ new checkout to repair the receipt.
    — the named target branch's own upstream, not the repo's currently
    checked-out branch, quoted because bare `@{upstream}..<target_branch>` is
    wrong when the checkout differs. When it is greater than 0, print the
-   repo, the branch and the ahead count. When the branch has no upstream (the
-   command fails), print `<repo> <branch>: no upstream`. Wrap-up never pushes.
+   repo, the branch and the ahead count. If the command fails, print the command failure verbatim
+   with the repo and branch; do not assume that every failure means no upstream.
+   Wrap-up never pushes.
 3. Run §2.5.3 once more: refresh step 1's full task-list, worker-list and
    classifier output after its release/close mutations, so a finished run
    leaves no stale `in-review` card.

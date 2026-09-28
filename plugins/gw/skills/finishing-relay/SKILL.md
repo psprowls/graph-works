@@ -301,11 +301,17 @@ integration into the merge target; PR, hold and discard do not.
   ```
   This session's own worktree comes back `deferred`; leave it for the
   coordinator. Write one line per removed, skipped and deferred row (path,
-  branch, and reason for any skip or deferred) to
-  `<workspace>/okf/<work-path>/references/04-finish-cleanup.md` — a durable
-  report that survives this session's own worktree, unlike the `worker_done`
-  body. A refused plan is one line in that report, never an escalation. The
-  item has already resolved.
+  branch, and reason for any skip or deferred) to the run-specific report
+  `<workspace>/.gw/cache/auto-drive/<run_id>/finish-cleanup/<dispatch_id>.md`.
+  Set `cleanup_report` to that path using this session's dispatch ID and its
+  matching run ID (from the dispatch context, or from a
+  `worker-show --dispatch <dispatch_id> --json` readback after matching its
+  task and dispatch IDs to this session). Then
+  `mkdir -p "$(dirname "$cleanup_report")"` before writing it. This is in
+  the main workspace's gitignored `.gw/cache` runtime area, outside the
+  removable item worktrees and tracked `okf` content; it survives this
+  session's worktree. A refused plan is one line in that report, never an
+  escalation. The item has already resolved.
   Only after a successful advance, send `worker_done --outcome succeeded` (this session's own dispatch
   preamble command, `--task-id`/`--dispatch-id` filled in from it) with
   `--report-path` set to the file above and the required exactly-three-sentence

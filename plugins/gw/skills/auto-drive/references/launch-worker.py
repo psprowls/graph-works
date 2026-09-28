@@ -537,6 +537,7 @@ def preparation_runtime() -> list[str]:
         "import inspect; from graph_works_core.orchestrate.placement import preparation_guard, run_record_placement; "
         "from graph_works_core.workspace.transactions import apply_mutation; "
         "assert 'expected_preparation' in inspect.signature(run_record_placement).parameters; "
+        "assert 'start_sha' in inspect.signature(run_record_placement).parameters; "
         "assert 'validate_read_set' in inspect.signature(apply_mutation).parameters"
     )
     try:
@@ -658,6 +659,7 @@ def prepare(args: argparse.Namespace) -> None:
     branch = text_field(selected.get("branch"), label, "branch")
     base = text_field(selected.get("base_branch"), label, "base branch")
     phase = text_field(selected.get("owner_phase"), label, "owner phase")
+    base_tip = preparation_git(repo, "rev-parse", "--verify", f"{base}^{{commit}}")
     marker = "gw-preparation:" + hashlib.sha256(
         json.dumps([args.owner, args.repo_name, os.path.realpath(repo), branch], separators=(",", ":")).encode()
     ).hexdigest()
@@ -685,8 +687,6 @@ def prepare(args: argparse.Namespace) -> None:
                 shown = {}
             if isinstance(shown.get("worktree"), dict) and shown["worktree"].get("repoId") != repo_id:
                 fail(f"{label}: cross-repository parent")
-        base_tip = preparation_git(repo, "rev-parse", "--verify", f"{base}^{{commit}}")
-
         marked = marked_rows(args.orca, repo_id, marker, label)
         if len(marked) > 1:
             fail(f"{label}: ambiguous preparation markers; repair")
@@ -738,6 +738,8 @@ def prepare(args: argparse.Namespace) -> None:
     if preparation_inventory(repo).get(branch, []) != [path]:
         fail(f"{label}: deterministic checkout not uniquely proven")
     preparation_checkout(repo, path, branch)
+    head = preparation_git(path, "rev-parse", "HEAD")
+    start_args = ["--start-sha", base_tip] if head == base_tip else []
     # Creation changes only the proposed worktree action/path. Any change in
     # owner phase, repo assignment, branch or base means no stamp is authorized.
     fresh = selected_preparation(preparation_json(refresh_argv, label), args.owner, args.repo_name)
@@ -746,7 +748,7 @@ def prepare(args: argparse.Namespace) -> None:
         fail(f"{label}: preparation changed after creation; replan")
     recorded = preparation_json([*adapter, "record", *common_args, "--root", args.owner,
         "--phase", phase, "--repo", args.repo_name, "--worktree", path,
-        "--branch", branch, "--expected", guard], label)
+        "--branch", branch, *start_args, "--expected", guard], label)
     print(json.dumps({"owner": args.owner, "repo": args.repo_name, "path": path,
                       "branch": branch, "record": recorded, "replan_required": True}))
 

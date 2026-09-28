@@ -402,7 +402,12 @@ class PreparationRuntimeTests(unittest.TestCase):
                         argv = function()
                         self.assertEqual(argv, [sys.executable, str(helper.resolve().with_name("record-preparation.py"))])
                     self.assertEqual(run.call_args.args[0][:2], [sys.executable, "-c"])
+                    self.assertIn("'start_sha' in inspect.signature(run_record_placement).parameters",
+                                  run.call_args.args[0][2])
                     self.assertEqual(run.call_args.kwargs["cwd"], str(executable.resolve().parent))
+
+    def test_the_runtime_probe_requires_start_sha_support(self):
+        self.test_installed_runtime_is_probed_and_never_uses_caller_project()
 
     def test_unknown_installed_runtime_refuses_explicitly(self):
         with tempfile.TemporaryDirectory() as temp:
@@ -502,6 +507,32 @@ class PreparationLifecycleTests(unittest.TestCase):
             self.assertEqual(argv[argv.index(flag) + 1], expected)
         self.assertEqual(self.git(self.root / "anchor", "branch", "--show-current"), "epic/integration")
         self.assertFalse(any("worker-start" in call or "task-create" in call for call in self.calls))
+
+    def record_argv(self):
+        return next(call for call in self.calls if "record" in call)
+
+    def test_a_created_anchor_records_its_base_tip(self):
+        self.prepare()
+        argv = self.record_argv()
+        self.assertEqual(argv[argv.index("--start-sha") + 1], self.git(self.repo, "rev-parse", "main"))
+
+    def adopt(self):
+        path = self.root / "adopted"
+        self.git(self.repo, "worktree", "add", "-b", "epic/integration", str(path), "main")
+        return path
+
+    def test_an_adopted_anchor_at_the_base_tip_records_it(self):
+        self.adopt()
+        self.prepare()
+        argv = self.record_argv()
+        self.assertEqual(argv[argv.index("--start-sha") + 1], self.git(self.repo, "rev-parse", "main"))
+
+    def test_an_adopted_anchor_that_moved_passes_no_start_sha(self):
+        path = self.adopt()
+        self.git(path, "-c", "user.name=Test", "-c", "user.email=test@example.com",
+                 "commit", "--allow-empty", "-m", "moved")
+        self.prepare()
+        self.assertNotIn("--start-sha", self.record_argv())
 
     def test_failed_stamp_then_restart_adopts_without_second_create(self):
         self.record_error = True

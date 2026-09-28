@@ -321,8 +321,11 @@ matches or resolves rules. Treat model IDs and effort strings as opaque.
 
       ```
       gw work record-placement <slug> --root <work-path> --phase <dispatch phase> \
-        --worktree <observed path> --branch <normalized branch> --json
+        --worktree <observed path> --branch <normalized branch> \
+        --start-sha <the checkout's HEAD read before the worker launched> --json
       ```
+
+      `--start-sha` is the execute baseline the commit gate reads; read it from the checkout before the worker launches and never abbreviate it.
 
       When `dispatch.repo.name` is `_workspace`, add `--repo _workspace`
       before `--json` in that command. This is a workspace-only item's no-fork
@@ -362,6 +365,9 @@ matches or resolves rules. Treat model IDs and effort strings as opaque.
       reader receipt above succeeded, then continue to the submission probe.
       Without that proof, halt into inspection; do not reinterpret a refusal
       on a non-reader dispatch as a successful record.
+      - `invalid-baseline` — the observed `--start-sha` is not a full lowercase commit OID; re-read it from the checkout, never abbreviate it.
+      - `baseline-conflict` — the item already records a different `start_sha` for this same worktree and branch; inspect which commit this stage's work started from before recording again.
+      - `baseline-missing` — a code placement would end up with no `start_sha` and none was proved; re-run preparation from a checkout still at its base tip, or record one explicitly.
 
    6. **Application failed or other non-success.** Every other non-success,
       including when `refusal: null`, enters inspection: a failed application,

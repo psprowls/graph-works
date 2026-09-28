@@ -660,6 +660,37 @@ assert_not_matches "skills/auto-drive/SKILL.md" \
     'reads from the shared epic worktree|read-only descendant that records nothing' \
     "auto-drive retires shared-reader placement and receipt skipping"
 
+# tech-debt-auto-drive-skill-orca-edge-cases: §2.7 waits through the tested
+# `gw work wait` verb; no raw `check --wait` / `check --ack` survives anywhere
+# in the skill tree. Wording pins are prose contracts, not a simulation.
+raw_check_hits="$(grep -rnE -- 'orchestration check --run <run_id> --(wait|ack)|check --wait|check --ack' \
+    "$PLUGIN_ROOT/skills/auto-drive" || true)"
+if [[ -z "$raw_check_hits" ]]; then
+    pass "auto-drive carries no raw orca check --wait / --ack loop"
+else
+    fail "auto-drive carries no raw orca check --wait / --ack loop"
+    echo "$raw_check_hits" | sed 's/^/      /'
+fi
+for contract in \
+    'gw work wait --run <run_id> [--ack <delivery_id>] --timeout-s 600 --json' \
+    'the one named exception to §2' \
+    'A deferred ack is simply the next call without `--ack`' \
+    'absorbed duplicate worker_done <dispatch_id>' \
+    'On `status: timeout`, triage from `liveness[]`' \
+    'Verb failure with code `consumer_fenced`' \
+    'strips them and self-acks heartbeat-only deliveries' \
+    'The verb absorbs a late duplicate only for a released single-attempt completion' \
+    'stablyai/orca#14910' \
+    'stablyai/orca#21226' \
+    'is "unknown", not "none"'
+do
+    assert_contains "skills/auto-drive/SKILL.md" "$contract" \
+        "auto-drive gw work wait contract: $contract"
+done
+assert_not_matches "skills/auto-drive/SKILL.md" \
+    "so they're never delivered|Until \`tech-debt-auto-drive-skill-orca-edge-cases\` replaces" \
+    "auto-drive drops the never-delivered heartbeat claim and the interim parenthetical"
+
 if [[ "$FAILURES" -gt 0 ]]; then
     echo "STATUS: FAILED ($FAILURES failure(s))"
     exit 1

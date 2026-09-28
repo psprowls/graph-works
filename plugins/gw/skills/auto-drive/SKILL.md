@@ -79,7 +79,9 @@ don't rely on implicit terminal binding once other dispatches may exist.
 Loop until Wrap-up (§5) or the user says stop. Each iteration is
 self-contained — never trust anything from a previous iteration in this same
 session; re-derive from Orca + the vault every time. This is what makes
-crash/compaction resume the same code path as a normal cycle. Run §2.5.3
+crash/compaction resume the same code path as a normal cycle. The one named
+exception to §2's rule is §2.7's carried delivery id; losing it only causes a
+replay, which §4 already tolerates. Run §2.5.3
 after §2.5.2 on every cycle that reaches park handling; terminal plans reconcile
 cards in §5 before ending.
 
@@ -724,7 +726,7 @@ classification is an ordinary fresh dispatch — run §3 unmodified.
    a decision is never un-answered — so without this check a resumed attempt
    that parks again or dies would leave the same answered decision and the
    same checkpoint on disk and be resumed again every cycle, forever, at
-   `check --wait` intervals. Derive the answer from the Task's own Dispatch
+   `gw work wait` intervals. Derive the answer from the Task's own Dispatch
    history rather than adding a new write path: every Dispatch on this Task is
    already in §2.1's worker-list snapshot (rows joined by `taskId`). For each,
    read `orca orchestration worker-show --dispatch <id> --json` →
@@ -841,7 +843,7 @@ hold at once:
   `worktree-pending` blocker means slots or worktrees free up on their own, so
   keep looping.
 
-When all three hold, the loop has nothing to wait *for*: `check --wait` would
+When all three hold, the loop has nothing to wait *for*: `gw work wait` would
 block for its full ten minutes with zero live dispatches, time out, re-derive
 an identical plan, and do it again indefinitely — never escalating to the one
 human whose answer is the only thing that can unblock it. So **stop the run**,
@@ -860,12 +862,31 @@ for finished work, and a parked run is not finished. Do not run §5.
 ### 2.7 Wait
 
 ```
-orca orchestration check --run <run_id> --wait \
-  --types worker_done,escalation,question --timeout-ms 600000 --json
+gw work wait --run <run_id> [--ack <delivery_id>] --timeout-s 600 --json
 ```
 
+One call waits, and acknowledges the previous event first. The result carries
+`status` (`event` or `timeout`), `delivery_id`, `messages[]`, `absorbed[]`,
+`self_acked`, `rebound`, `sleep_gap` (`{seconds}` or null), `waited_s`,
+`pending_questions` (null when the read failed), `warnings`, and `liveness`
+(rows on timeout only, else null). Heartbeats never wake it, and a
+heartbeat-only or absorbed-only delivery is acked by the verb itself.
+
+- **Carried state: the delivery id to ack.** This is
+  the one named exception to §2's self-contained-iteration rule. Carry `delivery_id` into the next
+  call's `--ack` only once every message in its batch is handled under the
+  rules below. A deferred ack is simply the next call without `--ack`; Orca
+  replays the same batch. Losing the id (restart, compaction) causes that same
+  replay. There is no standalone ack, and `--ack` is ignored at
+  `--timeout-s 0`.
+- **On `status: event`:** process `messages[]` under §4. For each
+  `absorbed[]` entry print `absorbed duplicate worker_done <dispatch_id>` and
+  take no action. Report `rebound: true` (the verb re-bound a fenced consumer)
+  and any `sleep_gap` (the host slept; wall-clock ages across it are not idle
+  time).
 - **On delivery, before mirroring:** obtain fresh pending labels with
-  `gw work wait --run <run_id> --timeout-s 0 --json`. Match each question's
+  this wait result's own `pending_questions`; no separate read is needed
+  here. Match each question's
   `message_id` to this read's `pending_questions` entry and use its `label`
   in §4.3; suffix collisions can change labels between reads.
   Never invent a label or reuse a cached label when the refresh fails.
@@ -933,16 +954,14 @@ orca orchestration check --run <run_id> --wait \
     → handle other messages and retry the reads on replay.
 - **Handle, then acknowledge:** process **every** message in the batch (§4)
   before acking, preserving the recovery-record requirement below. Only when
-  every message is handled, acknowledge with the delivery id from the response:
-  `orca orchestration check --run <run_id> --ack <delivery_id>`, reading the
-  id from `result.deliveryId` (a bound Run replays the same delivery until
-  acked — don't ack before every message in the batch is handled). For a question, *handled* means *mirrored to the human*, not *answered*.
+  every message is handled, acknowledge by passing the result's `delivery_id`
+  as the next wait's `--ack <delivery_id>` (a bound Run replays the same
+  delivery until acked — don't ack before every message in the batch is
+  handled). For a question, *handled* means *mirrored to the human*, not *answered*.
   The positive closure/reply path above also handles an already closed question.
   Once §4.3 has printed it, it satisfies the mirroring requirement; the question
-  stays pending in Orca until `reply --id` answers it or its Dispatch ends. If a
-  future runtime version reports the id under a different key, read it off
-  the first real `check --wait --json` response rather than trusting this
-  name blindly. Continue to the pending display below, even if ack was deferred.
+  stays pending in Orca until `reply --id` answers it or its Dispatch ends.
+  Continue to the pending display below, even if ack was deferred.
 - **Rejected or unprovable completion:** a delivery holding a
   `claimed-unconfirmed` report (§4.1) may be acked only once that report's
   recovery record is written with its identities, the evidence so far, and
@@ -951,36 +970,50 @@ orca orchestration check --run <run_id> --wait \
   replayed delivery is the only copy. After the ack, each cycle's §2.1 row
   carrying `recovery` resumes §4.1.1. A timeout never launches a replacement,
   and an unresolved active worker keeps its live key.
-- **stderr note:** `--wait` emits JSON keepalive lines to **stderr** every
-  15s so the caller can tell the process is alive — stdout carries only the
-  real response. Don't merge streams (`2>&1`) when capturing this call; if a
-  merge is unavoidable, filter with `jq "select(._keepalive|not)"`. The
-  `_heartbeat` alias inside this keepalive stream is unrelated to worker
-  heartbeat messages and to `lastHeartbeatAt` (§3's probe) — three
-  unrelated things share the name.
-- **On timeout with nothing delivered:**
-  `orca orchestration worker-show --dispatch <id> --json` for every
-  still-live dispatch. Any `failed`/`stopped` → failure flow
-  (§4.2), then continue to the pending display below. An unsuccessful or uncertain read
-  enters inspection without nudging. Still `ready`/`running` → before
-  looping back into another `--wait`, run §3's **Manual ordered probe** on
-  each still-live dispatch. An `attend` dispatch may legitimately be waiting
-  on a dialog, while an unsent prompt can report `running` indefinitely;
-  elapsed idle time decides neither case.
+- **On `status: timeout`, triage from `liveness[]`**, one row per still-live
+  dispatch, instead of a per-dispatch `worker-show` sweep. Rows carry facts
+  (`key`, `handle`, `state`, heartbeat/transcript/output instants and ages,
+  `worktree_path`, `progress`, `notes[]`), never a verdict. A `failed` or
+  `stopped` row → failure flow (§4.2), then continue to the pending display
+  below. A `worker-show failed` note or an unknown state enters inspection
+  without nudging. A `ready`/`running` row → before looping back into another
+  wait, run §3's **Manual ordered probe** on that dispatch, unchanged: it
+  takes its own fresh reads and keeps its heartbeat veto. An `attend` dispatch
+  may legitimately be waiting on a dialog, while an unsent prompt can report
+  `running` indefinitely; elapsed idle time decides neither case. Print one
+  progress line per row: key, state, heartbeat age, and SDD task counts when
+  `progress` is present. With a `sleep_gap`, ages are not idle time.
+- **Verb failure.** A nonzero exit carries `reason: refused` and payload
+  `{run_id, code}`; nothing unprocessed was acked.
+  Verb failure with code `consumer_fenced` means the verb's own rebind failed: re-run §1's bind once
+  and retry the wait. Any other code → report it and stop the loop;
+  re-running `/gw:auto-drive <work-path>` resumes cleanly.
 - **On both delivery and timeout, display pending before restarting.**
-  After the handling above, read (or refresh after delivery processing) the
-  pending set: `gw work wait --run <run_id> --timeout-s 0 --json` — a zero
+  After the handling above, refresh the pending set:
+  `gw work wait --run <run_id> --timeout-s 0 --json` — a zero
   timeout makes no Orca `check` call and acks nothing; it only derives the
-  Run's unanswered questions from Orca. Print its `pending_questions` as
+  Run's unanswered questions from Orca. A timeout whose triage sent, stopped
+  or replied to nothing may display its own result's `pending_questions`
+  instead. Print its `pending_questions` as
   §4.3 step 1a says, and show its `warnings`. A failed read prints the refresh
   failure notice, not an invented pending list. If this display finally mirrors
   a deferred delivery question, or positive evidence handles its closure,
   acknowledge only after every message meets
   the handling and recovery-record safeguards above.
   Only after the pending display, restart the cycle at §2.1.
-  (Until `tech-debt-auto-drive-skill-orca-edge-cases` replaces this section's
-  raw `check --wait` with `gw work wait`, the pending reads are separate calls;
-  afterwards every wait result already carries the field.)
+
+**Orca behaviour the verb does not absorb.**
+
+- The "You have N orchestration messages" text Orca types into the
+  coordinator terminal is noise. Do not run `check` or `inbox` in response;
+  the next `gw work wait` receives the messages (stablyai/orca#14910,
+  stablyai/orca#16822).
+- Under a fence, `inbox --terminal` returns `count: 0`
+  (stablyai/orca#21226). A zero-timeout `gw work wait` makes no `check` call
+  and so never rebinds: an empty `pending_questions` or an empty reply-proof
+  `inbox` read is "unknown", not "none". Only a full wait detects the fence
+  and rebinds. The fail-closed rules above (no ack without positive evidence)
+  already prevent a wrong ack; this note keeps the display honest.
 
 ## 3. Dispatch mechanics
 
@@ -1124,13 +1157,13 @@ paths, which relaunch an existing Task; new dispatches do not use them.
 
 ## 4. Delivery processing
 
-Handle every message in the `check --wait` batch (§2.7) — one at a time —
+Handle every message in the `gw work wait` batch (§2.7) — one at a time —
 before acking.
 
 ### 4.1 `worker_done`
 
 Classify each `worker_done` before reading its outcome. Save the message
-object from `result.messages[]` and run:
+object from the wait result's `messages[]` and run:
 
 ```
 python3 references/launch-worker.py classify-report --message <message-json>
@@ -1177,7 +1210,8 @@ capability, pane/leaf, process incarnation — are authority boundaries: never
 resend the report for the worker, never rewrite `--from`, and
 never infer identity from a terminal-handle prefix.
 The historical caller-identity cause remains unverified upstream; this branch
-recovers without explaining it.
+recovers without explaining it. The verb absorbs a late duplicate only for a released single-attempt completion
+(§2.7's `absorbed[]`); every other rejected or late report still arrives here.
 
 Recovery records live at
 `<workspace>/okf/<dispatched-item-path>/references/orca-settlement/<dispatch_id>.json`
@@ -1918,9 +1952,10 @@ joined on the escalation's sender terminal handle.
 Otherwise just note it and continue — an escalation doesn't have to block
 the loop unless the user says so.
 
-Worker heartbeats are never in `--types` (§2.7), so they're never delivered
-here; liveness between deliveries is checked only via `worker-show` on
-wait-timeout.
+Orca's batches can carry worker heartbeats, but `gw work wait` (§2.7)
+strips them and self-acks heartbeat-only deliveries (`self_acked`), so §4
+never sees one; liveness between events comes from the timeout `liveness[]`
+rows.
 
 ## 5. Resume & wrap-up
 

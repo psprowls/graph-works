@@ -147,6 +147,8 @@ transcript is not filed under the next phase. A refusal or a "not written"
 warning is a note to relay, never a reason to stop: capture is provenance, not
 a gate.
 
+**Record the execute baseline.** When the stage about to run is `execute` (the phase captured in step 1, or entered by step 2's dispatch transition), run `gw work record-baseline <work-path> --json` from the checkout where the stage's code work starts — the session's own checkout, or `--cwd <worktree>` when the item's frontmatter names a `worktree:` the rider sends the stage to — before invoking the stage skill. It records that checkout's HEAD as the item's `start_sha`, which the `execute -> finish` gate reads. Under a supervised dispatch it is a no-op when `gw work dispatch` already recorded the baseline. A refusal (`baseline-conflict`, `outside-repository`, `git-unavailable`, `no-repo`) stops the stage: report it rather than starting code work without a baseline.
+
 Invoke the stage skill named by `action.skill` via the Skill tool, using the
 value **verbatim**, prepending a work-item brief.
 
@@ -286,6 +288,8 @@ owns its one advance after the stock finishing skill returns.
 For non-finish stages and satisfied gates, run `gw work advance <work-path> --from <expected-phase>`
 with whatever flags the stage produced (`--effort` if the command demands it).
 Under a supervised dispatch (step 2), add `--no-infer-worktree`; this applies to the finish-outcome rows below too.
+
+**Gate refusals.** The `execute -> finish` advance fails closed. It refuses with `no-affects`, `no-repo`, `worktree-missing`, `git-unavailable`, `uncommitted-work`, `no-start-sha`, `range-unreadable`, `no-commits` or `no-affects-touched`, and its `refusal.detail` says what is missing. Fix the cause when you can (commit the work, restore the worktree, configure `toolchain.git`) and advance again. Only a human may bypass one: in an attended session, show the refusal and ask the user whether to bypass exactly that code; on a yes, run `gw work advance <work-path> --from execute --skip-gate <code> --reason "<their reason>" --actor <their handle>`, which records an answered decision in the ledger. A supervised worker must never pass `--skip-gate`: it sends `worker_done --outcome failed` with subject `gate refused: <code>` and the refusal detail in its body, and stops.
 
 **Finish outcomes: only a verified integration resolves.** Apply this table
 for every item type, using the attended rider's outcome line or relay's result:

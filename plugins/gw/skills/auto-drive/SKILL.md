@@ -1201,6 +1201,8 @@ It reads `payload` (`taskId`, `dispatchId`, `outcome`) and checks Orca's
   → §4.1.1. Never the failure question by default: retry/skip/stop is wrong
   for work that may already be done.
 
+**Gate refusal.** A `worker_done --outcome failed` whose subject starts with `gate refused: <code>` is the `execute -> finish` gate failing closed, not a crashed worker. Do not re-dispatch the stage blindly. Show the human the code and the body's detail and ask whether to fix the cause (re-dispatch execute) or bypass exactly that code. On a bypass, run `gw work advance <path> --from execute --skip-gate <code> --reason "<the human's reason>" --actor <the human's handle> --no-infer-worktree` yourself — workers never pass `--skip-gate` — then continue the loop from `gw work orchestrate`.
+
 - **Success branch**: refresh the full task-list and worker-list and run
   §2.1's classifier before acknowledging the delivery. Require its `settled`
   result for this exact task/dispatch pair: this validates the full frozen

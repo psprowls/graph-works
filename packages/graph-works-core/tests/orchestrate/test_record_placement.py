@@ -1069,6 +1069,21 @@ def test_guarded_preparation_binds_inherited_assignment(tmp_path: Path) -> None:
         )
 
 
+def _anchor_checkout(tmp_path: Path) -> tuple[str, str]:
+    """A real one-commit checkout: the adapter verifies its HEAD against `--start-sha`."""
+    import subprocess
+
+    anchor = tmp_path / "anchor-checkout"
+    anchor.mkdir()
+    identity = ["-c", "user.name=Test", "-c", "user.email=test@example.com"]
+    subprocess.run(["git", "-C", str(anchor), "init", "-q", "-b", "main"], check=True)
+    subprocess.run(["git", "-C", str(anchor), *identity, "commit", "-q", "--allow-empty", "-m", "base"], check=True)
+    head = subprocess.run(
+        ["git", "-C", str(anchor), "rev-parse", "HEAD"], check=True, capture_output=True, text=True
+    ).stdout.strip()
+    return str(anchor), head
+
+
 def test_preparation_adapter_records_foreign_anchor_with_owner_phase(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -1077,6 +1092,7 @@ def test_preparation_adapter_records_foreign_anchor_with_owner_phase(
     import sys
 
     layout = _vault(tmp_path)
+    wt, head = _anchor_checkout(tmp_path)
     _declare_two_repos(layout, tmp_path)
     _tag(layout, EPIC, "code")
     adapter = Path(__file__).resolve().parents[4] / "plugins/gw/skills/auto-drive/references/record-preparation.py"
@@ -1098,9 +1114,11 @@ def test_preparation_adapter_records_foreign_anchor_with_owner_phase(
             "--repo",
             "ui",
             "--worktree",
-            WT,
+            wt,
             "--branch",
             BR,
+            "--start-sha",
+            head,
             "--expected",
             guard,
         ],
@@ -1108,7 +1126,7 @@ def test_preparation_adapter_records_foreign_anchor_with_owner_phase(
     runpy.run_path(str(adapter), run_name="__main__")
     assert json.loads(capsys.readouterr().out)["written"] is True
     owner = next(item for item in load_items(load_bundle(layout.bundle_dir, ignore=IGNORE)) if item.path == EPIC)
-    assert owner.repo_stamps["ui"] == Stamp(WT, BR)
+    assert owner.repo_stamps["ui"] == Stamp(wt, BR, start_sha=head)
     assert owner.worktree is None
 
 
@@ -1118,6 +1136,7 @@ def test_preparation_runtime_runs_real_adapter_from_external_cwd(tmp_path: Path)
     import subprocess
 
     layout = _vault(tmp_path)
+    wt, head = _anchor_checkout(tmp_path)
     helper = Path(__file__).resolve().parents[4] / "plugins/gw/skills/auto-drive/references/launch-worker.py"
     functions = runpy.run_path(str(helper))
     argv = functions["preparation_runtime"]()
@@ -1145,9 +1164,11 @@ def test_preparation_runtime_runs_real_adapter_from_external_cwd(tmp_path: Path)
             "--repo",
             "repo",
             "--worktree",
-            WT,
+            wt,
             "--branch",
             BR,
+            "--start-sha",
+            head,
             "--expected",
             json.loads(result.stdout)["guard"],
         ],

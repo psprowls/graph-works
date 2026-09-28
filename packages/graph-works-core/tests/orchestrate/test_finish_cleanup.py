@@ -133,12 +133,42 @@ def test_deleted_branch_leaves_worktree_only_row(tmp_path):
     assert (row.worktree, row.branch, row.action) == (str(worktrees["code"].resolve()), "", "remove")
 
 
+def test_deleted_branch_with_unrelated_current_branch_is_skipped(tmp_path):
+    """A deleted stamped branch alone is not proof the surviving checkout is safe."""
+    layout, repos, worktrees, _ = setup(tmp_path)
+    git(worktrees["code"], "switch", "-c", "other")
+    git(repos["code"], "branch", "-d", "feature")
+    row = by_repo(plan(layout))["code"]
+    assert (row.action, row.reason) == ("skip", "unmerged")
+
+
+def test_deleted_branch_with_unmerged_detached_head_is_skipped(tmp_path):
+    layout, repos, worktrees, _ = setup(tmp_path)
+    git(worktrees["code"], "switch", "--detach")
+    git(worktrees["code"], "commit", "--allow-empty", "-m", "post-merge work")
+    git(repos["code"], "branch", "-d", "feature")
+    row = by_repo(plan(layout))["code"]
+    assert (row.action, row.reason) == ("skip", "unmerged")
+
+
 def test_main_checkout_and_target_branch_are_protected(tmp_path):
     layout, repos, worktrees, page = setup(tmp_path)
     page.write_text(
         page.read_text(encoding="utf-8").replace(f"worktree: {worktrees['code']}", f"worktree: {repos['code']}"),
         encoding="utf-8",
     )
+    row = by_repo(plan(layout))["code"]
+    assert (row.action, row.reason) == ("skip", "target")
+
+
+def test_deleted_branch_checkout_now_at_target_is_protected(tmp_path):
+    layout, repos, worktrees, page = setup(tmp_path)
+    page.write_text(
+        page.read_text(encoding="utf-8").replace(f"worktree: {worktrees['code']}", f"worktree: {repos['code']}"),
+        encoding="utf-8",
+    )
+    git(worktrees["code"], "switch", "--detach")
+    git(repos["code"], "branch", "-d", "feature")
     row = by_repo(plan(layout))["code"]
     assert (row.action, row.reason) == ("skip", "target")
 
@@ -159,6 +189,21 @@ def test_live_sibling_sharing_worktree_or_branch_is_protected(tmp_path):
         encoding="utf-8",
     )
     assert by_repo(plan(layout))["code"].action == "remove"
+
+
+def test_live_sibling_sharing_branch_only_is_protected(tmp_path):
+    """A live sibling naming the same branch at an unrelated path still shares it."""
+    layout, _, worktrees, _ = setup(tmp_path)
+    sibling = layout.bundle_dir / "work/feature-sibling.md"
+    unrelated = worktrees["code"].parent / "unrelated-checkout"
+    sibling.write_text(
+        "---\ntype: Feature\ntitle: Sibling\nwork_status: in-progress\nphase: execute\nrepo: code\n"
+        f"worktree: {unrelated}\nbranch: feature\n---\n",
+        encoding="utf-8",
+    )
+    rows = by_repo(plan(layout))
+    assert (rows["code"].action, rows["code"].reason) == ("skip", "shared")
+    assert rows["_workspace"].action == "remove"
 
 
 def test_runner_worktree_is_deferred(tmp_path):

@@ -460,6 +460,7 @@ def plan_finish_cleanup(layout: WorkspaceLayout, path: str, *, runner_cwd: Path 
         tree = str(Path(worktree).resolve()) if worktree else ""
         if tree not in listed_paths:
             tree = ""
+        stamped_branch = branch
         if branch:
             exists = probe_git(repo, "show-ref", "--verify", "--quiet", "refs/heads/" + branch)
             if exists.cause != "ok" or exists.returncode not in (0, 1):
@@ -481,13 +482,35 @@ def plan_finish_cleanup(layout: WorkspaceLayout, path: str, *, runner_cwd: Path 
         )
         action: CleanupAction
         reason: str
+        unmerged: bool
         if branch:
             ancestry = probe_git(repo, "merge-base", "--is-ancestor", "refs/heads/" + branch, "refs/heads/" + target)
             if ancestry.cause != "ok" or ancestry.returncode not in (0, 1):
                 return CleanupPlan((), f"{path}: cannot verify merge of {branch!r} into {target!r} in {stamp_name!r}")
+            unmerged = ancestry.returncode == 1
+        elif tree and stamped_branch:
+            # The stamped branch is gone. A deleted branch alone is not proof the
+            # surviving checkout is safe: its own identity must still hold — a
+            # checkout switched to an unrelated named branch is not this stamp
+            # any more — and, when detached, its current HEAD must itself be
+            # proven merged into the target, not merely absent from the receipt.
+            if checkout_branch and checkout_branch != target:
+                unmerged = True
+            elif checkout_branch:
+                unmerged = False  # checked out at the target branch; the target check below covers it
+            else:
+                head = _commit(Path(tree), "HEAD")
+                if head is None:
+                    return CleanupPlan((), f"{path}: cannot verify checkout HEAD in {stamp_name!r}")
+                head_ancestry = probe_git(repo, "merge-base", "--is-ancestor", head, "refs/heads/" + target)
+                if head_ancestry.cause != "ok" or head_ancestry.returncode not in (0, 1):
+                    return CleanupPlan(
+                        (), f"{path}: cannot verify merge of checkout HEAD into {target!r} in {stamp_name!r}"
+                    )
+                unmerged = head_ancestry.returncode == 1
         else:
-            ancestry = None
-        if ancestry is not None and ancestry.returncode == 1:
+            unmerged = False
+        if unmerged:
             action, reason = "skip", "unmerged"
         elif branch == target or (tree and (tree in trunk or tree in target_checkouts)):
             action, reason = "skip", "target"

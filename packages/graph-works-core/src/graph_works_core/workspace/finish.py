@@ -18,6 +18,7 @@ from graph_works_core.workspace.layout import WorkspaceLayout
 from graph_works_core.workspace.provenance import probe_git
 from graph_works_core.workspace.repo_context import RepositoryContext, observe_repository
 from graph_works_core.workspace.repos import ItemRepo, declared_repositories, resolve_item_repo
+from graph_works_core.workspace.workspace_branch import WORKSPACE_REPO, workspace_repo
 
 
 @dataclass(frozen=True, slots=True)
@@ -79,7 +80,9 @@ def resolve_finish_targets(
     occupancy_known = "repo_stamps" not in item.invalid_optional_fields
     if "repo_stamps" in item.invalid_optional_fields:
         blockers.append(f"{path}: repair malformed repo_stamps before finishing")
-    if single_repo is not None and item.repo_stamps:
+    code_stamps = {name: stamp for name, stamp in item.repo_stamps.items() if name != WORKSPACE_REPO}
+    ws_stamp = item.repo_stamps.get(WORKSPACE_REPO)
+    if single_repo is not None and code_stamps:
         return FinishPlan((), (f"{path}: explicit repo override cannot finish foreign repo_stamps",))
     observed = dict(repo_contexts)
 
@@ -98,7 +101,7 @@ def resolve_finish_targets(
         outer_repo = (single_repo or resolve_item_repo(layout, outer, by_path)) if outer is not None else None
         if item.branch or item.worktree:
             candidates.append((single_repo or resolve_item_repo(layout, item, by_path), item.worktree, item.branch))
-        elif not item.repo_stamps and item.type not in {"Epic", "Release"}:
+        elif not code_stamps and ws_stamp is None and item.type not in {"Epic", "Release"}:
             own_repo = single_repo or resolve_item_repo(layout, item, by_path)
             if outer is not None:
                 # A descendant's source is the enclosing anchor it finishes
@@ -129,12 +132,18 @@ def resolve_finish_targets(
                     blockers.append(f"{path}: cannot verify current branch of unstamped finish checkout {checkout!r}")
                 else:
                     candidates.append((own_repo, checkout, branches[0]))
-        for name, stamp in sorted(item.repo_stamps.items()):
+        for name, stamp in sorted(code_stamps.items()):
             if name not in declared:
                 occupancy_known = False
                 blockers.append(f"{path}: stamped repo {name!r} is not declared")
             else:
                 candidates.append((ItemRepo(name, declared[name], "frontmatter"), stamp.worktree, stamp.branch))
+        if ws_stamp is not None:
+            ws_repo, ws_note = workspace_repo(layout)
+            if ws_repo is None:
+                blockers.append(f"{path}: workspace branch is stamped but workspace placement is disabled ({ws_note})")
+            else:
+                candidates.append((ws_repo, ws_stamp.worktree, ws_stamp.branch))
     except WorkspaceError as exc:
         return FinishPlan((), (str(exc),))
     for repo, worktree, branch in candidates:
@@ -331,7 +340,8 @@ def inspect_finish(layout: WorkspaceLayout, path: str) -> FinishVerification:
         blockers.append("finish receipt contains an unexpected repository")
     if not plan.targets:
         blockers.append("no verified finish targets")
-    resolved = verified[0].result_commit if verified else None
+    code_entries = [entry for entry in verified if entry.repo != WORKSPACE_REPO]
+    resolved = (code_entries or verified)[0].result_commit if verified else None
     return FinishVerification(not blockers, resolved, tuple(blockers), tuple(verified))
 
 

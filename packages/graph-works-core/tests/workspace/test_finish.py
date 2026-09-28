@@ -1,4 +1,6 @@
+import subprocess
 from dataclasses import replace
+from datetime import date
 
 import pytest
 from graph_works_core.workspace import finish as finish_module
@@ -7,6 +9,132 @@ from graph_works_core.workspace.layout import layout_for
 from graph_works_core.workspace.repo_context import RepositoryContext
 from okf_io import load_bundle
 from work_tracker_okf.items import load_items
+
+
+def _git(repo, *args):
+    return subprocess.run(["git", "-C", str(repo), *args], check=True, capture_output=True, text=True).stdout.strip()
+
+
+def _git_workspace_with_code(tmp_path):
+    from graph_works_core import apply_init, plan_init
+
+    layout = apply_init(plan_init(tmp_path / "workspace", today=date(2026, 9, 23), topic="Finish")).layout
+    code = tmp_path / "code"
+    code.mkdir()
+    for repo in (layout.root, code):
+        _git(repo, "init", "-b", "main")
+        _git(repo, "config", "user.name", "Test")
+        _git(repo, "config", "user.email", "test@example.test")
+        _git(repo, "add", "-A")
+        _git(repo, "commit", "--allow-empty", "-m", "base")
+    layout.manifest_path.write_text(f"version: 1\nrepositories:\n  code: {{path: {code}}}\n", encoding="utf-8")
+    _git(layout.root, "add", "-A")
+    _git(layout.root, "commit", "-m", "configure code")
+    return layout, code
+
+
+def _write_workspace_finish_item(layout, *, ws_source, code_source=None, parent_anchor=None, code_anchor=None):
+    owner = "work/epic-child"
+    if parent_anchor is not None:
+        parent = layout.bundle_dir / "work/epic-parent.md"
+        parent.parent.mkdir(parents=True, exist_ok=True)
+        stamps = "repo_stamps:\n"
+        if parent_anchor:
+            stamps += f"  _workspace: {{worktree: {parent_anchor}, branch: epic/ws}}\n"
+        if code_anchor:
+            stamps += f"  code: {{worktree: {code_anchor}, branch: epic/code}}\n"
+        scalar = f"worktree: {code_anchor}\nbranch: epic/code\n" if code_anchor else ""
+        parent.write_text(f"---\ntype: Epic\nrepo: code\n{scalar}{stamps}---\n", encoding="utf-8")
+        owner = "work/epic-parent/children/epic-child"
+    page = layout.bundle_dir / f"{owner}.md"
+    page.parent.mkdir(parents=True, exist_ok=True)
+    code_stamp = f"  code: {{worktree: {code_source}, branch: feature/code}}\n" if code_source else ""
+    page.write_text(
+        "---\ntype: Epic\nrepo: code\nphase: finish\nwork_status: in-progress\n"
+        f"repo_stamps:\n{code_stamp}  _workspace: {{worktree: {ws_source}, branch: feature/ws}}\n---\n",
+        encoding="utf-8",
+    )
+    return owner
+
+
+@pytest.mark.parametrize("nested", [False, True])
+def test_workspace_stamp_targets_the_enclosing_workspace_anchor_or_main(tmp_path, nested):
+    layout, code = _git_workspace_with_code(tmp_path)
+    ws_anchor, ws_source, code_source = (tmp_path / n for n in ("ws-anchor", "ws-source", "code-source"))
+    _git(layout.root, "worktree", "add", "-b", "epic/ws", str(ws_anchor))
+    _git(layout.root, "worktree", "add", "-b", "feature/ws", str(ws_source), "epic/ws" if nested else "main")
+    code_anchor = tmp_path / "code-anchor" if nested else None
+    if code_anchor:
+        _git(code, "worktree", "add", "-b", "epic/code", str(code_anchor))
+    _git(code, "worktree", "add", "-b", "feature/code", str(code_source))
+    owner = _write_workspace_finish_item(
+        layout,
+        ws_source=ws_source,
+        code_source=code_source,
+        parent_anchor=ws_anchor if nested else None,
+        code_anchor=code_anchor,
+    )
+    result = resolve_finish_targets(layout, load_items(load_bundle(layout.bundle_dir)), owner)
+    assert not result.blockers
+    assert [t.repo.name for t in result.targets] == ["code", "_workspace"]
+    ws = result.targets[-1]
+    assert (ws.source_branch, ws.target_branch) == ("feature/ws", "epic/ws" if nested else "main")
+
+
+def test_foreign_only_code_item_still_finishes_in_its_code_worktree(tmp_path):
+    layout, code = _git_workspace_with_code(tmp_path)
+    ws_source, code_source = tmp_path / "ws-source", tmp_path / "code-source"
+    _git(layout.root, "worktree", "add", "-b", "feature/ws", str(ws_source))
+    _git(code, "worktree", "add", "-b", "feature/code", str(code_source))
+    owner = _write_workspace_finish_item(layout, ws_source=ws_source, code_source=code_source)
+    result = resolve_finish_targets(layout, load_items(load_bundle(layout.bundle_dir)), owner)
+    assert not result.blockers
+    assert [t.repo.name for t in result.targets] == ["code", "_workspace"]
+    assert result.targets[0].worktree == str(code_source)
+
+
+def test_missing_enclosing_workspace_anchor_blocks(tmp_path):
+    layout, _code = _git_workspace_with_code(tmp_path)
+    ws_source = tmp_path / "ws-source"
+    _git(layout.root, "worktree", "add", "-b", "feature/ws", str(ws_source))
+    owner = _write_workspace_finish_item(layout, ws_source=ws_source, parent_anchor="")
+    result = resolve_finish_targets(layout, load_items(load_bundle(layout.bundle_dir)), owner)
+    assert any("prepare enclosing integration anchor" in b and "'_workspace'" in b for b in result.blockers)
+
+
+def test_workspace_stamp_with_placement_disabled_blocks(tmp_path, monkeypatch):
+    layout, _code = _git_workspace_with_code(tmp_path)
+    ws_source = tmp_path / "ws-source"
+    _git(layout.root, "worktree", "add", "-b", "feature/ws", str(ws_source))
+    owner = _write_workspace_finish_item(layout, ws_source=ws_source)
+    monkeypatch.setattr(finish_module, "workspace_repo", lambda _layout: (None, "off"))
+    result = resolve_finish_targets(layout, load_items(load_bundle(layout.bundle_dir)), owner)
+    assert any("workspace placement is disabled" in b for b in result.blockers)
+
+
+def test_inspect_is_incomplete_until_the_workspace_target_merges(tmp_path):
+    from graph_works_core.orchestrate.finish_receipt import run_record_finish
+
+    layout, code = _git_workspace_with_code(tmp_path)
+    ws_source, code_source = tmp_path / "ws-source", tmp_path / "code-source"
+    _git(layout.root, "worktree", "add", "-b", "feature/ws", str(ws_source))
+    _git(code, "worktree", "add", "-b", "feature/code", str(code_source))
+    _git(ws_source, "commit", "--allow-empty", "-m", "workspace work")
+    _git(code_source, "commit", "--allow-empty", "-m", "code work")
+    owner = _write_workspace_finish_item(layout, ws_source=ws_source, code_source=code_source)
+    _git(code, "merge", "--ff-only", "feature/code")
+    code_tip = _git(code, "rev-parse", "HEAD")
+    recorded = run_record_finish(layout, owner, repo_name="code", today=date(2026, 9, 23))
+    assert recorded.refusal is None
+    pending = finish_module.inspect_finish(layout, owner)
+    assert not pending.complete
+    assert any("_workspace" in b for b in pending.blockers)
+    _git(layout.root, "merge", "--no-ff", "--no-edit", "feature/ws")
+    recorded = run_record_finish(layout, owner, repo_name="_workspace", today=date(2026, 9, 23))
+    assert recorded.refusal is None
+    complete = finish_module.inspect_finish(layout, owner)
+    assert complete.complete, complete.blockers
+    assert complete.resolved_in == code_tip
 
 
 def setup(tmp_path, monkeypatch, *, scalar=True, nested=False, base_checkout=False):

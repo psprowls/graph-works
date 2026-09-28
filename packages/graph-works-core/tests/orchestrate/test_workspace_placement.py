@@ -1,6 +1,7 @@
 """Pure workspace-branch selection for orchestration."""
 
 from dataclasses import replace
+from pathlib import Path
 
 from graph_works_core.orchestrate.anchors import (
     AnchorRefusal,
@@ -47,9 +48,9 @@ def test_chain_is_outermost_first() -> None:
 
 
 def test_worktree_path_uses_stable_stem() -> None:
-    path = workspace_worktree_path(WT, CHILD, "Feature")
-    assert path.startswith(f"{WT}/workspace/")
-    assert path.endswith(branch_name(CHILD, "Feature").split("/", 1)[1])
+    path = Path(workspace_worktree_path(WT, CHILD, "Feature"))
+    assert path.parent == Path(WT) / "workspace"
+    assert path.name == branch_name(CHILD, "Feature").split("/", 1)[1]
 
 
 def test_missing_epic_anchor_is_prepared_first_from_main() -> None:

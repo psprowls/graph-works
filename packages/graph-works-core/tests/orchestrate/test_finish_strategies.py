@@ -1,7 +1,16 @@
 """Each receipt strategy verifies exactly the history shape it claims."""
 
-from _finish_repos import code_repo, commit_file, git, squash, target
-from graph_works_core.workspace.finish import VerifiedIntegration, verify_integration
+import pytest
+from _finish_repos import OWNER, code_repo, commit_file, git, squash, target, workspace
+from graph_works_core.workspace.errors import WorkspaceConfigError
+from graph_works_core.workspace.finish import (
+    VerifiedIntegration,
+    finish_strategy,
+    resolve_finish_targets,
+    verify_integration,
+)
+from okf_io import load_bundle
+from work_tracker_okf.items import IGNORE, load_items
 
 
 def entry(source_sha, result, strategy, before):
@@ -105,3 +114,46 @@ def test_attested_entry_needs_only_reachability(tmp_path):
     )
 
     assert verify_integration(target(repo, source), attested) is None
+
+
+def finish_target(layout):
+    plan = resolve_finish_targets(layout, load_items(load_bundle(layout.bundle_dir, ignore=IGNORE)), OWNER)
+    assert plan.blockers == ()
+    return plan.targets[0]
+
+
+def test_default_strategy_is_squash_when_unconfigured(tmp_path):
+    repo, source = code_repo(tmp_path)
+    layout = workspace(tmp_path, repo, source)
+
+    assert finish_strategy(layout, "code") == ("squash", "default")
+    assert finish_target(layout).default_strategy == "squash"
+
+
+def test_configured_strategy_is_the_default(tmp_path):
+    repo, source = code_repo(tmp_path)
+    layout = workspace(tmp_path, repo, source, finish_config="    finish:\n      strategy: merge\n")
+
+    assert finish_strategy(layout, "code") == ("merge", "config")
+    assert finish_target(layout).default_strategy == "merge"
+
+
+def test_local_overlay_strategy_wins(tmp_path):
+    repo, source = code_repo(tmp_path)
+    layout = workspace(tmp_path, repo, source, finish_config="    finish:\n      strategy: merge\n")
+    layout.local_manifest_path.write_text(
+        "repositories:\n  code:\n    finish:\n      strategy: ff\n", encoding="utf-8", newline="\n"
+    )
+
+    assert finish_strategy(layout, "code") == ("ff", "config")
+
+
+@pytest.mark.parametrize(
+    "block", ["    finish:\n      strategy: rebase\n", "    finish: squash\n", "    finish:\n      mode: ff\n"]
+)
+def test_invalid_strategy_configuration_is_a_config_error(tmp_path, block):
+    repo, source = code_repo(tmp_path)
+    layout = workspace(tmp_path, repo, source, finish_config=block)
+
+    with pytest.raises(WorkspaceConfigError, match=r"repositories\.code\.finish"):
+        finish_strategy(layout, "code")

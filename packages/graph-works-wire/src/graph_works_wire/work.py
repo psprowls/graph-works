@@ -439,6 +439,7 @@ def _finish_target(target: FinishTarget) -> dict[str, Any]:
         "source_branch": target.source_branch,
         "target_branch": target.target_branch,
         "target_worktree": target.target_worktree,
+        "default_strategy": target.default_strategy,
     }
 
 

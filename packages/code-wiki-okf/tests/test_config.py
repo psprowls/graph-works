@@ -344,3 +344,12 @@ def test_a_non_mapping_repository_gate_is_refused(tmp_path: Path) -> None:
             declarations_dir=tmp_path / ".gw",
             source="workspace.yaml",
         )
+
+
+def test_load_config_repo_finish_block_is_allowed(tmp_path: Path) -> None:
+    _write(
+        tmp_path,
+        "version: 1\nrepositories:\n  agent-workspace:\n    path: ../../agent-workspace\n"
+        "    finish:\n      strategy: merge\n",
+    )
+    assert [repo.name for repo in load_config(tmp_path, graph_dir="../graphs/code").repos] == ["agent-workspace"]

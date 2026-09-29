@@ -138,6 +138,16 @@ CATALOG: tuple[ConfigEntry, ...] = (
         default=None,
         description="Per-repository git glob pathspecs to exclude, merged with the global `ignore:` list.",
     ),
+    ConfigEntry(
+        key="repositories.*.finish.strategy",
+        type="str",
+        default=None,
+        description=(
+            "How `gw work integrate` merges this repository's finish source when no --strategy is "
+            "given: squash, merge (--no-ff) or ff. Absent means squash."
+        ),
+        allowed=("squash", "merge", "ff"),
+    ),
     # The repository gate (feature-gate-receipts). `gw work gate` runs `full`
     # as the stage-boundary gate; `scoped` is a fix-wave recheck template.
     # Validation beyond type lives in `workspace.gate_config`.

@@ -790,7 +790,7 @@ def test_finish_target_projection_is_explicit_and_ordered() -> None:
 
     result = next_result(full=True)
     result.finish_targets = (
-        FinishTarget(ItemRepo("core", Path("/core"), "frontmatter"), "/core/epic", "epic/a", "main", "/core"),
+        FinishTarget(ItemRepo("core", Path("/core"), "frontmatter"), "/core/epic", "epic/a", "main", "/core", "merge"),
         FinishTarget(ItemRepo(None, None, "sole"), "/ui/epic", "epic/a", "trunk", None),
     )
     result.state.phase = "finish"
@@ -801,6 +801,7 @@ def test_finish_target_projection_is_explicit_and_ordered() -> None:
             "source_branch": "epic/a",
             "target_branch": "main",
             "target_worktree": "/core",
+            "default_strategy": "merge",
         },
         {
             "repo": {"name": None, "path": None, "source": "sole"},
@@ -808,6 +809,7 @@ def test_finish_target_projection_is_explicit_and_ordered() -> None:
             "source_branch": "epic/a",
             "target_branch": "trunk",
             "target_worktree": None,
+            "default_strategy": None,
         },
     ]
 

@@ -234,7 +234,7 @@ def config_from_mapping(
                 "code-graph/index.md; rename it"
             )
         entry = _require_mapping(entry, name=name, where=f"`repositories.{repo_name}`")
-        allowed_repo_keys = {"path", "ignore", "gate"}
+        allowed_repo_keys = {"path", "ignore", "gate", "finish"}
         _reject_unknown_keys(entry, allowed=allowed_repo_keys, name=name, where=f"`repositories.{repo_name}`")
         if "gate" in entry:
             # The gate block is graph-works-core's (`workspace/gate_config.py`); this

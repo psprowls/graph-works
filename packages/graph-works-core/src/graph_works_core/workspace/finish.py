@@ -11,13 +11,15 @@ from pathlib import Path
 from types import MappingProxyType
 from typing import Literal, cast
 
+from config_io import StoreValidationError
 from okf_io import Bundle, Document, load_bundle, parse
 from work_tracker_okf.items import IGNORE, WorkItem, load_items
 from work_tracker_okf.paths import MANAGED_ARTIFACTS, artifact_ref
 from work_tracker_okf.vocabulary import TERMINAL_STATUSES
 
-from graph_works_core.workspace.errors import WorkspaceError
+from graph_works_core.workspace.errors import WorkspaceConfigError, WorkspaceError
 from graph_works_core.workspace.layout import WorkspaceLayout
+from graph_works_core.workspace.manifest import workspace_store
 from graph_works_core.workspace.provenance import GitExecutable, GitOutcome, probe_git, resolve_git
 from graph_works_core.workspace.repo_context import RepositoryContext, observe_repository
 from graph_works_core.workspace.repos import ItemRepo, declared_repositories, resolve_item_repo
@@ -41,6 +43,13 @@ def finish_git(cwd: Path, *args: str, timeout: float = _PROBE_TIMEOUT) -> GitOut
     return probe_git(cwd, *args, executable=resolved.path, timeout=timeout)
 
 
+IntegrationStrategy = Literal["squash", "merge", "ff"]
+ReceiptStrategy = Literal["squash", "merge", "ff", "ancestry", "attested"]
+ReceiptEvidence = Literal["verified", "accepted"]
+#: The relay lists these in this order after the target's default.
+STRATEGIES: tuple[IntegrationStrategy, ...] = ("squash", "merge", "ff")
+
+
 @dataclass(frozen=True, slots=True)
 class FinishTarget:
     repo: ItemRepo
@@ -48,6 +57,7 @@ class FinishTarget:
     source_branch: str
     target_branch: str
     target_worktree: str | None  # unique checkout holding target_branch, when one exists
+    default_strategy: IntegrationStrategy | None = None  # None only for _workspace
 
 
 @dataclass(frozen=True, slots=True)
@@ -76,6 +86,35 @@ def enclosing_owner(item: WorkItem, items: Mapping[str, WorkItem]) -> WorkItem |
             return owner
         parent = owner.parent_path
     return None
+
+
+def finish_strategy(
+    layout: WorkspaceLayout, repo_name: str
+) -> tuple[IntegrationStrategy, Literal["config", "default"]]:
+    """`repositories.<name>.finish.strategy` (layered, local overlay first), else `squash`.
+
+    Read from the explicit mapping rather than a dotted catalog key so a
+    repository name containing `.` still resolves; the catalog entry exists
+    for `gw config` and documentation.
+    """
+    try:
+        explicit = workspace_store(layout).read_explicit()
+    except StoreValidationError as exc:
+        raise WorkspaceConfigError(str(exc)) from exc
+    repos = explicit.get("repositories")
+    entry = repos.get(repo_name) if isinstance(repos, dict) else None
+    block = entry.get("finish") if isinstance(entry, dict) else None
+    where = f"{layout.manifest_path}: repositories.{repo_name}.finish"
+    if block is None:
+        return "squash", "default"
+    if not isinstance(block, dict) or set(block) - {"strategy"}:
+        raise WorkspaceConfigError(f"{where}: expects a mapping with only `strategy`, got {block!r}")
+    value = block.get("strategy")
+    if value is None:
+        return "squash", "default"
+    if not isinstance(value, str) or value not in STRATEGIES:
+        raise WorkspaceConfigError(f"{where}.strategy: must be one of {sorted(STRATEGIES)}, got {value!r}")
+    return value, "config"
 
 
 def resolve_finish_targets(
@@ -115,8 +154,10 @@ def resolve_finish_targets(
         return context
 
     candidates: list[tuple[ItemRepo, str | None, str | None]] = []
+    strategies: dict[str, IntegrationStrategy] = {}
     try:
         declared = declared_repositories(layout)
+        strategies = {name: finish_strategy(layout, name)[0] for name in declared}
         outer = enclosing_owner(item, by_path)
         outer_repo = (single_repo or resolve_item_repo(layout, outer, by_path)) if outer is not None else None
         if item.branch or item.worktree:
@@ -225,17 +266,13 @@ def resolve_finish_targets(
             blockers.append(f"{path}: cannot verify clean worktree {worktree!r} on branch {branch!r} in {repo.name!r}")
             continue
         target_worktree = holders[0] if holders else None
-        targets.append(FinishTarget(repo, worktree, branch, target, target_worktree))
+        default = None if repo.name == WORKSPACE_REPO else strategies.get(repo.name or "", "squash")
+        targets.append(FinishTarget(repo, worktree, branch, target, target_worktree, default))
     return FinishPlan(
         tuple(targets), tuple(blockers), FinishOccupancy(tuple(sorted(occupied)), occupancy_known and bool(candidates))
     )
 
 
-IntegrationStrategy = Literal["squash", "merge", "ff"]
-ReceiptStrategy = Literal["squash", "merge", "ff", "ancestry", "attested"]
-ReceiptEvidence = Literal["verified", "accepted"]
-#: The relay lists these in this order after the target's default.
-STRATEGIES: tuple[IntegrationStrategy, ...] = ("squash", "merge", "ff")
 _RECEIPT_STRATEGIES = frozenset({*STRATEGIES, "ancestry", "attested"})
 _SHA = re.compile(r"[0-9a-f]{40}|[0-9a-f]{64}")
 _OPTIONAL_KEYS = ("target_before", "accepted_by", "reason")

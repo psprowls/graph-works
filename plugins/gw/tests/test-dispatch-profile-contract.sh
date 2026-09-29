@@ -82,7 +82,7 @@ grep -F 'orca orchestration worker-read --dispatch <dispatch_id> --limit 5 --jso
 grep -F 'Immediately before either allowed Enter branch, run a fresh successful' <<<"$section_three" >/dev/null || fail "nudge requires fresh successful heartbeat evidence"
 grep -F 'unknown, enter inspection without nudging.' <<<"$section_three" >/dev/null || fail "unknown heartbeat forbids Enter"
 grep -F 'orca terminal send --terminal <agent_terminal_handle> --text "" --enter --json' <<<"$section_three" >/dev/null || fail "manual probe gives exact Enter command"
-if grep -F 'python3 references/launch-worker.py create' <<<"$section_three" >/dev/null; then
+if grep -F 'references/launch-worker.py create' <<<"$section_three" >/dev/null; then
   fail "section three must not prescribe primitive task creation"
 fi
 grep -F 'Preflight — confirm the skill resolves.' "$WORKFLOW" >/dev/null || fail "workflow preserves skill preflight"

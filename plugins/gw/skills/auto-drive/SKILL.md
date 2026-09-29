@@ -121,7 +121,7 @@ cards in §5 before ending.
    the helper only receives files):
 
    ```
-   python3 references/launch-worker.py classify-restart \
+   uv run --no-project --python 3.12 python references/launch-worker.py classify-restart \
      --tasks <task-list-json> --workers <worker-list-json> \
      --recovery-record <record-json> [--recovery-record <record-json> ...] \
      --dispatch-record <file> [--dispatch-record <file> ...] \
@@ -338,7 +338,7 @@ candidates resolve against their actual current attributes.
 plan, then process preparations **serially**:
 
 ```bash
-python3 "$PLUGIN_ROOT/skills/auto-drive/references/launch-worker.py" prepare \
+uv run --no-project --python 3.12 python "$PLUGIN_ROOT/skills/auto-drive/references/launch-worker.py" prepare \
   --plan-file <saved-plan.json> --owner <owner_path> --repo-name <repo.name> \
   --workspace <workspace-path>
 ```
@@ -665,7 +665,7 @@ live rows. This also applies to immediate dispatch and wrap-up reconciliation.
 Without a complete fresh snapshot, report inspection and move no cards.
 
 ```
-python3 references/launch-worker.py attend-cards --tasks <task-list-json> --classification <classify-restart-json>
+uv run --no-project --python 3.12 python references/launch-worker.py attend-cards --tasks <task-list-json> --classification <classify-restart-json>
 ```
 
 It prints `set_in_review`, `release_candidates` (worktrees used by an attend
@@ -777,7 +777,7 @@ classification is an ordinary fresh dispatch — run §3 unmodified.
    placement), redirecting stdout as the legacy recipe does:
 
    ```
-   python3 references/launch-worker.py place --dispatch <dispatch-json> \
+   uv run --no-project --python 3.12 python references/launch-worker.py place --dispatch <dispatch-json> \
      --repo-path <dispatch repo.path> --out-placement <placement-json-file> \
      > <workspace>/okf/<dispatch path>/references/orca-placement/<key>.json
    ```
@@ -791,7 +791,7 @@ classification is an ordinary fresh dispatch — run §3 unmodified.
    `launch --recovery-placement` opens its argument **as a path** and will
    not accept an inline JSON literal. Then build the resume spec:
    ```
-   python3 references/launch-worker.py resume-spec \
+   uv run --no-project --python 3.12 python references/launch-worker.py resume-spec \
      --spec <the original spec file from step 2> \
      --checkpoint <the checkpoint file path> \
      --answer "<the answer text from step 3>" \
@@ -802,7 +802,7 @@ classification is an ordinary fresh dispatch — run §3 unmodified.
    recipe's create and encode steps in `references/dispatch-checks.md`
    (build/encode/create) entirely for this key:
    ```
-   python3 references/launch-worker.py launch --spec <new-spec-file> \
+   uv run --no-project --python 3.12 python references/launch-worker.py launch --spec <new-spec-file> \
      --task <task_id from step 2> --dispatch-key <key> --run <run_id> \
      --retry-of <dispatch_id from step 2> \
      --recovery-placement <the same placement-json-file from step 5> > <start-json>
@@ -1191,7 +1191,7 @@ Classify each `worker_done` before reading its outcome. Save the message
 object from the wait result's `messages[]` and run:
 
 ```
-python3 references/launch-worker.py classify-report --message <message-json>
+uv run --no-project --python 3.12 python references/launch-worker.py classify-report --message <message-json>
 ```
 
 It reads `payload` (`taskId`, `dispatchId`, `outcome`) and checks Orca's
@@ -1251,7 +1251,7 @@ Recovery records live at
 and are written only through:
 
 ```
-python3 references/launch-worker.py record-write --path <record-file> --record <record-json>
+uv run --no-project --python 3.12 python references/launch-worker.py record-write --path <record-file> --record <record-json>
 ```
 
 `record-write` validates the schema and keeps identity immutable. It refuses
@@ -1314,7 +1314,7 @@ until it proves exit this helper cannot verify a recovery checkpoint.
    this attempt: an independent actor may have advanced the item. A finish
    stage keeps merge/PR/hold/discard semantics, and Task completion never
    resolves a graph-works item. Compute the spec hash with
-   `python3 references/launch-worker.py spec-hash --tasks <task-list-json> --task <task_id>`
+   `uv run --no-project --python 3.12 python references/launch-worker.py spec-hash --tasks <task-list-json> --task <task_id>`
    and file hashes with `shasum -a 256 <file>`; commits are full 40-hex ids.
 4. **Record inspection before any mutation.** Write the record at
    `inspection`:
@@ -1460,8 +1460,8 @@ inspection; do not infer success from command exit. Use these full commands
 at every call site (the shorter references above name the operation/authority):
 
 ```
-python3 references/launch-worker.py classify-lifecycle --op release --result <receipt-json> --mode <mode>
-python3 references/launch-worker.py classify-lifecycle --op stop --result <receipt-json> --authority <park|user-authorized|exit-evidence|none>
+uv run --no-project --python 3.12 python references/launch-worker.py classify-lifecycle --op release --result <receipt-json> --mode <mode>
+uv run --no-project --python 3.12 python references/launch-worker.py classify-lifecycle --op stop --result <receipt-json> --authority <park|user-authorized|exit-evidence|none>
 ```
 
 `<mode>` is the `mode` in the dispatch's frozen envelope
@@ -1650,7 +1650,7 @@ One `AskUserQuestion` with exactly four options — *retry* / *reroute* /
   For an existing Task with an authorized retry, run:
 
   ```
-  python3 references/launch-worker.py launch --spec <saved-task-spec> \
+  uv run --no-project --python 3.12 python references/launch-worker.py launch --spec <saved-task-spec> \
     --task <task_id> --dispatch-key <task-title> --run <run_id> \
     --retry-of <dispatch_id> \
     --recovery-placement <recovery-approved-placement-json> > <start-json>

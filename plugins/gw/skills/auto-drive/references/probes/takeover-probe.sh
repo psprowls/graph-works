@@ -23,7 +23,7 @@ confirm() {
   [[ "$answer" == yes ]] || die 'cancelled; preserve resources for inspection'
 }
 field() {
-  python3 - "$1" "$2" <<'PY'
+  uv run --no-project --python 3.12 python - "$1" "$2" <<'PY'
 import json, sys
 with open(sys.argv[1], encoding="utf-8") as stream:
     value = json.load(stream)
@@ -55,7 +55,7 @@ case "$trigger" in
   *) die "unknown case: $trigger" ;;
 esac
 command -v orca >/dev/null || die 'orca not on PATH'
-command -v python3 >/dev/null || die 'python3 not on PATH'
+command -v uv >/dev/null || die 'uv not on PATH'
 [[ -d "$worktree" ]] || die 'scratch worktree must already exist'
 worktree=$(cd "$worktree" && pwd -P)
 [[ ! -e "$out" ]] || die 'use a NEW output directory; never overwrite evidence'
@@ -104,7 +104,7 @@ done
 capture ready-show orca orchestration worker-show --dispatch "$dispatch" --json
 [[ "$(field "$out/ready-show.json" result.worker.state)" == ready ]] \
   || die 'worker not ready; inspect evidence before any trigger'
-python3 - "$out/ready-show.json" <<'PYTERMINAL'
+uv run --no-project --python 3.12 python - "$out/ready-show.json" <<'PYTERMINAL'
 import json, sys
 with open(sys.argv[1], encoding="utf-8") as stream:
     result = json.load(stream)["result"]

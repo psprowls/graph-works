@@ -14,6 +14,7 @@ from graph_works_core.orchestrate.dispatch import DispatchFailure, DispatchResul
 from graph_works_core.orchestrate.dispatch_record import Overrides
 from graph_works_core.orchestrate.gate import GateCheckResult, GateRunResult, GateWaitResult
 from graph_works_core.orchestrate.gate_receipts import GateMatch, GateRun
+from graph_works_core.orchestrate.integrate import IntegrateResult
 from graph_works_core.orchestrate.merge_workspace import MergeWorkspaceResult
 from graph_works_core.orchestrate.placement import ReaderRecord
 from graph_works_core.orchestrate.reroute import RerouteResult
@@ -624,6 +625,68 @@ WORK: dict[str, tuple[Callable[[], object], ...]] = {
             )
         )
         for refusal in (None, "unknown-path")
+    ),
+    "work.integrate_payload": (
+        lambda: work.integrate_payload(
+            IntegrateResult(
+                "work/a",
+                "code",
+                "squash",
+                "default",
+                "feature",
+                "a" * 40,
+                "main",
+                "/code",
+                "b" * 40,
+                None,
+                "planned",
+                None,
+                "",
+                (),
+                None,
+                False,
+            )
+        ),
+        lambda: work.integrate_payload(
+            IntegrateResult(
+                "work/a",
+                "code",
+                "merge",
+                "flag",
+                "feature",
+                "a" * 40,
+                "main",
+                "/code",
+                "b" * 40,
+                "c" * 40,
+                "integrated",
+                None,
+                "",
+                (),
+                "receipt.md",
+                True,
+            )
+        ),
+        lambda: work.integrate_payload(
+            IntegrateResult(
+                "work/a",
+                "code",
+                "squash",
+                "config",
+                "feature",
+                "a" * 40,
+                "main",
+                "/code",
+                "b" * 40,
+                None,
+                None,
+                "conflict",
+                "CONFLICT",
+                ("a.txt",),
+                None,
+                False,
+            )
+        ),
     ),
     "work.merge_workspace_payload": (
         lambda: work.merge_workspace_payload(

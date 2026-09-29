@@ -470,6 +470,21 @@ def render_gate_check(payload: dict[str, Any]) -> None:
         typer.echo(f"unsatisfied: {payload['reason']} (tree {payload['tree']})")
 
 
+def render_integrate(payload: dict[str, Any]) -> None:
+    """Render the planned or applied code-repository integration and its receipt."""
+    verb = {"planned": "would integrate", "integrated": "integrated", "already-integrated": "already integrated"}[
+        payload["outcome"]
+    ]
+    typer.echo(
+        f"[ok] {payload['path']}: {verb} {payload['source_branch']} into {payload['target_branch']} "
+        f"in {payload['repo']} ({payload['strategy']}, from {payload['strategy_source']})"
+    )
+    if payload["result_commit"]:
+        typer.echo(f"  result: {payload['result_commit']}")
+    if payload["receipt_path"]:
+        typer.echo(f"  receipt: {payload['receipt_path']}")
+
+
 def render_merge_workspace(payload: dict[str, Any]) -> None:
     """Render the planned or applied integration and its receipt."""
     action = "merged" if payload["applied"] else "would merge"

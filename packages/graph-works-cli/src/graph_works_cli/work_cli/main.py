@@ -23,6 +23,7 @@ import typer
 from graph_works_core.archive.commands import run_archive, stranded_warnings
 from graph_works_core.orchestrate.commands import run_orchestrate
 from graph_works_core.orchestrate.dispatch import run_dispatch
+from graph_works_core.orchestrate.integrate import run_integrate
 from graph_works_core.orchestrate.merge_workspace import run_merge_workspace
 from graph_works_core.orchestrate.placement import (
     ReaderObservation,
@@ -37,6 +38,7 @@ from graph_works_core.orchestrate.workspace_prepare import run_prepare_workspace
 from graph_works_core.work import commands as work
 from graph_works_core.workspace.config import WorkspaceConfig, load_workspace_config
 from graph_works_core.workspace.errors import WorkspaceConfigError, WorkspaceError
+from graph_works_core.workspace.finish import STRATEGIES, IntegrationStrategy
 from graph_works_core.workspace.layout import WorkspaceLayout
 from graph_works_core.workspace.repos import resolve_repos
 from graph_works_wire import work as wire_work
@@ -1101,6 +1103,57 @@ def prepare_workspace(
         rendering.render_prepare_workspace(payload)
     if payload["note"]:
         rendering.warn(payload["note"])
+
+
+@work_app.command(name="integrate")
+def integrate(
+    path: str = typer.Argument(..., help="Extensionless bundle-relative canonical concept path."),
+    repo: str = typer.Option(..., "--repo", help="Declared repository whose finish target to integrate."),
+    strategy: str = typer.Option(
+        "",
+        "--strategy",
+        help="squash, merge (--no-ff) or ff. Default: repositories.<name>.finish.strategy, else squash.",
+    ),
+    apply: bool = typer.Option(False, "--apply", help="Merge and record; without it, print the plan."),
+    workspace: str = typer.Option("", "--workspace", help="Workspace path."),
+    json_output: bool = rendering.json_option("Emit the integration result as JSON."),
+) -> None:
+    """Integrate PATH's finish source for one code repository and record its receipt.
+
+    gw chooses the merge flags for the strategy, runs the merge in the target
+    worktree and records v2 evidence under the owner lock. A conflict or a
+    rejected commit restores the target and refuses. Plans by default.
+    """
+    chosen: IntegrationStrategy | None = None
+    if strategy:
+        if strategy not in STRATEGIES:
+            rendering.fail(f"--strategy {strategy!r}: expected squash, merge or ff", reason="usage")
+        chosen = strategy
+    layout = resolve_workspace(workspace)
+    try:
+        result = run_integrate(
+            layout,
+            path,
+            repo_name=repo,
+            strategy=chosen,
+            today=_today(),
+            apply=apply,
+        )
+    except WorkspaceError as exc:
+        rendering.fail(str(exc), reason="workspace", code=exit_codes.SCHEMA_MISMATCH, cause=exc)
+    except OSError as exc:
+        rendering.fail(str(exc), reason="io", cause=exc)
+    payload = wire_work.integrate_payload(result)
+    if payload["refusal"] is not None:
+        rendering.fail(
+            f"{path}: refused ({payload['refusal']['reason']}) — {payload['refusal']['detail']}",
+            reason="refused",
+            payload=payload,
+        )
+    if json_output:
+        rendering.emit(payload)
+    else:
+        rendering.render_integrate(payload)
 
 
 @work_app.command(name="merge-workspace")

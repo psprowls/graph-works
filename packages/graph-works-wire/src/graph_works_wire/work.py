@@ -21,6 +21,7 @@ from graph_works_core.orchestrate.commands import OrchestrateResult
 from graph_works_core.orchestrate.dispatch import DispatchFailure, DispatchResult, ObservedPlacement
 from graph_works_core.orchestrate.gate import GateCheckResult, GateRunResult, GateWaitResult
 from graph_works_core.orchestrate.gate_receipts import GateMatch
+from graph_works_core.orchestrate.integrate import IntegrateResult
 from graph_works_core.orchestrate.merge_workspace import MergeWorkspaceResult
 from graph_works_core.orchestrate.orca_port import OrcaMessage
 from graph_works_core.orchestrate.placement import BaselineRecord, PlacementRecord, ReaderRecord
@@ -1148,5 +1149,26 @@ def merge_workspace_payload(result: MergeWorkspaceResult) -> dict[str, Any]:
         "applied": result.applied,
         "merge_commit": result.merge_commit,
         "receipt_path": result.receipt_path,
+        "refusal": None if result.refusal is None else {"reason": result.refusal, "detail": result.detail},
+    }
+
+
+def integrate_payload(result: IntegrateResult) -> dict[str, Any]:
+    """Code-repository integration, including a landed merge whose receipt was refused."""
+    return {
+        "path": result.path,
+        "repo": result.repo,
+        "strategy": result.strategy,
+        "strategy_source": result.strategy_source,
+        "source_branch": result.source_branch,
+        "source_commit": result.source_commit,
+        "target_branch": result.target_branch,
+        "target_worktree": result.target_worktree,
+        "target_before": result.target_before,
+        "result_commit": result.result_commit,
+        "outcome": result.outcome,
+        "conflicts": list(result.conflicts),
+        "receipt_path": result.receipt_path,
+        "applied": result.applied,
         "refusal": None if result.refusal is None else {"reason": result.refusal, "detail": result.detail},
     }

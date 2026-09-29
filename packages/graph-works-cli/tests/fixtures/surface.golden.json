@@ -2468,6 +2468,7 @@
         "file",
         "gate",
         "ingest-queue",
+        "integrate",
         "lint",
         "merge-workspace",
         "next",
@@ -4184,6 +4185,84 @@
       "path": [
         "work",
         "ingest-queue"
+      ]
+    },
+    {
+      "name": "gw work integrate",
+      "help": "Integrate PATH's finish source for one code repository and record its receipt.\n\ngw chooses the merge flags for the strategy, runs the merge in the target\nworktree and records v2 evidence under the owner lock. A conflict or a\nrejected commit restores the target and refuses. Plans by default.",
+      "short_help": "Integrate PATH's finish source for one code repository and record its receipt.",
+      "usage": [
+        "[OPTIONS]",
+        "{path}"
+      ],
+      "arguments": [
+        {
+          "name": "path",
+          "required": true,
+          "nargs": 1
+        }
+      ],
+      "options": [
+        {
+          "name": "repo",
+          "opts": [
+            "--repo"
+          ],
+          "secondary_opts": [],
+          "help": "Declared repository whose finish target to integrate.",
+          "required": true,
+          "default": null,
+          "is_flag": false
+        },
+        {
+          "name": "strategy",
+          "opts": [
+            "--strategy"
+          ],
+          "secondary_opts": [],
+          "help": "squash, merge (--no-ff) or ff. Default: repositories.<name>.finish.strategy, else squash.",
+          "required": false,
+          "default": "",
+          "is_flag": false
+        },
+        {
+          "name": "apply",
+          "opts": [
+            "--apply"
+          ],
+          "secondary_opts": [],
+          "help": "Merge and record; without it, print the plan.",
+          "required": false,
+          "default": false,
+          "is_flag": true
+        },
+        {
+          "name": "workspace",
+          "opts": [
+            "--workspace"
+          ],
+          "secondary_opts": [],
+          "help": "Workspace path.",
+          "required": false,
+          "default": "",
+          "is_flag": false
+        },
+        {
+          "name": "json_output",
+          "opts": [
+            "--json"
+          ],
+          "secondary_opts": [],
+          "help": "Emit the integration result as JSON.",
+          "required": false,
+          "default": false,
+          "is_flag": true
+        }
+      ],
+      "commands": [],
+      "path": [
+        "work",
+        "integrate"
       ]
     },
     {

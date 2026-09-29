@@ -81,6 +81,7 @@ EXPECTED: set[str] = {
     "work.gate_run_payload",
     "work.gate_wait_payload",
     "work.ingest_queue_payload",
+    "work.integrate_payload",
     "work.item_payload",
     "work.lint_payload",
     "work.next_payload",

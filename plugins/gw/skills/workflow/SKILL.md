@@ -71,7 +71,7 @@ Do not replace the expectation with a fresh phase to make a stale action pass.
 - If `blockers` is non-empty:
   - If a blocker reports a **terminal status** (`resolved`, `wontfix`, or
     `superseded`) or **`phase=done`**, run **Terminal handling** (below): the
-    pipeline is finished and the remaining work is ingest + archive.
+    pipeline is finished and the remaining work is ingest.
   - Otherwise report each blocker and **stop** — *except* the **effort-required**
     blocker and the **"waiting on children"** blocker, which are handled by the
     dedicated bullets below (a non-null `on_complete` with empty `blockers` is the
@@ -382,13 +382,10 @@ context window).
    (already ingested). Ingest accepts design sources only — never hand it a
    plan artifact.
 
-2. **Offer to archive (any terminal status).** When session transcript capture
-   is enabled, say so before asking: archiving in this same session clears the
-   active-work pointer and moves the item, so this finish session's own
-   transcript is not captured — archiving later, from a fresh session, keeps
-   it. Ask the user "Archive `<work-path>` now?" If yes, run
-   `/gw:archive <work-path>`. If no, report that the item stays in `work/` and
-   can be archived later with `/gw:archive`.
+2. **Point at archiving; never offer it (any terminal status).** Say that
+   `<work-path>` stays in `work/` and can be archived later, from a fresh
+   session, with `/gw:archive <work-path>`.
+   This skill never runs `/gw:archive`.
 
 ### Detaching a child
 

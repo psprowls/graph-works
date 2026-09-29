@@ -391,9 +391,14 @@ assert_contains "skills/onboard/SKILL.md" \
 assert_contains "skills/workflow/SKILL.md" \
     "gate item's own phase" \
     "workflow's satisfied-gate bullet stamps the pointer before advancing"
-assert_contains "skills/workflow/SKILL.md" \
-    "this finish session's own" \
-    "workflow's archive offer names the finish transcript archiving-in-session drops"
+assert_not_matches "skills/workflow/SKILL.md" 'Archive `<work-path>` now\?' \
+    "workflow's Terminal handling asks no archive question"
+assert_not_matches "skills/workflow/references/editing-work-items.md" 'offer `/gw:archive' \
+    "the editing guide does not tell a model to offer /gw:archive"
+assert_contains "skills/workflow/SKILL.md" 'This skill never runs `/gw:archive`' \
+    "workflow's Terminal handling points at /gw:archive without running it"
+assert_contains "skills/workflow/SKILL.md" "/gw:archive <work-path>" \
+    "workflow's Terminal handling names /gw:archive <work-path> for later"
 
 # work/feature-generic-work-edit-command: there is no `gw work edit` verb; the
 # editing guide is the supported path, so every place a model would look for

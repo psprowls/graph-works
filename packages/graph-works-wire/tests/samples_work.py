@@ -12,6 +12,8 @@ from types import SimpleNamespace as ns
 from graph_works_core.orchestrate.asks import AskAnswerResult, AskResult
 from graph_works_core.orchestrate.dispatch import DispatchFailure, DispatchResult, ObservedPlacement
 from graph_works_core.orchestrate.dispatch_record import Overrides
+from graph_works_core.orchestrate.gate import GateCheckResult, GateRunResult, GateWaitResult
+from graph_works_core.orchestrate.gate_receipts import GateMatch, GateRun
 from graph_works_core.orchestrate.merge_workspace import MergeWorkspaceResult
 from graph_works_core.orchestrate.placement import ReaderRecord
 from graph_works_core.orchestrate.reroute import RerouteResult
@@ -106,6 +108,32 @@ def bare_next() -> object:
     return result
 
 
+GATE_RUN = GateRun(
+    "20260928T120000Z-0a1b2c3d",
+    "code",
+    "/wt",
+    "a" * 40,
+    "b" * 40,
+    True,
+    False,
+    "full",
+    "just check",
+    (),
+    0,
+    "/l",
+    "t",
+    "2026-09-28T12:00:00Z",
+    1.0,
+)
+GATE_MATCH = GateMatch("work/other", GATE_RUN)
+GATE_RUN_STARTED = GateRunResult("started", None, "", GATE_RUN.run_id, None, "just check", ("a",), "/l", ("w",))
+GATE_RUN_REFUSED = GateRunResult(None, "dirty-tree", "d", None, None, None, (), None, ())
+GATE_WAIT_FINISHED = GateWaitResult("finished", None, "", GATE_RUN.run_id, 0, True, "/l", "tail", "/r.md")
+GATE_WAIT_REFUSED = GateWaitResult(None, "no-run", "d", None, None, False, None, None, None)
+GATE_CHECK_SATISFIED = GateCheckResult("satisfied", None, "", GATE_MATCH, "b" * 40, ())
+GATE_CHECK_UNSATISFIED = GateCheckResult("unsatisfied", None, "no receipt", None, "b" * 40, ("w",))
+
+
 def advance(*, applied: bool, bypass: bool = False) -> object:
     plan = ns(
         changes=(
@@ -133,6 +161,7 @@ def advance(*, applied: bool, bypass: bool = False) -> object:
         gate_bypass=ns(code="no-start-sha", reason="r", actor="pat", detail="d", decision_id="D-001")
         if bypass
         else None,
+        gate_receipt=ns(owner="work/other", run=ns(run_id="20260928T120000Z-0a1b2c3d")) if bypass else None,
     )
 
 
@@ -560,6 +589,18 @@ WORK: dict[str, tuple[Callable[[], object], ...]] = {
                 next_result=ns(route=ns(blockers=("b",)), descent=None, dispatch_preflight=None),
             )
         ),
+    ),
+    "work.gate_run_payload": (
+        lambda: work.gate_run_payload(GATE_RUN_STARTED, "work/a"),
+        lambda: work.gate_run_payload(GATE_RUN_REFUSED, "work/a"),
+    ),
+    "work.gate_wait_payload": (
+        lambda: work.gate_wait_payload(GATE_WAIT_FINISHED, "work/a"),
+        lambda: work.gate_wait_payload(GATE_WAIT_REFUSED, "work/a"),
+    ),
+    "work.gate_check_payload": (
+        lambda: work.gate_check_payload(GATE_CHECK_SATISFIED, "work/a"),
+        lambda: work.gate_check_payload(GATE_CHECK_UNSATISFIED, "work/a"),
     ),
     "work.advance_payload": (
         lambda: work.advance_payload(advance(applied=True), "work/a"),

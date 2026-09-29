@@ -2466,6 +2466,7 @@
         "decision",
         "dispatch",
         "file",
+        "gate",
         "ingest-queue",
         "lint",
         "merge-workspace",
@@ -3932,6 +3933,219 @@
       "path": [
         "work",
         "file"
+      ]
+    },
+    {
+      "name": "gw work gate",
+      "help": "Run and check the repository gate for a work item.",
+      "short_help": "Run and check the repository gate for a work item.",
+      "usage": [
+        "[OPTIONS]",
+        "COMMAND [ARGS]..."
+      ],
+      "arguments": [],
+      "options": [],
+      "commands": [
+        "check",
+        "run",
+        "wait"
+      ],
+      "path": [
+        "work",
+        "gate"
+      ]
+    },
+    {
+      "name": "gw work gate check",
+      "help": "Whether PATH's worktree tree already has a satisfying gate receipt. Writes nothing.",
+      "short_help": "Whether PATH's worktree tree already has a satisfying gate receipt.",
+      "usage": [
+        "[OPTIONS]",
+        "{path}"
+      ],
+      "arguments": [
+        {
+          "name": "path",
+          "required": true,
+          "nargs": 1
+        }
+      ],
+      "options": [
+        {
+          "name": "worktree",
+          "opts": [
+            "--worktree"
+          ],
+          "secondary_opts": [],
+          "help": "Worktree path; default is the item's recorded worktree.",
+          "required": false,
+          "default": "",
+          "is_flag": false
+        },
+        {
+          "name": "workspace",
+          "opts": [
+            "--workspace"
+          ],
+          "secondary_opts": [],
+          "help": "Workspace path.",
+          "required": false,
+          "default": "",
+          "is_flag": false
+        },
+        {
+          "name": "json_output",
+          "opts": [
+            "--json"
+          ],
+          "secondary_opts": [],
+          "help": "Emit the check result as JSON.",
+          "required": false,
+          "default": false,
+          "is_flag": true
+        }
+      ],
+      "commands": [],
+      "path": [
+        "work",
+        "gate",
+        "check"
+      ]
+    },
+    {
+      "name": "gw work gate run",
+      "help": "Start (or join, or short-circuit) the gate run for PATH's worktree tree.",
+      "short_help": "Start (or join, or short-circuit) the gate run for PATH's worktree tree.",
+      "usage": [
+        "[OPTIONS]",
+        "{path}"
+      ],
+      "arguments": [
+        {
+          "name": "path",
+          "required": true,
+          "nargs": 1
+        }
+      ],
+      "options": [
+        {
+          "name": "scope",
+          "opts": [
+            "--scope"
+          ],
+          "secondary_opts": [],
+          "help": "Gate scope: full or scoped.",
+          "required": false,
+          "default": "full",
+          "is_flag": false
+        },
+        {
+          "name": "worktree",
+          "opts": [
+            "--worktree"
+          ],
+          "secondary_opts": [],
+          "help": "Worktree path; default is the item's recorded worktree.",
+          "required": false,
+          "default": "",
+          "is_flag": false
+        },
+        {
+          "name": "workspace",
+          "opts": [
+            "--workspace"
+          ],
+          "secondary_opts": [],
+          "help": "Workspace path.",
+          "required": false,
+          "default": "",
+          "is_flag": false
+        },
+        {
+          "name": "json_output",
+          "opts": [
+            "--json"
+          ],
+          "secondary_opts": [],
+          "help": "Emit the run result as JSON.",
+          "required": false,
+          "default": false,
+          "is_flag": true
+        }
+      ],
+      "commands": [],
+      "path": [
+        "work",
+        "gate",
+        "run"
+      ]
+    },
+    {
+      "name": "gw work gate wait",
+      "help": "Report a gate run's outcome, waiting up to --timeout seconds. Never starts a run.",
+      "short_help": "Report a gate run's outcome, waiting up to --timeout seconds.",
+      "usage": [
+        "[OPTIONS]",
+        "{path}"
+      ],
+      "arguments": [
+        {
+          "name": "path",
+          "required": true,
+          "nargs": 1
+        }
+      ],
+      "options": [
+        {
+          "name": "run_id",
+          "opts": [
+            "--run"
+          ],
+          "secondary_opts": [],
+          "help": "Run id to wait for; default is the item's latest run.",
+          "required": false,
+          "default": "",
+          "is_flag": false
+        },
+        {
+          "name": "timeout",
+          "opts": [
+            "--timeout"
+          ],
+          "secondary_opts": [],
+          "help": "Seconds to wait before reporting running.",
+          "required": false,
+          "default": 540.0,
+          "is_flag": false
+        },
+        {
+          "name": "workspace",
+          "opts": [
+            "--workspace"
+          ],
+          "secondary_opts": [],
+          "help": "Workspace path.",
+          "required": false,
+          "default": "",
+          "is_flag": false
+        },
+        {
+          "name": "json_output",
+          "opts": [
+            "--json"
+          ],
+          "secondary_opts": [],
+          "help": "Emit the wait result as JSON.",
+          "required": false,
+          "default": false,
+          "is_flag": true
+        }
+      ],
+      "commands": [],
+      "path": [
+        "work",
+        "gate",
+        "wait"
       ]
     },
     {

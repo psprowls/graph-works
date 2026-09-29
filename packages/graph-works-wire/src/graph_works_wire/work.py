@@ -19,6 +19,8 @@ from graph_works_core.guidance.assembly import Guidance
 from graph_works_core.orchestrate.asks import AskAnswerResult, AskResult
 from graph_works_core.orchestrate.commands import OrchestrateResult
 from graph_works_core.orchestrate.dispatch import DispatchFailure, DispatchResult, ObservedPlacement
+from graph_works_core.orchestrate.gate import GateCheckResult, GateRunResult, GateWaitResult
+from graph_works_core.orchestrate.gate_receipts import GateMatch
 from graph_works_core.orchestrate.merge_workspace import MergeWorkspaceResult
 from graph_works_core.orchestrate.orca_port import OrcaMessage
 from graph_works_core.orchestrate.placement import BaselineRecord, PlacementRecord, ReaderRecord
@@ -583,6 +585,58 @@ def advance_payload(result: StageAdvance, path: str) -> dict[str, Any]:
             "detail": result.gate_bypass.detail,
             "decision_id": result.gate_bypass.decision_id,
         },
+        "gate_receipt": _gate_match(result.gate_receipt),
+    }
+
+
+def _gate_match(match: GateMatch | None) -> dict[str, str] | None:
+    return None if match is None else {"owner": match.owner, "run_id": match.run.run_id}
+
+
+def _gate_refusal(refusal: str | None, detail: str) -> dict[str, str] | None:
+    return None if refusal is None else {"reason": refusal, "detail": detail}
+
+
+def gate_run_payload(result: GateRunResult, path: str) -> dict[str, Any]:
+    """The `gw work gate run` contract."""
+    return {
+        "path": path,
+        "status": result.status,
+        "run_id": result.run_id,
+        "command": result.command,
+        "names": list(result.names),
+        "log_path": result.log_path,
+        "match": _gate_match(result.match),
+        "warnings": list(result.warnings),
+        "refusal": _gate_refusal(result.refusal, result.detail),
+    }
+
+
+def gate_wait_payload(result: GateWaitResult, path: str) -> dict[str, Any]:
+    """The `gw work gate wait` contract."""
+    return {
+        "path": path,
+        "status": result.status,
+        "run_id": result.run_id,
+        "exit": result.exit,
+        "recorded": result.recorded,
+        "log_path": result.log_path,
+        "log_tail": result.log_tail,
+        "receipt_path": result.receipt_path,
+        "refusal": _gate_refusal(result.refusal, result.detail),
+    }
+
+
+def gate_check_payload(result: GateCheckResult, path: str) -> dict[str, Any]:
+    """The `gw work gate check` contract; `reason` is the unsatisfied detail."""
+    return {
+        "path": path,
+        "status": result.status,
+        "reason": result.detail if result.status == "unsatisfied" else None,
+        "tree": result.tree,
+        "match": _gate_match(result.match),
+        "warnings": list(result.warnings),
+        "refusal": _gate_refusal(result.refusal, result.detail),
     }
 
 

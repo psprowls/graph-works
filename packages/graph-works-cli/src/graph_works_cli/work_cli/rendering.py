@@ -435,6 +435,41 @@ def render_prepare_workspace(payload: dict[str, Any]) -> None:
         )
 
 
+def render_gate_run(payload: dict[str, Any]) -> None:
+    """One line for a `gw work gate run` result."""
+    for warning in payload["warnings"]:
+        warn(warning)
+    match = payload["match"]
+    if payload["status"] == "satisfied" and match is not None:
+        typer.echo(f"satisfied by {match['owner']} run {match['run_id']}")
+    else:
+        typer.echo(f"{payload['status']} {payload['run_id']}: {payload['command']} (log: {payload['log_path']})")
+
+
+def render_gate_wait(payload: dict[str, Any]) -> None:
+    """One line for a `gw work gate wait` result, plus the log tail when red."""
+    if payload["status"] == "finished":
+        recorded = "recorded" if payload["recorded"] else "not recorded"
+        typer.echo(f"finished exit {payload['exit']} ({recorded}) log: {payload['log_path']}")
+        if payload["exit"] != 0 and payload["log_tail"]:
+            typer.echo(payload["log_tail"])
+    elif payload["status"] == "running":
+        typer.echo(f"running {payload['run_id']} log: {payload['log_path']}")
+    else:
+        typer.echo(f"{payload['status']} {payload['run_id']} log: {payload['log_path']}")
+
+
+def render_gate_check(payload: dict[str, Any]) -> None:
+    """One line for a `gw work gate check` result."""
+    for warning in payload["warnings"]:
+        warn(warning)
+    match = payload["match"]
+    if payload["status"] == "satisfied" and match is not None:
+        typer.echo(f"satisfied by {match['owner']} run {match['run_id']}")
+    else:
+        typer.echo(f"unsatisfied: {payload['reason']} (tree {payload['tree']})")
+
+
 def render_merge_workspace(payload: dict[str, Any]) -> None:
     """Render the planned or applied integration and its receipt."""
     action = "merged" if payload["applied"] else "would merge"

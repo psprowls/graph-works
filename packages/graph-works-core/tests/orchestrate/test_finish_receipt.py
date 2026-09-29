@@ -196,7 +196,7 @@ def test_timeout_is_unverified(tmp_path, monkeypatch):
     layout, repos = setup(tmp_path)
     merge_all(repos)
     assert record(layout, "code").changed
-    monkeypatch.setattr(finish, "probe_git", lambda *a: GitOutcome(None, "", "timeout"))
+    monkeypatch.setattr(finish, "finish_git", lambda *a, **k: GitOutcome(None, "", "timeout"))
     assert not inspect_finish(layout, OWNER).entries
     assert record(layout, "code").refusal
 

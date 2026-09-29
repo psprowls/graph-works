@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 import hashlib
+import os
 import re
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from pathlib import Path
 from types import MappingProxyType
-from typing import Literal
+from typing import Literal, cast
 
 from okf_io import Bundle, Document, load_bundle, parse
 from work_tracker_okf.items import IGNORE, WorkItem, load_items
@@ -17,10 +18,27 @@ from work_tracker_okf.vocabulary import TERMINAL_STATUSES
 
 from graph_works_core.workspace.errors import WorkspaceError
 from graph_works_core.workspace.layout import WorkspaceLayout
-from graph_works_core.workspace.provenance import probe_git
+from graph_works_core.workspace.provenance import GitExecutable, GitOutcome, probe_git, resolve_git
 from graph_works_core.workspace.repo_context import RepositoryContext, observe_repository
 from graph_works_core.workspace.repos import ItemRepo, declared_repositories, resolve_item_repo
 from graph_works_core.workspace.workspace_branch import WORKSPACE_REPO, workspace_repo
+
+_PROBE_TIMEOUT = 5  # provenance._GIT_TIMEOUT_SECONDS, copied rather than importing a private name
+
+
+def finish_git(cwd: Path, *args: str, timeout: float = _PROBE_TIMEOUT) -> GitOutcome:
+    """`probe_git` through the shared resolver; a resolver failure is a non-ok outcome.
+
+    Every finish-evidence git call goes through here, so the executable policy
+    (bug-pipeline-gates-fail-open's resolver) is decided in exactly one place.
+    """
+    resolved = resolve_git(None, environ=os.environ)
+    if not isinstance(resolved, GitExecutable):
+        cause: Literal["missing", "timeout", "error"] = (
+            "timeout" if resolved.cause == "timeout" else "error" if resolved.cause == "error" else "missing"
+        )
+        return GitOutcome(None, "", cause, resolved.detail)
+    return probe_git(cwd, *args, executable=resolved.path, timeout=timeout)
 
 
 @dataclass(frozen=True, slots=True)
@@ -213,6 +231,16 @@ def resolve_finish_targets(
     )
 
 
+IntegrationStrategy = Literal["squash", "merge", "ff"]
+ReceiptStrategy = Literal["squash", "merge", "ff", "ancestry", "attested"]
+ReceiptEvidence = Literal["verified", "accepted"]
+#: The relay lists these in this order after the target's default.
+STRATEGIES: tuple[IntegrationStrategy, ...] = ("squash", "merge", "ff")
+_RECEIPT_STRATEGIES = frozenset({*STRATEGIES, "ancestry", "attested"})
+_SHA = re.compile(r"[0-9a-f]{40}|[0-9a-f]{64}")
+_OPTIONAL_KEYS = ("target_before", "accepted_by", "reason")
+
+
 @dataclass(frozen=True, slots=True)
 class VerifiedIntegration:
     repo: str
@@ -220,6 +248,57 @@ class VerifiedIntegration:
     source_commit: str
     target_branch: str
     result_commit: str
+    # v2: how the result was produced and whose word it rests on. A v1 entry
+    # reads as ancestry that gw verified.
+    strategy: ReceiptStrategy = "ancestry"
+    evidence: ReceiptEvidence = "verified"
+    target_before: str | None = None  # target tip captured before squash/merge/ff
+    accepted_by: str | None = None  # attested entries only
+    reason: str | None = None  # attested entries only
+
+
+def receipt_entry_data(entry: VerifiedIntegration) -> dict[str, str]:
+    """The v2 mapping written for *entry*; absent optional fields are omitted, never null."""
+    return {key: value for key, value in asdict(entry).items() if value is not None}
+
+
+def _parse_entry(value: object) -> VerifiedIntegration | str:
+    """One `integrations[]` entry, or the refusal message that makes the receipt malformed."""
+    keys = ("repo", "source_branch", "source_commit", "target_branch", "result_commit")
+    if not isinstance(value, dict) or any(not isinstance(value.get(k), str) or not value[k] for k in keys):
+        return "malformed finish receipt integration"
+    if not all(_SHA.fullmatch(value[k]) for k in ("source_commit", "result_commit")):
+        return "malformed finish receipt commit"
+    strategy = value.get("strategy", "ancestry")
+    evidence = value.get("evidence", "verified")
+    raw_before, raw_by, raw_reason = (value.get(k) for k in _OPTIONAL_KEYS)
+    if not isinstance(strategy, str) or strategy not in _RECEIPT_STRATEGIES or evidence not in ("verified", "accepted"):
+        return "malformed finish receipt integration"
+    attested = strategy == "attested"
+    if attested != (evidence == "accepted"):
+        return "malformed finish receipt integration"
+    if attested:
+        if not all(isinstance(v, str) and v.strip() for v in (raw_by, raw_reason)):
+            return "malformed finish receipt attribution"
+    elif raw_by is not None or raw_reason is not None:
+        return "malformed finish receipt attribution"
+    if strategy in STRATEGIES:
+        if not isinstance(raw_before, str) or not _SHA.fullmatch(raw_before):
+            return "malformed finish receipt target_before"
+    elif raw_before is not None:
+        return "malformed finish receipt target_before"
+    return VerifiedIntegration(
+        value["repo"],
+        value["source_branch"],
+        value["source_commit"],
+        value["target_branch"],
+        value["result_commit"],
+        cast(ReceiptStrategy, strategy),
+        cast(ReceiptEvidence, evidence),
+        raw_before if isinstance(raw_before, str) else None,
+        raw_by if isinstance(raw_by, str) else None,
+        raw_reason if isinstance(raw_reason, str) else None,
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -249,33 +328,28 @@ def read_finish_receipt(
             doc.parse_error
             or data.get("type") != "Explanation"
             or type(data.get("receipt_version")) is not int
-            or data.get("receipt_version") != 1
+            or data.get("receipt_version") not in (1, 2)
             or data.get("owner") != path
             or not isinstance(values, list)
         ):
             return None, (), "malformed finish receipt"
         entries: list[VerifiedIntegration] = []
         for value in values:
-            keys = ("repo", "source_branch", "source_commit", "target_branch", "result_commit")
-            if not isinstance(value, dict) or any(not isinstance(value.get(k), str) or not value[k] for k in keys):
-                return None, (), "malformed finish receipt integration"
-            entry = VerifiedIntegration(*(value[k] for k in keys))
-            if any(e.repo == entry.repo for e in entries):
+            parsed = _parse_entry(value)
+            if isinstance(parsed, str):
+                return None, (), parsed
+            if any(e.repo == parsed.repo for e in entries):
                 return None, (), "duplicate finish receipt repository"
-            if not all(
-                re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", sha) for sha in (entry.source_commit, entry.result_commit)
-            ):
-                return None, (), "malformed finish receipt commit"
-            entries.append(entry)
+            entries.append(parsed)
         return doc, tuple(entries), None
     except (UnicodeError, ValueError):
         return None, (), "malformed finish receipt"
 
 
 def _commit(repo: Path, ref: str) -> str | None:
-    result = probe_git(repo, "rev-parse", "--verify", "--end-of-options", ref + "^{commit}")
+    result = finish_git(repo, "rev-parse", "--verify", "--end-of-options", ref + "^{commit}")
     sha = result.stdout.strip()
-    return sha if result.returncode == 0 and re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", sha) else None
+    return sha if result.returncode == 0 and _SHA.fullmatch(sha) else None
 
 
 def historical_integration(target: FinishTarget, entry: VerifiedIntegration) -> bool:

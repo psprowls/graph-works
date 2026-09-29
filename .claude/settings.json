@@ -1,6 +1,6 @@
 {
   "env": {
-    "CLAUDE_CODE_SUBAGENT_MODEL": "sonnet"
+    "CLAUDE_CODE_SUBAGENT_MODEL": "claude-sonnet-5-5"
   },
   "enabledPlugins": {
     "gw@graph-works": true,

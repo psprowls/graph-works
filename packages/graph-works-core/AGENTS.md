@@ -101,7 +101,14 @@ workspace worktrees outermost first and records committed, guarded stamps.
 `merge_workspace.py` merges workspace branches into the default base under decision-owner
 then bundle locks and records a receipt using fresh post-merge content; nested children
 merge in their epic anchor instead. `finish_receipt.record_finish_in` uses an existing
-owner lock and never reacquires ownership. See "The dispatch seam" in the README.
+owner lock and never reacquires ownership. `gate.py` resolves a gate request
+(item, repository, worktree, clean tree), shares one pending run per
+`(repo, tree, scope)` under `cache_dir/gate-runs/`, and spawns `gate_runner.py`
+detached; the runner holds `<run>.lock` for its whole life (the only liveness
+signal) and appends to the owner's `03-gate-receipts.md` through
+`gate_receipts.record_gate_run`. `gate_git.py` is the gate's only git reader and
+is strict. `stage_advance._receipt_gate` refuses execute→finish without a
+satisfying receipt. See "The dispatch seam" in the README.
 
 `wiki_page/` — `run_page_read`: one page with outlinks, backlinks and broken links; `run_wiki_citations` (`citations.py`): the page's `path:N` inline-code citations with body-relative lines, resolved against `workspace.repo_files`; no cache.
 

@@ -85,8 +85,11 @@ exists yet — enforcement is local, by design (ADR-0010).
 | `just check-pkg <name>`  | Scoped gate for one package: `lint` + `types` (both arms) + `cov`, restricted to `packages/<name>`. Skips `normalization`/`text-io`/`line-endings`/`platform-declared`/`contracts`/`test-plugin` — **not** a substitute for `just check`, just the fast loop while iterating |
 
 
-**Run `just check-pkg <name>` while iterating on one package; run the full `just
-check` once, at the finish gate, before advancing the work item or opening a PR.**
+**Run `just check-pkg <name>` while iterating on one package. At a stage
+boundary the gate is `gw work gate run <work-path>` then `gw work gate wait
+<work-path>`: gw runs this repository's `gate.full` (`just check`) once per
+clean tree and records a receipt that advance and finish trust. Do not re-run
+the full gate by hand.**
 Re-running the full 15-package gate on every fix attempt is the single biggest
 source of wasted time in this repo — mypy strict runs twice per package per
 platform arm, cov runs the full suite per package, and `test-plugin` alone chains
@@ -97,7 +100,7 @@ platform arm, cov runs the full suite per package, and `test-plugin` alone chain
 stray leftover Node process squatting on its port — unrelated to the code under
 test). Isolate the failing recipe (`just test-plugin`, `just check-pkg <name>`,
 or a direct `uv run --package <name> pytest ...`) and rerun only that; save the
-full gate for the final confirmation.
+full gate for the stage boundary, through `gw work gate`.
 
 Every suite `just check` runs is Python, bash, or — for the plugin's
 `tests/pi` extension suite alone — `node --test`. Node 23.6+ is required for

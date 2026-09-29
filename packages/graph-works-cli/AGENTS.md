@@ -46,7 +46,7 @@ change that moved it, never as an incidental side effect.
   retain their lower-layer calls. Root-level aliases `gw bootstrap|scan|ingest|query` are registered
   by `wiki_cli.main.register_root_commands()`.
 - `work_cli` — `gw work ...` (the work-item pipeline verbs, `decision` sub-app,
-  `reconcile-context`), plus root-level aliases `gw next` and `gw archive` registered by
+  `gate` sub-app (`run|wait|check`), `reconcile-context`), plus root-level aliases `gw next` and `gw archive` registered by
   `util_cli.main.register_util_root_commands()`. `gw next` is a genuine alias — it reuses `gw work
   next`'s own callback object rather than a copy (see `util_cli/main.py`'s `work_next_callback()`),
   so the two can never drift.

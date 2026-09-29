@@ -163,6 +163,13 @@ def test_another_pids_file_survives_exit(workspace: WorkspaceLayout) -> None:
         "http://",
         "http://u@a.b",
         "http://a.b:99999",
+        "",
+        "Null",
+        "NULL",
+        "null/",
+        " null",
+        "null ",
+        "file://",
     ],
 )
 def test_a_malformed_origin_exits_2_naming_it(bad: str, capsys: pytest.CaptureFixture[str]) -> None:
@@ -196,3 +203,41 @@ def test_no_flag_means_an_empty_allow_list(workspace: WorkspaceLayout) -> None:
     seen: list[object] = []
     assert serve_main.main(["--workspace", str(workspace.root)], serve_fn=lambda app, _sock: seen.append(app)) == 0
     assert seen[0].user_middleware[0].kwargs["allow_origins"] == frozenset()  # type: ignore[attr-defined]
+
+
+def test_the_null_origin_parses_to_itself() -> None:
+    assert serve_main.parse_origin("null") == "null"
+
+
+def test_a_malformed_origin_names_null_as_an_accepted_form(capsys: pytest.CaptureFixture[str]) -> None:
+    with pytest.raises(SystemExit):
+        serve_main.main(["--describe", "--allow-origin", "Null"])
+    assert "expected http(s)://host[:port] or null" in capsys.readouterr().err
+
+
+def test_the_null_origin_reaches_the_guard_beside_a_url_origin(workspace: WorkspaceLayout) -> None:
+    seen: list[object] = []
+
+    def fake_serve(app: object, _sock: socket.socket) -> None:
+        seen.append(app)
+
+    argv = [
+        "--workspace",
+        str(workspace.root),
+        "--allow-origin",
+        "http://127.0.0.1:5188",
+        "--allow-origin",
+        "null",
+    ]
+    assert serve_main.main(argv, serve_fn=fake_serve) == 0
+
+    (middleware,) = seen[0].user_middleware  # type: ignore[attr-defined]
+    assert middleware.kwargs["allow_origins"] == frozenset({"http://127.0.0.1:5188", "null"})
+
+
+def test_help_names_the_null_origin(capsys: pytest.CaptureFixture[str]) -> None:
+    with pytest.raises(SystemExit) as exc:
+        serve_main.main(["--help"])
+    assert exc.value.code == 0
+    help_text = " ".join(capsys.readouterr().out.split())
+    assert "The literal null admits pages with an opaque origin" in help_text

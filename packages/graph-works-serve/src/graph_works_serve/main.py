@@ -71,7 +71,14 @@ def serve(app: object, sock: socket.socket) -> None:
 
 
 def parse_origin(value: str) -> str:
-    """An exact ``scheme://host[:port]`` origin, or an argparse error naming *value*."""
+    """An exact ``scheme://host[:port]`` origin or the literal ``null``, or an argparse error naming *value*.
+
+    ``null`` is the opaque origin a browser sends from ``file://`` pages, sandboxed
+    iframes and ``data:`` documents. It is matched case-sensitively because that is
+    the only spelling a browser sends and the guard compares strings exactly.
+    """
+    if value == "null":
+        return value
     parts = urlsplit(value)
     try:
         port_ok = parts.port is None or parts.port > 0
@@ -84,7 +91,7 @@ def parse_origin(value: str) -> str:
         or not port_ok
         or value != f"{parts.scheme}://{parts.netloc}"
     ):
-        raise argparse.ArgumentTypeError(f"invalid origin {value!r}: expected http(s)://host[:port]")
+        raise argparse.ArgumentTypeError(f"invalid origin {value!r}: expected http(s)://host[:port] or null")
     return value
 
 
@@ -98,7 +105,11 @@ def _parser() -> argparse.ArgumentParser:
         type=parse_origin,
         default=[],
         metavar="ORIGIN",
-        help="Answer CORS for this exact origin (repeatable), e.g. http://127.0.0.1:4780.",
+        help=(
+            "Answer CORS for this exact origin (repeatable), e.g. http://127.0.0.1:4780. "
+            "The literal null admits pages with an opaque origin (file://, sandboxed iframes, data: documents); "
+            "the token still authenticates every request."
+        ),
     )
     parser.add_argument("--describe", action="store_true", help="Print the route catalog as JSON and exit.")
     return parser

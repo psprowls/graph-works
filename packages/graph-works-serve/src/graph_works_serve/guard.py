@@ -11,6 +11,12 @@ origin's preflight is refused), then the token check. Every response to an
 allowed origin -- refusals and the event stream included -- carries
 ``Access-Control-Allow-Origin`` and ``Vary: Origin``. With no allow-list,
 none of that runs and no CORS header is ever sent.
+
+``null`` -- the opaque origin of ``file://`` pages, sandboxed iframes and
+``data:`` documents -- is an ordinary member of the allow-list, matched and
+echoed exactly like any other. It is shared by every opaque context, so
+allowing it lets any of them read responses; none of them gets past the
+token check without the token.
 """
 
 from __future__ import annotations

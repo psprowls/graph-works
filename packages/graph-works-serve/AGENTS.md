@@ -39,7 +39,10 @@ check. Every response to an allowed origin, refusals and the event stream
 included, carries `Access-Control-Allow-Origin` and `Vary: Origin`. With no
 allow-list none of that runs and no CORS header is ever sent. `check()` still
 composes both halves for callers that want one call. Origins match exactly
-(`scheme://host[:port]`).
+(`scheme://host[:port]`, or the literal `null` for an opaque origin such as a
+`file://` renderer). `null` needs no guard code: the guard only compares and
+echoes strings, so `parse_origin` in `main.py` is the one place that knows
+about it.
 
 ## Change stream (`/v1/events`)
 

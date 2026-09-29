@@ -597,6 +597,9 @@ def inspect_finish(layout: WorkspaceLayout, path: str) -> FinishVerification:
 CleanupAction = Literal["remove", "deferred", "skip"]
 
 
+CleanupDelete = Literal["branch-d", "update-ref"]
+
+
 @dataclass(frozen=True, slots=True)
 class CleanupRow:
     repo: str
@@ -605,6 +608,22 @@ class CleanupRow:
     target_branch: str
     action: CleanupAction
     reason: str
+    # How the branch is deleted: `git branch -d` when ancestry proves the
+    # merge; compare-and-delete to `expected` when a verified squash does.
+    delete: CleanupDelete = "branch-d"
+    expected: str | None = None
+
+
+def squash_integrated(repo: Path, entry: VerifiedIntegration) -> bool:
+    """A verified squash entry whose result is still on its target branch."""
+    tip = _commit(repo, "refs/heads/" + entry.target_branch)
+    return (
+        entry.strategy == "squash"
+        and entry.evidence == "verified"
+        and tip is not None
+        and integration_shape(repo, entry) is None
+        and _is_ancestor(repo, entry.result_commit, tip)
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -670,6 +689,7 @@ def plan_finish_cleanup(layout: WorkspaceLayout, path: str, *, runner_cwd: Path 
     except WorkspaceError as exc:
         return CleanupPlan((), str(exc))
     targets = {entry.repo: entry.target_branch for entry in entries}
+    by_repo = {entry.repo: entry for entry in entries}
     for stamp_name, repo, _worktree, _branch in stamps:
         if stamp_name is None or repo is None:
             return CleanupPlan((), f"{path}: stamped repo {stamp_name!r} has no verified checkout")
@@ -730,11 +750,22 @@ def plan_finish_cleanup(layout: WorkspaceLayout, path: str, *, runner_cwd: Path 
         action: CleanupAction
         reason: str
         unmerged: bool
+        entry = by_repo[stamp_name]
+        delete: CleanupDelete = "branch-d"
+        expected: str | None = None
         if branch:
             ancestry = probe_git(repo, "merge-base", "--is-ancestor", "refs/heads/" + branch, "refs/heads/" + target)
             if ancestry.cause != "ok" or ancestry.returncode not in (0, 1):
                 return CleanupPlan((), f"{path}: cannot verify merge of {branch!r} into {target!r} in {stamp_name!r}")
             unmerged = ancestry.returncode == 1
+            # A squash never makes the branch an ancestor; a verified squash
+            # receipt at the branch's exact tip is the proof instead.
+            if (
+                unmerged
+                and _commit(repo, "refs/heads/" + branch) == entry.source_commit
+                and squash_integrated(repo, entry)
+            ):
+                unmerged, delete, expected = False, "update-ref", entry.source_commit
         elif tree and stamped_branch:
             # The stamped branch is gone. A deleted branch alone is not proof the
             # surviving checkout is safe: its own identity must still hold — a
@@ -754,7 +785,10 @@ def plan_finish_cleanup(layout: WorkspaceLayout, path: str, *, runner_cwd: Path 
                 return CleanupPlan(
                     (), f"{path}: cannot verify merge of checkout HEAD into {target!r} in {stamp_name!r}"
                 )
-            unmerged = unmerged or head_ancestry.returncode == 1
+            head_merged = head_ancestry.returncode == 0 or (
+                head == entry.source_commit and squash_integrated(repo, entry)
+            )
+            unmerged = unmerged or not head_merged
         if unmerged:
             action, reason = "skip", "unmerged"
         elif branch == target or (tree and (tree in trunk or tree in target_checkouts)):
@@ -770,7 +804,7 @@ def plan_finish_cleanup(layout: WorkspaceLayout, path: str, *, runner_cwd: Path 
             action, reason = "deferred", "runner"
         else:
             action, reason = "remove", ""
-        rows.append(CleanupRow(stamp_name, tree, branch, target, action, reason))
+        rows.append(CleanupRow(stamp_name, tree, branch, target, action, reason, delete, expected))
     return CleanupPlan(tuple(rows), None)
 
 

@@ -1,11 +1,14 @@
 """Each receipt strategy verifies exactly the history shape it claims."""
 
+import subprocess
+
 import pytest
-from _finish_repos import OWNER, code_repo, commit_file, git, squash, target, workspace
+from _finish_repos import OWNER, code_repo, commit_file, git, squash, target, workspace, write_receipt
 from graph_works_core.workspace.errors import WorkspaceConfigError
 from graph_works_core.workspace.finish import (
     VerifiedIntegration,
     finish_strategy,
+    plan_finish_cleanup,
     resolve_finish_targets,
     verify_integration,
 )
@@ -157,3 +160,94 @@ def test_invalid_strategy_configuration_is_a_config_error(tmp_path, block):
 
     with pytest.raises(WorkspaceConfigError, match=r"repositories\.code\.finish"):
         finish_strategy(layout, "code")
+
+
+def resolved_after_squash(tmp_path, *, attested=False):
+    repo, source = code_repo(tmp_path)
+    commit_file(repo, "c.txt", "main\n", "main moves")
+    before, result = squash(repo)
+    source_sha = git(source, "rev-parse", "HEAD")
+    layout = workspace(tmp_path, repo, source, phase="done", status="resolved")
+    recorded = (
+        VerifiedIntegration(
+            "code", "feature", source_sha, "main", result, "attested", "accepted", None, "pat", "rebased"
+        )
+        if attested
+        else VerifiedIntegration("code", "feature", source_sha, "main", result, "squash", "verified", before)
+    )
+    write_receipt(layout, [recorded])
+    return layout, repo, source, source_sha
+
+
+def rows(layout, tmp_path):
+    plan = plan_finish_cleanup(layout, OWNER, runner_cwd=tmp_path)
+    assert plan.refusal is None
+    return plan.rows
+
+
+def test_verified_squash_branch_is_removed_by_compare_and_delete(tmp_path):
+    layout, _repo, source, source_sha = resolved_after_squash(tmp_path)
+
+    (row,) = rows(layout, tmp_path)
+
+    assert (row.action, row.delete, row.expected, row.worktree) == (
+        "remove",
+        "update-ref",
+        source_sha,
+        str(source.resolve()),
+    )
+
+
+def test_squash_branch_that_moved_is_unmerged(tmp_path):
+    layout, _repo, source, _sha = resolved_after_squash(tmp_path)
+    commit_file(source, "late.txt", "late\n", "late work")
+
+    (row,) = rows(layout, tmp_path)
+
+    assert (row.action, row.reason) == ("skip", "unmerged")
+
+
+def test_accepted_entry_never_makes_a_branch_merged(tmp_path):
+    layout, *_ = resolved_after_squash(tmp_path, attested=True)
+
+    (row,) = rows(layout, tmp_path)
+
+    assert (row.action, row.reason) == ("skip", "unmerged")
+
+
+def test_detached_checkout_at_the_squashed_source_is_merged(tmp_path):
+    layout, _repo, source, _sha = resolved_after_squash(tmp_path)
+    git(source, "checkout", "-q", "--detach")
+
+    (row,) = rows(layout, tmp_path)
+
+    assert (row.action, row.delete) == ("remove", "update-ref")
+
+
+def test_ancestry_rows_keep_branch_d(tmp_path):
+    repo, source = code_repo(tmp_path)
+    git(repo, "merge", "--ff-only", "feature")
+    layout = workspace(tmp_path, repo, source, phase="done", status="resolved")
+    sha = git(source, "rev-parse", "HEAD")
+    write_receipt(layout, [VerifiedIntegration("code", "feature", sha, "main", sha)])
+
+    (row,) = rows(layout, tmp_path)
+
+    assert (row.action, row.delete, row.expected) == ("remove", "branch-d", None)
+
+
+def test_update_ref_compare_and_delete_refuses_a_moved_branch(tmp_path):
+    """Pins the git contract finish-cleanup.md relies on."""
+    repo, source = code_repo(tmp_path)
+    stale = git(source, "rev-parse", "HEAD")
+    commit_file(source, "late.txt", "late\n", "late work")
+    git(repo, "worktree", "remove", str(source))
+
+    refused = subprocess.run(
+        ["git", "-C", str(repo), "update-ref", "-d", "refs/heads/feature", stale],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert refused.returncode != 0 and git(repo, "rev-parse", "refs/heads/feature") != stale

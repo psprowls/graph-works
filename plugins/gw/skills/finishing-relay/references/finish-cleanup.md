@@ -14,29 +14,16 @@ uv run --package graph-works-core python <plugin>/skills/finishing-relay/referen
 is set: report it as one line and stop. The item has already resolved, so a
 refusal is never an escalation and never changes item state.
 
-The JSON is `{"rows": [...], "refusal": null}`. Each row carries `repo`,
-`worktree` (absolute, or `""` when only a branch remains), `branch` (or `""`),
-`target_branch`, `action` (`remove` / `deferred` / `skip`) and `reason`.
+The JSON is `{"rows": [...], "refusal": null}`. Each row carries `repo`, `worktree` (absolute, or `""` when only a branch remains), `branch` (or `""`), `target_branch`, `action` (`remove` / `deferred` / `skip`), `reason`, `delete` (`branch-d` / `update-ref`) and `expected`. `update-ref` marks a branch proven merged by a verified squash receipt rather than by ancestry; `expected` is the commit that branch must still point at.
 
 ## Execute each `remove` row, in order
 
 1. When `orca` is on PATH, and the row has a worktree, run
    `orca worktree show --worktree path:<worktree> --json`.
-2. **Orca-managed** (the show succeeded) →
-   `orca worktree rm --worktree path:<worktree> --json`. Pass no other flags:
-   never `--force`, and no hooks flags. Orca deletes the branch only when it
-   can prove it merged; a branch Orca keeps is reported as retained.
-3. **Otherwise** → `git -C <repo> worktree remove <worktree>` (never
-   `--force`), then `git -C <repo> branch -d <branch>` (never `-D`). `<repo>`
-   is the declared checkout of the row's `repo`: for a code repository, the
-   `repositories.<repo>.path` entry in `<workspace>/workspace.yaml`; the
-   reserved `_workspace` row is the workspace's own Git checkout
-   (`<workspace>`), never a `repositories.<repo>` entry. The main checkout is
-   never a row's worktree.
-4. A row with an empty `worktree` runs only `git -C <repo> branch -d <branch>`.
-5. Any refusal (a dirty worktree, an unmerged branch, a branch Orca
-   retained) is reported as `skipped: <reason>` and never retried with force
-   or any other flag.
+2. **Orca-managed** (the show succeeded) → `orca worktree rm --worktree path:<worktree> --json`. Pass no other flags: never `--force`, and no hooks flags. Orca deletes the branch only when it can prove it merged, so a squash-integrated branch is always retained. For an `update-ref` row, then run `git -C <repo> update-ref -d refs/heads/<branch> <expected>`.
+3. **Otherwise** → `git -C <repo> worktree remove <worktree>` (never `--force`), then delete the branch as the row's `delete` says: `branch-d` → `git -C <repo> branch -d <branch>` (never `-D`); `update-ref` → `git -C <repo> update-ref -d refs/heads/<branch> <expected>`, a compare-and-delete that refuses if the branch moved. `<repo>` is the declared checkout of the row's `repo`: for a code repository, the `repositories.<repo>.path` entry in `<workspace>/workspace.yaml`; the reserved `_workspace` row is the workspace's own Git checkout (`<workspace>`), never a `repositories.<repo>` entry. The main checkout is never a row's worktree.
+4. A row with an empty `worktree` runs only its branch deletion (`branch-d` or `update-ref`, as above).
+5. Any refusal (a dirty worktree, an unmerged branch, a branch Orca retained, an `update-ref` whose branch moved) is reported as `skipped: <reason>` — `skipped: branch moved` for the last — and never retried with force or any other flag.
 
 ## Report
 

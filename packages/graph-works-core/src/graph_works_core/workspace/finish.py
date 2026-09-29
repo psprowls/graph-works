@@ -307,6 +307,7 @@ class FinishVerification:
     resolved_in: str | None
     blockers: tuple[str, ...]
     entries: tuple[VerifiedIntegration, ...]
+    accepted: tuple[str, ...] = ()
 
 
 def read_finish_receipt(
@@ -352,44 +353,117 @@ def _commit(repo: Path, ref: str) -> str | None:
     return sha if result.returncode == 0 and _SHA.fullmatch(sha) else None
 
 
+def _is_ancestor(repo: Path, older: str, newer: str) -> bool:
+    return finish_git(repo, "merge-base", "--is-ancestor", older, newer).returncode == 0
+
+
+def _parents(repo: Path, sha: str) -> tuple[str, ...] | None:
+    listed = finish_git(repo, "rev-list", "--parents", "-n", "1", sha)
+    fields = listed.stdout.split()
+    return tuple(fields[1:]) if listed.returncode == 0 and fields and fields[0] == sha else None
+
+
+def _tree(repo: Path, ref: str) -> str | None:
+    result = finish_git(repo, "rev-parse", "--verify", "--end-of-options", ref + "^{tree}")
+    sha = result.stdout.strip()
+    return sha if result.returncode == 0 and _SHA.fullmatch(sha) else None
+
+
+def _merged_tree(repo: Path, base: str, source: str) -> str | None:
+    """Git's clean merge of *source* into *base* (plain `merge-tree`), or None on conflict or failure."""
+    merged = finish_git(repo, "merge-tree", "--write-tree", base, source)
+    first = merged.stdout.splitlines()[0] if merged.stdout else ""
+    return first if merged.returncode == 0 and _SHA.fullmatch(first) else None
+
+
+def integration_shape(repo: Path, entry: VerifiedIntegration) -> str | None:
+    """None when *entry*'s result has the shape its strategy claims; otherwise why not.
+
+    Never checks the live target tip: historical evidence must stay genuine
+    after the target moves on.
+    """
+    if _commit(repo, entry.source_commit) != entry.source_commit:
+        return "source commit is not in the repository"
+    if _commit(repo, entry.result_commit) != entry.result_commit:
+        return "result commit is not in the repository"
+    if entry.strategy == "attested":
+        return None
+    if entry.strategy == "ancestry":
+        return (
+            None
+            if _is_ancestor(repo, entry.source_commit, entry.result_commit)
+            else "source is not an ancestor of the result"
+        )
+    if entry.strategy == "ff":
+        return None if entry.result_commit == entry.source_commit else "fast-forward result is not the source commit"
+    before = entry.target_before
+    assert before is not None  # the reader requires it for squash/merge/ff
+    parents = _parents(repo, entry.result_commit)
+    if entry.strategy == "merge":
+        return (
+            None
+            if parents == (before, entry.source_commit)
+            else "merge result's parents are not (target_before, source)"
+        )
+    if parents != (before,):
+        return "squash result's parent is not target_before"
+    merged = _merged_tree(repo, before, entry.source_commit)
+    if merged is None:
+        return "merge-tree of target_before and source conflicts or failed"
+    if merged != _tree(repo, entry.result_commit):
+        return "squash tree differs from merge-tree of target_before and source"
+    return None
+
+
 def historical_integration(target: FinishTarget, entry: VerifiedIntegration) -> bool:
-    """Historical evidence may be stale, but must remain genuine repository-local ancestry."""
+    """Historical evidence may be stale, but must remain a genuine result of its strategy."""
     repo = target.repo.path
     return bool(
         repo is not None
         and entry.repo == target.repo.name
         and entry.source_branch == target.source_branch
         and entry.target_branch == target.target_branch
-        and _commit(repo, entry.source_commit) == entry.source_commit
-        and _commit(repo, entry.result_commit) == entry.result_commit
-        and probe_git(repo, "merge-base", "--is-ancestor", entry.source_commit, entry.result_commit).returncode == 0
+        and integration_shape(repo, entry) is None
     )
 
 
-def observe_integration(target: FinishTarget, entry: VerifiedIntegration | None = None) -> VerifiedIntegration | None:
-    """Prove current source ancestry in this target's repository; never mutate Git."""
+def verify_integration(target: FinishTarget, entry: VerifiedIntegration) -> str | None:
+    """Live proof for one target: None when verified, else the reason. Never mutates Git."""
     repo = target.repo.path
     if repo is None or target.repo.name is None:
-        return None
+        return "no repository checkout"
+    if (entry.repo, entry.source_branch, entry.target_branch) != (
+        target.repo.name,
+        target.source_branch,
+        target.target_branch,
+    ):
+        return "entry names a different target"
     source = _commit(repo, "refs/heads/" + target.source_branch)
     tip = _commit(repo, "refs/heads/" + target.target_branch)
     if source is None or tip is None:
-        return None
+        return "cannot resolve the source or target branch"
+    if entry.source_commit != source:
+        return "source branch moved since the receipt"
+    shape = integration_shape(repo, entry)
+    if shape is not None:
+        return shape
+    if not _is_ancestor(repo, entry.result_commit, tip):
+        return "result is not reachable from the target tip"
+    return None
+
+
+def observe_integration(target: FinishTarget, entry: VerifiedIntegration | None = None) -> VerifiedIntegration | None:
+    """*entry* when it verifies; with no entry, current-tip ancestry evidence. Never mutates Git."""
     if entry is None:
-        entry = VerifiedIntegration(target.repo.name, target.source_branch, source, target.target_branch, tip)
-    if (
-        entry.repo != target.repo.name
-        or entry.source_branch != target.source_branch
-        or entry.target_branch != target.target_branch
-        or entry.source_commit != source
-        or _commit(repo, entry.source_commit) != entry.source_commit
-        or _commit(repo, entry.result_commit) != entry.result_commit
-    ):
-        return None
-    for left, right in ((source, entry.result_commit), (entry.result_commit, tip)):
-        if probe_git(repo, "merge-base", "--is-ancestor", left, right).returncode != 0:
+        repo = target.repo.path
+        if repo is None or target.repo.name is None:
             return None
-    return entry
+        source = _commit(repo, "refs/heads/" + target.source_branch)
+        tip = _commit(repo, "refs/heads/" + target.target_branch)
+        if source is None or tip is None:
+            return None
+        entry = VerifiedIntegration(target.repo.name, target.source_branch, source, target.target_branch, tip)
+    return entry if verify_integration(target, entry) is None else None
 
 
 def inspect_finish(layout: WorkspaceLayout, path: str) -> FinishVerification:
@@ -405,12 +479,17 @@ def inspect_finish(layout: WorkspaceLayout, path: str) -> FinishVerification:
     if error:
         blockers.append(error)
     verified: list[VerifiedIntegration] = []
+    accepted: list[str] = []
     for target in plan.targets:
         entry = next((e for e in entries if e.repo == target.repo.name), None)
-        if entry is None or observe_integration(target, entry) is None:
-            blockers.append(f"{target.repo.name}: incomplete integration into {target.target_branch}")
-        else:
-            verified.append(entry)
+        reason = "no receipt entry" if entry is None else verify_integration(target, entry)
+        if reason is not None:
+            blockers.append(f"{target.repo.name}: incomplete integration into {target.target_branch} ({reason})")
+            continue
+        assert entry is not None
+        verified.append(entry)
+        if entry.evidence == "accepted":
+            accepted.append(entry.repo)
     names = {target.repo.name for target in plan.targets}
     if any(e.repo not in names for e in entries):
         blockers.append("finish receipt contains an unexpected repository")
@@ -418,7 +497,7 @@ def inspect_finish(layout: WorkspaceLayout, path: str) -> FinishVerification:
         blockers.append("no verified finish targets")
     code_entries = [entry for entry in verified if entry.repo != WORKSPACE_REPO]
     resolved = (code_entries or verified)[0].result_commit if verified else None
-    return FinishVerification(not blockers, resolved, tuple(blockers), tuple(verified))
+    return FinishVerification(not blockers, resolved, tuple(blockers), tuple(verified), tuple(accepted))
 
 
 CleanupAction = Literal["remove", "deferred", "skip"]

@@ -432,6 +432,8 @@ assert_contains "skills/finishing-relay/SKILL.md" "gw work gate check <work-path
 assert_contains "skills/finishing-relay/SKILL.md" "gw work gate check <work-path> --worktree <target worktree>" "relay R4 checks the merged tree"
 assert_contains "skills/finishing-relay/SKILL.md" 'git log <target_branch>..<source_branch>' "relay R2 settles an empty range without gating"
 assert_contains "skills/workflow/references/brief-riders.md" "gw work gate check <work-path>" "attended finish rider checks for a receipt"
+assert_contains "skills/finishing-relay/SKILL.md" "except a target R2's already-contained rule settles" "relay R1 exempts already-contained targets"
+assert_contains "skills/workflow/references/brief-riders.md" "except one already contained" "attended rider exempts already-contained targets"
 assert_contains "skills/auto-drive/SKILL.md" "### Gates" "auto-drive states the gate rules"
 assert_contains "skills/auto-drive/SKILL.md" "gw work gate wait" "auto-drive resumes gates with wait"
 sweep_denylist "gate-tmp-logs" '/private/tmp/[^ ]*just-check|/private/tmp/claude' \

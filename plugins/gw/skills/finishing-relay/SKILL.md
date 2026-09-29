@@ -34,17 +34,17 @@ Enter the Escalation path and hold the finish stage until targets are verified.
 
 ## R1 — Verify tests
 
-For every code target, run `gw work gate check <work-path> --json` in its source worktree (`--worktree <source worktree>` when it is not the item's stamped worktree). `satisfied` skips the gate: quote the receipt's `match.owner` and `match.run_id` in R3's question. `unsatisfied` runs `gw work gate run <work-path>` and then `gw work gate wait <work-path>` until it returns `finished`; `running` means call `wait` again, and `orphaned` means start a new run. A red `finished` enters the Escalation path with `log_tail`. Never run the repository's check command directly as the gate.
+For every code target, except a target R2's already-contained rule settles (run `git log <target_branch>..<source_branch>` first; empty means no gate), run `gw work gate check <work-path> --json` in its source worktree (`--worktree <source worktree>` when it is not the item's stamped worktree). `satisfied` skips the gate: quote the receipt's `match.owner` and `match.run_id` in R3's question. `unsatisfied` runs `gw work gate run <work-path>` (with the same `--worktree <source worktree>` when you passed one to `check`) and then `gw work gate wait <work-path>` until it returns `finished`; `running` means call `wait` again, and `orphaned` means start a new run. A red `finished` enters the Escalation path with `log_tail`. Never run the repository's check command directly as the gate.
 The `_workspace` target has no test suite; its merged-result check is
 `gw wiki lint --workspace <main workspace>` for main integration, or
 `gw wiki lint --workspace <anchor worktree>` for epic integration.
 Keep `GRAPH_WORKS_DIR` on the main workspace for work and receipt verbs.
 
-**If tests fail:** do not stop silently and do not present options. Enter
+**If the gate is red:** do not stop silently and do not present options. Enter
 the **Escalation path** (below) with the failure output in the escalation
 body. Wait for the coordinator's instructions before doing anything else.
 
-**If tests pass:** continue to R2.
+**If the gate is satisfied or passes:** continue to R2.
 
 ## R2 — Detect state
 

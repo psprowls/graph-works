@@ -34,9 +34,7 @@ Enter the Escalation path and hold the finish stage until targets are verified.
 
 ## R1 — Verify tests
 
-For every entry in the supplied `finish_targets` list, run that repository's test suite (same discovery approach as
-`finishing-a-development-branch` Step 1 — `npm test` / `cargo test` /
-`pytest` / `go test ./...`, whichever the repo uses).
+For every code target, run `gw work gate check <work-path> --json` in its source worktree (`--worktree <source worktree>` when it is not the item's stamped worktree). `satisfied` skips the gate: quote the receipt's `match.owner` and `match.run_id` in R3's question. `unsatisfied` runs `gw work gate run <work-path>` and then `gw work gate wait <work-path>` until it returns `finished`; `running` means call `wait` again, and `orphaned` means start a new run. A red `finished` enters the Escalation path with `log_tail`. Never run the repository's check command directly as the gate.
 The `_workspace` target has no test suite; its merged-result check is
 `gw wiki lint --workspace <main workspace>` for main integration, or
 `gw wiki lint --workspace <anchor worktree>` for epic integration.
@@ -59,6 +57,8 @@ holds the entire finish stage. A `null` target_worktree means the target is not
 checked out; hold at R2 without merging.
 Use each entry's target_branch verbatim. The scalar Auto-drive merge target
 is context only; it cannot replace this complete set or justify trunk fallback.
+
+**Already contained.** For a code target, when `git log <target_branch>..<source_branch>` in the source worktree prints nothing, the source is already contained in the target. That target settles on the confirm path with no R1 or R4 gate; carry `resolved_in` = the target branch tip.
 
 For each target, in its source worktree:
 
@@ -201,8 +201,7 @@ what already integrated. Cross-repository atomicity is not promised.
   **Conflicts:** never auto-resolve (parent-epic policy). Enter the
   **Escalation path** with the conflict file list in the body; wait for
   instructions.
-  **On a clean code merge:** re-run the test suite (R1's command) in the target
-  worktree, on the merged result. **Failing tests post-merge:** enter the
+  **On a clean code merge:** run `gw work gate check <work-path> --worktree <target worktree>`. A fast-forward, or a squash onto an unmoved target, reproduces the gated tree and is `satisfied`, so nothing re-runs. Otherwise run `gw work gate run <work-path> --worktree <target worktree>` and `gw work gate wait <work-path>`; the receipt is recorded under this item. **A red gate post-merge:** enter the
   Escalation path — the merge already happened, so the escalation body must
   say so explicitly (don't let the coordinator think it's still pending).
   Continue to R5 with each target's merge commit SHA from its target

@@ -1176,6 +1176,10 @@ The `launch-worker.py` primitives (`place`, `prepare-reader`, `encode`,
 resumed on the old recipe, and for the park-resume (§2.6) and retry (§4.1)
 paths, which relaunch an existing Task; new dispatches do not use them.
 
+### Gates
+
+The coordinator runs no gates. Workers gate through `gw work gate run` and `gw work gate wait`; gw records the receipt. A worker resumed after a crash or park calls `gw work gate wait <work-path>` before anything else, so an in-flight run is reused rather than restarted. An advance refused `no-gate-receipt` or `no-gate-configured` reaches the human through the same skip-gate question as every other fail-closed gate refusal: the human either answers with `--skip-gate <code> --reason "…"` or sends the worker back to run the gate (or to have `repositories.<name>.gate.full` configured).
+
 ## 4. Delivery processing
 
 Handle every message in the `gw work wait` batch (§2.7) — one at a time —
@@ -1978,7 +1982,7 @@ taking `<work-path>` and `<phase>` from the body's first two words (before the
 `AskUserQuestion` and continue the loop. The human answers in that terminal,
 not here. Card state for attend dispatches is derived by §2.5.3.
 
-Every other escalation:
+Every other escalation (when its body names `no-gate-receipt` or `no-gate-configured`, see `### Gates` in section 3):
 
 Surface the message body to the user and ask, free-form (not a forced
 multiple-choice `AskUserQuestion`), how to proceed. If the user wants to

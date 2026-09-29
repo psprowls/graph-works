@@ -269,6 +269,8 @@ resolves an item; the rider leaves the stock skill unmodified.
 > integrated targets explicitly because cross-repository atomicity is not
 > promised. PR, keep/hold and discard never resolve the item.
 >
+> **Gates are receipts.** For each code target, run `gw work gate check <work-path>` in the source worktree before Step 1's tests. `satisfied` replaces Step 1's test run; name the receipt's owner and run id in the summary. Otherwise run `gw work gate run <work-path>` and `gw work gate wait <work-path>` in place of Step 1's test command. When `git log <target_branch>..<source_branch>` is empty the target is already contained: take the on-target confirm path with no gate. After a clean merge run `gw work gate check <work-path> --worktree <target worktree>`; only when it is unsatisfied run `gw work gate run <work-path> --worktree <target worktree>` and `wait`. Never run the repository's check command directly as the gate.
+>
 > **Receipt procedure.** Before presenting the choice explain that verification
 > requires ancestry-preserving fast-forward or merge commits. Squash/rebase does
 > not prove integration. Keep source worktrees and branches until verification.

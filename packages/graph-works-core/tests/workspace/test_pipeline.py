@@ -145,6 +145,13 @@ def test_the_execute_tail_names_the_artifact_and_its_placeholders():
     assert "## Acceptance" in pipeline.EXECUTE_TAIL
 
 
+def test_execute_tail_names_the_gate_verbs():
+    assert "gw work gate run {path}" in pipeline.EXECUTE_TAIL
+    assert "gw work gate wait {path}" in pipeline.EXECUTE_TAIL
+    assert "--scope scoped" in pipeline.EXECUTE_TAIL
+    assert "/private/tmp" not in pipeline.EXECUTE_TAIL
+
+
 def test_only_the_relay_tail_carries_the_grace_period_pointer() -> None:
     # An attend worker asks in its own terminal (the attend-ask decision), so
     # no Orca ask of its can time out; the protocol is relay-only now.

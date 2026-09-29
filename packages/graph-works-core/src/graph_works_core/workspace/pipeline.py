@@ -94,6 +94,8 @@ ASK_LINE = (
 #: registered into `sources[]` by the advance, and no transition is gated on
 #: its contents. A gate that read a worker's self-report would be trusting the
 #: exact judgement the defect this tail exists for shows a model getting wrong.
+#: The trailing gate paragraph is mirrored verbatim in the workflow skill's
+#: execute-gate bullet (`<work-path>` there, `{path}` here).
 EXECUTE_TAIL = (
     "Before you advance, write {workspace}/okf/{path}/references/03-execute-coverage.md: "
     "one markdown task-list line per item in this stage's design spec `## Acceptance` section, "
@@ -101,7 +103,10 @@ EXECUTE_TAIL = (
     "Where the spec has no `## Acceptance` section, enumerate its `## Scope` / "
     "`## What this design changes` headings instead and say in the file that you did. "
     "Mark honestly -- an unchecked box is a normal, expected outcome; an inaccurate checked box "
-    "is not. Pass that file's path as --report-path on your worker_done."
+    "is not. Pass that file's path as --report-path on your worker_done.\n"
+    "The gate is `gw work gate run {path}`, then `gw work gate wait {path}` until it finishes. "
+    "Run it on the committed, clean tree before you advance. Use `--scope scoped` for fix-wave rechecks. "
+    "Never run the repository's check command directly as the gate, and never write gate logs to a shared tmp path."
     "\n" + WORKSPACE_COMMIT_TAIL
 )
 

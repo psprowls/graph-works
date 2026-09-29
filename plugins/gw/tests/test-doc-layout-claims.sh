@@ -426,6 +426,19 @@ assert_contains "skills/auto-drive/references/multi-repo-acceptance.md" \
 # workflow skill's step 3 obligation + step 4 read-back (attended). Nothing else
 # ties the prose to the producer, so pin each half; see
 # work/bug-auto-drive-execute-coverage-read.
+GATE_LINE='The gate is `gw work gate run <work-path>`, then `gw work gate wait <work-path>` until it finishes.'
+assert_contains "skills/workflow/SKILL.md" "$GATE_LINE" "workflow's execute bullet names the gate verbs"
+assert_contains "skills/finishing-relay/SKILL.md" "gw work gate check <work-path>" "relay R1 checks for a receipt first"
+assert_contains "skills/finishing-relay/SKILL.md" "gw work gate check <work-path> --worktree <target worktree>" "relay R4 checks the merged tree"
+assert_contains "skills/finishing-relay/SKILL.md" 'git log <target_branch>..<source_branch>' "relay R2 settles an empty range without gating"
+assert_contains "skills/workflow/references/brief-riders.md" "gw work gate check <work-path>" "attended finish rider checks for a receipt"
+assert_contains "skills/auto-drive/SKILL.md" "### Gates" "auto-drive states the gate rules"
+assert_contains "skills/auto-drive/SKILL.md" "gw work gate wait" "auto-drive resumes gates with wait"
+sweep_denylist "gate-tmp-logs" '/private/tmp/[^ ]*just-check|/private/tmp/claude' \
+    "names a shared tmp gate log path" "tests/test-doc-layout-claims.sh"
+sweep_denylist "gate-by-hand" 'run `just check`( as the gate|,? then advance)|until grep .\^EXIT' \
+    "names just check or an EXIT-grep loop as the gate" "tests/test-doc-layout-claims.sh"
+
 assert_contains "skills/auto-drive/SKILL.md" \
     "### Coverage read (execute dispatches only)" \
     "auto-drive carries the execute-stage Coverage read section"

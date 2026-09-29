@@ -17,16 +17,19 @@ from typing import Literal
 from okf_io import load_bundle
 from work_tracker_okf.items import IGNORE, WorkItem, load_items
 
-from graph_works_core.orchestrate.finish_receipt import record_finish_in
+from graph_works_core.orchestrate.finish_receipt import receipt_problem, record_finish_in
 from graph_works_core.workspace.commits import commit_mode
-from graph_works_core.workspace.decision_owner import locked_decision_owner
+from graph_works_core.workspace.decision_owner import decision_context, locked_decision_owner
 from graph_works_core.workspace.finish import (
+    FinishPlan,
     FinishTarget,
     IntegrationStrategy,
     VerifiedIntegration,
     discover_integration,
     finish_git,
     finish_strategy,
+    finish_toolchain,
+    merge_tree_unsupported,
     read_finish_receipt,
     resolve_finish_targets,
     verify_integration,
@@ -77,11 +80,14 @@ class IntegrateResult:
 
 
 class _Refused(Exception):
-    def __init__(self, refusal: IntegrateRefusal, detail: str, conflicts: tuple[str, ...] = ()) -> None:
+    def __init__(
+        self, refusal: IntegrateRefusal, detail: str, conflicts: tuple[str, ...] = (), *, restored: bool = False
+    ) -> None:
         super().__init__(detail)
         self.refusal = refusal
         self.detail = detail
         self.conflicts = conflicts
+        self.restored = restored
 
 
 def _run(worktree: Path, *args: str) -> GitOutcome:
@@ -104,7 +110,7 @@ def _sha(worktree: Path, ref: str) -> str:
 
 def _target(
     layout: WorkspaceLayout, items: Sequence[WorkItem], path: str, repo_name: str
-) -> tuple[WorkItem, FinishTarget, Path]:
+) -> tuple[WorkItem, FinishTarget, Path, FinishPlan]:
     if repo_name == WORKSPACE_REPO:
         raise _Refused(
             "workspace-target",
@@ -123,7 +129,7 @@ def _target(
         raise _Refused("no-target", f"{repo_name}: not an owned finish target of {path}")
     if target.target_worktree is None:
         raise _Refused("no-target", f"{repo_name}: {target.target_branch!r} is not checked out in any worktree")
-    return item, target, Path(target.target_worktree)
+    return item, target, Path(target.target_worktree), plan
 
 
 def _require_clean(worktree: Path, target_branch: str) -> None:
@@ -175,15 +181,34 @@ def _restore(worktree: Path, before: str, *, merge_head: bool) -> str:
 def _merge(
     item: WorkItem, target: FinishTarget, worktree: Path, strategy: IntegrationStrategy, source: str, before: str
 ) -> str:
-    ref = "refs/heads/" + target.source_branch
+    """Integrate the observed *source* commit; on any failure the target is put back at *before*."""
+    try:
+        return _merge_observed(item, target, worktree, strategy, source, before)
+    except _Refused as refused:
+        if refused.restored:
+            raise
+        # A timeout or spawn failure inside `_run` can leave MERGE_HEAD, a staged squash or a lock behind.
+        raise _Refused(
+            refused.refusal,
+            refused.detail + _restore(worktree, before, merge_head=strategy == "merge"),
+            refused.conflicts,
+            restored=True,
+        ) from None
+
+
+def _merge_observed(
+    item: WorkItem, target: FinishTarget, worktree: Path, strategy: IntegrationStrategy, source: str, before: str
+) -> str:
     if strategy == "ff":
-        merged = _run(worktree, "merge", "--ff-only", ref)
+        merged = _run(worktree, "merge", "--ff-only", source)
         if merged.returncode != 0:
-            raise _Refused("not-fast-forward", _output(merged) + _restore(worktree, before, merge_head=False))
+            raise _Refused(
+                "not-fast-forward", _output(merged) + _restore(worktree, before, merge_head=False), restored=True
+            )
         return _sha(worktree, "HEAD")
     if strategy == "merge":
         merged = _run(
-            worktree, "merge", "--no-ff", "--no-edit", "-m", f"Merge {target.source_branch} for {item.path}", ref
+            worktree, "merge", "--no-ff", "--no-edit", "-m", f"Merge {target.source_branch} for {item.path}", source
         )
         if merged.returncode != 0:
             conflicts = _conflicts(worktree)
@@ -192,9 +217,10 @@ def _merge(
                 "conflict" if conflicts else "git-unavailable",
                 detail + _restore(worktree, before, merge_head=True),
                 conflicts,
+                restored=True,
             )
         return _sha(worktree, "HEAD")
-    squashed = _run(worktree, "merge", "--squash", ref)
+    squashed = _run(worktree, "merge", "--squash", source)
     if squashed.returncode != 0:
         conflicts = _conflicts(worktree)
         detail = _output(squashed) if conflicts else f"git merge --squash refused: {_output(squashed)}"
@@ -202,6 +228,7 @@ def _merge(
             "conflict" if conflicts else "git-unavailable",
             detail + _restore(worktree, before, merge_head=False),
             conflicts,
+            restored=True,
         )
     if _run(worktree, "diff", "--cached", "--quiet").returncode == 0:
         raise _Refused(
@@ -209,6 +236,7 @@ def _merge(
             f"squashing {target.source_branch} stages nothing onto {target.target_branch}; if its work already "
             "landed another way, a human records that with `gw work accept-integration`"
             + _restore(worktree, before, merge_head=False),
+            restored=True,
         )
     committed = _run(
         worktree,
@@ -222,10 +250,12 @@ def _merge(
         raise _Refused(
             "git-unavailable",
             f"git commit refused: {_output(committed)}" + _restore(worktree, before, merge_head=False),
+            restored=True,
         )
     return _sha(worktree, "HEAD")
 
 
+@finish_toolchain
 def run_integrate(
     layout: WorkspaceLayout,
     path: str,
@@ -273,7 +303,10 @@ def run_integrate(
 
     def observe(items: Sequence[WorkItem]) -> tuple[WorkItem, Path, VerifiedIntegration | None]:
         nonlocal target, source, before, chosen, source_of
-        item, target, worktree = _target(layout, items, path, repo_name)
+        item, target, worktree, plan = _target(layout, items, path, repo_name)
+        problem = receipt_problem(layout, path, plan)  # read-only: refuse before Git is touched
+        if problem is not None:
+            raise _Refused("receipt-refused", problem)
         if chosen is None:
             chosen, source_of = finish_strategy(layout, repo_name)
         source = _sha(worktree, "refs/heads/" + target.source_branch)
@@ -286,6 +319,10 @@ def run_integrate(
             and finish_git(worktree, "merge-base", "--is-ancestor", before, source).returncode != 0
         ):
             raise _Refused("not-fast-forward", f"{target.target_branch} has diverged from {target.source_branch}")
+        if settled is None and chosen == "squash":
+            unsupported = merge_tree_unsupported(worktree)
+            if unsupported is not None:
+                raise _Refused("git-unavailable", unsupported)
         return item, worktree, settled
 
     try:
@@ -319,7 +356,21 @@ def run_integrate(
                 result_commit, evidence, outcome = settled.result_commit, None, "already-integrated"
         except _Refused as refused:
             return result(refused.refusal, refused.detail, conflicts=refused.conflicts)
-        receipt = record_finish_in(layout, context, path, repo_name=repo_name, today=today, evidence=evidence)
+        fresh = context
+        if outcome == "integrated":
+            # The merge can change the owner page or receipt (a workspace inside the code repository).
+            try:
+                fresh = decision_context(layout, path)
+            except ValueError as exc:
+                return result("receipt-refused", str(exc), outcome=outcome, applied=True)
+            if fresh.owner != context.owner:
+                return result(
+                    "receipt-refused",
+                    f"integrated at {result_commit}; merged content changed the decision owner; record again",
+                    outcome=outcome,
+                    applied=True,
+                )
+        receipt = record_finish_in(layout, fresh, path, repo_name=repo_name, today=today, evidence=evidence)
         if receipt.refusal is not None or (receipt.commit is not None and receipt.commit.status == "failed"):
             return result(
                 "receipt-refused",

@@ -17,9 +17,11 @@ from graph_works_core.workspace.commits import CommitOutcome, WorkspaceCommit, c
 from graph_works_core.workspace.decision_owner import DecisionContext, locked_decision_owner
 from graph_works_core.workspace.errors import WorkspaceError
 from graph_works_core.workspace.finish import (
+    FinishPlan,
     VerifiedIntegration,
     discover_integration,
     finish_read_guard,
+    finish_toolchain,
     historical_integration,
     read_finish_receipt,
     receipt_entry_data,
@@ -90,6 +92,21 @@ def link_receipt(page: Document, ref: ArtifactRef, *, newline: str) -> None:
         page.set_body(page.body + f"{newline}[^finish-receipt]: [Finish receipt]({ref.resource}){newline}")
 
 
+def receipt_problem(layout: WorkspaceLayout, path: str, plan: FinishPlan) -> str | None:
+    """Why the existing receipt blocks any new entry, else None. Read-only: safe before Git is touched."""
+    _receipt, entries, error = read_finish_receipt(layout, path)
+    if error:
+        return error
+    if any(e.repo not in {t.repo.name for t in plan.targets} for e in entries):
+        return "finish receipt contains an unexpected repository"
+    for entry in entries:
+        entry_target = next(t for t in plan.targets if t.repo.name == entry.repo)
+        if not historical_integration(entry_target, entry):
+            return f"{entry.repo}: unverifiable historical receipt evidence"
+    return None
+
+
+@finish_toolchain
 def run_record_finish(layout: WorkspaceLayout, path: str, *, repo_name: str, today: date) -> FinishReceiptResult:
     """Callers name a target, never supply completion claims or commit identities."""
     if not any(i.path == path for i in load_items(load_bundle(layout.bundle_dir, ignore=IGNORE))):
@@ -99,6 +116,7 @@ def run_record_finish(layout: WorkspaceLayout, path: str, *, repo_name: str, tod
         return record_finish_in(layout, context, path, repo_name=repo_name, today=today)
 
 
+@finish_toolchain
 def record_finish_in(
     layout: WorkspaceLayout,
     context: DecisionContext,
@@ -127,15 +145,10 @@ def record_finish_in(
     target = next((t for t in plan.targets if t.repo.name == repo_name), None)
     if target is None:
         return FinishReceiptResult(f"{repo_name}: not an owned finish target", False, None)
-    _receipt, entries, error = read_finish_receipt(layout, path)
-    if error:
-        return FinishReceiptResult(error, False, None)
-    if any(e.repo not in {t.repo.name for t in plan.targets} for e in entries):
-        return FinishReceiptResult("finish receipt contains an unexpected repository", False, None)
-    for entry in entries:
-        entry_target = next(t for t in plan.targets if t.repo.name == entry.repo)
-        if not historical_integration(entry_target, entry):
-            return FinishReceiptResult(f"{entry.repo}: unverifiable historical receipt evidence", False, None)
+    problem = receipt_problem(layout, path, plan)
+    if problem is not None:
+        return FinishReceiptResult(problem, False, None)
+    entries = read_finish_receipt(layout, path)[1]
     previous = next((e for e in entries if e.repo == repo_name), None)
     if evidence is not None:
         reason = verify_integration(target, evidence)

@@ -32,6 +32,9 @@ from graph_works_core.workspace.finish import (
     VerifiedIntegration,
     finish_git,
     finish_read_guard,
+    finish_toolchain,
+    historical_integration,
+    read_finish_receipt,
     resolve_finish_targets,
 )
 from graph_works_core.workspace.layout import WorkspaceLayout
@@ -95,6 +98,15 @@ def _observe(
     target = next((t for t in plan.targets if t.repo.name == repo_name), None)
     if target is None or target.repo.path is None:
         raise _Refused("no-target", f"{repo_name}: not an owned finish target of {path}")
+    _receipt, entries, error = read_finish_receipt(layout, path)
+    if error:
+        raise _Refused("receipt-refused", f"{error}; repair the receipt, accepting evidence does not replace it")
+    previous = next((e for e in entries if e.repo == repo_name), None)
+    if previous is not None and previous.evidence == "verified" and historical_integration(target, previous):
+        raise _Refused(
+            "receipt-refused",
+            f"{repo_name} already has verified {previous.strategy} evidence; attested evidence never replaces it",
+        )
     repo = target.repo.path
     source = _resolve(repo, "refs/heads/" + target.source_branch)
     tip = _resolve(repo, "refs/heads/" + target.target_branch)
@@ -151,6 +163,7 @@ def _mutation(
     )
 
 
+@finish_toolchain
 def run_accept_integration(
     layout: WorkspaceLayout,
     path: str,

@@ -1,14 +1,16 @@
 """`gw work integrate` merges with exact flags, restores on failure and records v2 evidence."""
 
 import os
+import shutil
 import stat
 
 import pytest
-from _finish_repos import OWNER, TODAY, code_repo, commit_file, git, workspace
+from _finish_repos import OWNER, TODAY, code_repo, commit_file, git, workspace, write_receipt
 from graph_works_core.orchestrate import integrate as integrate_module
 from graph_works_core.orchestrate.finish_receipt import FinishReceiptResult
 from graph_works_core.orchestrate.integrate import run_integrate
-from graph_works_core.workspace.finish import inspect_finish, read_finish_receipt
+from graph_works_core.workspace import finish as finish_module
+from graph_works_core.workspace.finish import VerifiedIntegration, inspect_finish, read_finish_receipt
 
 
 def run(layout, strategy=None, apply=True, repo="code"):
@@ -200,3 +202,150 @@ def test_receipt_failure_after_merge_reports_the_landed_commit(tmp_path, monkeyp
 
     assert (result.refusal, result.applied) == ("receipt-refused", True)
     assert result.result_commit == git(repo, "rev-parse", "HEAD") and result.result_commit in result.detail
+
+
+def test_timeout_during_the_merge_restores_the_target(tmp_path, monkeypatch):
+    repo, source = code_repo(tmp_path)
+    before = commit_file(repo, "c.txt", "main\n", "main moves")
+    real = integrate_module.finish_git
+
+    def fake(cwd, *args, **kwargs):
+        if args[0] == "merge" and "--no-ff" in args:
+            real(cwd, "merge", "--no-ff", "--no-commit", args[-1], **kwargs)
+            return integrate_module.GitOutcome(None, "", "timeout", "")
+        return real(cwd, *args, **kwargs)
+
+    monkeypatch.setattr(integrate_module, "finish_git", fake)
+
+    result = run(workspace(tmp_path, repo, source), "merge")
+
+    assert result.refusal == "git-unavailable"
+    pristine(repo, before)
+
+
+def test_timeout_during_the_squash_commit_restores_the_target(tmp_path, monkeypatch):
+    repo, source = code_repo(tmp_path)
+    before = commit_file(repo, "c.txt", "main\n", "main moves")
+    real = integrate_module.finish_git
+
+    def fake(cwd, *args, **kwargs):
+        if args[0] == "commit":
+            return integrate_module.GitOutcome(None, "", "timeout", "")
+        return real(cwd, *args, **kwargs)
+
+    monkeypatch.setattr(integrate_module, "finish_git", fake)
+
+    result = run(workspace(tmp_path, repo, source), "squash")
+
+    assert result.refusal == "git-unavailable"
+    pristine(repo, before)
+
+
+@pytest.mark.parametrize("strategy", ["ff", "merge", "squash"])
+def test_integrates_the_observed_source_not_a_moving_ref(tmp_path, monkeypatch, strategy):
+    repo, source = code_repo(tmp_path)
+    if strategy != "ff":
+        commit_file(repo, "c.txt", "main\n", "main moves")
+    observed = git(source, "rev-parse", "HEAD")
+    layout = workspace(tmp_path, repo, source)
+    real = integrate_module._merge
+
+    def source_moves_then_merge(*args, **kwargs):
+        commit_file(source, "late.txt", "late\n", "committed after observation")
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(integrate_module, "_merge", source_moves_then_merge)
+
+    result = run(layout, strategy)
+
+    # Only the observed commit landed; the receipt cannot verify against a source that has since moved.
+    assert result.source_commit == observed and result.applied
+    assert not (repo / "late.txt").exists() and (repo / "b.txt").exists()
+    monkeypatch.undo()
+
+    again = run(layout, strategy)  # the late commit is integrated by the next, freshly observed run
+
+    assert (again.refusal, again.outcome) == (None, "integrated") and (repo / "late.txt").exists()
+
+
+@pytest.mark.parametrize("damage", ["malformed", "unexpected-repo", "stale-entry"])
+def test_receipt_problems_refuse_before_any_git_mutation(tmp_path, damage):
+    repo, source = code_repo(tmp_path)
+    before = commit_file(repo, "c.txt", "main\n", "main moves")
+    layout = workspace(tmp_path, repo, source)
+    if damage == "malformed":
+        receipt = layout.bundle_dir / OWNER / "references/04-finish-receipt.md"
+        receipt.parent.mkdir(parents=True, exist_ok=True)
+        receipt.write_text("---\nreceipt_version: 2\nintegrations: [oops\n---\n", encoding="utf-8", newline="\n")
+    else:
+        stale = VerifiedIntegration(
+            "code" if damage == "stale-entry" else "gone",
+            "old-branch" if damage == "stale-entry" else "feature",
+            git(source, "rev-parse", "HEAD"),
+            "main",
+            before,
+            "ancestry",
+            "verified",
+            None,
+        )
+        write_receipt(layout, [stale])
+
+    result = run(layout, "merge")
+
+    assert result.refusal == "receipt-refused"
+    pristine(repo, before)
+
+
+def test_squash_refuses_before_committing_on_a_git_without_merge_tree_write_tree(tmp_path, monkeypatch):
+    repo, source = code_repo(tmp_path)
+    before = commit_file(repo, "c.txt", "main\n", "main moves")
+    real = finish_module.finish_git
+
+    def old_git(cwd, *args, **kwargs):
+        if args[:2] == ("merge-tree", "--write-tree"):
+            return finish_module.GitOutcome(129, "", "ok", "error: unknown option `write-tree'")
+        return real(cwd, *args, **kwargs)
+
+    monkeypatch.setattr(finish_module, "finish_git", old_git)
+
+    result = run(workspace(tmp_path, repo, source), "squash")
+
+    assert result.refusal == "git-unavailable" and "git version" in result.detail
+    pristine(repo, before)
+
+
+def test_finish_honours_toolchain_git(tmp_path):
+    repo, source = code_repo(tmp_path)
+    layout = workspace(tmp_path, repo, source)
+    log = tmp_path / "git-calls.log"
+    wrapper = tmp_path / "git-wrapper"
+    real_git = shutil.which("git")
+    wrapper.write_text(f'#!/bin/sh\necho "$@" >> "{log}"\nexec "{real_git}" "$@"\n', encoding="utf-8", newline="\n")
+    wrapper.chmod(wrapper.stat().st_mode | stat.S_IEXEC)
+    layout.local_manifest_path.write_text(f"toolchain:\n  git: {wrapper}\n", encoding="utf-8", newline="\n")
+
+    result = run(layout, "merge")
+
+    assert result.refusal is None
+    calls = log.read_text(encoding="utf-8")
+    assert "merge --no-ff" in calls and "rev-list --parents" in calls  # integrate and verification both used it
+
+
+def test_decision_context_is_reloaded_after_the_merge(tmp_path, monkeypatch):
+    repo, source = code_repo(tmp_path)
+    commit_file(repo, "c.txt", "main\n", "main moves")
+    layout = workspace(tmp_path, repo, source)
+    real = integrate_module._merge
+
+    def merge_that_edits_the_owner_page(*args, **kwargs):
+        merged = real(*args, **kwargs)
+        page = layout.bundle_dir / (OWNER + ".md")
+        page.write_text(page.read_text(encoding="utf-8") + "\nEdited by the merge.\n", encoding="utf-8", newline="\n")
+        return merged
+
+    monkeypatch.setattr(integrate_module, "_merge", merge_that_edits_the_owner_page)
+
+    result = run(layout, "merge")
+
+    assert (result.refusal, result.outcome, result.applied) == (None, "integrated", True)
+    assert inspect_finish(layout, OWNER).complete

@@ -90,3 +90,29 @@ def test_receipt_and_ledger_are_one_mutation(tmp_path, monkeypatch):
     assert accept(layout, sha).refusal == "receipt-refused"
     assert read_finish_receipt(layout, OWNER)[0] is None
     assert not decisions.ledger_ref(OWNER).path(layout.bundle_dir).exists()
+
+
+def test_malformed_receipt_refuses_as_repair_not_replacement(tmp_path):
+    repo, source, sha = hand_integrated(tmp_path)
+    layout = workspace(tmp_path, repo, source)
+    receipt = layout.bundle_dir / OWNER / "references/04-finish-receipt.md"
+    receipt.parent.mkdir(parents=True, exist_ok=True)
+    receipt.write_text("---\nreceipt_version: 2\nintegrations: [oops\n---\n", encoding="utf-8", newline="\n")
+
+    for apply in (False, True):
+        result = accept(layout, sha, apply=apply)
+        assert result.refusal == "receipt-refused" and "malformed" in result.detail
+    assert "oops" in receipt.read_text(encoding="utf-8")
+
+
+def test_a_verified_entry_is_never_replaced_by_attested_evidence(tmp_path):
+    repo, source = code_repo(tmp_path)
+    git(repo, "merge", "--no-ff", "-m", "merge feature", "feature")
+    layout = workspace(tmp_path, repo, source)
+    assert run_record_finish(layout, OWNER, repo_name="code", today=TODAY).refusal is None
+    (verified,) = read_finish_receipt(layout, OWNER)[1]
+
+    result = accept(layout, git(repo, "rev-parse", "HEAD"))
+
+    assert result.refusal == "receipt-refused" and "verified" in result.detail
+    assert read_finish_receipt(layout, OWNER)[1] == (verified,)

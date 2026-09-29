@@ -2,14 +2,16 @@
 
 from __future__ import annotations
 
+import functools
 import hashlib
 import os
 import re
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
+from contextvars import ContextVar
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from types import MappingProxyType
-from typing import Literal, cast
+from typing import Concatenate, Literal, cast
 
 from config_io import StoreValidationError
 from okf_io import Bundle, Document, load_bundle, parse
@@ -20,7 +22,14 @@ from work_tracker_okf.vocabulary import TERMINAL_STATUSES
 from graph_works_core.workspace.errors import WorkspaceConfigError, WorkspaceError
 from graph_works_core.workspace.layout import WorkspaceLayout
 from graph_works_core.workspace.manifest import workspace_store
-from graph_works_core.workspace.provenance import GitExecutable, GitOutcome, probe_git, resolve_git
+from graph_works_core.workspace.provenance import (
+    GitExecutable,
+    GitFailure,
+    GitOutcome,
+    gate_git,
+    probe_git,
+    resolve_git,
+)
 from graph_works_core.workspace.repo_context import RepositoryContext, observe_repository
 from graph_works_core.workspace.repos import ItemRepo, declared_repositories, resolve_item_repo
 from graph_works_core.workspace.workspace_branch import WORKSPACE_REPO, workspace_repo
@@ -28,19 +37,54 @@ from graph_works_core.workspace.workspace_branch import WORKSPACE_REPO, workspac
 _PROBE_TIMEOUT = 5  # provenance._GIT_TIMEOUT_SECONDS, copied rather than importing a private name
 
 
+#: The git the current finish operation runs, set by `@finish_toolchain` at each layout-taking entry point.
+_TOOLCHAIN_GIT: ContextVar[GitExecutable | GitFailure | None] = ContextVar("finish_toolchain_git", default=None)
+
+
+def finish_toolchain[**P, R](
+    fn: Callable[Concatenate[WorkspaceLayout, P], R],
+) -> Callable[Concatenate[WorkspaceLayout, P], R]:
+    """Run *fn* (whose first argument is the layout) with `toolchain.git` as every finish git call's executable.
+
+    The gate resolves its git with `provenance.gate_git`; finish, integrate,
+    squash verification and cleanup must run the same one, or a workspace that
+    pins `toolchain.git` would gate with one git and integrate with another.
+    """
+
+    @functools.wraps(fn)
+    def wrapper(layout: WorkspaceLayout, /, *args: P.args, **kwargs: P.kwargs) -> R:
+        token = _TOOLCHAIN_GIT.set(gate_git(layout))
+        try:
+            return fn(layout, *args, **kwargs)
+        finally:
+            _TOOLCHAIN_GIT.reset(token)
+
+    return wrapper
+
+
 def finish_git(cwd: Path, *args: str, timeout: float = _PROBE_TIMEOUT) -> GitOutcome:
-    """`probe_git` through the shared resolver; a resolver failure is a non-ok outcome.
+    """`probe_git` through the gate's resolver; a resolver failure is a non-ok outcome.
 
     Every finish-evidence git call goes through here, so the executable policy
-    (bug-pipeline-gates-fail-open's resolver) is decided in exactly one place.
+    (bug-pipeline-gates-fail-open's resolver, `toolchain.git` included when a
+    `@finish_toolchain` entry point is running) is decided in exactly one place.
     """
-    resolved = resolve_git(None, environ=os.environ)
+    resolved = _TOOLCHAIN_GIT.get() or resolve_git(None, environ=os.environ)
     if not isinstance(resolved, GitExecutable):
         cause: Literal["missing", "timeout", "error"] = (
             "timeout" if resolved.cause == "timeout" else "error" if resolved.cause == "error" else "missing"
         )
         return GitOutcome(None, "", cause, resolved.detail)
     return probe_git(cwd, *args, executable=resolved.path, timeout=timeout)
+
+
+def merge_tree_unsupported(repo: Path) -> str | None:
+    """None when this git can verify a squash (`merge-tree --write-tree`, git >= 2.38); else why not."""
+    probe = finish_git(repo, "merge-tree", "--write-tree", "HEAD", "HEAD")
+    if probe.returncode == 0:
+        return None
+    version = finish_git(repo, "--version").stdout.strip() or "git version unknown"
+    return f"squash verification needs `git merge-tree --write-tree` (git >= 2.38); this is {version}"
 
 
 IntegrationStrategy = Literal["squash", "merge", "ff"]
@@ -560,6 +604,7 @@ def discover_integration(target: FinishTarget) -> VerifiedIntegration | str:
     return f"no merge, fast-forward or squash of {branch} found in the last {REDISCOVERY_SCAN} commits of {into}"
 
 
+@finish_toolchain
 def inspect_finish(layout: WorkspaceLayout, path: str) -> FinishVerification:
     """Reverify every recorded integration against live repository-local refs."""
     bundle = load_bundle(layout.bundle_dir, ignore=IGNORE)
@@ -656,6 +701,7 @@ def _worktree_list(repo: Path) -> tuple[tuple[str, str], ...] | None:
     return tuple(rows)
 
 
+@finish_toolchain
 def plan_finish_cleanup(layout: WorkspaceLayout, path: str, *, runner_cwd: Path | None) -> CleanupPlan:
     """Plan removal of resolved, receipted stamps from read-only Git observations."""
     items = load_items(load_bundle(layout.bundle_dir, ignore=IGNORE))

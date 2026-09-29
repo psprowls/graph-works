@@ -27,3 +27,19 @@ def test_multi_segment_roots() -> None:
 
 def test_no_code_paths_is_uncovered_not_empty_success() -> None:
     assert expand_scoped(SCOPED, []).command is None
+
+
+def test_an_unsafe_name_is_shell_quoted_and_never_executes(tmp_path) -> None:
+    import subprocess
+
+    marker = tmp_path / "pwned"
+    name = "a; touch pwned $(touch pwned)"
+    got = expand_scoped(ScopedGate("packages/*", "echo {name}"), [f"packages/{name}/x.py"])
+    assert got.command is not None and got.names == (name,)
+    assert got.command.startswith("echo '") and "$(" in got.command
+    out = subprocess.run(["sh", "-c", got.command], capture_output=True, text=True, check=True, cwd=tmp_path).stdout
+    assert out.strip() == name and not marker.exists()
+
+
+def test_a_safe_name_stays_byte_identical() -> None:
+    assert expand_scoped(SCOPED, ["packages/okf-io/x"]).command == "just check-pkg okf-io"

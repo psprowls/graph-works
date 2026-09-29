@@ -6,6 +6,7 @@ import hashlib
 import json
 import os
 import re
+import shlex
 import subprocess
 import sys
 import time
@@ -24,6 +25,7 @@ from work_tracker_okf.items import IGNORE, WorkItem, load_items
 from graph_works_core.orchestrate import gate_git
 from graph_works_core.orchestrate.gate_receipts import (
     GateMatch,
+    GateRecord,
     GateRun,
     GateScope,
     any_for_tree,
@@ -77,7 +79,7 @@ def expand_scoped(scoped: ScopedGate, code_paths: Sequence[str]) -> ScopedComman
     if uncovered or not names:
         return ScopedCommand(None, tuple(sorted(names)), tuple(uncovered))
     ordered = tuple(sorted(names))
-    return ScopedCommand(" && ".join(scoped.command.replace("{name}", n) for n in ordered), ordered, ())
+    return ScopedCommand(" && ".join(scoped.command.replace("{name}", shlex.quote(n)) for n in ordered), ordered, ())
 
 
 @dataclass(frozen=True, slots=True)
@@ -121,7 +123,7 @@ WINDOWS_DETACHED_FLAGS = 0x00000200 | 0x00000008  # CREATE_NEW_PROCESS_GROUP | D
 RUNNER_START_TIMEOUT = 10.0
 REPLACE_ATTEMPTS = 5
 REPLACE_PAUSE = 0.05
-RUN_ID_PATTERN = re.compile(r"\d{8}T\d{6}Z-[0-9a-f]{8}")
+RUN_ID_PATTERN = re.compile(r"[0-9]{8}T\d{6}Z-[0-9a-f]{8}")
 START_GRACE = timedelta(seconds=30)
 
 
@@ -254,6 +256,8 @@ def run_gate_run(
         return _run_refusal("no-gate-configured", str(exc))
     if gate.full is None:
         return _run_refusal("no-gate-configured", f"set repositories.{target.repo}.gate.full in {layout.manifest_path}")
+    # a finished-but-unrecorded result is recorded, never re-run (design 4.6)
+    recover_unrecorded(layout, path, now=now)
     lookup = find_satisfying(layout.bundle_dir, repo=target.repo, tree=target.tree, command=gate.full)
     if lookup.match is not None:
         return GateRunResult("satisfied", None, "", None, lookup.match, gate.full, (), None, lookup.warnings)
@@ -475,6 +479,40 @@ def _mark_recorded(record_path: Path) -> None:
         write_record(record_path, data)
 
 
+def _record_finished(
+    layout: WorkspaceLayout,
+    path: str,
+    record_path: Path,
+    data: dict[str, Any],
+    result: dict[str, Any],
+    *,
+    today: date,
+) -> GateRecord:
+    outcome = record_gate_run(layout, path, gate_run_from_record(data, result), today=today)
+    if outcome.refusal is None:
+        _mark_recorded(record_path)
+    return outcome
+
+
+def recover_unrecorded(layout: WorkspaceLayout, path: str, *, now: datetime, today: date | None = None) -> None:
+    """Record every finished pending record whose runner is gone and whose entry never landed.
+
+    The result is never lost and never re-run. A refused or malformed record is left as it is.
+    """
+    day = today or now.astimezone(UTC).date()
+    for record_path in sorted(runs_dir(layout, path).glob("*.json")):
+        data, alive = _read_live(record_path, now)
+        result = data.get("result") if data is not None else None
+        if data is None or alive or data.get("recorded") or not isinstance(result, dict):
+            continue
+        if not isinstance(result.get("exit"), int):
+            continue
+        try:
+            _record_finished(layout, path, record_path, data, result, today=day)
+        except (KeyError, TypeError, ValueError):
+            continue
+
+
 def run_gate_wait(
     layout: WorkspaceLayout,
     path: str,
@@ -486,6 +524,8 @@ def run_gate_wait(
     today: date,
 ) -> GateWaitResult:
     """Report a gate run's outcome, waiting up to *timeout* seconds. Never starts a run."""
+    if run_id is None:
+        recover_unrecorded(layout, path, now=clock.wall(), today=today)
     record_path = _choose_record(runs_dir(layout, path), run_id)
     if record_path is None:
         return _wait_refusal(f"{path}: no gate run to wait for")
@@ -508,9 +548,8 @@ def run_gate_wait(
             receipt_path = f"{path}/references/03-gate-receipts.md" if recorded else None
             detail = ""
             if not recorded and not alive:
-                outcome = record_gate_run(layout, path, gate_run_from_record(data, result), today=today)
+                outcome = _record_finished(layout, path, record_path, data, result, today=today)
                 if outcome.refusal is None:
-                    _mark_recorded(record_path)
                     recorded, receipt_path = True, outcome.receipt_path
                 else:
                     detail = outcome.detail or outcome.refusal

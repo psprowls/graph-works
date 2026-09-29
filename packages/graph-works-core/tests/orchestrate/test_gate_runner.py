@@ -325,6 +325,7 @@ def test_wait_probes_liveness_before_reading_the_record(env, monkeypatch):
 
 def test_existing_run_probes_liveness_before_reading_the_record(env, monkeypatch):
     record = start(env)
+    monkeypatch.setattr(gate, "recover_unrecorded", lambda *a, **k: None)  # isolate _existing_run's probe order
     monkeypatch.setattr(gate, "_alive", lambda path: (finish_unrecorded(record, exit=0), False)[1])
     second = run_gate_run(env.layout, env.path, now=NOW + timedelta(seconds=5), token="1a1b2c3d", spawn=env.spawn)
     assert second.status == "started" and len(env.spawned) == 1  # finished record is not joined
@@ -390,3 +391,47 @@ def test_wait_rejects_a_malformed_run_id(env, bad):
     start(env)
     result = run_gate_wait(env.layout, env.path, run_id=bad, timeout=0, clock=CLOCK, sleep=no_sleep, today=TODAY)
     assert result.refusal == "no-run"
+
+
+def test_run_records_an_unrecorded_result_and_finds_it_instead_of_rerunning(env):
+    record = start(env)
+    finish_unrecorded(record, exit=0)
+    spawned: list[Path] = []
+    result = run_gate_run(env.layout, env.path, now=NOW, token="1a1b2c3d", spawn=spawned.append)
+    assert result.status == "satisfied" and not spawned
+    assert len(parse_gate_receipt(receipt_text(env))[1]) == 1
+    assert json.loads(record.read_text(encoding="utf-8"))["recorded"] is True
+
+
+def test_run_leaves_a_live_runners_result_alone(env):
+    record = start(env)
+    finish_unrecorded(record, exit=0)
+    with locked(record.with_suffix(".lock")):
+        result = run_gate_run(env.layout, env.path, now=NOW, token="1a1b2c3d", spawn=lambda r: None)
+    assert result.status != "satisfied"
+    assert json.loads(record.read_text(encoding="utf-8"))["recorded"] is False
+
+
+def test_run_skips_spawn_failed_and_malformed_pending_records(env):
+    record = start(env)
+    data = json.loads(record.read_text(encoding="utf-8"))
+    data["result"] = {"exit": None, "error": "boom"}
+    record.write_text(json.dumps(data), encoding="utf-8", newline="\n")
+    (record.parent / "20260928T120001Z-00000001.json").write_text(
+        json.dumps({"run_id": "x", "result": {"exit": 0}}), encoding="utf-8", newline="\n"
+    )
+    (record.parent / "20260928T120002Z-00000002.json").write_text("not json", encoding="utf-8", newline="\n")
+    result = run_gate_run(env.layout, env.path, now=NOW, token="1a1b2c3d", spawn=lambda r: None)
+    assert result.status == "started"
+
+
+def test_wait_sweeps_an_older_unrecorded_result_before_choosing_the_newest(env):
+    older = start(env)
+    finish_unrecorded(older, exit=0)
+    newer = older.parent / "20260928T130000Z-0a1b2c3d.json"
+    data = json.loads(older.read_text(encoding="utf-8"))
+    data.update(run_id=newer.stem, started="2026-09-28T13:00:00Z", result=None, runner_started=False)
+    newer.write_text(json.dumps(data), encoding="utf-8", newline="\n")
+    result = run_gate_wait(env.layout, env.path, run_id=None, timeout=0, clock=CLOCK, sleep=no_sleep, today=TODAY)
+    assert result.run_id == newer.stem
+    assert len(parse_gate_receipt(receipt_text(env))[1]) == 1

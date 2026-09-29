@@ -67,6 +67,7 @@ EXPECTED: set[str] = {
     "wiki.tag_inventory_payload",
     "wiki.tags_undeclared_payload",
     "wiki.wiki_tree_payload",
+    "work.accept_integration_payload",
     "work.advance_payload",
     "work.archive_payload",
     "work.baseline_payload",

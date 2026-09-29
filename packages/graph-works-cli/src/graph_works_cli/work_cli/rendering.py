@@ -485,6 +485,19 @@ def render_integrate(payload: dict[str, Any]) -> None:
         typer.echo(f"  receipt: {payload['receipt_path']}")
 
 
+def render_accept_integration(payload: dict[str, Any]) -> None:
+    """Render planned or recorded attested integration evidence."""
+    verb = "accepted" if payload["applied"] else "would accept"
+    typer.echo(
+        f"[ok] {payload['path']}: {verb} {payload['evidence']} as {payload['source_branch']} integrated into "
+        f"{payload['target_branch']} in {payload['repo']} (attested by {payload['accepted_by']})"
+    )
+    if payload["decision_id"]:
+        typer.echo(f"  decision: {payload['decision_id']} in {payload['ledger_path']}")
+    if payload["receipt_path"]:
+        typer.echo(f"  receipt: {payload['receipt_path']}")
+
+
 def render_merge_workspace(payload: dict[str, Any]) -> None:
     """Render the planned or applied integration and its receipt."""
     action = "merged" if payload["applied"] else "would merge"

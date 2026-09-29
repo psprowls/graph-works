@@ -21,6 +21,7 @@ from typing import Any, Never, cast
 
 import typer
 from graph_works_core.archive.commands import run_archive, stranded_warnings
+from graph_works_core.orchestrate.accept_integration import run_accept_integration
 from graph_works_core.orchestrate.commands import run_orchestrate
 from graph_works_core.orchestrate.dispatch import run_dispatch
 from graph_works_core.orchestrate.integrate import run_integrate
@@ -1154,6 +1155,46 @@ def integrate(
         rendering.emit(payload)
     else:
         rendering.render_integrate(payload)
+
+
+@work_app.command(name="accept-integration")
+def accept_integration(
+    path: str = typer.Argument(..., help="Extensionless bundle-relative canonical concept path."),
+    repo: str = typer.Option(
+        ..., "--repo", help="Declared repository (or _workspace) whose finish target this settles."
+    ),
+    evidence: str = typer.Option(..., "--evidence", help="Commit on the target branch that holds the integration."),
+    reason: str = typer.Option("", "--reason", help="Why this evidence stands (e.g. squashed in PR 12)."),
+    by: str = typer.Option("", "--by", help="Who attests: the human's handle, never a worker."),
+    apply: bool = typer.Option(False, "--apply", help="Record; without it, print the plan."),
+    workspace: str = typer.Option("", "--workspace", help="Workspace path."),
+    json_output: bool = rendering.json_option("Emit the acceptance as JSON."),
+) -> None:
+    """Record human-attested integration evidence gw cannot verify, with a ledger entry.
+
+    For a rebase, an external squash or a PR merged upstream: the receipt entry
+    is marked accepted, not verified. It never advances the item. Plans by default.
+    """
+    layout = resolve_workspace(workspace)
+    try:
+        result = run_accept_integration(
+            layout, path, repo_name=repo, evidence=evidence, reason=reason, by=by, today=_today(), apply=apply
+        )
+    except WorkspaceError as exc:
+        rendering.fail(str(exc), reason="workspace", code=exit_codes.SCHEMA_MISMATCH, cause=exc)
+    except OSError as exc:
+        rendering.fail(str(exc), reason="io", cause=exc)
+    payload = wire_work.accept_integration_payload(result)
+    if payload["refusal"] is not None:
+        rendering.fail(
+            f"{path}: refused ({payload['refusal']['reason']}) — {payload['refusal']['detail']}",
+            reason="refused",
+            payload=payload,
+        )
+    if json_output:
+        rendering.emit(payload)
+    else:
+        rendering.render_accept_integration(payload)
 
 
 @work_app.command(name="merge-workspace")

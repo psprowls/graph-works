@@ -97,3 +97,43 @@ def test_integrate_reports_workspace_and_io_errors(tmp_path, monkeypatch):
         result = runner.invoke(app, [*args, "--json"])
         assert result.exit_code != 0
         assert json.loads(result.stdout)["error"]["reason"] == reason
+
+
+def test_accept_integration_plan_apply_and_refusal(tmp_path):
+    layout, repo = setup(tmp_path)
+    git(repo, "merge", "--squash", "feature")
+    (repo / "b.txt").write_text("edited in review\n", encoding="utf-8", newline="\n")
+    git(repo, "add", "b.txt")
+    git(repo, "commit", "-m", "squash with review edits")
+    sha = git(repo, "rev-parse", "HEAD")
+    args = ["work", "accept-integration", OWNER, "--repo", "code", "--evidence", sha, "--workspace", str(layout.root)]
+
+    missing = runner.invoke(app, [*args, "--json"])
+    assert missing.exit_code != 0
+    assert json.loads(missing.stdout)["error"]["payload"]["refusal"]["reason"] == "missing-attribution"
+
+    attributed = [*args, "--reason", "squashed with review edits", "--by", "pat"]
+    planned = runner.invoke(app, attributed)
+    assert planned.exit_code == 0 and "would accept" in planned.stdout
+
+    applied = runner.invoke(app, [*attributed, "--apply", "--json"])
+    assert applied.exit_code == 0, applied.output
+    payload = json.loads(applied.stdout)
+    assert payload["applied"] and payload["evidence"] == sha and payload["decision_id"] and payload["receipt_path"]
+
+
+def test_accept_integration_reports_workspace_and_io_errors(tmp_path, monkeypatch):
+    from graph_works_cli.work_cli import main as work_main
+    from graph_works_core.workspace.errors import WorkspaceError
+
+    layout, _repo = setup(tmp_path)
+    args = ["work", "accept-integration", OWNER, "--repo", "code", "--evidence", "abc", "--workspace", str(layout.root)]
+    for exc, reason in ((WorkspaceError("boom"), "workspace"), (OSError("disk"), "io")):
+
+        def raiser(*_a, _exc=exc, **_k):
+            raise _exc
+
+        monkeypatch.setattr(work_main, "run_accept_integration", raiser)
+        result = runner.invoke(app, [*args, "--json"])
+        assert result.exit_code != 0
+        assert json.loads(result.stdout)["error"]["reason"] == reason

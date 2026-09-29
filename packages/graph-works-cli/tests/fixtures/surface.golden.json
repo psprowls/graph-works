@@ -2458,6 +2458,7 @@
       "arguments": [],
       "options": [],
       "commands": [
+        "accept-integration",
         "adopt",
         "advance",
         "archive",
@@ -2487,6 +2488,106 @@
       ],
       "path": [
         "work"
+      ]
+    },
+    {
+      "name": "gw work accept-integration",
+      "help": "Record human-attested integration evidence gw cannot verify, with a ledger entry.\n\nFor a rebase, an external squash or a PR merged upstream: the receipt entry\nis marked accepted, not verified. It never advances the item. Plans by default.",
+      "short_help": "Record human-attested integration evidence gw cannot verify, with a ledger entry.",
+      "usage": [
+        "[OPTIONS]",
+        "{path}"
+      ],
+      "arguments": [
+        {
+          "name": "path",
+          "required": true,
+          "nargs": 1
+        }
+      ],
+      "options": [
+        {
+          "name": "repo",
+          "opts": [
+            "--repo"
+          ],
+          "secondary_opts": [],
+          "help": "Declared repository (or _workspace) whose finish target this settles.",
+          "required": true,
+          "default": null,
+          "is_flag": false
+        },
+        {
+          "name": "evidence",
+          "opts": [
+            "--evidence"
+          ],
+          "secondary_opts": [],
+          "help": "Commit on the target branch that holds the integration.",
+          "required": true,
+          "default": null,
+          "is_flag": false
+        },
+        {
+          "name": "reason",
+          "opts": [
+            "--reason"
+          ],
+          "secondary_opts": [],
+          "help": "Why this evidence stands (e.g. squashed in PR 12).",
+          "required": false,
+          "default": "",
+          "is_flag": false
+        },
+        {
+          "name": "by",
+          "opts": [
+            "--by"
+          ],
+          "secondary_opts": [],
+          "help": "Who attests: the human's handle, never a worker.",
+          "required": false,
+          "default": "",
+          "is_flag": false
+        },
+        {
+          "name": "apply",
+          "opts": [
+            "--apply"
+          ],
+          "secondary_opts": [],
+          "help": "Record; without it, print the plan.",
+          "required": false,
+          "default": false,
+          "is_flag": true
+        },
+        {
+          "name": "workspace",
+          "opts": [
+            "--workspace"
+          ],
+          "secondary_opts": [],
+          "help": "Workspace path.",
+          "required": false,
+          "default": "",
+          "is_flag": false
+        },
+        {
+          "name": "json_output",
+          "opts": [
+            "--json"
+          ],
+          "secondary_opts": [],
+          "help": "Emit the acceptance as JSON.",
+          "required": false,
+          "default": false,
+          "is_flag": true
+        }
+      ],
+      "commands": [],
+      "path": [
+        "work",
+        "accept-integration"
       ]
     },
     {

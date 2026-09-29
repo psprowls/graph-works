@@ -16,6 +16,7 @@ from typing import Any, Protocol, cast
 
 from graph_works_core.archive.commands import ArchiveRun
 from graph_works_core.guidance.assembly import Guidance
+from graph_works_core.orchestrate.accept_integration import AcceptIntegrationResult
 from graph_works_core.orchestrate.asks import AskAnswerResult, AskResult
 from graph_works_core.orchestrate.commands import OrchestrateResult
 from graph_works_core.orchestrate.dispatch import DispatchFailure, DispatchResult, ObservedPlacement
@@ -1149,6 +1150,25 @@ def merge_workspace_payload(result: MergeWorkspaceResult) -> dict[str, Any]:
         "applied": result.applied,
         "merge_commit": result.merge_commit,
         "receipt_path": result.receipt_path,
+        "refusal": None if result.refusal is None else {"reason": result.refusal, "detail": result.detail},
+    }
+
+
+def accept_integration_payload(result: AcceptIntegrationResult) -> dict[str, Any]:
+    """Attested finish evidence and the ledger entry recording who accepted it."""
+    return {
+        "path": result.path,
+        "repo": result.repo,
+        "source_branch": result.source_branch,
+        "source_commit": result.source_commit,
+        "target_branch": result.target_branch,
+        "evidence": result.evidence,
+        "accepted_by": result.accepted_by,
+        "reason": result.reason,
+        "decision_id": result.decision_id,
+        "receipt_path": result.receipt_path,
+        "ledger_path": result.ledger_path,
+        "applied": result.applied,
         "refusal": None if result.refusal is None else {"reason": result.refusal, "detail": result.detail},
     }
 

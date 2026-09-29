@@ -9,6 +9,7 @@ from pathlib import Path
 from types import MappingProxyType
 from types import SimpleNamespace as ns
 
+from graph_works_core.orchestrate.accept_integration import AcceptIntegrationResult
 from graph_works_core.orchestrate.asks import AskAnswerResult, AskResult
 from graph_works_core.orchestrate.dispatch import DispatchFailure, DispatchResult, ObservedPlacement
 from graph_works_core.orchestrate.dispatch_record import Overrides
@@ -625,6 +626,62 @@ WORK: dict[str, tuple[Callable[[], object], ...]] = {
             )
         )
         for refusal in (None, "unknown-path")
+    ),
+    "work.accept_integration_payload": (
+        lambda: work.accept_integration_payload(
+            AcceptIntegrationResult(
+                "work/a",
+                "code",
+                "feature",
+                "a" * 40,
+                "main",
+                "b" * 40,
+                "pat",
+                "rebased",
+                None,
+                None,
+                None,
+                None,
+                "",
+                False,
+            )
+        ),
+        lambda: work.accept_integration_payload(
+            AcceptIntegrationResult(
+                "work/a",
+                "code",
+                "feature",
+                "a" * 40,
+                "main",
+                "b" * 40,
+                "pat",
+                "rebased",
+                "D-001",
+                "receipt.md",
+                "work/a/references/00-decisions.md",
+                None,
+                "",
+                True,
+            )
+        ),
+        lambda: work.accept_integration_payload(
+            AcceptIntegrationResult(
+                "work/a",
+                "code",
+                None,
+                None,
+                None,
+                None,
+                "",
+                "",
+                None,
+                None,
+                None,
+                "missing-attribution",
+                "--reason and --by are required",
+                False,
+            )
+        ),
     ),
     "work.integrate_payload": (
         lambda: work.integrate_payload(

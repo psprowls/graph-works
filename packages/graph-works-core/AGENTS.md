@@ -110,6 +110,8 @@ signal) and appends to the owner's `03-gate-receipts.md` through
 is strict. `stage_advance._receipt_gate` refuses execute→finish without a
 satisfying receipt. See "The dispatch seam" in the README.
 
+`integrate.py` is its code-repository sibling: `gw work integrate` resolves the strategy (`--strategy`, else `repositories.<name>.finish.strategy`, else `squash`), merges in the unique clean target worktree with exact flags (`--ff-only`, `--no-ff`, or `--squash` plus one commit), restores the target on any failure, and records the v2 receipt entry through `record_finish_in(..., evidence=)` under the same owner lock. `accept_integration.py` writes an `attested`/`accepted` receipt entry and an answered decision-ledger entry in one mutation, for evidence gw cannot verify; it never advances.
+
 `wiki_page/` — `run_page_read`: one page with outlinks, backlinks and broken links; `run_wiki_citations` (`citations.py`): the page's `path:N` inline-code citations with body-relative lines, resolved against `workspace.repo_files`; no cache.
 
 `code_read/` — `run_code_excerpt`: a context window of one declared repository's tracked file; refusals are results. `workspace/repo_files.py` is the file set both share (tracked files minus ignore globs) and the confinement check.
@@ -359,7 +361,7 @@ hand. `today` is always injected; nothing in this package reads the clock.
   shell, then uses one frontier and global worker budget. Affects reservations
   are keyed by Git common-directory identity. Preparations defer launch and
   stamp the owning item's phase, never the child's. `workspace.finish` is the
-  shared target/receipt reader; `orchestrate.finish_receipt` is the writer.
+  shared target/receipt reader; `orchestrate.finish_receipt` is the writer. Receipt v2 entries carry `strategy`/`evidence`/`target_before`; `integration_shape` verifies each strategy's history shape (squash by single parent plus `git merge-tree --write-tree` tree equality) and `discover_integration` rediscovers a landed merge, fast-forward or squash for `record`.
   Finish targets include foreign-only and nested owner sources. Partial proof
   blocks advance until every target's current Git ancestry is verified; scalar
   `resolved_in` prefers the owner's repository, falling back to the first

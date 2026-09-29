@@ -172,7 +172,7 @@ def test_malformed_and_forged_receipts_refuse_without_overwrite(tmp_path):
     original = receipt_path(layout).read_bytes()
     for raw in (
         b"broken",
-        original.replace(b"receipt_version: 1", b"receipt_version: true"),
+        original.replace(b"receipt_version: 2", b"receipt_version: true"),
         original.replace(b"source_commit: ", b"source_commit: invalid-"),
     ):
         receipt_path(layout).write_bytes(raw)
@@ -307,7 +307,7 @@ def test_unknown_and_wrong_phase_are_refusals(tmp_path):
     assert record(layout, "code").refusal
 
 
-def test_squash_does_not_prove_integration(tmp_path):
+def test_squash_is_rediscovered_as_integration(tmp_path):
     layout, repos = setup(tmp_path)
     repo, source = repos["code"]
     (source / "change.txt").write_text("content", encoding="utf-8")
@@ -315,8 +315,8 @@ def test_squash_does_not_prove_integration(tmp_path):
     git(source, "commit", "-m", "source change")
     git(repo, "merge", "--squash", "feature")
     git(repo, "commit", "-m", "squashed change")
-    assert record(layout, "code").refusal
-    assert not receipt_path(layout).exists()
+    assert record(layout, "code").refusal is None
+    assert "strategy: squash\n" in receipt_path(layout).read_text(encoding="utf-8")
 
 
 def test_receipt_and_stamp_preimage_races_refuse(tmp_path, monkeypatch):
@@ -386,3 +386,27 @@ def test_invalid_commit_config_rejects_valid_finish_before_lock_and_preserves_pr
     # Receipt verification previews still report domain blockers with invalid commit config.
     preview = advance(layout, git(repos["code"][0], "rev-parse", "HEAD"), dry_run=True)
     assert preview.outcome.plan.refusal == "finish-incomplete"
+
+
+def test_first_v2_write_upgrades_a_v1_receipt_without_rewriting_other_entries(tmp_path):
+    layout, repos = setup(tmp_path)
+    git(repos["code"][0], "merge", "feature")
+    code_source = git(repos["code"][0], "rev-parse", "refs/heads/feature")
+    code_tip = git(repos["code"][0], "rev-parse", "refs/heads/main")
+    code_lines = (
+        "  - repo: code\n    source_branch: feature\n"
+        f"    source_commit: {code_source}\n    target_branch: main\n    result_commit: {code_tip}\n"
+    )
+    receipt_path(layout).parent.mkdir(parents=True, exist_ok=True)
+    receipt_path(layout).write_text(
+        f"---\ntype: Explanation\nreceipt_version: 1\nowner: {OWNER}\nintegrations:\n{code_lines}---\n",
+        encoding="utf-8",
+        newline="\n",
+    )
+    git(repos["ui"][0], "merge", "feature")
+
+    assert record(layout, "ui").refusal is None
+
+    text = receipt_path(layout).read_text(encoding="utf-8")
+    assert "receipt_version: 2\n" in text and code_lines in text
+    assert inspect_finish(layout, OWNER).complete

@@ -466,6 +466,63 @@ def observe_integration(target: FinishTarget, entry: VerifiedIntegration | None 
     return entry if verify_integration(target, entry) is None else None
 
 
+#: How far back rediscovery looks for a landed merge or squash on the target.
+REDISCOVERY_SCAN = 200
+
+
+def _first_parent_log(repo: Path, tip: str, *exclude: str) -> list[list[str]] | None:
+    listed = finish_git(
+        repo,
+        "rev-list",
+        "--first-parent",
+        "--parents",
+        f"--max-count={REDISCOVERY_SCAN}",
+        tip,
+        *(f"^{e}" for e in exclude),
+    )
+    return [line.split() for line in listed.stdout.splitlines() if line] if listed.returncode == 0 else None
+
+
+def discover_integration(target: FinishTarget) -> VerifiedIntegration | str:
+    """Rediscover how the current source landed on the target, or say why not. Never mutates Git.
+
+    Reachable source: a first-parent merge commit whose second parent is the
+    source is `merge`; anything else (including a landed fast-forward, which
+    Git cannot tell from prior ancestry) is `ancestry`. Unreachable source:
+    exactly one non-empty single-parent first-parent commit whose tree equals
+    `merge-tree(parent, source)` is `squash`.
+    """
+    repo = target.repo.path
+    if repo is None or target.repo.name is None:
+        return "no repository checkout"
+    source = _commit(repo, "refs/heads/" + target.source_branch)
+    tip = _commit(repo, "refs/heads/" + target.target_branch)
+    if source is None or tip is None:
+        return "cannot resolve the source or target branch"
+    name, branch, into = target.repo.name, target.source_branch, target.target_branch
+    if _is_ancestor(repo, source, tip):
+        for fields in _first_parent_log(repo, tip) or []:
+            if len(fields) == 3 and fields[2] == source:
+                return VerifiedIntegration(name, branch, source, into, fields[0], "merge", "verified", fields[1])
+        return VerifiedIntegration(name, branch, source, into, tip)
+    base = finish_git(repo, "merge-base", source, tip).stdout.strip()
+    log = _first_parent_log(repo, tip, *([base] if _SHA.fullmatch(base) else []))
+    if log is None:
+        return "cannot read target history"
+    matches = [
+        candidate
+        for fields in log
+        if len(fields) == 2 and _tree(repo, fields[0]) != _tree(repo, fields[1])
+        for candidate in (VerifiedIntegration(name, branch, source, into, fields[0], "squash", "verified", fields[1]),)
+        if integration_shape(repo, candidate) is None
+    ]
+    if len(matches) > 1:
+        return f"ambiguous: {len(matches)} squash commits on {into} match {branch}; record with accept-integration"
+    if matches:
+        return matches[0]
+    return f"no merge, fast-forward or squash of {branch} found in the last {REDISCOVERY_SCAN} commits of {into}"
+
+
 def inspect_finish(layout: WorkspaceLayout, path: str) -> FinishVerification:
     """Reverify every recorded integration against live repository-local refs."""
     bundle = load_bundle(layout.bundle_dir, ignore=IGNORE)

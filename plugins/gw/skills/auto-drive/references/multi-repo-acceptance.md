@@ -34,7 +34,7 @@ For a source checkout, run the adapters from any working directory with the
 explicit project environment (replace all placeholders):
 
 ```bash
-python3 <plugin>/skills/auto-drive/references/launch-worker.py prepare \
+uv run --no-project --python 3.12 python <plugin>/skills/auto-drive/references/launch-worker.py prepare \
   --plan-file <plan.json> --owner <owner_path> --repo-name <name> \
   --workspace <workspace>
 uv run --project <source-checkout> --package graph-works-core python \

@@ -15,6 +15,12 @@ default: check
 normalization:
     uv run python scripts/check_filename_normalization.py .
 
+# Host toolchain check: git works, uv is present, uv resolves Python >= 3.12.
+# First dependency of every gate so a broken host fails in one second with one
+# `TOOLCHAIN PREFLIGHT FAILED (host, not code)` line instead of a red suite.
+preflight:
+    bash scripts/preflight.sh
+
 # Implicit text-IO defaults in shipped source -- a missing `encoding=` on any
 # text read/write, or a missing `newline=` on any text write.
 #
@@ -134,7 +140,7 @@ test:
     #!/usr/bin/env bash
     set -euo pipefail
     jobs="${GW_TEST_JOBS:-3}"
-    ncpu=$(python3 -c "import os; print(os.cpu_count() or 1)")
+    ncpu=$(uv run python -c "import os; print(os.cpu_count() or 1)")
     workers=$(( ncpu / jobs )); [ "$workers" -ge 1 ] || workers=1
     export PYTEST_XDIST_AUTO_NUM_WORKERS="$workers"
     pkgs=(_test-okf _test-code-graph-io _test-code-wiki-okf _test-work-tracker-okf _test-config-io _test-plugin-fork-io _test-models-io _test-subagents-io _test-doc-wiki-okf _test-graph-works-core _test-workflow-local _test-workflow-orca _test-graph-works-wire _test-graph-works-cli _test-graph-works-serve)
@@ -198,7 +204,7 @@ cov:
     #!/usr/bin/env bash
     set -euo pipefail
     jobs="${GW_COV_JOBS:-3}"
-    ncpu=$(python3 -c "import os; print(os.cpu_count() or 1)")
+    ncpu=$(uv run python -c "import os; print(os.cpu_count() or 1)")
     workers=$(( ncpu / jobs )); [ "$workers" -ge 1 ] || workers=1
     export PYTEST_XDIST_AUTO_NUM_WORKERS="$workers"
     pkgs=(_cov-okf _cov-code-graph-io _cov-code-wiki-okf _cov-work-tracker-okf _cov-config-io _cov-plugin-fork-io _cov-models-io _cov-subagents-io _cov-doc-wiki-okf _cov-graph-works-core _cov-workflow-local _cov-workflow-orca _cov-graph-works-wire _cov-graph-works-cli _cov-graph-works-serve)
@@ -257,7 +263,7 @@ _cov-workflow-local:
 #
 # PKG is the package directory name under `packages/` (e.g. `code-graph-io`).
 # `okf-io` and `okf-ext` share one root suite, so either name runs both.
-check-pkg PKG: sync
+check-pkg PKG: preflight sync
     #!/usr/bin/env bash
     set -euo pipefail
     case "{{PKG}}" in
@@ -329,7 +335,7 @@ check-pkg PKG: sync
 # happens to pull `sync` in today. Without it the gate's result depends on the
 # order of this list: `types` before `cov` fails from a clean checkout, `cov`
 # before `types` passes, on identical code.
-check: sync normalization text-io line-endings platform-declared lint types contracts cov test-plugin
+check: preflight sync normalization text-io line-endings platform-declared lint types contracts cov test-plugin
 
 # Orca's coordinator->worker reply path -- P1 static (offline), P2 live round trip.
 #
@@ -363,10 +369,16 @@ orca-reply-probe *ARGS:
 # against v24), so node
 # remains a hard requirement of `just check`. A gate that silently skips a
 # suite when a toolchain is missing reports green while covering nothing.
-test-plugin:
+test-plugin: preflight
     #!/usr/bin/env bash
     set -euo pipefail
     cd plugins/gw
+    # The bash suites shell out to the unversioned interpreter name; shadow it with uv's pinned
+    # interpreter so a host whose first interpreter is 3.9 cannot fail them.
+    shim=$(mktemp -d)
+    trap 'rm -rf "$shim"' EXIT
+    ln -s "$(uv run python -c 'import sys; print(sys.executable)')" "$shim/python3"
+    export PATH="$shim:$PATH"
     echo "--- test-dispatch-profile-contract"
     bash tests/test-dispatch-profile-contract.sh
     echo "--- test-workspace-commit-authority"
@@ -374,14 +386,14 @@ test-plugin:
     echo "--- test-workspace-branch-docs"
     bash tests/test-workspace-branch-docs.sh
     echo "--- test_launch_placement"
-    python3 tests/test_launch_placement.py
+    uv run python tests/test_launch_placement.py
     echo "--- test_attend_cards"
-    python3 tests/test_attend_cards.py
+    uv run python tests/test_attend_cards.py
     echo "--- test_classify_lifecycle"
-    python3 tests/test_classify_lifecycle.py
+    uv run python tests/test_classify_lifecycle.py
     echo "--- test_reader_pinning"
-    python3 tests/test_reader_pinning.py
-    python3 tests/test_finish_receipt.py
+    uv run python tests/test_reader_pinning.py
+    uv run python tests/test_finish_receipt.py
     echo "--- test-finish-cleanup-contract"
     bash tests/test-finish-cleanup-contract.sh
     echo "--- test-finish-strategy-contract"
@@ -395,7 +407,7 @@ test-plugin:
     echo "--- hooks/test-skill-doc-routing"
     bash tests/hooks/test-skill-doc-routing.sh
     echo "--- hooks/test-dispatch-prompt-guard"
-    python3 tests/hooks/test-dispatch-prompt-guard.py
+    uv run python tests/hooks/test-dispatch-prompt-guard.py
     echo "--- test-doc-layout-claims"
     bash tests/test-doc-layout-claims.sh
     echo "--- test_log_recipe"

@@ -19,7 +19,7 @@ matches or resolves rules. Treat model IDs and effort strings as opaque.
    before anything is created:
 
    ```
-   python3 references/launch-worker.py place --dispatch <dispatch-json> \
+   uv run --no-project --python 3.12 python references/launch-worker.py place --dispatch <dispatch-json> \
      --repo-path <dispatch repo.path> --out-placement <placement-json> \
      > <workspace>/okf/<dispatch path>/references/orca-placement/<key>.json
    ```
@@ -49,7 +49,7 @@ matches or resolves rules. Treat model IDs and effort strings as opaque.
    `--attempt-id` accepts `[A-Za-z0-9][A-Za-z0-9_.-]{0,127}`; a UUID fits.
 
    ```
-   python3 references/launch-worker.py prepare-reader --dispatch <dispatch-json> \
+   uv run --no-project --python 3.12 python references/launch-worker.py prepare-reader --dispatch <dispatch-json> \
      --attempt-id <preparation-attempt-id> --out-placement <fresh-placement-json> \
      > <workspace>/okf/<dispatch path>/references/orca-placement/<key>.json
    ```
@@ -96,7 +96,7 @@ matches or resolves rules. Treat model IDs and effort strings as opaque.
    Then encode the immutable task spec from the successful placement output:
 
    ```
-   python3 references/launch-worker.py encode \
+   uv run --no-project --python 3.12 python references/launch-worker.py encode \
      --dispatch <dispatch-json> --placement <placement-json> > <spec-file>
    ```
 
@@ -106,7 +106,7 @@ matches or resolves rules. Treat model IDs and effort strings as opaque.
    with a null model is refused; do not repair it locally.
 
 2. ```
-   python3 references/launch-worker.py create --spec <spec-file> \
+   uv run --no-project --python 3.12 python references/launch-worker.py create --spec <spec-file> \
      --run <run_id> --task-title "<key>" \
      --display-name "<work-path> · <phase>"
    ```
@@ -116,7 +116,7 @@ matches or resolves rules. Treat model IDs and effort strings as opaque.
 3. Launch from that same spec instead of rebuilding argv:
 
    ```
-   python3 references/launch-worker.py launch --spec <spec-file> \
+   uv run --no-project --python 3.12 python references/launch-worker.py launch --spec <spec-file> \
      --task <task_id> --dispatch-key <key> --run <run_id> > <start-json>
    ```
 
@@ -181,7 +181,7 @@ matches or resolves rules. Treat model IDs and effort strings as opaque.
    **Where the truth comes from, and lineage.** Run:
 
    ```
-   python3 references/launch-worker.py settle-placement --dispatch <dispatch-json> \
+   uv run --no-project --python 3.12 python references/launch-worker.py settle-placement --dispatch <dispatch-json> \
      --placement-result <workspace>/okf/<dispatch path>/references/orca-placement/<key>.json \
      --start <start-json>
    ```

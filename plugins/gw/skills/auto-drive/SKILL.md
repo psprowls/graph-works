@@ -1754,8 +1754,8 @@ structurally identified case** — a child's merge into its owner's integration
 branch, step 0 — and relays everything else to the human. It never decides
 what the options *mean*; that is the worker's job.
 
-0. **Auto-answer `merge`?** Answer it yourself, without mirroring, when
-   **both** hold:
+0. **Auto-answer the integration choice?** Answer it yourself, without mirroring, when
+   **both** hold. The answer is the dispatch's **strategy token**: the `default_strategy` of the first entry in that dispatch's `finish_targets` (from the same read-only plan entry as `auto_merge`) whose `default_strategy` is non-null, or `merge` when none has one:
 
    1. The sending dispatch's `auto_merge` is `true`. A live dispatch is
       excluded from the plan's `dispatches[]` (it rides in `--live`), so read
@@ -1774,7 +1774,7 @@ what the options *mean*; that is the worker's job.
          its key, or if more than one does, **mirror** — an unattributable
          question is not a structurally identified case. Otherwise read that
          entry's `auto_merge`.
-   2. The question's `options` include `merge`.
+   2. The question's `options` include that strategy token.
 
    `auto_merge` already folds in everything about *where* the merge lands:
    `supervise_merges` off, a non-root item, and a merge target that is the
@@ -1785,14 +1785,14 @@ what the options *mean*; that is the worker's job.
    carry `auto_merge: false` and mirror.
 
    Guard 2 is the detached-HEAD guard. A worker on a detached HEAD drops
-   `merge` from its own options, and testing the options rather than
+   `squash`, `merge` and `ff` from its own options, and testing the options rather than
    re-deriving git state keeps you out of the worker's business — any case
    the worker itself judged un-mergeable falls through to the human
    automatically. It also excludes the option-less discard-confirmation ask
    of step 4, which must never be auto-answered.
 
    **`pr`, `hold` and `discard` are never auto-answered, under any
-   condition.** The policy chooses only `merge`: an untyped ask replies with
+   condition.** The policy chooses only the strategy token: an untyped ask replies with
    that literal string, while a typed ask replies with the recorded answer's
    `reply_body`. Otherwise mirror to the human; there is no third choice.
 
@@ -1806,7 +1806,7 @@ what the options *mean*; that is the worker's job.
 
    When both hold, **on a typed ask** (step 1's marker test), record who
    answered before replying:
-   `gw work ask-answer <resource> --choice merge --by policy:auto-merge --json`.
+   `gw work ask-answer <resource> --choice <token> --by policy:auto-merge --json`.
    Require a successful exit, `ok: true`, and a nonempty string `reply_body`
    in its JSON result. An identical already-recorded answer can satisfy this
    check; `changed: false` alone is not a refusal. Use that `reply_body` as
@@ -1815,13 +1815,13 @@ what the options *mean*; that is the worker's job.
    and take their direction by label (step 1b); do not print `auto-merged`, reply,
    fabricate a body, overwrite the payload, or automatically resend a
    conflicting answer. For `already-answered`, read and show the recorded
-   answer alongside the proposed `merge`, then let the human decide which
+   answer alongside the proposed token, then let the human decide which
    stands. Keep the worker's question
    pending until a valid recorded reply body is available and the human directs
    the relay. Do not fall through to an automatic reply or repeat this policy
    attempt for the same refused ask.
 
-   **On an untyped ask**, the step 2 body is the bare string `merge`, preserving
+   **On an untyped ask**, the step 2 body is the bare strategy token, preserving
    the legacy fallback. Only after that check, print the `auto-merged` notice
    in this session (for an untyped ask, after selecting the literal body) — no
    human prompt, no outward worktree comment or status push:

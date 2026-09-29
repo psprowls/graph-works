@@ -297,7 +297,7 @@ for every item type, using the attended rider's outcome line or relay's result:
 
 | Stage | Outcome | Step 5 does |
 |---|---|---|
-| Attended finish | `merge` (clean merge, tests green on the merged result) | `gw work advance <work-path> --from finish --resolved-in <merge commit SHA>` |
+| Attended finish | `merge` (a successful `gw work integrate` by any strategy, tests green on the merged result) | `gw work advance <work-path> --from finish --resolved-in <merge commit SHA>` |
 | Attended finish | `confirm` (commits already on the merge target) | `gw work advance <work-path> --from finish --resolved-in <HEAD SHA>` |
 | Attended finish | `pr`, `keep`, `discard`, `none` | **No advance** — stay at `phase: finish` and use step 6's held-item hand-off. |
 | `gw:finishing-relay` | Any | **No advance** — relay R5 already settled the item: `merge` advanced; `pr`/`hold`/`discard` held. |
@@ -408,9 +408,7 @@ phase changed, then `gw work lint`). There is no `gw work edit` verb.
 
 ## Finish receipt verification and recovery
 
-Before presenting the integration choice, explain that automated receipt verification
-requires ancestry-preserving integration (fast-forward or merge commit). Squash and
-rebase results are not ancestry proof and remain unverified by this contract.
+Before presenting the integration choice, state each code target's default strategy. `gw work integrate` performs every code-repository integration and records a receipt whose verification matches its strategy: `ff` proves the target now contains the source commit itself, `merge` proves a merge commit whose parents are the pre-merge target and the source, and `squash` proves a single-parent commit on the pre-merge target whose tree equals Git's merge of the source into it. An integration gw cannot verify (a rebase, a squash made elsewhere, a PR merged upstream) is never forced through. Hold, and route it to the human, who may record it with `gw work accept-integration <work-path> --repo <name> --evidence <sha> --reason "<why>" --by <human> --apply` (attested evidence, marked `accepted`). Workers never run `accept-integration` and never hand-advance.
 
 Resolve `<plugin>` to this installed plugin's absolute directory. Run the helper
 with the core environment available: the command below works from the source
@@ -424,8 +422,8 @@ uv run --package graph-works-core python <plugin>/skills/finishing-relay/referen
 uv run --package graph-works-core python <plugin>/skills/finishing-relay/references/finish-receipt.py cleanup <work-path> --workspace <workspace> --runner-cwd <cwd>
 ```
 
-Inspect before any integration. After each repository's merge and merged-result
-checks pass, record that repository immediately.
+Inspect before any integration. `gw work integrate` records code targets itself; record each workspace-anchor target immediately after its merge and merged-result
+checks pass.
 For a `_workspace` entry in `finish_targets` targeting workspace `main`, run
 `gw work merge-workspace <work-path> --apply --json`. It merges and records
 that receipt entry in one locked step; do not run `record` for it. A
@@ -441,7 +439,7 @@ ends that preservation.
 
 If a later repository fails, hold the entire finish and report already verified
 entries. If a merge succeeded but receipt persistence failed, run `record` again:
-it rediscovers current source ancestry in the target without another merge.
+it rediscovers the merge commit, fast-forward or squash in the target without another merge.
 Inspection returns only currently verified entries; stale entries remain historical
 receipt content and block completion until refreshed. A malformed receipt requires
 repair, not replacement. No cross-repository atomicity is promised.

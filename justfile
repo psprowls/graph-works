@@ -384,6 +384,8 @@ test-plugin:
     python3 tests/test_finish_receipt.py
     echo "--- test-finish-cleanup-contract"
     bash tests/test-finish-cleanup-contract.sh
+    echo "--- test-finish-strategy-contract"
+    bash tests/test-finish-strategy-contract.sh
     echo "--- codex/test-marketplace-manifest"
     bash tests/codex/test-marketplace-manifest.sh
     echo "--- codex/test-package-codex-plugin"

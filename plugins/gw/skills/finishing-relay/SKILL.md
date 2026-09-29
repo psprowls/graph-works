@@ -1,13 +1,13 @@
 ---
 name: finishing-relay
-description: Use when the finish stage of a work item is dispatched under auto-drive with mode relay — sends one orca orchestration ask carrying the merge/PR/hold/discard decision instead of finishing-a-development-branch's interactive menu, executes the chosen outcome, and settles the item. Dispatched by the gw:workflow skill when the `Auto-drive context:` line appears in this session's own dispatch prompt; never invoked directly by a human.
+description: Use when the finish stage of a work item is dispatched under auto-drive with mode relay — sends one orca orchestration ask carrying the integrate/PR/hold/discard decision instead of finishing-a-development-branch's interactive menu, executes the chosen outcome, and settles the item. Dispatched by the gw:workflow skill when the `Auto-drive context:` line appears in this session's own dispatch prompt; never invoked directly by a human.
 ---
 
 # Finishing a Development Branch — Relay Mode
 
 ## Overview
 
-Relay the merge/PR/hold/discard decision to the auto-drive coordinator via
+Relay the integrate/PR/hold/discard decision to the auto-drive coordinator via
 one `orca orchestration ask` instead of `finishing-a-development-branch`'s
 interactive menu — this session is a dispatched worker with no human in the
 terminal.
@@ -16,7 +16,7 @@ terminal.
 choice → Settle the item and report.
 
 **Announce at start:** "I'm using the finishing-relay skill to relay the
-merge/PR/hold/discard decision for `<work-path>`."
+integrate/PR/hold/discard decision for `<work-path>`."
 
 **Detection is the caller's job, not this skill's.** This skill is
 dispatched only when the `gw:workflow` skill (or `/gw:workflow`)
@@ -69,13 +69,13 @@ git rev-parse --abbrev-ref HEAD
 git worktree list --porcelain
 ```
 
-- **Detached HEAD** (`git rev-parse --abbrev-ref HEAD` prints `HEAD`): drop
-  `merge` from the ask's options in R3 — the same reduction
+- **Detached HEAD** (`git rev-parse --abbrev-ref HEAD` prints `HEAD`):
+  drop `squash`, `merge` and `ff` from the ask's options in R3 — the same reduction
   `finishing-a-development-branch` Step 4 makes for its 3-option menu.
 - **Trunk case** (current branch **is** the merge target — a shared epic
   worktree, or a main-mode item that never had a dedicated branch to begin
   with): the stage's commits already sit on the merge target — there is
-  nothing to merge. The `merge` choice in R4 resolves to "confirm and
+  nothing to merge. Any integration choice (`squash`, `merge` or `ff`) in R4 resolves to "confirm and
   advance" with `resolved_in` = current HEAD SHA (`git rev-parse HEAD`).
   Never merge a branch into itself.
 - **Integration-branch case** (current branch differs from the merge target,
@@ -94,6 +94,7 @@ git worktree list --porcelain
   never merge from this worker's worktree.
   For `_workspace` targeting workspace `main`, R4 uses
   `gw work merge-workspace <work-path> --apply --json` instead of `git merge`.
+  For code repositories, R4 uses `gw work integrate`; this worker never runs `git merge` for a code repository.
   For `_workspace` targeting an epic workspace anchor, R4 merges in that
   anchor worktree and records the result with `finish-receipt.py record --repo _workspace`.
 
@@ -115,7 +116,7 @@ and R1's test result, for every repository target.
 
 Ask once for the entire target set. Include each repository, source/target
 branch, commit summary and test result in the question. The answer applies
-to all targets; remove merge if any target is detached or unverified.
+to all targets; remove the integration options if any target is detached or unverified.
 
 Prepare the ask with `gw work ask`, then send exactly the strings it prints.
 Write the full per-target detail — each repository, source/target branch,
@@ -126,14 +127,16 @@ the question. The summary is a one-line headline:
 gw work ask <work-path> --kind choice \
   --summary "Finish <work-path>: <N> commit(s) across <T> target(s); tests <pass|fail>; merge target <merge target>." \
   --question-file <scratch>/finish-question.md \
-  --option "merge=Merge into the target branch" \
+  --option "squash=Squash into one commit on the target branch" \
+  --option "merge=Merge commit (--no-ff) into the target branch" \
+  --option "ff=Fast-forward the target branch (refuses if it diverged)" \
   --option "pr=Open a pull request" \
   --option "hold=Hold at finish" \
   --option "discard=Discard the branch" \
   --json
 ```
 
-Drop the `merge` option when any target is detached or unverified. Then send
+The three integration tokens are listed first, and the targets' default strategy is listed first among them: the `default_strategy` of the first `finish_targets` entry that has a non-null one, or `squash` when none does. The other two follow in the order `squash`, `merge`, `ff`; then `pr`, `hold`, `discard`. The example above shows default `squash`; reorder the first three lines for another default. The question file states each code target's `default_strategy`, and that `_workspace` targets always integrate with a merge commit whatever token is chosen. One answer applies to every code target. Drop `squash`, `merge` and `ff` when any target is detached or unverified. Then send
 one `orca orchestration ask` with this session's own `--from` /
 `--dispatch-capability` from its dispatch preamble, passing `orca.question`
 and `orca.options` from that JSON **unchanged**. Never hand-write `--options`:
@@ -164,7 +167,7 @@ actions` section is "re-send R3's ask (reusing its payload — never call
 and execute R4/R5." Reuse the prepared payload on a resume of any typed
 ask in R3, R4 or R5; never prepare a second payload for the same question.
 
-The reply body is JSON: read `choice` from the JSON reply (`merge`, `pr`,
+The reply body is JSON: read `choice` from the JSON reply (`squash`, `merge`, `ff`, `pr`,
 `hold` or `discard`). A reply that is not JSON, including a bare option token, is treated as `hold`.
 A `choice` that is not one of the options you sent is also treated as `hold`.
 Note the verbatim reply in the R5 report — don't guess at unrecognized intent.
@@ -176,7 +179,7 @@ Collect before/after commit evidence and merged-result checks for each
 target. Any conflict or failed check holds the whole stage; explicitly report
 what already integrated. Cross-repository atomicity is not promised.
 
-### `merge`
+### `squash`, `merge` or `ff`
 
 - **Trunk case:** no-op merge — the commits are already on the merge
   target. Skip straight to R5 with `resolved_in` = the HEAD SHA captured in
@@ -195,17 +198,14 @@ what already integrated. Cross-repository atomicity is not promised.
   `finish-receipt.py record <work-path> --workspace <workspace> --repo _workspace`.
   A conflict, failed lint, or refusal enters the Escalation path. For code
   repositories, run:
-  ```bash
-  git -C <target worktree path from R2> merge <this target's source_branch>
-  ```
-  **Conflicts:** never auto-resolve (parent-epic policy). Enter the
-  **Escalation path** with the conflict file list in the body; wait for
-  instructions.
-  **On a clean code merge:** run `gw work gate check <work-path> --worktree <target worktree>`. A fast-forward, or a squash onto an unmoved target, reproduces the gated tree and is `satisfied`, so nothing re-runs. Otherwise run `gw work gate run <work-path> --worktree <target worktree>` and `gw work gate wait <work-path>`; the receipt is recorded under this item. **A red gate post-merge:** enter the
+
+      gw work integrate <work-path> --repo <this target's repository> --strategy <choice> --apply --json
+
+  Never run `git merge` for a code repository: gw chooses the flags for the strategy, merges in the target worktree and records the receipt in the same locked step. `outcome: already-integrated` continues. Any refusal enters the **Escalation path** with its `reason` and `detail`, and holds the entire finish. `conflict` lists the paths in `conflicts` (never auto-resolve them — parent-epic policy). `not-fast-forward` means `ff` cannot apply. `nothing-to-integrate` means the target already carries these changes another way, and a human decides whether to record that with `gw work accept-integration`. `receipt-refused` means the integration landed at `result_commit` and only its receipt is missing: the body must say so, and the retry is `finish-receipt.py record --repo <name>`.
+  **On a successful integrate:** run `gw work gate check <work-path> --worktree <target worktree>`. A fast-forward, or a squash onto an unmoved target, reproduces the gated tree and is `satisfied`, so nothing re-runs. Otherwise run `gw work gate run <work-path> --worktree <target worktree>` and `gw work gate wait <work-path>`; the receipt is recorded under this item. **A red gate post-merge:** enter the
   Escalation path — the merge already happened, so the escalation body must
   say so explicitly (don't let the coordinator think it's still pending).
-  Continue to R5 with each target's merge commit SHA from its target
-  worktree; for workspace `main`, use the merge result returned by gw.
+  Continue to R5 with each code target's `result_commit` from `gw work integrate`; for workspace `main`, use the merge result returned by gw.
 
 ### `pr`
 
@@ -263,9 +263,7 @@ The shared rule is: only a verified integration resolves — same rule
 as attended `workflow` step 5. The trunk-case confirmation counts as
 integration into the merge target; PR, hold and discard do not.
 
-- **`merge`:** Record each successful code or workspace-anchor target
-  immediately using the helper procedure below. The workspace `main` target
-  was recorded by `merge-workspace`; do not record it again. Only after every
+- **`squash` / `merge` / `ff`:** Code targets were recorded by `gw work integrate` and the workspace `main` target by `merge-workspace`; do not record them again. Record each workspace-anchor target immediately using the helper procedure below. Only after every
   target is proven integrated and all checks
   pass, inspect the complete workflow-owned finish receipt and use its
   `resolved_in` for advancement. Missing evidence holds the entire stage. Run the advance below exactly once
@@ -292,7 +290,7 @@ integration into the merge target; PR, hold and discard do not.
   phase. The merge may already have happened, so include the merge SHA in the
   escalation body (or say the commits were already on the target in the trunk case).
   Do not claim settlement or send `worker_done` while escalating.
-  **Cleanup (`merge` only, after the successful advance).** Before sending
+  **Cleanup (`squash` / `merge` / `ff` only, after the successful advance).** Before sending
   `worker_done`, run the cleanup plan from this session's own cwd and execute
   it per [finish-cleanup.md](references/finish-cleanup.md):
   ```bash
@@ -335,7 +333,7 @@ integration into the merge target; PR, hold and discard do not.
 ## Escalation path (failure handling)
 
 Entered from R1 (failing tests), R2 (no single worktree has the merge target
-checked out), R4 (merge conflicts, post-merge test failure) and R5 (no usable
+checked out), R4 (an integrate refusal, merge conflicts, post-merge test failure) and R5 (no usable
 release date or phase-mismatch):
 
 1. Send an escalation with the concrete failure output (test failures,
@@ -389,9 +387,7 @@ not apply here.
 
 ## Finish receipt verification and recovery
 
-Before presenting the integration choice, explain that automated receipt verification
-requires ancestry-preserving integration (fast-forward or merge commit). Squash and
-rebase results are not ancestry proof and remain unverified by this contract.
+Before presenting the integration choice, state each code target's default strategy. `gw work integrate` performs every code-repository integration and records a receipt whose verification matches its strategy: `ff` proves the target now contains the source commit itself, `merge` proves a merge commit whose parents are the pre-merge target and the source, and `squash` proves a single-parent commit on the pre-merge target whose tree equals Git's merge of the source into it. An integration gw cannot verify (a rebase, a squash made elsewhere, a PR merged upstream) is never forced through. Hold, and route it to the human, who may record it with `gw work accept-integration <work-path> --repo <name> --evidence <sha> --reason "<why>" --by <human> --apply` (attested evidence, marked `accepted`). Workers never run `accept-integration` and never hand-advance.
 
 Resolve `<plugin>` to this installed plugin's absolute directory. Run the helper
 with the core environment available: the command below works from the source
@@ -405,8 +401,8 @@ uv run --package graph-works-core python <plugin>/skills/finishing-relay/referen
 uv run --package graph-works-core python <plugin>/skills/finishing-relay/references/finish-receipt.py cleanup <work-path> --workspace <workspace> --runner-cwd <cwd>
 ```
 
-Inspect before any integration. After each repository's merge and merged-result
-checks pass, record that repository immediately.
+Inspect before any integration. `gw work integrate` records code targets itself; record each workspace-anchor target immediately after its merge and merged-result
+checks pass.
 `record` commits the receipt itself; do not commit the workspace.
 `record` derives commit evidence itself; never hand-author completion
 claims. Preserve source branches and worktrees until the item resolves: the
@@ -415,7 +411,7 @@ ends that preservation.
 
 If a later repository fails, hold the entire finish and report already verified
 entries. If a merge succeeded but receipt persistence failed, run `record` again:
-it rediscovers current source ancestry in the target without another merge.
+it rediscovers the merge commit, fast-forward or squash in the target without another merge.
 Inspection returns only currently verified entries; stale entries remain historical
 receipt content and block completion until refreshed. A malformed receipt requires
 repair, not replacement. No cross-repository atomicity is promised.

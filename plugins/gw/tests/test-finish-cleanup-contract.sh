@@ -46,7 +46,7 @@ assert_absent "$CONTRACT" "--run-hooks" "contract passes no hooks flags"
 
 echo "--- finishing-relay"
 assert_matches "$RELAY" "finish-receipt\.py cleanup .*--runner-cwd" "relay runs the cleanup helper with --runner-cwd"
-assert_contains "$RELAY" "Cleanup (\`merge\` only, after the successful advance)" "relay cleanup is merge-only and after the advance"
+assert_contains "$RELAY" "Cleanup (\`squash\` / \`merge\` / \`ff\` only, after the successful advance)" "relay cleanup is merge-only and after the advance"
 assert_contains "$RELAY" "\`pr\` / \`hold\` / \`discard\` run no cleanup" "held outcomes run no cleanup"
 assert_contains "$RELAY" "never its own worktree" "ownership rule: relay never removes its own worktree"
 assert_contains "$RELAY" "the coordinator removes the relay's own worktree" "ownership rule: coordinator removes the deferred row"

@@ -271,22 +271,21 @@ resolves an item; the rider leaves the stock skill unmodified.
 >
 > **Gates are receipts.** For each code target, except one already contained (`git log <target_branch>..<source_branch>` empty: no gate), run `gw work gate check <work-path>` in the source worktree before Step 1's tests, adding `--worktree <source worktree>` to `check` and to `run` when the source worktree is not the item's stamped one. `satisfied` replaces Step 1's test run; name the receipt's owner and run id in the summary. Otherwise run `gw work gate run <work-path>` and `gw work gate wait <work-path>` in place of Step 1's test command. When `git log <target_branch>..<source_branch>` is empty the target is already contained: take the on-target confirm path with no gate. After a clean merge run `gw work gate check <work-path> --worktree <target worktree>`; only when it is unsatisfied run `gw work gate run <work-path> --worktree <target worktree>` and `wait`. Never run the repository's check command directly as the gate.
 >
-> **Receipt procedure.** Before presenting the choice explain that verification
-> requires ancestry-preserving fast-forward or merge commits. Squash/rebase does
-> not prove integration. Keep source worktrees and branches until verification.
-> Use the absolute installed plugin path and the core runtime (from an external
+> **Integration strategy.** Offer the integration choice as `squash`, `merge` (merge commit, `--no-ff`) or `ff` (fast-forward), listing each code target's `default_strategy` from `finish_targets` first. Integrate every code target with `gw work integrate <work-path> --repo <name> --strategy <choice> --apply --json` in place of the stock skill's own `git merge`: gw merges in the target worktree and records the receipt. Never run `git merge` for a code repository. `_workspace` targets keep `gw work merge-workspace` (workspace `main`) or an anchor merge followed by `record --repo _workspace`. A refusal holds the entire finish; `receipt-refused` means the integration landed and only `record` is needed. When the human says a target is integrated but gw cannot verify it (rebase, external squash, PR merged upstream), record it with `gw work accept-integration <work-path> --repo <name> --evidence <sha> --reason "<why>" --by <human>` — never with a hand `gw work advance`. Keep source worktrees and branches until verification.
+>
+> **Receipt procedure.** Use the absolute installed plugin path and the core runtime (from an external
 > checkout add `--project <graph-works source root>` to `uv run`, or use an
 > installed interpreter with graph-works-core). Run before merging:
 >
 > `uv run --package graph-works-core python <plugin>/skills/finishing-relay/references/finish-receipt.py inspect <work-path> --workspace <workspace>`
 >
-> After each repository's successful merge and merged-result checks, run:
+> After each workspace-anchor target's merge and merged-result checks, run:
 >
 > `uv run --package graph-works-core python <plugin>/skills/finishing-relay/references/finish-receipt.py record <work-path> --workspace <workspace> --repo <name>`
 >
 > `record` commits the receipt itself; do not commit the workspace.
 > If receipt writing fails after a merge, retry `record`:
-> it rediscovers source ancestry without another merge. Preserve partial receipts
+> it rediscovers the merge, fast-forward or squash without another merge. Preserve partial receipts
 > when a later target fails. Inspect again after every target is recorded; only
 > `complete: true` allows workflow's one advance, using that inspection's
 > `resolved_in` and `--no-infer-worktree`. Malformed receipts require repair;
@@ -313,7 +312,7 @@ resolves an item; the rider leaves the stock skill unmodified.
 > including after a stop; merge/confirm means the entire set integrated:
 > `Finish outcome: <merge|confirm|pr|keep|discard|none>; merge target: <branch>; resolved_in: <SHA|none>`
 >
-> Use `merge` only after a clean merge and green tests on the merged result,
+> Use `merge` after a successful integration by any strategy and green tests on the merged result,
 > with the complete receipt inspection's `resolved_in`. Use `confirm` only
 > for the confirmed on-target case, with receipt verification. Use `pr` for PR creation,
 > `keep` for keep-as-is, and `discard` for a confirmed discard; their

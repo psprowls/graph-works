@@ -13,6 +13,7 @@ from graph_works_cli import exit_codes
 from graph_works_cli.cli import app
 from graph_works_cli.work_cli import main as work_main
 from graph_works_cli.workspace_resolution import resolve_workspace
+from graph_works_core.orchestrate.gate_receipts import GateRun, render_receipt
 from okf_io import load
 from typer.testing import CliRunner
 
@@ -1325,7 +1326,8 @@ def _execute_item_without_baseline(workspace: Path) -> str:
         subprocess.run(["git", *args], cwd=code, check=True, capture_output=True)
     layout = resolve_workspace(str(workspace))
     layout.manifest_path.write_text(
-        f"version: 1\nrepositories:\n  code:\n    path: {json.dumps(str(code))}\n", encoding="utf-8"
+        f"version: 1\nrepositories:\n  code:\n    path: {json.dumps(str(code))}\n    gate:\n      full: 'true'\n",
+        encoding="utf-8",
     )
     result = runner.invoke(
         app,
@@ -1353,6 +1355,30 @@ def _execute_item_without_baseline(workspace: Path) -> str:
     text = text.replace("work_status: open\n", "work_status: in-progress\nphase: execute\n", 1)
     text = text.replace("phase: design\n", "")
     page.write_text(text, encoding="utf-8", newline="")
+    # a bypassed commit-gate code never exempts the receipt: mint one for the clean tree
+    tree = subprocess.run(
+        ["git", "rev-parse", "HEAD^{tree}"], cwd=code, check=True, capture_output=True, text=True
+    ).stdout.strip()
+    receipt = GateRun(
+        run_id="20260928T120000Z-00000000",
+        repo="code",
+        worktree=str(code),
+        head="b" * 40,
+        tree=tree,
+        clean=True,
+        tree_changed=False,
+        scope="full",
+        command="true",
+        names=(),
+        exit=0,
+        log_path="/l",
+        log_tail="",
+        started="2026-09-28T12:00:00Z",
+        duration_s=1.0,
+    )
+    target = workspace / "okf" / path / "references" / "03-gate-receipts.md"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(render_receipt(path, [receipt], created="2026-09-28"), encoding="utf-8", newline="\n")
     return path
 
 

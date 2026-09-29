@@ -481,13 +481,26 @@ def _advance(
             explicit_start=start_sha,
             git=provenance.gate_git(layout),
         )
-        if verdict.refusal is None and verdict.root is not None:
-            verdict = _receipt_gate(
+        commit_refusal = verdict.refusal
+        if verdict.root is not None and (
+            commit_refusal is None or (skip_gate is not None and commit_refusal == skip_gate)
+        ):
+            # A bypassed commit-gate code never exempts the receipt: each gate is bypassable only by its own code.
+            receipt_verdict = _receipt_gate(
                 layout,
                 item,
                 verdict.root,
                 item_repo.name if item_repo is not None else _repo_name_of(layout, resolved_repo),
             )
+            if commit_refusal is None:
+                verdict = receipt_verdict
+            elif receipt_verdict.refusal is not None:
+                # the bypass covers the commit code only; the receipt refusal stands under its own code
+                return StageAdvance(
+                    outcome=_refuse(outcome, receipt_verdict.refusal, receipt_verdict.detail),
+                    repo_note=repo_note,
+                    warnings=inference_warnings + drift_warnings,
+                )
         warnings = (verdict.note,) if verdict.note else ()
         gate_receipt = verdict.receipt
         if skip_gate is not None:
@@ -860,15 +873,18 @@ def _commit_gate(
             )
     else:
         root = repo
+
+    def refuse(code: RefusalReason, detail: str) -> GateVerdict:
+        # the resolved root rides along so a bypassed commit refusal still reaches the receipt gate
+        return GateVerdict(code, detail, root=root)
+
     if isinstance(git, provenance.GitFailure):
-        return GateVerdict("git-unavailable", f"no usable git ({git.cause}): {git.detail}")
+        return refuse("git-unavailable", f"no usable git ({git.cause}): {git.detail}")
     dirty = provenance.strict_dirty_paths(root, paths, git=git)
     if isinstance(dirty, provenance.GitFailure):
-        return GateVerdict(
-            "git-unavailable", f"`git status` could not be read in {root} ({dirty.cause}): {dirty.detail}"
-        )
+        return refuse("git-unavailable", f"`git status` could not be read in {root} ({dirty.cause}): {dirty.detail}")
     if dirty:
-        return GateVerdict(
+        return refuse(
             "uncommitted-work",
             "the execute stage left uncommitted changes under `affects`: "
             + ", ".join(dirty)
@@ -876,7 +892,7 @@ def _commit_gate(
         )
     start = explicit_start or recorded_start
     if not start:
-        return GateVerdict(
+        return refuse(
             "no-start-sha",
             f"{item.path} has no recorded execute baseline (`start_sha`) and none was passed; record one with "
             f"`gw work record-baseline {item.path}` before execute work starts, pass --start-sha, or, for an item "
@@ -885,18 +901,18 @@ def _commit_gate(
         )
     resolved = provenance.strict_commit(root, start, git=git)
     if isinstance(resolved, provenance.GitFailure):
-        return GateVerdict(
+        return refuse(
             "range-unreadable", f"start_sha {start} does not resolve to a commit in {root}: {resolved.detail}"
         )
     facts = provenance.strict_range(root, start_sha=resolved, paths=paths, git=git)
     if isinstance(facts, provenance.GitFailure):
-        return GateVerdict("range-unreadable", f"the range {start}..HEAD is unreadable in {root}: {facts.detail}")
+        return refuse("range-unreadable", f"the range {start}..HEAD is unreadable in {root}: {facts.detail}")
     if not facts.commits:
-        return GateVerdict(
+        return refuse(
             "no-commits", f"the execute stage recorded no commits touching `affects` in {start}..{facts.end_sha}"
         )
     if not facts.files:
-        return GateVerdict(
+        return refuse(
             "no-affects-touched",
             "the execute stage committed work but touched nothing under this item's declared "
             f"surface ({', '.join(facts.scope)}); either the work landed outside `affects` or "

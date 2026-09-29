@@ -6,7 +6,9 @@ from pathlib import Path
 
 from _gate_helpers import TODAY, mint_receipt, raise_
 from conftest import GateEnv, git, make_repo
+from graph_works_core.orchestrate import gate_git
 from graph_works_core.orchestrate import stage_advance as stage
+from graph_works_core.workspace import provenance
 from work_tracker_okf import decisions as _decisions
 
 
@@ -133,3 +135,31 @@ def test_unusable_git_refuses_before_the_receipt_lookup(env: GateEnv, monkeypatc
     monkeypatch.setattr(stage.provenance, "gate_git", lambda layout: next(calls, failure))
     result = advance(env)
     assert result.outcome.plan.refusal == "git-unavailable" and "no git" in result.outcome.plan.detail
+
+
+def _dirty_env(env: GateEnv) -> None:
+    _ready(env)
+    (env.repo / "packages/a/z.py").write_text("z", encoding="utf-8", newline="\n")
+
+
+def test_bypassing_a_commit_gate_code_still_requires_a_receipt(env: GateEnv) -> None:
+    _dirty_env(env)
+    result = advance(env, skip_gate=("uncommitted-work", "unrelated dirt"))
+    assert result.outcome.plan.refusal == "no-gate-receipt"
+    assert env.page_unchanged()
+
+
+def test_bypassing_a_commit_gate_code_passes_with_a_receipt(env: GateEnv) -> None:
+    _dirty_env(env)
+    tree = gate_git.snapshot(env.repo, git=provenance.gate_git(env.layout)).tree
+    mint_receipt(env, tree=tree)
+    result = advance(env, skip_gate=("uncommitted-work", "unrelated dirt"))
+    assert result.outcome.written and result.gate_bypass is not None
+    assert result.gate_bypass.code == "uncommitted-work"
+
+
+def test_bypassing_a_commit_gate_code_with_no_gate_configured_refuses(env: GateEnv) -> None:
+    _dirty_env(env)
+    env.set_manifest(gate="")
+    result = advance(env, skip_gate=("uncommitted-work", "unrelated dirt"))
+    assert result.outcome.plan.refusal == "no-gate-configured"

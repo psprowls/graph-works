@@ -26,6 +26,7 @@ def _setup(tmp_path: Path):
 
 def test_a_matching_attributed_bypass_advances_and_records_one_entry(tmp_path: Path) -> None:
     layout, repo, _fork = _setup(tmp_path)
+    gate_ready(layout, repo, PATH)
     result = stage.run_stage_advance(
         layout,
         PATH,
@@ -98,6 +99,7 @@ def test_an_invalid_bypass_request_refuses(tmp_path: Path, reason: str, actor: s
 
 def test_an_unrecordable_bypass_leaves_the_item_at_execute(tmp_path: Path, monkeypatch) -> None:
     layout, repo, _fork = _setup(tmp_path)
+    gate_ready(layout, repo, PATH)
     monkeypatch.setattr(
         stage._decisions,
         "plan_append",
@@ -112,6 +114,7 @@ def test_an_unrecordable_bypass_leaves_the_item_at_execute(tmp_path: Path, monke
 
 def test_a_dry_run_bypass_plans_and_writes_nothing(tmp_path: Path) -> None:
     layout, repo, _fork = _setup(tmp_path)
+    gate_ready(layout, repo, PATH)
     result = stage.run_stage_advance(
         layout, PATH, today=TODAY, repo=repo, dry_run=True, skip_gate="no-start-sha", skip_reason="r", actor="pat"
     )

@@ -523,6 +523,9 @@ assert_contains "skills/workflow/SKILL.md" "drain sweep" \
     "workflow says drained sources are archived by the sweep"
 
 # Findings are a workflow obligation shared by stock and gw-owned stages.
+assert_contains "skills/workflow/references/brief-riders.md" \
+    "An exit-advance refusal is an escalation to the human or coordinator" \
+    "design riders escalate exit refusals instead of altering valid artifacts"
 assert_contains "skills/workflow/SKILL.md" "**Out-of-scope findings.**" \
     "workflow step 3 carries the universal findings instruction"
 assert_contains "skills/workflow/SKILL.md" 'Never pass `--parent-path` naming this item or any ancestor' \
@@ -710,6 +713,22 @@ done
 assert_not_matches "skills/auto-drive/SKILL.md" \
     "so they're never delivered|Until \`tech-debt-auto-drive-skill-orca-edge-cases\` replaces" \
     "auto-drive drops the never-delivered heartbeat claim and the interim parenthetical"
+
+# feature-decision-amend-and-relay-ledger: every stage brief carries the
+# ledger obligations, and riders point at it instead of copying it.
+for contract in \
+    '- **Decision ledger.** For every stage, regardless of `action.skill`, add:' \
+    'gw work decision amend <owner-path> <D-id> --answer … --note …' \
+    'gw work decision add <path> --question … --status answered --answer … --decided-by <human>' \
+    'gw work decision add <owner-path> --status assumed --question "Changes D-nnn: …"' \
+    'is `supersede` or `overturn`, and only on a human'"'"'s instruction'
+do
+    assert_contains "skills/workflow/SKILL.md" "$contract" \
+        "workflow Decision ledger bullet: $contract"
+done
+assert_contains "skills/workflow/references/brief-riders.md" \
+    "step 3 **Decision ledger** bullet" \
+    "brief-riders points at the Decision ledger bullet instead of copying it"
 
 if [[ "$FAILURES" -gt 0 ]]; then
     echo "STATUS: FAILED ($FAILURES failure(s))"

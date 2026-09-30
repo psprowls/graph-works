@@ -39,14 +39,16 @@ VERBS = [
     ["work", "ask-answer"],
     ["work", "decision", "add"],
     ["work", "decision", "answer"],
+    ["work", "decision", "amend"],
     ["work", "decision", "list"],
     ["work", "decision", "supersede"],
     ["work", "decision", "overturn"],
+    ["work", "obligation", "add"],
 ]
 
 
-def test_the_surface_is_exactly_twenty_five_verbs() -> None:
-    assert len(VERBS) == 25
+def test_the_surface_is_exactly_twenty_seven_verbs() -> None:
+    assert len(VERBS) == 27
 
 
 @pytest.mark.parametrize("verb", VERBS, ids=lambda verb: " ".join(verb))
@@ -76,9 +78,11 @@ def test_next_declares_descend_and_json() -> None:
         ["work", "ask"],
         ["work", "decision", "add"],
         ["work", "decision", "answer"],
+        ["work", "decision", "amend"],
         ["work", "decision", "list"],
         ["work", "decision", "supersede"],
         ["work", "decision", "overturn"],
+        ["work", "obligation", "add"],
     ],
     ids=lambda verb: " ".join(verb),
 )

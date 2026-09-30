@@ -57,11 +57,11 @@ Variant = Literal[
 #: Which variants each stage can dispatch. `route()` pairs every `Dispatch`
 #: with a variant from its own stage's tuple; orchestrate uses the mapping to
 #: classify a live key whose exact variant it cannot recover (a live key names
-#: a phase, not a variant).
+#: a phase, not a variant). `reconcile` is the one variant offered by two stages.
 VARIANTS_BY_STAGE: Mapping[Stage, tuple[Variant, ...]] = MappingProxyType(
     {
         "design": ("exploration", "diagnosis", "reconcile", "epic-design"),
-        "plan": ("decompose", "single"),
+        "plan": ("decompose", "single", "reconcile"),
         "execute": ("planned", "unplanned"),
         "finish": ("branch",),
     }
@@ -77,6 +77,9 @@ class RouteState:
     `hold` is resolved by the caller from a ledger read; this module stays pure
     and never reads a decisions ledger or the filesystem itself.
 
+    `stale_spec` names siblings landed since the spec baseline whose `affects` overlap;
+    resolved by the caller from git, like `hold`.
+
     `has_branch` is branch *ownership* only, from the item's scalar `branch:`
     or `repo_stamps`: a stamped Epic or Release owns the integration branch its descendants merged
     into, so it finishes like any other branch (D-002). Never a name, never a
@@ -90,6 +93,7 @@ class RouteState:
     has_plan_doc: bool = False
     has_spec_doc: bool = False
     hold: HoldFact | None = None
+    stale_spec: tuple[str, ...] = ()
     dependency_edges: tuple[DependencyEdge, ...] = ()
     dependency_facts: tuple[DependencyFact, ...] = ()
     dependency_issues: tuple[DependencyIssue, ...] = ()
@@ -100,7 +104,11 @@ class RouteState:
 
 @dataclass(frozen=True, slots=True)
 class Transition:
-    """One frontmatter mutation. `None` fields are left unchanged."""
+    """One frontmatter mutation. `None` fields are left unchanged.
+
+    `stamp_baseline` is an unresolved request like `stamp_source`: core
+    resolves it to `spec_baseline` in the same write.
+    """
 
     phase: str | None = None
     work_status: str | None = None
@@ -108,6 +116,7 @@ class Transition:
     requires: tuple[str, ...] = ()
     sync_plan_table: bool = False
     stamp_source: str | None = None
+    stamp_baseline: bool = False
 
 
 #: The one backwards transition the table offers: `finish` -> `execute`, with
@@ -319,13 +328,17 @@ def _design_complete(state: RouteState) -> Transition:
                 document_status="stable",
                 requires=("effort",),
                 stamp_source=SPEC_SOURCE_ID,
+                stamp_baseline=True,
             )
         if state.effort in SMALL_EFFORTS:
-            return Transition(phase="execute", document_status="stable", stamp_source=SPEC_SOURCE_ID)
+            return Transition(
+                phase="execute", document_status="stable", stamp_source=SPEC_SOURCE_ID, stamp_baseline=True
+            )
     return Transition(
         phase="plan",
         document_status="stable",
         stamp_source=SPEC_SOURCE_ID,
+        stamp_baseline=True,
         requires=("effort",) if state.effort is None else (),
     )
 
@@ -351,6 +364,12 @@ def _plan(state: RouteState) -> RouteResult:
     blocker = _dependency_blocker(state, "plan")
     if blocker is not None:
         return blocker
+    if state.stale_spec:
+        return RouteResult(
+            dispatch=Dispatch("plan", "reconcile"),
+            reason=f"spec baseline stale: {', '.join(state.stale_spec)} landed since with overlapping affects",
+            on_complete=Transition(phase="plan", stamp_baseline=True),
+        )
     if state.type in {"Release", "Epic"}:
         # A release or epic decomposes into children and has no implementation row to
         # add, so no plan table to sync.
@@ -470,7 +489,12 @@ def _finish(state: RouteState) -> RouteResult:
 
 
 def state_for(
-    items: Sequence[WorkItem], path: str, *, effort: str | None = None, hold: HoldFact | None = None
+    items: Sequence[WorkItem],
+    path: str,
+    *,
+    effort: str | None = None,
+    hold: HoldFact | None = None,
+    stale_spec: tuple[str, ...] = (),
 ) -> RouteState | None:
     """The `RouteState` for *path*, or `None` when no item has that path.
 
@@ -487,6 +511,9 @@ def state_for(
 
     `effort=` overrides the item's own value: it is what lets a caller resolve
     the design-complete fork in the same call that supplies the size.
+
+    `stale_spec=` is resolved by the caller from git. Default `()` is correct
+    for callers that have no git context.
 
     `hold=` is resolved by the caller, never by this module: a decisions ledger
     read is IO, and this function stays pure. Default `None` is correct for
@@ -516,6 +543,7 @@ def state_for(
         has_plan_doc=item.has_plan_artifact,
         has_spec_doc=item.has_design_artifact,
         hold=hold,
+        stale_spec=stale_spec,
         dependency_edges=item.dependency_edges,
         dependency_facts=resolve_facts(items, item.dependency_edges),
         dependency_issues=(*item.dependency_issues, *structural_issues),

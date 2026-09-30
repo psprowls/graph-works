@@ -27,13 +27,14 @@ from okf_io import Bundle, load_bundle
 from work_tracker_okf import decisions as _decisions
 from work_tracker_okf.advance import COMMIT_GATE_REFUSALS as COMMIT_GATE_REFUSALS
 from work_tracker_okf.advance import ExpectedPhase as ExpectedPhase
-from work_tracker_okf.advance import RefusalReason
+from work_tracker_okf.advance import FieldChange, RefusalReason
 from work_tracker_okf.advance import apply as apply_advance
 from work_tracker_okf.affects import affects_drift, code_affects, plan_files, touches_workspace
 from work_tracker_okf.compose import AdvanceOutcome, advance_and_stamp, ensure_plan_row
 from work_tracker_okf.decisions import HoldFact
-from work_tracker_okf.items import IGNORE, WorkItem, load_items
+from work_tracker_okf.items import IGNORE, WorkItem, is_commit_oid, load_items
 from work_tracker_okf.mutation import DirectoryPrecondition, PlannedWrite, WorkMutationPlan
+from work_tracker_okf.obligations import KEY, apply_obligations, plan_derive
 from work_tracker_okf.paths import MANAGED_ARTIFACTS, artifact_ref, item_page
 from work_tracker_okf.results import render as render_results
 from work_tracker_okf.sources import upsert
@@ -52,6 +53,7 @@ from graph_works_core.workspace.decision_owner import (
 from graph_works_core.workspace.errors import WorkspaceError
 from graph_works_core.workspace.finish import finish_read_guard, inspect_finish
 from graph_works_core.workspace.gate_config import repo_gate
+from graph_works_core.workspace.landed import stale_spec_for
 from graph_works_core.workspace.layout import WorkspaceLayout
 from graph_works_core.workspace.repos import (
     ItemRepo,
@@ -322,6 +324,41 @@ def run_stage_advance(
         )
 
 
+_NO_CODE_BASELINE = "spec baseline: no code sha resolvable; landed-since will be unavailable"
+
+
+def _baseline_stamp(
+    layout: WorkspaceLayout, item: WorkItem, repo: Path | None, cwd: Path | None, bundle_root: Path
+) -> tuple[dict[str, str], tuple[str, ...]]:
+    """Resolve spec anchors, then the matching cwd HEAD, without refusing an advance.
+
+    Omit the existing stamp when resolving its replacement. Workspace HEAD is
+    observed before this advance commits.
+    """
+    stamp: dict[str, str] = {}
+    code: str | None = None
+    if repo is not None:
+        spec_path = bundle_root / anchor.spec_ref(item)
+        try:
+            spec_text = spec_path.read_text(encoding="utf-8") if spec_path.is_file() else ""
+        except (OSError, UnicodeError):
+            spec_text = ""
+        code, _source = anchor.resolve_anchor(repo, spec_path, spec_text)
+        if code is not None:
+            resolved = provenance.run_git(repo, "rev-parse", "--verify", "--end-of-options", f"{code}^{{commit}}")
+            normalized = (resolved or "").strip().lower()
+            code = normalized if is_commit_oid(normalized) else None
+        here = cwd or Path.cwd()
+        if code is None and provenance.repository_of(here, (repo,)) is not None:
+            code = provenance.head_sha(here)
+    if code is not None:
+        stamp["code"] = code
+    workspace = provenance.head_sha(layout.root)
+    if workspace is not None:
+        stamp["workspace"] = workspace
+    return stamp, (() if code is not None else (_NO_CODE_BASELINE,))
+
+
 def _advance(
     layout: WorkspaceLayout,
     bundle: Bundle,
@@ -402,6 +439,7 @@ def _advance(
             else:
                 resolved_in = verification.resolved_in
 
+    stale = stale_spec_for(layout, items, item) if item is not None and not return_ else ()
     outcome = advance_and_stamp(
         bundle,
         path,
@@ -415,6 +453,7 @@ def _advance(
         branch=stamped_branch,
         return_=return_,
         hold=hold,
+        stale_spec=stale,
         dry_run=True,
     )
     if finish_blockers:
@@ -424,6 +463,7 @@ def _advance(
             route=replace(outcome.plan.route, blockers=outcome.plan.route.blockers + finish_blockers),
             changes=(),
             stamp_source=None,
+            stamp_baseline=False,
             detail="; ".join(finish_blockers),
             trigger=None,
         )
@@ -438,7 +478,13 @@ def _advance(
         and outcome.plan.transition.phase == "execute"
     ):
         drift_warnings = _affects_drift_warnings(bundle.root, item)
-    candidate = StageAdvance(outcome=outcome, repo_note=repo_note, warnings=inference_warnings + drift_warnings)
+    stamp: dict[str, str] = {}
+    baseline_warnings: tuple[str, ...] = ()
+    if outcome.plan.stamp_baseline and outcome.plan.refusal is None and item is not None:
+        stamp, baseline_warnings = _baseline_stamp(layout, item, resolved_repo, cwd, bundle.root)
+    candidate = StageAdvance(
+        outcome=outcome, repo_note=repo_note, warnings=inference_warnings + drift_warnings + baseline_warnings
+    )
     if not dry_run and before_apply is not None:
         before_apply(candidate)
     if skip_gate is not None:
@@ -525,7 +571,7 @@ def _advance(
             return StageAdvance(
                 outcome=_refuse(outcome, verdict.refusal, verdict.detail),
                 repo_note=repo_note,
-                warnings=inference_warnings + drift_warnings + warnings,
+                warnings=inference_warnings + drift_warnings + baseline_warnings + warnings,
             )
     owner_ctx = decision_owner_
     ledger_plan: _decisions.DecisionPlan | None = None
@@ -554,6 +600,8 @@ def _advance(
 
     document = load_bundle(layout.bundle_dir, ignore=IGNORE).concepts[path]
     apply_advance(document, outcome.plan)
+    if stamp:
+        document.set("spec_baseline", stamp)
     if outcome.stamped is not None and outcome.stamp_title is not None:
         upsert(document, outcome.stamped, title=outcome.stamp_title)
         if outcome.plan.sync_plan_table:
@@ -589,8 +637,29 @@ def _advance(
 
     if old_phase == "execute" and new_phase == "finish":
         coverage_ref = artifact_ref(path, MANAGED_ARTIFACTS["execute-coverage"])
-        if coverage_ref.path(bundle.root).exists():
+        coverage_path = coverage_ref.path(bundle.root)
+        coverage_text: str | None = None
+        coverage_readable = True
+        if coverage_path.exists():
             upsert(document, coverage_ref, title="Execute coverage")
+            try:
+                coverage_text = coverage_path.read_text(encoding="utf-8")
+            except (OSError, UnicodeDecodeError) as exc:
+                coverage_readable = False
+                warnings = (*warnings, f"finish_obligations: coverage unreadable: {exc}")
+        # Advancing accepts caveats; a return leaves the current list intact,
+        # then re-advancing replaces only coverage-derived entries.
+        if coverage_readable:
+            obligation_plan = plan_derive(item, coverage_text, on=today)
+            if obligation_plan.changed or KEY in item.invalid_optional_fields:
+                before_obligations = document.fm_data(dates="iso").get(KEY, [])
+                apply_obligations(document, obligation_plan)
+                change = FieldChange(
+                    KEY,
+                    before_obligations,
+                    [entry.to_data() for entry in obligation_plan.after],
+                )
+                outcome = replace(outcome, plan=replace(outcome.plan, changes=(*outcome.plan.changes, change)))
 
     page_member = item_page(path).rel
     page_before = (bundle.root / page_member).read_bytes()
@@ -714,14 +783,16 @@ def _advance(
         pointer_path=pointer_path,
         repo_note=repo_note,
         application=application,
-        warnings=inference_warnings + drift_warnings + warnings,
+        warnings=inference_warnings + drift_warnings + baseline_warnings + warnings,
         gate_bypass=bypass if application.ok else None,
         gate_receipt=gate_receipt,
     )
 
 
 def _refuse(outcome: AdvanceOutcome, reason: RefusalReason, detail: str) -> AdvanceOutcome:
-    refused = replace(outcome.plan, refusal=reason, changes=(), stamp_source=None, detail=detail, trigger=None)
+    refused = replace(
+        outcome.plan, refusal=reason, changes=(), stamp_source=None, stamp_baseline=False, detail=detail, trigger=None
+    )
     return replace(outcome, plan=refused, stamped=None, stamp_title=None, plan_row=False)
 
 

@@ -4,6 +4,10 @@ Every verb accepts any canonical path and core resolves its nearest
 Release/Epic/Feature decision owner, else the item itself, so a fan-out
 worker need not know it.
 
+`amend` refines an answered entry in place — same id, still answered — and
+records the previous answer in an `**Amended:**` block; reversing a decision
+is `supersede` or `overturn`.
+
 `overturn` is one logical operation, not two commands: it retires the old
 decision, records its replacement, and files the follow-up work item
 describing remediation for what already landed. Core preflights both halves
@@ -175,6 +179,44 @@ def answer(
     except OSError as exc:
         rendering.fail(str(exc), reason="io", cause=exc)
     _emit(wire_work.decision_payload(result), verb="answered", json_output=json_output)
+
+
+@decision_app.command()
+def amend(
+    path: str = typer.Argument(..., help="Extensionless bundle-relative canonical concept path."),
+    decision_id: str = typer.Argument(..., metavar="DECISION_ID", help="The answered id being refined, e.g. D-014."),
+    answer_text: str = typer.Option(..., "--answer", help="The refined answer; replaces the **Answer:** block."),
+    note: str = typer.Option(..., "--note", help="What changed and why; recorded in an **Amended:** block."),
+    rationale: str = typer.Option("", "--rationale", help="Replaces the **Rationale:** block; omit to keep it."),
+    affects: str = typer.Option("", "--affects", help="Comma-separated paths replacing affects; omit to keep them."),
+    decided_by: str = typer.Option("user", "--decided-by", help="Actor recorded in the Amended block."),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Plan the amendment without writing."),
+    workspace: str = typer.Option("", "--workspace", help="Workspace path."),
+    json_output: bool = rendering.json_option(""),
+) -> None:
+    """Refine an answered decision in place, keeping its id and recording what changed."""
+    layout = resolve_workspace(workspace)
+    parsed_affects = rendering.split_csv(affects)
+    try:
+        result = work.run_decision_amend(
+            layout,
+            path,
+            decision_id,
+            answer=answer_text,
+            note=note,
+            rationale=rationale or None,
+            affects=parsed_affects or None,
+            on=_today(),
+            decided_by=decided_by,
+            dry_run=dry_run,
+        )
+    except WorkspaceError as exc:
+        rendering.fail(str(exc), reason="workspace", code=exit_codes.SCHEMA_MISMATCH, cause=exc)
+    except ValueError as exc:
+        _unknown_target(exc)
+    except OSError as exc:
+        rendering.fail(str(exc), reason="io", cause=exc)
+    _emit(wire_work.decision_payload(result), verb="amended", json_output=json_output)
 
 
 @decision_app.command()

@@ -1,11 +1,42 @@
 from pathlib import Path
 
+import pytest
 from work_helpers import lane_report, load_written_items, write_item
 from work_tracker_okf._rules.structure import _direct_entries
 
 
 def _codes(root: Path) -> set[str]:
     return {finding.code for finding in lane_report(root).errors}
+
+
+def _warn_codes(root: Path) -> set[str]:
+    return {finding.code for finding in lane_report(root).warnings}
+
+
+def test_malformed_finish_obligations_warn(tmp_path: Path) -> None:
+    write_item(tmp_path, "work/feature-a", "type: Feature\nwork_status: open\nfinish_obligations: nope\n")
+    (tmp_path / "work" / "feature-a").mkdir()
+    assert "structure.finish-obligations-malformed" in _warn_codes(tmp_path)
+
+
+def test_explicit_null_finish_obligations_warn(tmp_path: Path) -> None:
+    write_item(tmp_path, "work/feature-a", "type: Feature\nwork_status: open\nfinish_obligations:\n")
+    (tmp_path / "work" / "feature-a").mkdir()
+    assert "structure.finish-obligations-malformed" in _warn_codes(tmp_path)
+
+
+@pytest.mark.parametrize(
+    "extra",
+    [
+        "",
+        "finish_obligations: []\n",
+        "finish_obligations:\n  - text: x\n    origin: coverage\n    recorded: 2026-09-20\n",
+    ],
+)
+def test_valid_or_absent_finish_obligations_do_not_warn(tmp_path: Path, extra: str) -> None:
+    write_item(tmp_path, "work/feature-a", f"type: Feature\nwork_status: open\n{extra}")
+    (tmp_path / "work" / "feature-a").mkdir()
+    assert "structure.finish-obligations-malformed" not in _warn_codes(tmp_path)
 
 
 def test_release_below_an_owner_and_children_below_a_leaf_are_errors(tmp_path: Path) -> None:

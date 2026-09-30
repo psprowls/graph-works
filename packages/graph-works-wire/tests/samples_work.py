@@ -21,10 +21,13 @@ from graph_works_core.orchestrate.placement import ReaderRecord
 from graph_works_core.orchestrate.reroute import RerouteResult
 from graph_works_core.orchestrate.wait import Absorbed, WaitResult
 from graph_works_core.orchestrate.workspace_prepare import WorkspacePrepareResult, WorkspaceStep
+from graph_works_core.work.carried import CarriedContext, FilledSlot, SlotFill
 from graph_works_core.work.commands import DispatchExplanation, ItemRead, ItemSource
+from graph_works_core.work.obligations import ObligationRecord
 from graph_works_core.work.reconcile import CitedDecision, CommitRef, LandedSibling, ReconcileContext
 from graph_works_core.workspace.dispatch import packaged_rule, resolve_dispatch
 from graph_works_wire import work
+from work_tracker_okf.obligations import Obligation, ObligationPlan
 from work_tracker_okf.placement import ReaderObservation, ReaderReceiptPlan
 
 BUNDLE = Path("/ws/okf")
@@ -36,6 +39,7 @@ TRANSITION = ns(
     requires=("owner",),
     sync_plan_table=True,
     stamp_source="plan",
+    stamp_baseline=False,
 )
 ROLLUP = ns(total=2, terminal=1, open_paths=("work/e/children/a",))
 APPLICATION = ns(rolled_back=True, failures=("f",), warnings=("w",), ok=False, commit=None)
@@ -97,6 +101,23 @@ def next_result(*, full: bool) -> object:
             )
             if full
             else None
+        ),
+        carried=(
+            CarriedContext(
+                (
+                    FilledSlot(
+                        "landed_since", "Landed since your design", SlotFill(("- a landed",), {"shas": ["abc"]})
+                    ),
+                    FilledSlot(
+                        "finish_obligations",
+                        "Finish obligations",
+                        SlotFill(warnings=("finish_obligations: unavailable: x",)),
+                    ),
+                ),
+                ("frame note",),
+            )
+            if full
+            else CarriedContext()
         ),
         guidance_file=Path("/ws/okf/work/a/references/guidance-design.md") if full else None,
     )
@@ -401,6 +422,12 @@ RECONCILE = ReconcileContext(
 )
 
 WORK: dict[str, tuple[Callable[[], object], ...]] = {
+    "work.obligation_payload": (
+        lambda: work.obligation_payload(
+            ObligationRecord(ObligationPlan("work/a", (), (Obligation("Tag it", "deferred", "2026-09-29"),)))
+        ),
+        lambda: work.obligation_payload(ObligationRecord(ObligationPlan("work/a", (), (), "empty-text", "one line"))),
+    ),
     "work.item_payload": (
         lambda: work.item_payload(
             ItemRead(

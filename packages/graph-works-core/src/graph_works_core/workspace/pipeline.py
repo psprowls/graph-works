@@ -96,6 +96,10 @@ ASK_LINE = (
 #: exact judgement the defect this tail exists for shows a model getting wrong.
 #: The trailing gate paragraph is mirrored verbatim in the workflow skill's
 #: execute-gate bullet (`<work-path>` there, `{path}` here).
+#: The deferral sentence is mirrored verbatim in the workflow skill's
+#: execute-stage deferral bullet (`<work-path>` there, `{path}` here);
+#: unchecked coverage lines need no instruction -- the `execute -> finish`
+#: advance records them as `finish_obligations` itself (D-001).
 EXECUTE_TAIL = (
     "Before you advance, write {workspace}/okf/{path}/references/03-execute-coverage.md: "
     "one markdown task-list line per item in this stage's design spec `## Acceptance` section, "
@@ -104,6 +108,8 @@ EXECUTE_TAIL = (
     "`## What this design changes` headings instead and say in the file that you did. "
     "Mark honestly -- an unchecked box is a normal, expected outcome; an inaccurate checked box "
     "is not. Pass that file's path as --report-path on your worker_done.\n"
+    "When the plan marks a step `Deferred to finish`, record it with "
+    '`gw work obligation add {path} --text "<the step>" --apply` instead of doing it or leaving it in prose.\n'
     "The gate is `gw work gate run {path}`, then `gw work gate wait {path}` until it finishes. "
     "Run it on the committed, clean tree before you advance. Use `--scope scoped` for fix-wave rechecks. "
     "Never run the repository's check command directly as the gate, and never write gate logs to a shared tmp path."

@@ -341,6 +341,7 @@ def advance_and_stamp(
     return_: bool = False,
     dry_run: bool = True,
     hold: HoldFact | None = None,
+    stale_spec: tuple[str, ...] = (),
 ) -> AdvanceOutcome:
     """Advance *path*, stamp its artifact, ensure its plan row -- in **one save**.
 
@@ -382,6 +383,7 @@ def advance_and_stamp(
         return_=return_,
         unreadable=bundle.unreadable,
         hold=hold,
+        stale_spec=stale_spec,
     )
     if plan.refusal is not None:
         return AdvanceOutcome(plan=plan, stamped=None, stamp_title=None, plan_row=False, written=False)
@@ -408,6 +410,7 @@ def advance_and_stamp(
                     changes=(),
                     stamp_source=None,
                     sync_plan_table=False,
+                    stamp_baseline=False,
                     refusal="artifact-missing",
                     detail=f"completion requires a regular artifact file: {target}",
                     trigger=None,

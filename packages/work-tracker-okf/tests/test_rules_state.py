@@ -213,10 +213,10 @@ def test_archive_eligible_is_silent_for_a_terminal_root_with_an_open_descendant(
 # --- the module's shape -----------------------------------------------------
 
 
-def test_the_module_declares_nine_codes_all_prefixed_state() -> None:
+def test_the_module_declares_ten_codes_all_prefixed_state() -> None:
     from work_tracker_okf._rules import state
 
-    assert len(state.CODES) == 9
+    assert len(state.CODES) == 10
     assert all(code.startswith("state.") for code in state.CODES)
 
 
@@ -225,3 +225,17 @@ def test_the_module_reads_no_clock() -> None:
 
     source = _Path("packages/work-tracker-okf/src/work_tracker_okf/_rules/state.py").read_text(encoding="utf-8")
     assert "date.today()" not in source
+
+
+@pytest.mark.parametrize("baseline", ["nope", "\n  code: abc123"])
+def test_spec_baseline_malformed_warns(tmp_path: Path, baseline: str) -> None:
+    write_item(tmp_path, "bug-x", f"type: Bug\nspec_baseline: {baseline}\n")
+    findings = lane_report(tmp_path, today=TODAY).by_code("state.spec-baseline-malformed")
+    assert len(findings) == 1
+    assert findings[0].severity == "warn"
+    assert "spec_baseline" in findings[0].message
+
+
+def test_a_well_formed_spec_baseline_is_silent(tmp_path: Path) -> None:
+    codes = codes_for(tmp_path, f"type: Bug\nspec_baseline:\n  code: {'a' * 40}\n  workspace: {'b' * 40}\n")
+    assert "state.spec-baseline-malformed" not in codes

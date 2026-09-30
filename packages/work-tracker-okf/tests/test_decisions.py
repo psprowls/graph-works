@@ -21,6 +21,7 @@ from work_tracker_okf.decisions import (
     load,
     next_id,
     parse,
+    plan_amend,
     plan_append,
     plan_refusal,
     plan_supersede,
@@ -635,3 +636,223 @@ def test_stale_decision_composition_does_not_register_the_ledger(tmp_path: Path)
 
     assert applied.stale and not applied.written
     assert "sources" not in load_document(page).fm_data()
+
+
+ANSWERED = """\
+# Decisions
+
+## D-001 — Choose a path?
+status: answered
+affects: [work/feature-a]
+decided: 2026-09-01 by pat
+
+**Answer:** use the left path
+
+**Rationale:** shorter
+
+**If wrong:** walk back
+"""
+
+
+def _amend(ledger: Path, decision_id: str = "D-001", **overrides):
+    kwargs = {
+        "answer": "use the left path, paved",
+        "note": "narrowed to the paved route",
+        "rationale": None,
+        "affects": None,
+        "on": DAY,
+        "decided_by": "pat",
+    }
+    kwargs.update(overrides)
+    return plan_amend(ledger, decision_id, **kwargs)
+
+
+def test_amend_replaces_answer_and_appends_one_amended_block(tmp_path: Path) -> None:
+    ledger = _ledger(tmp_path)
+    ledger.write_text(ANSWERED, encoding="utf-8")
+    plan = _amend(ledger)
+    assert plan.refusal is None
+    assert plan.detail == "amend D-001"
+    assert plan.superseded is None
+    entry = plan.primary
+    assert entry is not None
+    assert (entry.id, entry.status, entry.decided) == ("D-001", "answered", "2026-09-01 by pat")
+    assert entry.affects == ("work/feature-a",)
+    assert decisions.prose_block(entry, "Answer") == "use the left path, paved"
+    assert decisions.prose_block(entry, "Rationale") == "shorter"
+    assert decisions.prose_block(entry, "If wrong") == "walk back"
+    assert decisions.prose_block(entry, "Amended") == (
+        "2026-08-22 by pat — narrowed to the paved route. Previously: use the left path"
+    )
+    assert entry.prose.count("**Amended:**") == 1
+    assert ledger.read_text(encoding="utf-8") == ANSWERED  # write-free
+
+
+def test_amend_applies_and_round_trips_without_warnings(tmp_path: Path) -> None:
+    ledger = _ledger(tmp_path)
+    ledger.write_text(ANSWERED, encoding="utf-8")
+    assert apply_plan(_amend(ledger), lock=_lock(tmp_path)).written
+    text = ledger.read_text(encoding="utf-8")
+    parsed = parse(text)
+    assert parsed.warnings == []
+    assert [entry.status for entry in parsed.entries] == ["answered"]
+    assert render(parsed.preamble, parsed.entries) == text
+
+
+def test_repeated_amends_stack_oldest_first(tmp_path: Path) -> None:
+    ledger = _ledger(tmp_path)
+    ledger.write_text(ANSWERED, encoding="utf-8")
+    assert apply_plan(_amend(ledger), lock=_lock(tmp_path)).written
+    second = _amend(ledger, answer="use the left path, paved and lit", note="added lighting")
+    assert apply_plan(second, lock=_lock(tmp_path)).written
+    prose = load(ledger).entries[0].prose
+    first_at = prose.index("Previously: use the left path")  # first occurrence = first Amended block
+    second_at = prose.index("Previously: use the left path, paved")
+    assert prose.count("**Amended:**") == 2
+    assert first_at < second_at
+    assert prose.rstrip().endswith("Previously: use the left path, paved")
+
+
+def test_amend_rationale_and_affects_replace_only_when_given(tmp_path: Path) -> None:
+    ledger = _ledger(tmp_path)
+    ledger.write_text(ANSWERED, encoding="utf-8")
+    plan = _amend(ledger, rationale="shorter and paved", affects=["work/feature-a", "work/feature-b"])
+    assert plan.primary is not None
+    assert decisions.prose_block(plan.primary, "Rationale") == "shorter and paved"
+    assert plan.primary.affects == ("work/feature-a", "work/feature-b")
+    assert "affects: [work/feature-a, work/feature-b]" in render("", plan.after)
+
+
+def test_amend_refusals(tmp_path: Path) -> None:
+    ledger = _ledger(tmp_path)
+    ledger.write_text(
+        ANSWERED + "\n## D-002 — Still open?\nstatus: open\n" + "\n## D-003 — Retired?\nstatus: superseded\n",
+        encoding="utf-8",
+    )
+    assert _amend(ledger, "D-999").refusal == "unknown-decision"
+    assert _amend(ledger, "D-003").refusal == "superseded-decision"
+    open_plan = _amend(ledger, "D-002")
+    assert open_plan.refusal == "transition-disallowed"
+    assert "answer it with gw work decision answer" in open_plan.detail
+    assert _amend(ledger, answer="  ").refusal == "answer-required"
+    assert _amend(ledger, note=" ").refusal == "note-required"
+    unchanged = _amend(ledger, answer="use  the left\npath")
+    assert unchanged.refusal == "answer-unchanged"
+    assert unchanged.detail == "D-001 already says this; nothing to amend"
+    assert _amend(ledger, answer="use the left path", rationale="shorter").refusal == "answer-unchanged"
+    assert _amend(ledger, answer="use the left path", affects=["work/feature-a"]).refusal == "answer-unchanged"
+    for refused in (_amend(ledger, "D-999"), unchanged):
+        assert refused.after == refused.before and refused.primary is None
+
+
+def test_amend_same_answer_with_new_rationale_or_affects_is_accepted(tmp_path: Path) -> None:
+    ledger = _ledger(tmp_path)
+    ledger.write_text(ANSWERED, encoding="utf-8")
+    assert _amend(ledger, answer="use the left path", rationale="safer").refusal is None
+    assert _amend(ledger, answer="use the left path", affects=["work/feature-b"]).refusal is None
+
+
+def test_amend_collapses_multiline_note_and_previous_answer(tmp_path: Path) -> None:
+    ledger = _ledger(tmp_path)
+    ledger.write_text(
+        ANSWERED.replace("**Answer:** use the left path", "**Answer:** use the left\npath"), encoding="utf-8"
+    )
+    plan = _amend(ledger, note="narrowed\n\nto the paved route.")
+    assert plan.primary is not None
+    assert decisions.prose_block(plan.primary, "Amended") == (
+        "2026-08-22 by pat — narrowed to the paved route. Previously: use the left path"
+    )
+
+
+def test_amend_entry_without_an_answer_block(tmp_path: Path) -> None:
+    ledger = _ledger(tmp_path)
+    ledger.write_text(
+        "# Decisions\n\n## D-001 — Legacy?\nstatus: answered\ndecided: 2026-09-01 by pat\n\nfree prose only\n",
+        encoding="utf-8",
+    )
+    plan = _amend(ledger, answer="spelled out now", note="made explicit")
+    assert plan.primary is not None
+    assert decisions.prose_block(plan.primary, "Answer") == "spelled out now"
+    assert "free prose only" in plan.primary.prose
+    assert plan.primary.prose.rstrip().endswith("Previously: (no answer recorded)")
+
+
+def test_amend_resolves_unpadded_ids_and_refuses_malformed_ones(tmp_path: Path) -> None:
+    ledger = _ledger(tmp_path)
+    ledger.write_text(ANSWERED, encoding="utf-8")
+    assert _amend(ledger, "D-1").primary.id == "D-001"  # type: ignore[union-attr]
+    assert _amend(ledger, "bad").refusal == "unknown-decision"
+
+
+def test_amend_plan_goes_stale_after_an_external_edit(tmp_path: Path) -> None:
+    ledger = _ledger(tmp_path)
+    ledger.write_text(ANSWERED, encoding="utf-8")
+    plan = _amend(ledger)
+    ledger.write_text(ANSWERED + "\nexternal edit\n", encoding="utf-8")
+    before = ledger.read_bytes()
+    applied = apply_plan(plan, lock=_lock(tmp_path))
+    assert applied.stale and not applied.written
+    assert ledger.read_bytes() == before
+
+
+MULTIPARAGRAPH = ANSWERED.replace(
+    "**Answer:** use the left path", "**Answer:** use the left path\n\nKeep to the pavement."
+).replace("**Rationale:** shorter", "**Rationale:** shorter\n\nSafer at night.")
+
+
+def test_amend_replaces_complete_paragraph_sections_and_records_history(tmp_path: Path) -> None:
+    ledger = _ledger(tmp_path)
+    ledger.write_text(MULTIPARAGRAPH, encoding="utf-8")
+    plan = _amend(ledger, rationale="well marked\n\nEasy to follow.")
+    assert plan.primary is not None
+    assert "Previously: use the left path Keep to the pavement." in plan.primary.prose
+    before_history = plan.primary.prose.split("**Amended:**")[0]
+    assert "Keep to the pavement." not in before_history
+    assert "Safer at night." not in before_history
+    assert "**Rationale:** well marked\n\nEasy to follow." in before_history
+    assert "**If wrong:** walk back" in before_history
+
+
+@pytest.mark.parametrize("rationale", [None, "shorter\n\nSafer at night."])
+def test_amend_refuses_unchanged_complete_answer_and_rationale(tmp_path: Path, rationale: str | None) -> None:
+    ledger = _ledger(tmp_path)
+    ledger.write_text(MULTIPARAGRAPH, encoding="utf-8")
+    assert (
+        _amend(ledger, answer="use the left path\n\nKeep to the pavement.", rationale=rationale).refusal
+        == "answer-unchanged"
+    )
+
+
+@pytest.mark.parametrize("rationale", [None, "shorter"])
+def test_amend_accepts_removing_later_answer_or_rationale_paragraph(tmp_path: Path, rationale: str | None) -> None:
+    ledger = _ledger(tmp_path)
+    ledger.write_text(MULTIPARAGRAPH, encoding="utf-8")
+    answer = "use the left path" if rationale is None else "use the left path\n\nKeep to the pavement."
+    assert _amend(ledger, answer=answer, rationale=rationale).refusal is None
+
+
+def test_amended_ledger_passes_decision_rules(tmp_path: Path) -> None:
+    from work_helpers import lane_report, write_item
+
+    owner = "work/feature-a"
+    write_item(
+        tmp_path,
+        owner,
+        "type: Feature\nstatus: stable\nwork_status: in-progress\nphase: execute\n"
+        "effort: small\nowner: pat\nopened: 2026-08-01\nupdated: 2026-08-22\n",
+    )
+    ledger = _ledger(tmp_path, owner)
+    ledger.write_text(MULTIPARAGRAPH, encoding="utf-8")
+    assert apply_plan(_amend(ledger), lock=_lock(tmp_path, owner)).written
+    findings = [finding for finding in lane_report(tmp_path).findings if finding.code.startswith("decisions.")]
+    assert findings == []
+
+
+def test_amend_preserves_unknown_labelled_notes_and_history(tmp_path: Path) -> None:
+    ledger = _ledger(tmp_path)
+    ledger.write_text(MULTIPARAGRAPH + "\n**Notes:** authored note\n\nsecond paragraph\n", encoding="utf-8")
+    assert apply_plan(_amend(ledger), lock=_lock(tmp_path)).written
+    plan = _amend(ledger, answer="another route", note="adjusted")
+    assert plan.primary is not None
+    assert "**Notes:** authored note\n\nsecond paragraph" in plan.primary.prose
+    assert plan.primary.prose.count("**Amended:**") == 2

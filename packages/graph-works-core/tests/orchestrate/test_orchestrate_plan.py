@@ -575,7 +575,7 @@ def test_session_index_maps_every_item_phase_pair() -> None:
     items = [_item("work/epic-a/children/feature-x", type="Feature")]
     index, warnings = orchestrate.session_index(items)
     assert warnings == ()
-    assert len(index) == len(orchestrate.DISPATCH_PHASES)
+    assert len(index) == len(orchestrate.DISPATCH_PHASES) + len(orchestrate.SESSION_LABELS)
     for phase in orchestrate.DISPATCH_PHASES:
         name = orchestrate.session_name("work/epic-a/children/feature-x", "Feature", phase)
         assert index[name].path == "work/epic-a/children/feature-x"
@@ -586,8 +586,8 @@ def test_session_index_drops_a_collision_and_warns() -> None:
     b = _item("work/epic-b/children/feature-x", type="Feature")
     collide = "gw-design-feature-x-deadbeef"
 
-    def fake(path: str, type_: str, phase: str) -> str:
-        return collide if phase == "design" else f"gw-{phase}-{path}"
+    def fake(path: str, type_: str, phase: str, *, label: str | None = None) -> str:
+        return collide if phase == "design" else f"gw-{label or phase}-{path}"
 
     with mock.patch.object(orchestrate, "session_name", fake):
         index, warnings = orchestrate.session_index([a, b])
@@ -1666,8 +1666,8 @@ def test_collision_dropped_live_key_refuses_with_ambiguous_owners() -> None:
     second = _item("work/feature-b")
     collision = "gw-design-collision-deadbeef"
 
-    def fake(path: str, type_: str, phase: str) -> str:
-        return collision if phase == "design" else f"gw-{phase}-{path}"
+    def fake(path: str, type_: str, phase: str, *, label: str | None = None) -> str:
+        return collision if phase == "design" else f"gw-{label or phase}-{path}"
 
     with mock.patch.object(orchestrate, "session_name", fake):
         with pytest.raises(ValueError, match="unknown live dispatch key") as caught:
@@ -2998,3 +2998,34 @@ def test_the_ask_line_follows_findings_on_every_non_attend_dispatch(variant: str
     if expected:
         assert lines[lines.index(pipeline.FINDINGS_LINE) + 1] == pipeline.ASK_LINE
     assert dispatch.mode == {"single": "autonomous", "exploration": "attend", "branch": "relay"}[variant]
+
+
+def test_session_name_label_replaces_the_phase_head() -> None:
+    path = "work/epic-a/children/feature-x"
+    assert orchestrate.session_name(path, "Feature", "plan", label="reconcile").startswith("gw-reconcile-x-")
+    assert orchestrate.session_name(path, "Feature", "plan").startswith("gw-plan-x-")
+
+
+def test_session_index_resolves_a_reconcile_key() -> None:
+    item = _item("work/feature-x")
+    index, warnings = orchestrate.session_index((item,))
+    key = orchestrate.session_name(item.path, item.type, "plan", label="reconcile")
+    assert index[key] == item
+    assert warnings == ()
+
+
+def test_a_stale_plan_item_is_emitted_under_the_reconcile_key() -> None:
+    item = _item("work/feature-x")
+    computed = _plan((item,), item.path, stale={item.path: ("work/feature-y",)})
+    key = orchestrate.session_name(item.path, item.type, "plan", label="reconcile")
+    assert computed.dispatch_resolutions[key].profile.skill == "gw:reconciling-spec"
+    assert computed.dispatches[0].key == key
+
+
+def test_a_live_reconcile_key_resolves_to_its_item_at_plan() -> None:
+    item = _item("work/feature-x")
+    key = orchestrate.session_name(item.path, item.type, "plan", label="reconcile")
+    computed = _plan((item,), item.path, live=(key,), stale={item.path: ("work/feature-y",)})
+    assert key not in computed.dispatch_resolutions
+    assert not computed.blocked
+    assert not computed.dispatches

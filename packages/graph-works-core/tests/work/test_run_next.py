@@ -275,3 +275,93 @@ def test_dependency_parser_requires_complete_path_mapping() -> None:
     parsed = work.parse_dependencies([{"path": "work/feature-a", "blocks": "plan", "needs": "design"}])
     assert parsed.issues == ()
     assert parsed.edges == (work.DependencyEdge("work/feature-a", "plan", "design"),)
+
+
+def _landed_plan(tmp_path: Path, *, overlap: bool = True):
+    import re
+    import subprocess
+
+    def git(repo: Path, *args: str) -> str:
+        return subprocess.run(["git", *args], cwd=repo, check=True, capture_output=True, text=True).stdout.strip()
+
+    repo = _init_git(tmp_path / "code")
+    baseline = git(repo, "rev-parse", "HEAD")
+    target = repo / "packages/a/new.py"
+    target.parent.mkdir(parents=True)
+    target.write_text("landed\n", encoding="utf-8", newline="\n")
+    git(repo, "add", ".")
+    git(repo, "commit", "-qm", "sibling")
+    landed = git(repo, "rev-parse", "HEAD")
+    layout = apply_init(plan_init(tmp_path / "workspace", today=TODAY, topic="Next")).layout
+    manifest = re.sub(r"(?m)^repositories:.*\n(?:[ \t]+.*\n)*", "", layout.manifest_path.read_text(encoding="utf-8"))
+    layout.manifest_path.write_text(
+        manifest + f"repositories:\n  code:\n    path: {json.dumps(str(repo))}\n", encoding="utf-8", newline="\n"
+    )
+    _write(layout, EPIC, type="Epic", phase="execute")
+    _write(layout, CHILD, phase="plan")
+    sibling = f"{EPIC}/children/feature-sibling"
+    _write(layout, sibling, phase="finish")
+    for path, extra in (
+        (EPIC, "repo: code\n"),
+        (
+            CHILD,
+            f"spec_baseline:\n  code: {baseline}\ndepends_on:\n- path: {sibling}\n"
+            "  blocks: execute\n  needs: resolved\n",
+        ),
+        (sibling, f"resolved_in: {landed}\n"),
+    ):
+        page = load(layout.bundle_dir / f"{path}.md")
+        if path == sibling:
+            page.set("work_status", "resolved")
+            page.set("affects", ["packages/a" if overlap else "packages/b"])
+        text = page.serialize().replace("\n---\n", "\n" + extra + "---\n", 1)
+        page.path.write_text(text, encoding="utf-8", newline="\n")
+    _init_git(layout.root)
+    return layout, repo, sibling, landed
+
+
+@pytest.mark.parametrize("dry_run", [True, False])
+def test_a_plan_item_with_an_overlapping_landed_sibling_routes_to_reconciling_spec(
+    tmp_path: Path, dry_run: bool
+) -> None:
+    from work_tracker_okf.workflow import Dispatch, Transition
+
+    layout, _, _, _ = _landed_plan(tmp_path)
+    result = work.run_next(layout, CHILD, dry_run=dry_run)
+    assert result.route.dispatch == Dispatch("plan", "reconcile")
+    assert result.dispatch_resolution.profile.skill == "gw:reconciling-spec"
+    assert result.route.on_complete == Transition(phase="plan", stamp_baseline=True)
+    assert result.artifact is None
+
+
+def test_without_overlap_it_routes_to_writing_plans(tmp_path: Path) -> None:
+    from work_tracker_okf.workflow import Dispatch
+
+    layout, _, sibling, landed = _landed_plan(tmp_path, overlap=False)
+    result = work.run_next(layout, CHILD)
+    assert result.route.dispatch == Dispatch("plan", "single")
+    (slot,) = result.carried.slots
+    assert slot.name == "landed_since"
+    assert slot.fill.data["siblings"] == [{"path": sibling, "resolved_in": landed, "overlaps": False}]
+
+
+def test_a_plan_stage_reconcile_completion_ends_the_loop(tmp_path: Path) -> None:
+    from graph_works_core.orchestrate.stage_advance import run_stage_advance
+    from work_tracker_okf.workflow import Dispatch
+
+    layout, repo, _, _ = _landed_plan(tmp_path)
+    assert work.run_next(layout, CHILD).route.dispatch == Dispatch("plan", "reconcile")
+    advanced = run_stage_advance(
+        layout, CHILD, today=TODAY, expected_phase="plan", cwd=repo, infer_worktree=False, dry_run=False
+    )
+    assert advanced.outcome.written
+    assert work.run_next(layout, CHILD).route.dispatch == Dispatch("plan", "single")
+
+
+def test_descend_selects_the_stale_plan_leaf(tmp_path: Path) -> None:
+    from work_tracker_okf.workflow import Dispatch
+
+    layout, _, _, _ = _landed_plan(tmp_path)
+    result = work.run_next(layout, EPIC, descend=True)
+    assert result.selected_path == CHILD
+    assert result.route.dispatch == Dispatch("plan", "reconcile")

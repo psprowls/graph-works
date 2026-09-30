@@ -30,6 +30,7 @@ from graph_works_core.orchestrate.reroute import RerouteResult
 from graph_works_core.orchestrate.stage_advance import StageAdvance
 from graph_works_core.orchestrate.wait import WaitResult
 from graph_works_core.orchestrate.workspace_prepare import WorkspacePrepareResult
+from graph_works_core.work.carried import CarriedContext
 from graph_works_core.work.commands import (
     ActiveWorkTouch,
     ChildRollup,
@@ -49,6 +50,7 @@ from graph_works_core.work.commands import (
     Transition,
     WorkItem,
 )
+from graph_works_core.work.obligations import ObligationRecord
 from graph_works_core.work.reconcile import ReconcileContext
 from graph_works_core.workspace.commits import CommitOutcome
 from graph_works_core.workspace.dispatch import DispatchResolution
@@ -60,6 +62,24 @@ from graph_works_wire.config import rule_payload
 # ---------------------------------------------------------------------------
 # Shared fragments
 # ---------------------------------------------------------------------------
+
+
+def obligation_payload(result: ObligationRecord) -> dict[str, Any]:
+    """The `gw work obligation add` contract."""
+    plan = result.plan
+    application = result.application
+    return {
+        "path": plan.path,
+        "obligations": [entry.to_data() for entry in plan.after],
+        "before": [entry.to_data() for entry in plan.before],
+        "changed": plan.changed,
+        "applied": application is not None,
+        "rolled_back": False if application is None else application.rolled_back,
+        "failures": [] if application is None else list(application.failures),
+        "commit": _commit(None if application is None else application.commit),
+        "warnings": [] if application is None else list(application.warnings),
+        "refusal": None if plan.refusal is None else {"reason": plan.refusal, "detail": plan.detail},
+    }
 
 
 def item_payload(result: ItemRead) -> dict[str, Any]:
@@ -78,7 +98,7 @@ def item_payload(result: ItemRead) -> dict[str, Any]:
 
 
 def _transition(transition: Transition | None) -> dict[str, Any] | None:
-    """`Transition` -> the three keys the plugin contract reads, plus its two
+    """`Transition` -> the three keys the plugin contract reads, plus its three
     unresolved requests. `None` stays `None`: "this stage completes nothing"
     is a distinguishable answer from "it completes with no changes"."""
     if transition is None:
@@ -90,6 +110,7 @@ def _transition(transition: Transition | None) -> dict[str, Any] | None:
         "requires": list(transition.requires),
         "sync_plan_table": transition.sync_plan_table,
         "stamp_source": transition.stamp_source,
+        "stamp_baseline": transition.stamp_baseline,
     }
 
 
@@ -452,6 +473,23 @@ def _guidance_entries(guidance: Guidance | None) -> list[dict[str, Any]]:
     return [{"path": e.path, "id": e.id, "kind": e.kind, "why": e.why, "tokens": e.tokens} for e in guidance.entries]
 
 
+def _carried_context(frame: CarriedContext) -> dict[str, Any]:
+    """Slots keyed by name in registry order; `data` copied to a plain dict (a
+    producer keeps it `json.dumps`-able). Always the full shape, never `None`."""
+    return {
+        "slots": {
+            slot.name: {
+                "title": slot.title,
+                "lines": list(slot.fill.lines),
+                "data": dict(slot.fill.data),
+                "warnings": list(slot.fill.warnings),
+            }
+            for slot in frame.slots
+        },
+        "warnings": list(frame.warnings),
+    }
+
+
 def next_payload(result: NextResult, *, bundle_root: Path) -> dict[str, Any]:
     """The `gw work next` contract: phase, status, blockers, on_complete,
     action, normalized, child_rollup -- plus the donor-compatible additions
@@ -464,6 +502,8 @@ def next_payload(result: NextResult, *, bundle_root: Path) -> dict[str, Any]:
 
     `guidance` / `guidance_warnings` / `guidance_file` are always present;
     empty/`null` unless the caller requested assembly (only the CLI does).
+    `carried_context` is always present: `{"slots": {}, "warnings": []}` unless
+    a usable dispatch's stage has applicable slots (ledger D-002/D-004).
     """
     resolution = _usable_resolution(result)
     return {
@@ -487,6 +527,7 @@ def next_payload(result: NextResult, *, bundle_root: Path) -> dict[str, Any]:
         "guidance": _guidance_entries(result.guidance),
         "guidance_warnings": [] if result.guidance is None else list(result.guidance.warnings),
         "guidance_file": None if result.guidance_file is None else str(result.guidance_file),
+        "carried_context": _carried_context(result.carried),
     }
 
 

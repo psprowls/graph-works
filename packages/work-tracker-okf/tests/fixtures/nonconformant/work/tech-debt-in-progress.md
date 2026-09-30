@@ -8,6 +8,7 @@ phase: execute
 effort: small
 opened: 2026-07-12
 updated: 2026-08-01
+finish_obligations: not-a-list
 affects:
   - packages/example
 ---

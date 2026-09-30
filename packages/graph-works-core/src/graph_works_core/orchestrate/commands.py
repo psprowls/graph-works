@@ -84,6 +84,7 @@ from graph_works_core.workspace.dispatch_artifacts import missing_design_source
 from graph_works_core.workspace.dispatch_config import load_dispatch_config
 from graph_works_core.workspace.errors import WorkspaceError
 from graph_works_core.workspace.finish import FinishPlan, FinishTarget, resolve_finish_targets
+from graph_works_core.workspace.landed import stale_by_path
 from graph_works_core.workspace.layout import WorkspaceLayout
 from graph_works_core.workspace.manifest import checked_bool, checked_int
 from graph_works_core.workspace.pipeline import ASK_LINE, FINDINGS_LINE
@@ -255,7 +256,11 @@ def branch_name(path: str, type_: str) -> str:
     return f"{segment}/{_stable_stem(path, type_)}"
 
 
-def session_name(path: str, type_: str, phase: str) -> str:
+#: Labels for dispatch variants sharing a phase, mapped back to that phase.
+SESSION_LABELS: Mapping[str, str] = MappingProxyType({"reconcile": "plan"})
+
+
+def session_name(path: str, type_: str, phase: str, *, label: str | None = None) -> str:
     """The one name a dispatched worker is known by, everywhere.
 
         work/epic-a/children/tech-debt-x  (TechDebt, design)
@@ -266,13 +271,16 @@ def session_name(path: str, type_: str, phase: str) -> str:
     visibly the same work. The kind lives in the branch segment; the phase
     lives here. Neither repeats the other.
 
+    `label` replaces the phase head for variants sharing the same phase.
+
     Capped at `SESSION_NAME_MAX`. When the cap bites it is the *word* part
     that is truncated and the eight-hex tail that survives: the tail is the
     only thing making two same-basename siblings distinguishable, so
     trimming it would trade away exactly the property it exists to provide.
     """
+    # A label distinguishes variants that run at the same phase.
     stem = _stable_stem(path, type_)
-    head = f"gw-{phase}-"
+    head = f"gw-{label or phase}-"
     budget = SESSION_NAME_MAX - len(head)
     if len(stem) > budget:
         words, _, tail = stem.rpartition("-")
@@ -299,8 +307,13 @@ def session_index(items: Iterable[WorkItem]) -> tuple[dict[str, WorkItem], tuple
     index: dict[str, WorkItem] = {}
     collisions: dict[str, list[str]] = {}
     for item in items:
-        for phase in sorted(DISPATCH_PHASES):
-            name = session_name(item.path, item.type, phase)
+        for phase in (*sorted(DISPATCH_PHASES), *sorted(SESSION_LABELS)):
+            name = session_name(
+                item.path,
+                item.type,
+                SESSION_LABELS.get(phase, phase),
+                label=phase if phase in SESSION_LABELS else None,
+            )
             prior = index.get(name)
             if prior is not None and prior.path != item.path:
                 collisions.setdefault(name, [prior.path]).append(item.path)
@@ -315,6 +328,17 @@ def session_index(items: Iterable[WorkItem]) -> tuple[dict[str, WorkItem], tuple
         paths = ", ".join(sorted(collisions[name]))
         warnings.append(f"session name {name!r} is ambiguous ({paths}); dropped")
     return index, tuple(warnings)
+
+
+def _live_phase(item: WorkItem, key: str) -> str:
+    for phase in DISPATCH_PHASES:
+        if session_name(item.path, item.type, phase) == key:
+            return phase
+    return next(
+        phase
+        for label, phase in SESSION_LABELS.items()
+        if session_name(item.path, item.type, phase, label=label) == key
+    )
 
 
 def _fork_branch(path: str, type_: str, *, base: str, phase: str) -> str:
@@ -350,7 +374,11 @@ def _children_of(items: Sequence[WorkItem]) -> dict[str, list[WorkItem]]:
 
 
 def _frontier(
-    items: Sequence[WorkItem], root: str, *, holds: Mapping[str, HoldFact] = MappingProxyType({})
+    items: Sequence[WorkItem],
+    root: str,
+    *,
+    holds: Mapping[str, HoldFact] = MappingProxyType({}),
+    stale: Mapping[str, tuple[str, ...]] = MappingProxyType({}),
 ) -> tuple[list[tuple[WorkItem, RouteResult]], list[PlannedAdvance], list[BlockedItem]]:
     """Every actionable node at or below *root*. Cycle-safe and depth-capped.
 
@@ -391,7 +419,7 @@ def _frontier(
             )
             continue
         children = children_of.get(path, [])
-        state = state_for(items, path, hold=holds.get(path))
+        state = state_for(items, path, hold=holds.get(path), stale_spec=stale.get(path, ()))
         if state is None:  # pragma: no cover -- `path` came out of `by_path`
             continue
         result = route(state)
@@ -1062,12 +1090,13 @@ def _live_is_attend(
     key: str,
     *,
     holds: Mapping[str, HoldFact],
+    stale: Mapping[str, tuple[str, ...]],
     rules: tuple[DispatchRule, ...],
     warnings: list[str],
 ) -> bool:
     """Whether a live key counts against `max_attend` (see `plan`'s docstring)."""
     try:
-        state = state_for(items, item.path, hold=holds.get(item.path))
+        state = state_for(items, item.path, hold=holds.get(item.path), stale_spec=stale.get(item.path, ()))
         if state is None:
             raise WorkspaceError(f"no route state for {item.path!r}")
         stage = cast(Stage, live_phase)
@@ -1094,6 +1123,7 @@ def plan(
     live: tuple[str, ...] = (),
     worktree_exists: Mapping[str, bool | None] | None = None,
     holds: Mapping[str, HoldFact] = MappingProxyType({}),
+    stale: Mapping[str, tuple[str, ...]] = MappingProxyType({}),
     provisions_worktrees: bool = True,
     workspace: str,
     default_base: str,
@@ -1118,6 +1148,9 @@ def plan(
     ledger, since a ledger read is IO and this function stays pure). A held
     item at any phase is blocked with kind `decisions`, never becomes a
     candidate, and therefore reserves nothing.
+
+    `stale` maps canonical paths to overlapping siblings landed since the spec
+    baseline, resolved by the caller from git; this planner remains pure.
 
     `provisions_worktrees` mirrors `subagents_io.backend.DispatchBackend`'s
     flag of the same name -- the caller resolves which backend a plan's
@@ -1231,7 +1264,7 @@ def plan(
             attend_slots_free=0,
         )
 
-    candidates, advances, blocked = _frontier(items, root, holds=holds)
+    candidates, advances, blocked = _frontier(items, root, holds=holds, stale=stale)
     candidates = _sorted(candidates, dependent_counts(items, root))
 
     # `live_worktree_owners` stays an owner map for `_resolve_worktree`'s
@@ -1260,8 +1293,10 @@ def plan(
     live_attend = 0
     for key in live:
         item = by_session[key]
-        live_phase = next(phase for phase in DISPATCH_PHASES if session_name(item.path, item.type, phase) == key)
-        if _live_is_attend(items, item, live_phase, key, holds=holds, rules=dispatch_rules, warnings=warnings):
+        live_phase = _live_phase(item, key)
+        if _live_is_attend(
+            items, item, live_phase, key, holds=holds, stale=stale, rules=dispatch_rules, warnings=warnings
+        ):
             live_attend += 1
         mutable_worker = live_phase not in READ_ONLY_PHASES
         _, context = evidence(item)
@@ -1381,6 +1416,7 @@ def plan(
         merge_target: str,
         item_repo: ItemRepo | None,
         *,
+        label: str | None = None,
         auto_merge: bool = False,
         targets: tuple[FinishTarget, ...] = (),
         claims: Sequence[Claim] = (),
@@ -1388,7 +1424,7 @@ def plan(
         content_root: WorkspacePlacement | None = None,
     ) -> None:
         entry = resolution.profile
-        key = session_name(item.path, item.type, phase)
+        key = session_name(item.path, item.type, phase, label=label)
         resolutions[key] = resolution
         finish_targets[key] = targets
         if phase == "execute" and item.path in checkpoints:
@@ -1525,7 +1561,7 @@ def plan(
         # mode is the property that means "no human is in the room but a
         # decision is needed".
         variant = result.dispatch.variant
-        state = state_for(items, item.path, hold=holds.get(item.path))
+        state = state_for(items, item.path, hold=holds.get(item.path), stale_spec=stale.get(item.path, ()))
         assert state is not None
         try:
             resolution = resolve_dispatch(dispatch_attributes(state, result.dispatch), rules=dispatch_rules)
@@ -1667,6 +1703,7 @@ def plan(
                 reader_action,
                 merge_target,
                 item_repo,
+                label="reconcile" if result.dispatch == Dispatch("plan", "reconcile") else None,
                 reader=(source[1], reader_action.start_sha),
                 content_root=content_root,
             )
@@ -1888,6 +1925,7 @@ def plan(
             action,
             merge_target,
             item_repo,
+            label="reconcile" if result.dispatch == Dispatch("plan", "reconcile") else None,
             auto_merge=auto_merge,
             targets=targets,
             claims=claims,
@@ -2386,6 +2424,9 @@ def run_orchestrate(
         live=live,
         worktree_exists=root_context.path_exists if root_context is not None else _stat_worktrees(items, repo_path),
         holds=holds_by_path(items, bundle.root),
+        stale=stale_by_path(
+            layout, items, {item.path for item in items if item.path in subtree_paths and item.phase == "plan"}
+        ),
         provisions_worktrees=provisions_worktrees,
         workspace=str(layout.root),
         default_base=root_context.default_base if root_context is not None else default_base(resolved_repo),

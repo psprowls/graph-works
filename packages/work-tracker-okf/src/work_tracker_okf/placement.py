@@ -473,6 +473,8 @@ def _entry_phase(items: Sequence[WorkItem], item: WorkItem) -> str | None:
     not a factual placement record. Missing effort, dependency blockers or an
     invalid entry state all answer `None` -- never a default of `design`.
     """
+    # Passes no `stale_spec`: this package runs no git, so the plan-stage
+    # reconcile reroute is only visible through `gw work next`.
     state = state_for(items, item.path)
     if state is None:  # pragma: no cover -- `item` was drawn from `items`
         return None

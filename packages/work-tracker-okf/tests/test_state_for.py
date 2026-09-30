@@ -192,3 +192,9 @@ def test_state_for_carries_branch_ownership_for_every_type() -> None:
         unstamped = state_for([make_item("item", type=type_name)], "work/item")
         assert stamped is not None and stamped.has_branch is True
         assert unstamped is not None and unstamped.has_branch is False
+
+
+def test_stale_spec_is_a_caller_supplied_fact() -> None:
+    items = [make_item("a")]
+    assert state_for(items, "work/a").stale_spec == ()
+    assert state_for(items, "work/a", stale_spec=("x",)).stale_spec == ("x",)

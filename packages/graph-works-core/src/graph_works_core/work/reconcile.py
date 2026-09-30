@@ -29,7 +29,6 @@ failure.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -38,23 +37,14 @@ from work_tracker_okf import decisions as _decisions
 from work_tracker_okf.affects import code_affects
 from work_tracker_okf.decisions import ledger_ref
 from work_tracker_okf.hierarchy import decision_owner
-from work_tracker_okf.items import IGNORE, WorkItem, load_items
+from work_tracker_okf.items import IGNORE, load_items
 from work_tracker_okf.paths import item_page
-from work_tracker_okf.vocabulary import TERMINAL_STATUSES
 
 from graph_works_core.workspace import provenance
 from graph_works_core.workspace.anchor import resolve_anchor, spec_ref
+from graph_works_core.workspace.landed import LandedSibling, landed_siblings
 from graph_works_core.workspace.layout import WorkspaceLayout
 from graph_works_core.workspace.repos import resolve_item_repo
-
-
-@dataclass(frozen=True, slots=True)
-class LandedSibling:
-    """One item that has both gone terminal and left a ref behind."""
-
-    path: str
-    resolved_in: str | None
-    affects: tuple[str, ...]
 
 
 @dataclass(frozen=True, slots=True)
@@ -85,7 +75,7 @@ class CitedDecision:
 class ReconcileContext:
     """What has landed since a spec was written that might have invalidated it.
 
-    `anchor_source` is a closed vocabulary: `"spec-git-history"`,
+    `anchor_source` is a closed vocabulary: `"spec-baseline"`, `"spec-git-history"`,
     `"last-reconciled-heading"`, `"baseline-commit"`, `"none"`.
 
     The nested types are frozen dataclasses in tuples rather than `list[dict]`:
@@ -107,47 +97,6 @@ class ReconcileContext:
     has_open_decision: bool = False
     diff_command: str | None = None
     warnings: tuple[str, ...] = ()
-
-
-def _has_landed(item: WorkItem) -> bool:
-    """Terminal AND carrying a ref. Terminal alone is not enough: a `wontfix`
-    sibling changed no code and cannot have invalidated anything.
-
-    Checks `work_status`, not `status`: `TERMINAL_STATUSES` is the
-    work-lifecycle vocabulary (`resolved`/`wontfix`/`superseded`), while
-    `WorkItem.status` is OKF's own document status (`draft`/`stable`/
-    `deprecated`, `DOCUMENT_STATUSES`) -- a different axis entirely. Every
-    other terminality check in this codebase (`hierarchy.py`,
-    `dependencies.py`, `filing.py`, `workflow.py`, `_rules/state.py`,
-    `_rules/graph.py`, `orchestrate/commands.py`) reads `work_status` for
-    the same reason.
-    """
-    return item.work_status in TERMINAL_STATUSES and bool(item.resolved_in)
-
-
-def _landed_siblings(items: Sequence[WorkItem], item: WorkItem) -> tuple[LandedSibling, ...]:
-    """`depends_on` union landed structural siblings whose `affects` overlap.
-
-    The declared arm is the coupling the author wrote down. The overlap arm
-    catches undeclared coupling — two children editing the same files — while
-    staying fully mechanical: a path-set intersection makes no judgment about
-    which sibling "seems relevant", which is exactly what makes widening the
-    scope safe. Structural containment, not decision-ledger ownership, defines
-    this arm, so an item under a different parent never enters it.
-
-    Union by canonical path, so an item matching both arms appears once. Order follows
-    *items*, which `load_items` returns sorted — the result is deterministic.
-    """
-    own_affects = set(code_affects(item.affects))
-    declared = {edge.path for edge in item.dependency_edges}
-    selected: dict[str, LandedSibling] = {}
-    for other in items:
-        if other.path == item.path or not _has_landed(other):
-            continue
-        overlaps = other.parent_path == item.parent_path and bool(own_affects & set(code_affects(other.affects)))
-        if other.path in declared or overlaps:
-            selected[other.path] = LandedSibling(path=other.path, resolved_in=other.resolved_in, affects=other.affects)
-    return tuple(selected.values())
 
 
 def run_reconcile_context(
@@ -200,7 +149,9 @@ def run_reconcile_context(
     if not spec_text:
         warnings.append(f"no design spec at {spec_path}; nothing to reconcile against")
 
-    anchor, anchor_source = resolve_anchor(repo, spec_path, spec_text)
+    anchor, anchor_source = resolve_anchor(
+        repo, spec_path, spec_text, stamped=item.spec_baseline.code if item.spec_baseline else None
+    )
     if anchor is None and repo is not None:
         warnings.append(
             "could not resolve an anchor commit (spec untracked here, no `## Reconciled` heading, "
@@ -208,12 +159,12 @@ def run_reconcile_context(
         )
     commit_range = f"{anchor}..HEAD" if anchor else None
 
-    landed_siblings = _landed_siblings(items, item)
+    siblings = landed_siblings(items, item)
     touched_paths = tuple(
         sorted(
             {
                 *code_affects(item.affects),
-                *(path for sibling in landed_siblings for path in code_affects(sibling.affects)),
+                *(path for sibling in siblings for path in code_affects(sibling.affects)),
             }
         )
     )
@@ -258,7 +209,7 @@ def run_reconcile_context(
         spec_anchor_commit=anchor,
         anchor_source=anchor_source,
         commit_range=commit_range,
-        landed_siblings=landed_siblings,
+        landed_siblings=siblings,
         touched_paths=touched_paths,
         commits_since=commits_since,
         cited_decisions=cited_decisions,

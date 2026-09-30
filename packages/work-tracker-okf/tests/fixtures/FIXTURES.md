@@ -88,6 +88,11 @@ pattern — and the recipe that would have to grow is `IGNORE` itself, the exact
 contract these tests exist to exercise. A sibling directory is hermetic, keeps
 the golden stable against real repo moves, and leaves `IGNORE` untouched.
 
+### Recorded edits
+
+- `work/feature-malformed-baseline.md` records a short `spec_baseline.code` to trigger `state.spec-baseline-malformed`; its ledger and index entry keep other lane rules silent. Pinned by `test_lane_catalog.py::test_the_vault_triggers_every_catalog_code`.
+- `work/tech-debt-in-progress.md` gained `finish_obligations: not-a-list` (feature-finish-obligations-and-caveats) so `structure.finish-obligations-malformed` fires once in the catalog walk. Pinned by `test_lane_catalog.py::test_each_new_structure_code_fires_once`.
+
 ### Known baseline noise
 
 The conformant vault emits four `provenance.source-uncited` warns from okf-io.

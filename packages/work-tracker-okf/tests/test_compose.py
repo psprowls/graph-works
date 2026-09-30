@@ -151,6 +151,7 @@ def test_completion_requires_a_regular_artifact(
     before = _snapshot_bytes(root)
     outcome = advance_and_stamp(load_bundle(root, ignore=IGNORE), ITEM, today=TODAY, effort="medium", dry_run=dry_run)
     assert outcome.plan.refusal == "artifact-missing"
+    assert not outcome.plan.stamp_baseline
     assert str(target) in outcome.plan.detail
     assert outcome.plan.changes == ()
     assert outcome.plan.stamp_source is None and not outcome.plan.sync_plan_table
@@ -170,6 +171,7 @@ def test_stale_source_does_not_satisfy_canonical_artifact(root: Path) -> None:
     )
     outcome = advance_and_stamp(load_bundle(root, ignore=IGNORE), ITEM, today=TODAY, effort="medium")
     assert outcome.plan.refusal == "artifact-missing"
+    assert not outcome.plan.stamp_baseline
 
 
 @pytest.mark.parametrize("source", [None, "old-design.md"])
@@ -423,3 +425,15 @@ def test_rule_set_vocabulary_findings_are_always_error(root: Path) -> None:
     tag_findings = [f for f in (*report.errors, *report.warnings) if f.code.startswith("tags.")]
     assert tag_findings
     assert all(f.severity == "error" for f in tag_findings)
+
+
+def test_plan_reconcile_passes_staleness_and_keeps_the_baseline_request(root: Path) -> None:
+    _write_feature(root, phase="plan")
+    outcome = advance_and_stamp(
+        load_bundle(root, ignore=IGNORE), ITEM, today=TODAY, expected_phase="plan", stale_spec=("x",)
+    )
+    assert outcome.plan.refusal is None
+    assert outcome.plan.stamp_baseline is True
+    assert outcome.plan.transition.phase == "plan"
+    assert outcome.stamped is None
+    assert not outcome.written

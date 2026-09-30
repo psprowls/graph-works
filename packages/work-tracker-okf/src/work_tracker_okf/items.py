@@ -13,6 +13,7 @@ from okf_ext.shape import DEFAULT_IGNORE as _SECTIONS_IGNORE
 from okf_io import Bundle, Document, Source
 
 from work_tracker_okf.dependencies import DependencyEdge, DependencyIssue, parse_dependencies
+from work_tracker_okf.obligations import Obligation, parse_obligations
 from work_tracker_okf.paths import ItemLocation, parse_item_path
 from work_tracker_okf.vocabulary import PLAN_SOURCE_ID, SPEC_SOURCE_ID, TYPES
 
@@ -52,6 +53,32 @@ def is_commit_oid(value: object) -> bool:
 
 
 @dataclass(frozen=True, slots=True)
+class SpecBaseline:
+    """Commits a design spec was written against, stamped at design exit.
+
+    Either repository may be absent. Re-stamping overwrites both; the
+    spec's reconciled headings preserve the history.
+    """
+
+    code: str | None = None
+    workspace: str | None = None
+
+
+_SPEC_BASELINE_KEYS = frozenset({"code", "workspace"})
+
+
+def spec_baseline_of(value: object) -> tuple[SpecBaseline | None, bool]:
+    """Return (projection, malformed); one bad key voids the field. Never raises."""
+    if value is None:
+        return None, False
+    if not isinstance(value, dict) or not set(value) <= _SPEC_BASELINE_KEYS:
+        return None, True
+    if any(not is_commit_oid(entry) for entry in value.values()):
+        return None, True
+    return SpecBaseline(code=value.get("code"), workspace=value.get("workspace")), False
+
+
+@dataclass(frozen=True, slots=True)
 class Stamp:
     """One `repo_stamps` entry: where an item runs in a repository other than its own,
     and the commit that placement's work started from (`None` for a stamp that predates baselines)."""
@@ -80,6 +107,13 @@ class WorkItem:
     `start_sha` is the scalar placement's execute baseline; a value that is
     not a full lowercase commit OID projects as `None` and names `start_sha`
     in `invalid_optional_fields`.
+
+    `spec_baseline` records the design baselines; malformed values project as
+    `None` and name `spec_baseline` in `invalid_optional_fields`.
+
+    `finish_obligations` projects the well-formed `{text, origin, recorded}`
+    entries in stored order (`work_tracker_okf.obligations`); a non-list or any
+    malformed entry names `finish_obligations` in `invalid_optional_fields`.
     """
 
     path: str
@@ -119,6 +153,8 @@ class WorkItem:
     repo: str | None = None
     repo_stamps: Mapping[str, Stamp] = MappingProxyType({})
     start_sha: str | None = None
+    finish_obligations: tuple[Obligation, ...] = ()
+    spec_baseline: SpecBaseline | None = None
 
 
 def _text(value: object) -> str:
@@ -165,6 +201,10 @@ def _project(location: ItemLocation, document: Document) -> WorkItem:
     source_ids = {source.id for source in fm.sources if source.id is not None}
     dependencies = parse_dependencies(data.get("depends_on"))
     repo_stamps, stamps_malformed = _repo_stamps(data.get("repo_stamps"))
+    spec_baseline, baseline_malformed = spec_baseline_of(data.get("spec_baseline"))
+    obligations, obligations_malformed = parse_obligations(data.get("finish_obligations"))
+    if "finish_obligations" in data and data["finish_obligations"] is None:
+        obligations_malformed = True
     return WorkItem(
         path=location.path,
         page_path=location.page,
@@ -201,6 +241,8 @@ def _project(location: ItemLocation, document: Document) -> WorkItem:
         released_at=_optional_text(data.get("released_at")),
         repo=_optional_text(data.get("repo")),
         repo_stamps=repo_stamps,
+        finish_obligations=obligations,
+        spec_baseline=spec_baseline,
         start_sha=data.get("start_sha") if is_commit_oid(data.get("start_sha")) else None,
         invalid_optional_fields=(
             *(
@@ -208,7 +250,9 @@ def _project(location: ItemLocation, document: Document) -> WorkItem:
                 for field in ("phase", "effort", "repo")
                 if data.get(field) is not None and _optional_text(data[field]) is None
             ),
+            *(("spec_baseline",) if baseline_malformed else ()),
             *(("repo_stamps",) if stamps_malformed else ()),
+            *(("finish_obligations",) if obligations_malformed else ()),
             *(("start_sha",) if data.get("start_sha") is not None and not is_commit_oid(data.get("start_sha")) else ()),
         ),
     )
@@ -248,11 +292,13 @@ __all__ = [
     "COMMIT_OID",
     "IGNORE",
     "WORK_DIR",
+    "SpecBaseline",
     "Stamp",
     "WorkItem",
     "is_commit_oid",
     "item_index",
     "load_items",
     "placement_directories",
+    "spec_baseline_of",
     "unreadable_detail",
 ]

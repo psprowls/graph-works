@@ -213,3 +213,35 @@ def test_base_schema_accepts_repo_and_repo_stamps(tmp_path: Path) -> None:
 )
 def test_base_schema_rejects_malformed_repo_fields(tmp_path: Path, fields: str) -> None:
     assert _findings(tmp_path, _COMPLETE + "status: draft\n" + fields) != []
+
+
+@pytest.mark.parametrize("type_name", _TYPES)
+def test_seeded_work_types_accept_valid_finish_obligations(tmp_path: Path, type_name: str) -> None:
+    page = _COMPLETE.replace("type: Feature", f"type: {type_name}")
+    obligations = (
+        "status: draft\nfinish_obligations:\n"
+        "  - text: Live Orca test not run\n"
+        "    origin: coverage\n"
+        "    recorded: '2026-09-29'\n"
+        "  - text: Tag the release\n"
+        "    origin: deferred\n"
+        "    recorded: '2026-09-20'\n"
+    )
+    assert _findings(tmp_path, page + obligations) == []
+
+
+@pytest.mark.parametrize(
+    "obligations",
+    [
+        "finish_obligations: nope\n",
+        "finish_obligations:\n  - text: ''\n    origin: coverage\n    recorded: '2026-09-29'\n",
+        "finish_obligations:\n  - text: '  '\n    origin: coverage\n    recorded: '2026-09-29'\n",
+        "finish_obligations:\n  - text: \"first\\nsecond\"\n    origin: coverage\n    recorded: '2026-09-29'\n",
+        "finish_obligations:\n  - text: caveat\n    origin: unknown\n    recorded: '2026-09-29'\n",
+        "finish_obligations:\n  - text: caveat\n    origin: coverage\n    recorded: '2026-09-30'\n    extra: no\n",
+        "finish_obligations:\n  - text: caveat\n    origin: coverage\n    recorded: '29-09-2026'\n",
+        "finish_obligations:\n  - text: caveat\n    origin: coverage\n",
+    ],
+)
+def test_seeded_schema_rejects_malformed_finish_obligations(tmp_path: Path, obligations: str) -> None:
+    assert _findings(tmp_path, _COMPLETE + "status: draft\n" + obligations) != []

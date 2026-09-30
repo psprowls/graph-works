@@ -675,6 +675,30 @@ class RecoveryFixture(unittest.TestCase):
 
 
 class RerouteClassificationTests(RecoveryFixture):
+    def test_reconcile_and_plan_tasks_with_the_same_display_name_stay_distinct(self):
+        self.orca.task_title = "gw-reconcile-example-0123abcd"
+        self.orca.spec = SPEC.replace(KEY, self.orca.task_title)
+        self.orca.display_name = "work/example · plan"
+        self.orca.worker_state = "succeeded"
+        self.orca.dispatch_status = "completed"
+        self.orca.task_status = "completed"
+        tasks = self.orca.tasks()
+        tasks["result"]["tasks"].append({
+            "id": "task_plan", "run_id": RUN,
+            "task_title": "gw-plan-example-0123abcd",
+            "display_name": self.orca.display_name, "status": "dispatched",
+        })
+        self.orca.extra_workers.append({
+            "dispatchId": "dispatch_plan", "taskId": "task_plan", "runId": RUN,
+            "workerState": "running", "dispatchStatus": "dispatched",
+        })
+        with patch.object(self.orca, "tasks", return_value=tasks):
+            rows = self.classify(records=[])
+        self.assertEqual(rows[TASK]["action"], "settled")
+        self.assertEqual(rows[TASK]["task_title"], "gw-reconcile-example-0123abcd")
+        self.assertEqual(rows["task_plan"]["action"], "live")
+        self.assertEqual(rows["task_plan"]["task_title"], "gw-plan-example-0123abcd")
+
     def test_rows_carry_task_title_and_display_name(self):
         row = self.classify(records=[])[TASK]
         self.assertEqual(row["task_title"], KEY)

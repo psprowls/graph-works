@@ -87,6 +87,7 @@ EXPECTED: set[str] = {
     "work.lint_payload",
     "work.next_payload",
     "work.normalized_payload",
+    "work.obligation_payload",
     "work.open_decisions_payload",
     "work.orchestrate_payload",
     "work.overturn_payload",

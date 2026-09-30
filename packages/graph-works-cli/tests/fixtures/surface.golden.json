@@ -2473,6 +2473,7 @@
         "lint",
         "merge-workspace",
         "next",
+        "obligation",
         "orchestrate",
         "prepare-workspace",
         "reconcile-context",
@@ -3146,6 +3147,7 @@
       "options": [],
       "commands": [
         "add",
+        "amend",
         "answer",
         "list",
         "overturn",
@@ -3321,6 +3323,124 @@
         "work",
         "decision",
         "add"
+      ]
+    },
+    {
+      "name": "gw work decision amend",
+      "help": "Refine an answered decision in place, keeping its id and recording what changed.",
+      "short_help": "Refine an answered decision in place, keeping its id and recording what changed.",
+      "usage": [
+        "[OPTIONS]",
+        "{path}",
+        "{DECISION_ID}"
+      ],
+      "arguments": [
+        {
+          "name": "path",
+          "required": true,
+          "nargs": 1
+        },
+        {
+          "name": "decision_id",
+          "required": true,
+          "nargs": 1
+        }
+      ],
+      "options": [
+        {
+          "name": "answer_text",
+          "opts": [
+            "--answer"
+          ],
+          "secondary_opts": [],
+          "help": "The refined answer; replaces the **Answer:** block.",
+          "required": true,
+          "default": null,
+          "is_flag": false
+        },
+        {
+          "name": "note",
+          "opts": [
+            "--note"
+          ],
+          "secondary_opts": [],
+          "help": "What changed and why; recorded in an **Amended:** block.",
+          "required": true,
+          "default": null,
+          "is_flag": false
+        },
+        {
+          "name": "rationale",
+          "opts": [
+            "--rationale"
+          ],
+          "secondary_opts": [],
+          "help": "Replaces the **Rationale:** block; omit to keep it.",
+          "required": false,
+          "default": "",
+          "is_flag": false
+        },
+        {
+          "name": "affects",
+          "opts": [
+            "--affects"
+          ],
+          "secondary_opts": [],
+          "help": "Comma-separated paths replacing affects; omit to keep them.",
+          "required": false,
+          "default": "",
+          "is_flag": false
+        },
+        {
+          "name": "decided_by",
+          "opts": [
+            "--decided-by"
+          ],
+          "secondary_opts": [],
+          "help": "Actor recorded in the Amended block.",
+          "required": false,
+          "default": "user",
+          "is_flag": false
+        },
+        {
+          "name": "dry_run",
+          "opts": [
+            "--dry-run"
+          ],
+          "secondary_opts": [],
+          "help": "Plan the amendment without writing.",
+          "required": false,
+          "default": false,
+          "is_flag": true
+        },
+        {
+          "name": "workspace",
+          "opts": [
+            "--workspace"
+          ],
+          "secondary_opts": [],
+          "help": "Workspace path.",
+          "required": false,
+          "default": "",
+          "is_flag": false
+        },
+        {
+          "name": "json_output",
+          "opts": [
+            "--json"
+          ],
+          "secondary_opts": [],
+          "help": "",
+          "required": false,
+          "default": false,
+          "is_flag": true
+        }
+      ],
+      "commands": [],
+      "path": [
+        "work",
+        "decision",
+        "amend"
       ]
     },
     {
@@ -4543,6 +4663,92 @@
       "path": [
         "work",
         "next"
+      ]
+    },
+    {
+      "name": "gw work obligation",
+      "help": "Finish obligations.",
+      "short_help": "Finish obligations.",
+      "usage": [
+        "[OPTIONS]",
+        "COMMAND [ARGS]..."
+      ],
+      "arguments": [],
+      "options": [],
+      "commands": [
+        "add"
+      ],
+      "path": [
+        "work",
+        "obligation"
+      ]
+    },
+    {
+      "name": "gw work obligation add",
+      "help": "Record a plan step deferred to finish as a finish obligation.",
+      "short_help": "Record a plan step deferred to finish as a finish obligation.",
+      "usage": [
+        "[OPTIONS]",
+        "{path}"
+      ],
+      "arguments": [
+        {
+          "name": "path",
+          "required": true,
+          "nargs": 1
+        }
+      ],
+      "options": [
+        {
+          "name": "text",
+          "opts": [
+            "--text"
+          ],
+          "secondary_opts": [],
+          "help": "The deferred step, one line.",
+          "required": true,
+          "default": null,
+          "is_flag": false
+        },
+        {
+          "name": "apply",
+          "opts": [
+            "--apply"
+          ],
+          "secondary_opts": [],
+          "help": "Write and commit; the default only plans.",
+          "required": false,
+          "default": false,
+          "is_flag": true
+        },
+        {
+          "name": "workspace",
+          "opts": [
+            "--workspace"
+          ],
+          "secondary_opts": [],
+          "help": "Workspace path.",
+          "required": false,
+          "default": "",
+          "is_flag": false
+        },
+        {
+          "name": "json_output",
+          "opts": [
+            "--json"
+          ],
+          "secondary_opts": [],
+          "help": "",
+          "required": false,
+          "default": false,
+          "is_flag": true
+        }
+      ],
+      "commands": [],
+      "path": [
+        "work",
+        "obligation",
+        "add"
       ]
     },
     {

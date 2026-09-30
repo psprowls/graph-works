@@ -155,3 +155,13 @@ def test_spec_ref_prefers_a_sources_hit() -> None:
 def test_spec_ref_falls_back_to_the_conventional_artifact_path() -> None:
     item = _item("work/widget")
     assert anchor.spec_ref(item) == "work/widget/references/01-design.md"
+
+
+def test_spec_baseline_arm_precedes_spec_history(repo: Path) -> None:
+    stamped = _sha(repo)
+    spec = repo / "spec.md"
+    spec.write_text("# spec\n", encoding="utf-8", newline="\n")
+    _git(repo, "add", "spec.md")
+    _git(repo, "commit", "-m", "spec")
+    assert anchor.resolve_anchor(repo, spec, "", stamped=stamped) == (stamped, "spec-baseline")
+    assert anchor.resolve_anchor(repo, spec, "", stamped="f" * 40) == (_sha(repo), "spec-git-history")

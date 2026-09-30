@@ -50,7 +50,11 @@ Nothing is ranked or scored. The JSON always carries three keys: `guidance`
 filesystem path to write elsewhere, or `--file ""` to skip the write. The file
 is written only when at least one entry was admitted; otherwise
 `guidance_file` is `null`. Blocked items, gates and terminal items assemble
-nothing. `gw work next` itself may also return
+nothing.
+
+The JSON also always carries `carried_context`: `{"slots": {…}, "warnings": […]}`. It is filled only for a usable dispatch, with one entry per producer slot that applies to the dispatched stage, keyed by slot name, each `{title, lines, data, warnings}`; otherwise `slots` is empty. It never changes routing, and a producer that fails shows up as a slot warning with empty `lines`.
+
+`gw work next` itself may also return
 `normalized` — a list of persisted managed-source repairs, each carrying the
 canonical item `path`, canonical `source_id` (`design`), and root-absolute
 `resource`; `null` means no source was repaired. A `--descend` repair may list
@@ -196,6 +200,15 @@ another stage, same as the stock skill it replaces.
 
   Omit this block entirely when `guidance_file` is null (nothing admitted,
   `--file ""`, or the write failed). Surface any `guidance_warnings` to the user as plain notes.
+- **Carried context.** For every stage skill — including the finish relay override, since the block comes from the same `gw next` JSON — when any entry in `carried_context.slots` has non-empty `lines`, add, for each such slot in payload order:
+
+  ```
+  ## Carried context
+  ### <title>
+  <each of the slot's lines, verbatim, one per line>
+  ```
+
+  The `## Carried context` heading appears once, above the first slot. Omit the block when no slot has non-empty `lines`. Surface every slot warning and every `carried_context.warnings` entry to the user as a plain note. Render slots by their `title` only; this skill never names a slot, so a new producer needs no edit here.
 - **Out-of-scope findings.** For every stage, regardless of `action.skill`, add:
   "A defect, debt or test gap outside this item's scope is not fixed in this
   stage and is not left as a follow-up in prose. File it with
@@ -206,6 +219,27 @@ another stage, same as the stock skill it replaces.
   otherwise finished work. If an existing open item already covers the finding,
   name its canonical path instead of filing a duplicate. Keep a list of every
   path filed or named this session for the step 6 hand-off."
+- **Decision ledger.** For every stage, regardless of `action.skill`, add:
+  "A decision settled during this stage goes in the ledger, never only in
+  prose. Write to the ledger that owns the decision: for an existing entry,
+  that entry's owner (`gw work decision list <owner-path>`); for a new
+  question, this item's own. Pass `--decided-by` naming who decided.
+  A relayed answer (a human's answer that reached you through a coordinator
+  message or ask) that settles a design question:
+  `gw work decision add <path> --question … --status answered --answer … --decided-by <human>`.
+  Refining an answered entry without reversing it (narrowing it, widening its
+  scope, correcting its wording to match what was built):
+  `gw work decision amend <owner-path> <D-id> --answer … --note …`, only when a
+  human made or confirmed the refinement. Changing an answered decision on
+  your own during the stage: do not amend it. File
+  `gw work decision add <owner-path> --status assumed --question "Changes D-nnn: …" --answer … --if-wrong … --affects <this item>`,
+  and name it in your stage report; a human later answers it and amends or
+  supersedes the original. Reversing an answered decision
+  is `supersede` or `overturn`, and only on a human's instruction."
+  The ledger target keeps each decision's history in one place: an amendment
+  or an `assumed` change goes to the ledger owning the entry it touches (an
+  epic's, when a child changes an epic decision); a new question goes to this
+  item's nearest-owner ledger.
 - **Execute-stage coverage (step 3).** When the stage just dispatched is
   `execute` — keyed on the stage, not on `action.skill`, which is used verbatim
   and may be any configured skill — add: "Before you advance, write
@@ -219,6 +253,7 @@ another stage, same as the stock skill it replaces.
   `EXECUTE_TAIL` gives an unattended worker, and it is a bullet here rather
   than a rider because riders carry behavior only for stock skills.
 - **Execute-stage gate (step 3).** For an execute stage, also add: "The gate is `gw work gate run <work-path>`, then `gw work gate wait <work-path>` until it finishes. Run it on the committed, clean tree before you advance. Use `--scope scoped` for fix-wave rechecks. Never run the repository's check command directly as the gate, and never write gate logs to a shared tmp path." This is the same text `EXECUTE_TAIL` gives an unattended worker. `gw work advance` refuses `no-gate-receipt` without a satisfying receipt, and `no-gate-configured` when the repository declares no `gate.full`; surface either refusal to the user and never pass `--skip-gate` on your own.
+- **Execute-stage deferrals (step 3).** For an execute stage, also add: "When the plan marks a step `Deferred to finish`, record it with `gw work obligation add <work-path> --text "<the step>" --apply` instead of doing it or leaving it in prose." This is the same text `EXECUTE_TAIL` gives an unattended worker. Unchecked coverage lines need no instruction: the `execute -> finish` advance records them as finish obligations, and the finish brief's `## Carried context` block lists them.
 - **Stage directives (riders).** Look `action.skill` up in the rider table
   below, keyed on its **last segment** — the part after the colon in a qualified
   `superpowers:brainstorming`. If a rider exists, open
@@ -288,6 +323,7 @@ owns its one advance after the stock finishing skill returns.
 
 For non-finish stages and satisfied gates, run `gw work advance <work-path> --from <expected-phase>`
 with whatever flags the stage produced (`--effort` if the command demands it).
+A same-phase completion (`--from plan` landing at `plan`) is normal for a plan-stage reconcile: it re-stamps the spec baseline, and the next `gw work next` dispatches writing-plans.
 Under a supervised dispatch (step 2), add `--no-infer-worktree`; this applies to the finish-outcome rows below too.
 
 **Gate refusals.** The `execute -> finish` advance fails closed. It refuses with `no-affects`, `no-repo`, `worktree-missing`, `git-unavailable`, `uncommitted-work`, `no-start-sha`, `range-unreadable`, `no-commits`, `no-affects-touched`, `no-gate-receipt` or `no-gate-configured`, and its `refusal.detail` says what is missing. Fix the cause when you can (commit the work, restore the worktree, configure `toolchain.git`, run `gw work gate run <work-path>` and `gw work gate wait <work-path>` for `no-gate-receipt`, configure `repositories.<name>.gate.full` for `no-gate-configured`) and advance again. Only a human may bypass one: in an attended session, show the refusal and ask the user whether to bypass exactly that code; on a yes, run `gw work advance <work-path> --from execute --skip-gate <code> --reason "<their reason>" --actor <their handle>`, which records an answered decision in the ledger. A supervised worker must never pass `--skip-gate`: it sends `worker_done --outcome failed` with subject `gate refused: <code>` and the refusal detail in its body, and stops.

@@ -43,8 +43,13 @@ def spec_ref(item: WorkItem) -> str:
     return artifact_ref(item.path, MANAGED_ARTIFACTS[SPEC_SOURCE_ID]).rel
 
 
-def resolve_anchor(repo: Path | None, spec_path: Path, spec_text: str) -> tuple[str | None, str]:
-    """`(anchor_sha, anchor_source)`. Three arms, decreasing directness.
+def resolve_anchor(
+    repo: Path | None, spec_path: Path, spec_text: str, *, stamped: str | None = None
+) -> tuple[str | None, str]:
+    """`(anchor_sha, anchor_source)`. Four arms, decreasing directness.
+
+    Arm 0 verifies the explicit spec baseline before the spec history.
+    Stage advance passes no stamp when re-stamping.
 
     The spec's own git history is the anchor whenever the spec is tracked in
     the repository being diffed. In a split topology the workspace is a
@@ -59,6 +64,8 @@ def resolve_anchor(repo: Path | None, spec_path: Path, spec_text: str) -> tuple[
     """
     if repo is None:
         return None, "none"
+    if stamped and provenance.commit_exists(repo, stamped):
+        return stamped, "spec-baseline"
     tracked = provenance.spec_anchor_commit(repo, spec_path)
     if tracked:
         return tracked, "spec-git-history"

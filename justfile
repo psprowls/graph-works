@@ -385,6 +385,8 @@ test-plugin: preflight
     bash tests/test-workspace-commit-authority.sh
     echo "--- test-workspace-branch-docs"
     bash tests/test-workspace-branch-docs.sh
+    echo "--- test-carried-context-docs"
+    bash tests/test-carried-context-docs.sh
     echo "--- test_launch_placement"
     uv run python tests/test_launch_placement.py
     echo "--- test_attend_cards"
@@ -398,6 +400,8 @@ test-plugin: preflight
     bash tests/test-finish-cleanup-contract.sh
     echo "--- test-finish-strategy-contract"
     bash tests/test-finish-strategy-contract.sh
+    echo "--- test-finish-obligations-docs"
+    bash tests/test-finish-obligations-docs.sh
     echo "--- codex/test-marketplace-manifest"
     bash tests/codex/test-marketplace-manifest.sh
     echo "--- codex/test-package-codex-plugin"

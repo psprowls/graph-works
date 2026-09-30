@@ -50,6 +50,7 @@ from graph_works_cli.work_cli import rendering
 from graph_works_cli.work_cli.ask import ask, ask_answer
 from graph_works_cli.work_cli.decision import decision_app
 from graph_works_cli.work_cli.gate import gate_app
+from graph_works_cli.work_cli.obligation import obligation_app
 from graph_works_cli.work_cli.orca import orca_port
 from graph_works_cli.work_cli.reconcile import reconcile_context
 from graph_works_cli.workspace_resolution import resolve_workspace
@@ -57,6 +58,7 @@ from graph_works_cli.workspace_resolution import resolve_workspace
 work_app = typer.Typer(name="work", help="Work-item pipeline verbs.", no_args_is_help=True)
 work_app.add_typer(decision_app, name="decision")
 work_app.add_typer(gate_app, name="gate")
+work_app.add_typer(obligation_app, name="obligation")
 work_app.command(name="reconcile-context")(reconcile_context)
 work_app.command(name="ask")(ask)
 work_app.command(name="ask-answer")(ask_answer)

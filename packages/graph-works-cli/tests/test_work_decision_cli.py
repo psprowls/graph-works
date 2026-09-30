@@ -308,3 +308,106 @@ def test_add_park_copies_the_checkpoint_file(workspace: tuple[Path, str, str]) -
     assert checkpoint.read_text(encoding="utf-8") == draft.read_text(encoding="utf-8").replace(
         "decision: pending", "decision: D-001"
     )
+
+
+def _answered(root: Path, path: str) -> str:
+    result = runner.invoke(
+        app,
+        [
+            "work",
+            "decision",
+            "add",
+            path,
+            "--question",
+            "q?",
+            "--status",
+            "answered",
+            "--answer",
+            "yes",
+            "--workspace",
+            str(root),
+            "--json",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    return str(json.loads(result.stdout)["entry"]["id"])
+
+
+def test_amend_returns_the_amended_entry(workspace: tuple[Path, str, str]) -> None:
+    root, epic, child = workspace
+    decision_id = _answered(root, epic)
+    result = runner.invoke(
+        app,
+        [
+            "work",
+            "decision",
+            "amend",
+            child,
+            decision_id,
+            "--answer",
+            "yes, behind a flag",
+            "--note",
+            "scoped",
+            "--affects",
+            child,
+            "--workspace",
+            str(root),
+            "--json",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.stdout)
+    assert payload["owner_path"] == epic and payload["requested_path"] == child
+    assert payload["entry"]["id"] == decision_id and payload["entry"]["status"] == "answered"
+    assert payload["entry"]["affects"] == [child]
+    assert "**Amended:**" in payload["entry"]["prose"] and "Previously: yes" in payload["entry"]["prose"]
+    assert payload["superseded"] is None and payload["applied"] is True
+
+
+def test_amend_human_output_names_the_verb(workspace: tuple[Path, str, str]) -> None:
+    root, epic, _child = workspace
+    decision_id = _answered(root, epic)
+    result = runner.invoke(
+        app,
+        [
+            "work",
+            "decision",
+            "amend",
+            epic,
+            decision_id,
+            "--answer",
+            "no",
+            "--note",
+            "reversed wording",
+            "--workspace",
+            str(root),
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    assert f"[ok] amended {decision_id}  status=answered" in result.stdout
+
+
+def test_amend_refusal_exits_nonzero_with_the_literal(workspace: tuple[Path, str, str]) -> None:
+    root, epic, _child = workspace
+    decision_id = _answered(root, epic)
+    result = runner.invoke(
+        app,
+        [
+            "work",
+            "decision",
+            "amend",
+            epic,
+            decision_id,
+            "--answer",
+            "yes",
+            "--note",
+            "same",
+            "--workspace",
+            str(root),
+            "--json",
+        ],
+    )
+    assert result.exit_code == exit_codes.GENERIC
+    doc = json.loads(result.stdout)
+    assert doc["error"]["reason"] == "refused"
+    assert doc["error"]["payload"]["refusal"] == "answer-unchanged"

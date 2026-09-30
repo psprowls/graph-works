@@ -51,7 +51,7 @@ import hashlib
 import os
 import time
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from datetime import date
 from pathlib import Path
 from types import MappingProxyType
@@ -98,6 +98,8 @@ from work_tracker_okf.vocabulary import PARENT_TYPES, SPEC_SOURCE_ID, TERMINAL_S
 from work_tracker_okf.workflow import RouteResult, RouteState, Transition, route, state_for
 
 from graph_works_core.guidance.assembly import Guidance, assemble_guidance, write_guidance
+from graph_works_core.work import carried as _carried
+from graph_works_core.work.carried import CarriedContext, SlotInput
 from graph_works_core.workspace import provenance
 from graph_works_core.workspace.commits import (
     COMMIT_FAILED_PREFIX,
@@ -126,6 +128,7 @@ from graph_works_core.workspace.dispatch_artifacts import missing_design_source
 from graph_works_core.workspace.dispatch_config import load_dispatch_config
 from graph_works_core.workspace.errors import WorkspaceError
 from graph_works_core.workspace.finish import FinishTarget, resolve_finish_targets
+from graph_works_core.workspace.landed import stale_spec_for
 from graph_works_core.workspace.layout import WorkspaceLayout
 from graph_works_core.workspace.repos import declared_repositories, resolve_repos
 from graph_works_core.workspace.transactions import MutationApplication, apply_mutation, only_stale_inventory
@@ -572,6 +575,7 @@ class NextResult:
     finish_targets: tuple[FinishTarget, ...] = ()
     guidance: Guidance | None = None
     guidance_file: Path | None = None
+    carried: CarriedContext = field(default_factory=CarriedContext)
 
 
 def _plan_source_normalization(bundle_root: Path, item: WorkItem) -> SourceNormalization | None:
@@ -677,7 +681,9 @@ def _resolve_next_dispatch(
     return _resolve_dispatch_with(_load_rules(layout), state, computed)
 
 
-def _plan_route(bundle: Bundle, items: Sequence[WorkItem], path: str, *, descend: bool) -> tuple[NextResult, WorkItem]:
+def _plan_route(
+    layout: WorkspaceLayout, bundle: Bundle, items: Sequence[WorkItem], path: str, *, descend: bool
+) -> tuple[NextResult, WorkItem]:
     """The dry-run routing preview for *path* over an already-loaded bundle.
 
     Resolves no dispatch and writes nothing: the planned source
@@ -708,6 +714,7 @@ def _plan_route(bundle: Bundle, items: Sequence[WorkItem], path: str, *, descend
         planned_items,
         selected_path,
         hold=hold_for(planned_items, bundle.root, selected_path),
+        stale_spec=stale_spec_for(layout, planned_items, selected),
     )
     assert state is not None
     computed = route(state)
@@ -728,7 +735,7 @@ def _plan_next(layout: WorkspaceLayout, path: str, *, descend: bool) -> tuple[Ne
     """Load the bundle once and plan *path* over it (`_plan_route`)."""
     bundle = load_bundle(layout.bundle_dir, ignore=IGNORE)
     items = tuple(load_items(bundle))
-    preview, selected = _plan_route(bundle, items, path, descend=descend)
+    preview, selected = _plan_route(layout, bundle, items, path, descend=descend)
     if preview.route.dispatch is not None and preview.route.dispatch.stage == "finish":
         finish = resolve_finish_targets(layout, items, preview.selected_path)
         preview = replace(preview, finish_targets=finish.targets, dispatch_preflight="; ".join(finish.blockers) or None)
@@ -787,6 +794,29 @@ def _with_guidance(
     return replace(result, guidance=guidance, guidance_file=written)
 
 
+def _with_carried(
+    layout: WorkspaceLayout,
+    result: NextResult,
+    bundle: Bundle,
+    items: Sequence[WorkItem],
+) -> NextResult:
+    """Attach the carried-context frame for the selected leaf at the dispatched
+    stage -- under `_with_guidance`'s usable-dispatch test, on every call
+    (dry run or not, guidance requested or not; it is read-only).
+
+    Never changes routing (ledger D-004): producer `OSError`/`ValueError`
+    already degrade inside `assemble_carried`. The registry is read from the
+    module at call time so a test can substitute `carried.SLOTS`."""
+    dispatch = result.route.dispatch
+    if dispatch is None or result.dispatch_resolution is None or result.dispatch_preflight is not None:
+        return result
+    item = next((candidate for candidate in items if candidate.path == result.selected_path), None)
+    if item is None:
+        return result
+    inp = SlotInput(layout=layout, bundle=bundle, items=tuple(items), item=item, stage=dispatch.stage)
+    return replace(result, carried=_carried.assemble_carried(inp, slots=_carried.SLOTS))
+
+
 def run_next(
     layout: WorkspaceLayout,
     path: str,
@@ -810,6 +840,8 @@ def run_next(
     admitted anything and has a target) plus the claims cache under
     `<cache_dir>/claims/`. With no *guidance* request it writes exactly what it
     always did; `test_run_next.py` and `test_run_next_guidance.py` pin both.
+    The carried-context frame (`NextResult.carried`) is read-only and assembled
+    on every call for a usable dispatch.
     """
     preview, bundle, selected = _plan_next(layout, path, descend=descend)
     if dry_run:
@@ -817,7 +849,9 @@ def run_next(
         resolved = replace(
             preview, dispatch_resolution=resolution, dispatch_preflight=preview.dispatch_preflight or preflight
         )
-        return _with_guidance(layout, resolved, bundle, tuple(load_items(bundle)) if guidance else (), guidance)
+        items = tuple(load_items(bundle))
+        guided = _with_guidance(layout, resolved, bundle, items if guidance else (), guidance)
+        return _with_carried(layout, guided, bundle, items)
 
     application, warnings = _apply_normalizations(layout, preview.normalizations, bundle=bundle)
     persisted_bundle = load_bundle(layout.bundle_dir, ignore=IGNORE)
@@ -825,6 +859,9 @@ def run_next(
     persisted_state = state_for(
         persisted_items,
         preview.selected_path,
+        stale_spec=stale_spec_for(
+            layout, persisted_items, next(item for item in persisted_items if item.path == preview.selected_path)
+        ),
         hold=hold_for(
             persisted_items,
             persisted_bundle.root,
@@ -845,7 +882,8 @@ def run_next(
         application=application,
         warnings=warnings,
     )
-    return _with_guidance(layout, applied, persisted_bundle, tuple(persisted_items), guidance)
+    guided = _with_guidance(layout, applied, persisted_bundle, tuple(persisted_items), guidance)
+    return _with_carried(layout, guided, persisted_bundle, tuple(persisted_items))
 
 
 @dataclass(frozen=True, slots=True)
@@ -927,7 +965,7 @@ def run_work_queue(layout: WorkspaceLayout) -> tuple[QueueEntry, ...]:
     for item in sorted(items, key=lambda candidate: candidate.path):
         if item.archived or item.work_status in TERMINAL_STATUSES:
             continue
-        preview, _selected = _plan_route(bundle, items, item.path, descend=False)
+        preview, _selected = _plan_route(layout, bundle, items, item.path, descend=False)
         resolution, preflight = _resolve_dispatch_with(rules, preview.state, preview.route)
         entries.append(QueueEntry(item, replace(preview, dispatch_resolution=resolution, dispatch_preflight=preflight)))
     return tuple(entries)
@@ -1515,6 +1553,46 @@ def run_decision_answer(
     return _decision_result(context, plan, application)
 
 
+def run_decision_amend(
+    layout: WorkspaceLayout,
+    path: str,
+    decision_id: str,
+    *,
+    answer: str,
+    note: str,
+    rationale: str | None = None,
+    affects: Sequence[str] | None = None,
+    on: date,
+    decided_by: str,
+    dry_run: bool = True,
+) -> DecisionCommandResult:
+    """Plan refining an answered decision in *path*'s nearest-owner ledger and optionally apply it."""
+
+    def planned(context: DecisionContext) -> DecisionPlan:
+        return _decisions.plan_amend(
+            context.owner.ledger,
+            decision_id,
+            answer=answer,
+            note=note,
+            rationale=rationale,
+            affects=affects,
+            on=on,
+            decided_by=decided_by,
+        )
+
+    if dry_run:
+        context = decision_context(layout, path)
+        plan = planned(context)
+        application = None
+    else:
+        commit_mode(layout)
+        with locked_decision_owner(layout, path) as context:
+            ledger_before = _optional_bytes(context.owner.ledger)
+            plan = planned(context)
+            application = _apply_decision(layout, context, plan, ledger_before, label=decision_id, verb="amend")
+    return _decision_result(context, plan, application)
+
+
 def run_decision_list(
     layout: WorkspaceLayout,
     path: str,
@@ -1745,6 +1823,7 @@ __all__ = [
     "WorkItem",
     "parse_dependencies",
     "run_decision_add",
+    "run_decision_amend",
     "run_decision_answer",
     "run_decision_list",
     "run_decision_overturn",

@@ -433,6 +433,7 @@ def test_cli_helper_error_mapping_and_json_fragments(tmp_path: Path, monkeypatch
         requires=("owner",),
         sync_plan_table=True,
         stamp_source="plan",
+        stamp_baseline=False,
     )
     assert cli._transition_json(transition)["requires"] == ["owner"]
     assert cli._transition_json(None) is None
@@ -593,3 +594,11 @@ def test_init_maps_library_failure_and_archive_maps_planning_and_apply_failures(
     with pytest.raises(typer.Exit):
         cli.archive(tmp_path, [], TODAY, False)
     assert "stale" in capsys.readouterr().err
+
+
+def test_transition_json_projects_baseline_request() -> None:
+    from work_tracker_okf import cli
+    from work_tracker_okf.workflow import Transition
+
+    assert cli._transition_json(Transition())["stamp_baseline"] is False
+    assert cli._transition_json(Transition(stamp_baseline=True))["stamp_baseline"] is True

@@ -108,7 +108,7 @@ class FieldChange:
 class AdvancePlan:
     """What advancing a canonical item path would change or decline to change.
 
-    `stamp_source` and `sync_plan_table` are **unresolved requests** (C3-K):
+    `stamp_source`, `sync_plan_table`, and `stamp_baseline` are **unresolved requests** (C3-K):
     turning the first into a `Source` needs child 2's path and upsert
     functions, and the second needs `okf_ext.tables` plus a row naming the
     plan artifact. Child 3 imports neither; child 6 composes them. `trigger`
@@ -121,6 +121,7 @@ class AdvancePlan:
     changes: tuple[FieldChange, ...]
     stamp_source: str | None
     sync_plan_table: bool
+    stamp_baseline: bool
     refusal: RefusalReason | None
     detail: str
     trigger: Trigger | None
@@ -155,6 +156,7 @@ def advance(
     return_: bool = False,
     unreadable: Mapping[str, str] | None = None,
     hold: HoldFact | None = None,
+    stale_spec: tuple[str, ...] = (),
 ) -> AdvancePlan:
     """Plan the next transition for *path*. Mutates nothing, reads no clock.
 
@@ -177,7 +179,7 @@ def advance(
     the OS reason instead of collapsing into `unknown-path`.
     """
     item = next((candidate for candidate in items if candidate.path == path), None)
-    state = state_for(items, path, effort=effort, hold=hold)
+    state = state_for(items, path, effort=effort, hold=hold, stale_spec=stale_spec)
     if item is None or state is None:
         detail = (unreadable or {}).get(f"{path}.md")
         if detail is not None:
@@ -272,6 +274,7 @@ def advance(
         ),
         stamp_source=transition.stamp_source,
         sync_plan_table=transition.sync_plan_table,
+        stamp_baseline=transition.stamp_baseline,
         refusal=None,
         detail=result.reason,
         trigger=trigger,
@@ -294,6 +297,7 @@ def _refused(
         changes=(),
         stamp_source=None,
         sync_plan_table=False,
+        stamp_baseline=False,
         refusal=reason,
         detail=detail,
         trigger=None,

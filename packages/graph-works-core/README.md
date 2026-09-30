@@ -186,6 +186,20 @@ work.run_decision_answer(
     dry_run: bool = True,
 ) -> DecisionCommandResult
 
+work.run_decision_amend(
+    layout: WorkspaceLayout,
+    path: str,
+    decision_id: str,
+    *,
+    answer: str,
+    note: str,
+    rationale: str | None = None,
+    affects: Sequence[str] | None = None,
+    on: date,
+    decided_by: str,
+    dry_run: bool = True,
+) -> DecisionCommandResult
+
 work.run_decision_list(
     layout: WorkspaceLayout,
     path: str,
@@ -289,7 +303,7 @@ that assumes an unpersisted stamp.
 
 Decision commands accept either an epic or any active or archived descendant
 and report the resolved epic-owned ledger in `DecisionCommandResult.owner`.
-Add, answer, and supersede use immutable `work_tracker_okf.decisions` plans.
+Add, answer, amend, and supersede use immutable `work_tracker_okf.decisions` plans. Amend refines an answered entry in place: it keeps the id and status and appends an `**Amended:**` block recording the previous answer.
 Apply rechecks the ledger snapshot under its exclusive lock; a stale
 application reports `stale=True`, `written=False`, and no landed entries.
 List filters returned entries while its counts cover the whole ledger.

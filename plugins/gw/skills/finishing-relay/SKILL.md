@@ -110,7 +110,8 @@ HEAD`; this is `resolved_in` for the trunk-case merge), the
 full commit list with commit count and one-line summary (`git log
 <merge-base>..HEAD --oneline` against the merge target — the full list feeds
 the discard re-ask in R4, the one-line summary feeds the R3 question text),
-and R1's test result, for every repository target.
+the diffstat (`git diff --stat <merge-base>..HEAD` against the merge target,
+in the source worktree), and R1's test result, for every repository target.
 
 ## R3 — One ask
 
@@ -119,13 +120,27 @@ branch, commit summary and test result in the question. The answer applies
 to all targets; remove the integration options if any target is detached or unverified.
 
 Prepare the ask with `gw work ask`, then send exactly the strings it prints.
-Write the full per-target detail — each repository, source/target branch,
-commit summary and test result — to a scratch markdown file, and pass it as
-the question. The summary is a one-line headline:
+Write the question to a scratch markdown file with exactly these sections, in
+this order, and pass it as the question:
+
+1. `## What the diff does` — drafted from each target's commit list and
+   diffstat, reading the changed files where a subject line is not enough.
+   Every claim names a changed file. Nothing is taken from the design or the
+   plan: a behaviour the diff does not show is not claimed.
+2. `## Finish obligations` — each line of the `finish_obligations`
+   carried-context slot, verbatim, or `None.` when the slot is absent or
+   empty. Read it from the brief's `## Carried context` block, or from
+   `gw work next <work-path> --json` → `carried_context.slots.finish_obligations.lines`.
+   A `deferred` obligation is not performed here; the human's answer decides it.
+3. Per target: repository, source/target branch, commit summary, test result
+   and default strategy.
+
+The summary is a one-line headline; when there are `k > 0` obligations it
+adds `; <k> finish obligation(s)` before the merge target:
 
 ```
 gw work ask <work-path> --kind choice \
-  --summary "Finish <work-path>: <N> commit(s) across <T> target(s); tests <pass|fail>; merge target <merge target>." \
+  --summary "Finish <work-path>: <N> commit(s) across <T> target(s); tests <pass|fail>[; <k> finish obligation(s)]; merge target <merge target>." \
   --question-file <scratch>/finish-question.md \
   --option "squash=Squash into one commit on the target branch" \
   --option "merge=Merge commit (--no-ff) into the target branch" \

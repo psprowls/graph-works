@@ -14,13 +14,14 @@ error	decisions.hold-invalid	work/epic-ledger-at-finish.md	work_tracker_okf._rul
 warn	decisions.hold-phase-stale	work/epic-ledger-at-finish.md	work_tracker_okf._rules.decisions	open decision D-006 holds work/epic-ledger-at-finish at 'execute', but it is at 'finish'
 error	decisions.open-at-finish	work/epic-ledger-at-finish.md	work_tracker_okf._rules.decisions	`phase: finish` with 2 open decision(s): D-002, D-006
 error	decisions.supersedes-invalid	work/epic-ledger-at-finish.md	work_tracker_okf._rules.decisions	decision D-004 supersedes 'D-009', which does not exist in the ledger
-error	decisions.cite-missing	work/epic-ledger-at-finish/children/feature-ledger-citation.md	work_tracker_okf._rules.decisions	design spec cites 'D-011', which is not in owner 'work/epic-ledger-at-finish/children/feature-ledger-citation''s ledger
+error	decisions.cite-missing	work/epic-ledger-at-finish/children/feature-ledger-citation.md	work_tracker_okf._rules.decisions	design spec cites 'D-011', absent from searched ledgers: work/epic-ledger-at-finish/children/feature-ledger-citation/references/00-decisions.md, work/epic-ledger-at-finish/references/00-decisions.md
 warn	targets.affects-empty	work/epic-ledger-at-finish/children/feature-ledger-citation.md	work_tracker_okf._rules.targets	no `affects` declared: this item will serialize against every write in its repository; declare the paths it changes, or `gw:workspace` if it only changes the workspace
 warn	decisions.ledger-missing	work/epic-stalled-decomposition.md	work_tracker_okf._rules.decisions	`type: Epic` at `phase: execute` has no decisions ledger at `work/epic-stalled-decomposition/references/00-decisions.md`
 warn	graph.epic-without-children	work/epic-stalled-decomposition.md	work_tracker_okf._rules.graph	`type: Epic` at `phase: execute` has no children
 warn	plan.table-malformed	work/epic-stalled-decomposition.md	work_tracker_okf._rules.plan	`## Plan` is present but carries no table matching its declared columns
 warn	state.stuck-open	work/epic-stalled-decomposition.md	work_tracker_okf._rules.state	`work_status: open` with no update in 94 days (over 30)
 error	targets.affects-missing	work/epic-stalled-decomposition.md	work_tracker_okf._rules.targets	`affects` entry 'packages/does-not-exist' does not exist under the repo root
+warn	state.spec-baseline-malformed	work/feature-malformed-baseline.md	work_tracker_okf._rules.state	`spec_baseline` must be a mapping of `code`/`workspace` to full lowercase commit ids; ignored
 error	structure.release-nested	work/feature-parent-cycle-a/children/release-nested.md	work_tracker_okf._rules.structure	`type: Release` is root-only but this item has parent 'work/feature-parent-cycle-a'
 warn	structure.index-entry-duplicate	work/index.md	work_tracker_okf._rules.structure	lane index links item page `work/bug-cycle-a.md` 2 times
 warn	structure.index-entry-missing	work/index.md	work_tracker_okf._rules.structure	lane index has no entry for direct item page `work/tech-debt-in-progress.md`
@@ -36,6 +37,7 @@ error	plan.accepted-without-plan	work/spike-wrong-parent-type/children/feature-a
 warn	state.phase-status-incoherent	work/spike-wrong-parent-type/children/feature-accepted-no-plan.md	work_tracker_okf._rules.state	`work_status` 'accepted' expects `phase` in ['done', 'execute', 'finish'], got 'design'
 warn	state.stuck-accepted	work/spike-wrong-parent-type/children/feature-accepted-no-plan.md	work_tracker_okf._rules.state	`work_status: accepted` with no update in 124 days (over 60)
 error	state.in-progress-without-owner	work/tech-debt-in-progress.md	work_tracker_okf._rules.state	`work_status: in-progress` with no `owner`
+warn	structure.finish-obligations-malformed	work/tech-debt-in-progress.md	work_tracker_okf._rules.structure	`finish_obligations` has malformed entries; each must be exactly {text, origin: coverage|deferred, recorded: YYYY-MM-DD}
 error	state.mitigated-without-mitigation	work/tech-debt-mitigated.md	work_tracker_okf._rules.state	`work_status: mitigated` with no `mitigation`
 error	structure.source-escape	work/tech-debt-mitigated.md	work_tracker_okf._rules.structure	`sources[2].resource` '/work/test-gap-wontfix.md' escapes its owner or bundle
 error	structure.source-id-duplicate	work/tech-debt-mitigated.md	work_tracker_okf._rules.structure	`sources[].id` 'plan' is duplicated within this item

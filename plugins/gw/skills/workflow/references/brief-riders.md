@@ -20,6 +20,8 @@ workspace path before inlining. `<work-path>` is the item's canonical path.
 `<worktree>` / `<branch>` come from the item's own frontmatter — see the
 execute riders' conditional note.
 
+**Ledger obligations are not a rider.** Recording relayed answers, amending answered decisions and filing in-stage changes as `assumed` is the `SKILL.md` step 3 **Decision ledger** bullet, which every stage brief carries regardless of `action.skill`. Riders carry no copy of it.
+
 **Every rider name here must appear in `SKILL.md`'s rider table, and every name
 in that table must appear here.** `tests/test-doc-layout-claims.sh` asserts both
 directions.
@@ -51,6 +53,8 @@ carries the flag; the stock companion document resolves the path.
 >
 > STOP after writing the spec — do not invoke writing-plans. This is a single
 > pipeline stage; the workflow skill advances the item.
+>
+> An exit-advance refusal is an escalation to the human or coordinator; do not alter a valid design artifact to silence citation lint.
 
 **`STOP after writing the spec` is a byte-exact literal.** Two things in this
 plugin match that string to detect that a work item already exists, and
@@ -105,6 +109,8 @@ rider permits the investigation and bounds where it may leave marks.
 >
 > STOP after writing the design — do not implement the fix. This is a single
 > pipeline stage; the workflow skill advances the item.
+>
+> An exit-advance refusal is an escalation to the human or coordinator; do not alter a valid design artifact to silence citation lint.
 
 **No byte-exact literal here.** Nothing matches this wording, so it is free to
 be worded for the stage rather than for a guard.
@@ -137,6 +143,10 @@ document to `<artifact.path>` — this overrides the skill's default location."*
 > where execution stops for a human (a review, a skim, a manual step), naming
 > the task and what the human does — or the single line `None.` Execute raises
 > each checkpoint with `gw work ask`.
+>
+> A step that can only happen at finish (after integration, or on the merge
+> target) is written as its own task whose heading ends `— Deferred to finish`;
+> execute records it as a finish obligation rather than performing it.
 >
 > STOP after writing the plan — do not run the Execution Handoff. This is a
 > single pipeline stage; the workflow skill advances the item.

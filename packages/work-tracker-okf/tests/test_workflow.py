@@ -51,10 +51,11 @@ def _state(**overrides) -> RouteState:
     return RouteState(**{**base, **overrides})
 
 
-def test_variants_by_stage_covers_every_variant_exactly_once() -> None:
+def test_variants_by_stage_covers_every_variant() -> None:
     listed = [variant for variants in VARIANTS_BY_STAGE.values() for variant in variants]
-    assert sorted(listed) == sorted(typing.get_args(Variant))
-    assert len(listed) == len(set(listed))
+    assert sorted(set(listed)) == sorted(typing.get_args(Variant))
+    assert {v for v in listed if listed.count(v) > 1} == {"reconcile"}
+    assert VARIANTS_BY_STAGE["plan"] == ("decompose", "single", "reconcile")
     assert set(VARIANTS_BY_STAGE) == {"design", "plan", "execute", "finish"}
 
 
@@ -80,6 +81,10 @@ def test_every_dispatch_route_pairs_a_variant_with_its_own_stage() -> None:
             assert dispatch is not None
             assert dispatch.stage == "design"
             assert dispatch.variant in VARIANTS_BY_STAGE[dispatch.stage]
+
+    stale_dispatch = route(_state(phase="plan", stale_spec=("x",))).dispatch
+    assert stale_dispatch is not None
+    assert stale_dispatch.variant in VARIANTS_BY_STAGE[stale_dispatch.stage]
 
     for has_plan_doc in (False, True):
         dispatch = route(_state(phase="execute", work_status="accepted", has_plan_doc=has_plan_doc)).dispatch
@@ -717,3 +722,43 @@ def test_foreign_stamp_release_still_requires_release_date(tmp_path):
     result = advance(items, items[0].path, today=date(2026, 9, 23), resolved_in="abc1234")
     assert result.refusal is not None
     assert "released_at" in str(result)
+
+
+@pytest.mark.parametrize("type_", ["Feature", "Bug", "Epic", "Release", "TechDebt"])
+def test_a_stale_spec_at_plan_routes_to_reconcile_in_place(type_: str) -> None:
+    result = route(
+        _state(
+            type=type_, phase="plan", effort="medium", has_spec_doc=True, stale_spec=("work/epic/children/feature-a",)
+        )
+    )
+    assert result.dispatch == Dispatch("plan", "reconcile")
+    assert result.on_complete == Transition(phase="plan", stamp_baseline=True)
+    assert result.on_dispatch is None
+    assert "work/epic/children/feature-a" in result.reason
+
+
+def test_dependency_blocker_beats_staleness() -> None:
+    result = route(dataclasses.replace(state_with_edge(phase="plan", blocks="plan"), stale_spec=("x",)))
+    assert result.dispatch is None and result.blockers
+
+
+def test_a_hold_beats_staleness() -> None:
+    hold = HoldFact(path="work/x", decision_id="D-001", shape="question", phase="plan")
+    assert route(_state(phase="plan", effort="medium", hold=hold, stale_spec=("y",))).dispatch is None
+
+
+def test_every_design_completion_requests_a_baseline_stamp() -> None:
+    for type_ in TYPES:
+        for effort in (None, "small", "medium"):
+            for phase in (None, "design"):
+                result = route(_state(type=type_, phase=phase, effort=effort))
+                if result.dispatch is not None and result.dispatch.stage == "design":
+                    assert result.on_complete is not None and result.on_complete.stamp_baseline
+
+
+def test_non_design_completions_never_request_a_stamp() -> None:
+    for state in (
+        _state(phase="plan", effort="medium"),
+        _state(phase="execute", work_status="accepted", has_plan_doc=True),
+    ):
+        assert not route(state).on_complete.stamp_baseline

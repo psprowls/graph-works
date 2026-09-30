@@ -27,7 +27,7 @@ bare names.
 
 The layout and writer surface follows the same rule:
 
-    paths -> {filing, sources, results, mutation, reparent, archive, decisions, checkpoints}
+    paths -> {filing, sources, results, mutation, reparent, archive, decisions, checkpoints, obligations}
     decisions, checkpoints -> holds
 
     from work_tracker_okf.paths import artifact_ref, item_page

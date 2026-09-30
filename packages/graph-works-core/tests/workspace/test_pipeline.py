@@ -152,6 +152,14 @@ def test_execute_tail_names_the_gate_verbs():
     assert "/private/tmp" not in pipeline.EXECUTE_TAIL
 
 
+def test_execute_tail_tells_the_worker_to_record_deferred_steps() -> None:
+    assert (
+        "When the plan marks a step `Deferred to finish`, record it with "
+        '`gw work obligation add {path} --text "<the step>" --apply` instead of doing it or leaving it in prose.'
+    ) in pipeline.EXECUTE_TAIL
+    assert pipeline.EXECUTE_TAIL.index("Deferred to finish") < pipeline.EXECUTE_TAIL.index("The gate is")
+
+
 def test_only_the_relay_tail_carries_the_grace_period_pointer() -> None:
     # An attend worker asks in its own terminal (the attend-ask decision), so
     # no Orca ask of its can time out; the protocol is relay-only now.

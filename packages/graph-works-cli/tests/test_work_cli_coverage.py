@@ -304,6 +304,10 @@ def test_decision_verbs_map_target_and_io_errors(monkeypatch: pytest.MonkeyPatch
         ("run_decision_list", lambda: decision.list_cmd("work/a", "", "", "", "", False)),
         ("run_decision_answer", lambda: decision.answer("work/a", "D-001", "a", "", "user", False, "", False)),
         (
+            "run_decision_amend",
+            lambda: decision.amend("work/a", "D-001", "a", "n", "", "", "user", False, "", False),
+        ),
+        (
             "run_decision_supersede",
             lambda: decision.supersede("work/a", "D-001", "q", "a", "", "", "user", False, "", False),
         ),
@@ -319,6 +323,10 @@ def test_decision_write_verbs_map_workspace_errors(monkeypatch: pytest.MonkeyPat
     calls = (
         ("run_decision_add", lambda: decision.add("work/a", "q", "open", "", "", "", "", "user", False, "", False)),
         ("run_decision_answer", lambda: decision.answer("work/a", "D-001", "a", "", "user", False, "", False)),
+        (
+            "run_decision_amend",
+            lambda: decision.amend("work/a", "D-001", "a", "n", "", "", "user", False, "", False),
+        ),
         (
             "run_decision_supersede",
             lambda: decision.supersede("work/a", "D-001", "q", "a", "", "", "user", False, "", False),

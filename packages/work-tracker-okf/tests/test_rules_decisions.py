@@ -214,6 +214,60 @@ def test_a_child_spec_citing_a_present_id_is_silent(tmp_path: Path) -> None:
     assert _codes(tmp_path, "decisions.cite-missing") == []
 
 
+def test_a_feature_spec_resolves_an_epic_decision(tmp_path: Path) -> None:
+    _epic(tmp_path)
+    _ledger(tmp_path, "## D-002 — epic choice\nstatus: answered\n")
+    _ledger(tmp_path, "## D-001 — feature choice\nstatus: answered\n", owner=_CHILD)
+    _child_with_spec(tmp_path, "# Spec\n\nFollows from D-002.\n")
+    assert _codes(tmp_path, "decisions.cite-missing") == []
+
+
+def test_missing_citation_names_all_searched_ledgers_and_resolved_winners(tmp_path: Path) -> None:
+    _epic(tmp_path)
+    _ledger(tmp_path, "## D-001 — epic choice\nstatus: answered\n")
+    _ledger(tmp_path, "## D-001 — feature choice\nstatus: answered\n", owner=_CHILD)
+    _child_with_spec(tmp_path, "# Spec\n\nD-001 and D-009.\n")
+    (message,) = _codes(tmp_path, "decisions.cite-missing")
+    child_ref = f"{_CHILD}/references/00-decisions.md"
+    epic_ref = f"{_EPIC}/references/00-decisions.md"
+    assert "D-009" in message
+    assert message.index(child_ref) < message.index(epic_ref)
+    assert f"D-001 -> {child_ref}" in message
+
+
+def test_a_deep_child_searches_release_epic_and_feature_in_order(tmp_path: Path) -> None:
+    release = "work/release-decisions"
+    epic = f"{release}/children/epic-decisions"
+    feature = f"{epic}/children/feature-decisions"
+    bug = f"{feature}/children/bug-decisions"
+    for path, kind in ((release, "Release"), (epic, "Epic"), (feature, "Feature")):
+        write_item(
+            tmp_path,
+            path,
+            f"type: {kind}\nstatus: stable\nwork_status: open\nphase: design\n"
+            "effort: medium\nopened: 2026-07-01\nupdated: 2026-08-01\n",
+        )
+    write_item(
+        tmp_path,
+        bug,
+        "type: Bug\nstatus: stable\nwork_status: open\nphase: design\n"
+        "effort: small\nopened: 2026-07-01\nupdated: 2026-08-01\n"
+        f"sources:\n  - id: design\n    resource: /{bug}/references/01-design.md\n    title: Design spec\n",
+    )
+    spec = tmp_path / bug / "references/01-design.md"
+    spec.parent.mkdir(parents=True, exist_ok=True)
+    spec.write_text("# Spec\n\nD-003 and D-099.\n", encoding="utf-8")
+    _ledger(tmp_path, "## D-003 — release choice\nstatus: answered\n", owner=release)
+    (message,) = _codes(tmp_path, "decisions.cite-missing")
+    assert "D-099" in message
+    assert f"D-003 -> {release}/references/00-decisions.md" in message
+    assert (
+        message.index(f"{feature}/references/00-decisions.md")
+        < message.index(f"{epic}/references/00-decisions.md")
+        < message.index(f"{release}/references/00-decisions.md")
+    )
+
+
 def test_an_unpadded_citation_still_resolves_against_the_padded_ledger_entry(tmp_path: Path) -> None:
     """Mirrors `_supersedes_findings`'s own padded/unpadded unification: a
     hand-typed `D-1` in a design spec must resolve against the ledger's

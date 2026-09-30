@@ -19,7 +19,8 @@
     "document_status": null,
     "requires": [],
     "sync_plan_table": false,
-    "stamp_source": null
+    "stamp_source": null,
+    "stamp_baseline": false
   },
   "on_complete": {
     "phase": "plan",
@@ -29,7 +30,8 @@
       "effort"
     ],
     "sync_plan_table": false,
-    "stamp_source": "design"
+    "stamp_source": "design",
+    "stamp_baseline": true
   },
   "blockers": [],
   "dispatch": {
@@ -100,5 +102,9 @@
   "guidance_warnings": [
     "no code graph: run `gw scan` to build one; the closure is empty"
   ],
-  "guidance_file": null
+  "guidance_file": null,
+  "carried_context": {
+    "slots": {},
+    "warnings": []
+  }
 }

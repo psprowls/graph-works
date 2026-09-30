@@ -1,7 +1,7 @@
 """reconciling-spec quotes the hold blocker; this pins the quote to the code.
 
 Rendered with the skill's own placeholders (`<work-path>`, `D-nnn`) for a
-design-stage question hold -- exactly what a reconciling-spec hold produces.
+design- or plan-stage question hold -- what a reconciling-spec hold produces.
 Whitespace is normalized because the skill wraps prose; nothing else is.
 """
 
@@ -27,10 +27,11 @@ def skill_text() -> str:
     return _normalized(SKILL.read_text(encoding="utf-8"))
 
 
-def test_the_skill_quotes_the_rendered_blocker_and_reason(skill_text: str) -> None:
+@pytest.mark.parametrize("phase", ["design", "plan"])
+def test_the_skill_quotes_the_rendered_blocker_and_reason(skill_text: str, phase: str) -> None:
     hold = HoldFact(path="<work-path>", decision_id="D-nnn", shape="question", phase=None)
     assert _normalized(hold_blocker(hold)) in skill_text
-    assert _normalized(hold_reason(hold, "design")) in skill_text
+    assert _normalized(hold_reason(hold, phase)) in skill_text
 
 
 def test_the_retired_claims_are_gone(skill_text: str) -> None:

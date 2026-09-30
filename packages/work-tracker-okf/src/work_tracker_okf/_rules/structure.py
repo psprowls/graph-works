@@ -30,6 +30,7 @@ CODES: tuple[str, ...] = (
     "structure.index-entry-duplicate",
     "structure.index-entry-non-direct",
     "structure.index-entry-unreadable",
+    "structure.finish-obligations-malformed",
 )
 
 _SPEC = "work_tracker_okf._rules.structure"
@@ -257,6 +258,19 @@ def indexes(ctx: RuleContext) -> Iterable[Finding]:
             )
 
 
+def obligations(ctx: RuleContext) -> Iterable[Finding]:
+    """Warn when hand-edited finish obligations cannot be fully projected (D-003)."""
+    for item in items(ctx):
+        if "finish_obligations" in item.invalid_optional_fields:
+            yield _finding(
+                "structure.finish-obligations-malformed",
+                "warn",
+                item,
+                "`finish_obligations` has malformed entries; each must be exactly "
+                "{text, origin: coverage|deferred, recorded: YYYY-MM-DD}",
+            )
+
+
 def rules(config: LaneConfig) -> tuple[Rule, ...]:
     del config
-    return (layout, sources, indexes)
+    return (layout, sources, indexes, obligations)

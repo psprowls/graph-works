@@ -1261,6 +1261,145 @@ def test_the_coverage_registration_rides_the_page_write(tmp_path: Path) -> None:
     assert result.application.written == (f"{path}.md",)
 
 
+def _coverage(layout, path: str, data: bytes | str) -> None:
+    coverage = layout.bundle_dir / path / "references/03-execute-coverage.md"
+    coverage.parent.mkdir(parents=True, exist_ok=True)
+    if isinstance(data, str):
+        coverage.write_text(data, encoding="utf-8", newline="")
+    else:
+        coverage.write_bytes(data)
+
+
+def _obligations(layout, path: str) -> list[dict[str, str]]:
+    return load(layout.bundle_dir / f"{path}.md").fm_data(dates="iso").get("finish_obligations", [])
+
+
+_DEFERRED_EXTRA = "finish_obligations:\n- text: Tag the release\n  origin: deferred\n  recorded: '2026-08-01'\n"
+
+
+def test_the_execute_advance_records_unchecked_lines_as_coverage_obligations(tmp_path: Path) -> None:
+    layout = _initialized_workspace(tmp_path)
+    path = "work/feature-a"
+    _ready(layout, path, phase="execute", affects=("gw:workspace",), extra=_DEFERRED_EXTRA)
+    _coverage(layout, path, "- [x] one\n- [ ] live Orca test not run\n")
+
+    result = stage.run_stage_advance(layout, path, today=TODAY, dry_run=False)
+
+    assert result.application is not None and result.application.ok
+    assert result.application.written == (f"{path}.md",)
+    assert _obligations(layout, path) == [
+        {"text": "Tag the release", "origin": "deferred", "recorded": "2026-08-01"},
+        {"text": "live Orca test not run", "origin": "coverage", "recorded": TODAY.isoformat()},
+    ]
+    change = next(change for change in result.outcome.plan.changes if change.key == "finish_obligations")
+    assert change.before == [{"text": "Tag the release", "origin": "deferred", "recorded": "2026-08-01"}]
+    assert change.after == _obligations(layout, path)
+
+
+def test_a_return_then_re_advance_replaces_coverage_and_keeps_deferred(tmp_path: Path) -> None:
+    layout = _initialized_workspace(tmp_path)
+    path = "work/feature-a"
+    _ready(layout, path, phase="execute", affects=("gw:workspace",), extra=_DEFERRED_EXTRA)
+    _coverage(layout, path, "- [ ] first caveat\n- [ ] second caveat\n")
+    assert stage.run_stage_advance(layout, path, today=TODAY, dry_run=False).application.ok
+
+    returned = stage.run_stage_advance(layout, path, today=TODAY, return_=True, dry_run=False)
+    assert returned.application is not None and returned.application.ok
+    assert len(_obligations(layout, path)) == 3
+
+    _coverage(layout, path, "- [x] first caveat\n- [ ] second caveat\n")
+    assert stage.run_stage_advance(layout, path, today=TODAY, dry_run=False).application.ok
+
+    assert [(entry["origin"], entry["text"]) for entry in _obligations(layout, path)] == [
+        ("deferred", "Tag the release"),
+        ("coverage", "second caveat"),
+    ]
+
+
+def test_an_advance_without_a_coverage_file_clears_coverage_obligations(tmp_path: Path) -> None:
+    layout = _initialized_workspace(tmp_path)
+    path = "work/feature-b"
+    extra = _DEFERRED_EXTRA + "- text: stale caveat\n  origin: coverage\n  recorded: '2026-08-01'\n"
+    _ready(layout, path, phase="execute", affects=("gw:workspace",), extra=extra)
+
+    stage.run_stage_advance(layout, path, today=TODAY, dry_run=False)
+
+    assert [entry["origin"] for entry in _obligations(layout, path)] == ["deferred"]
+
+
+def test_an_undecodable_coverage_file_warns_and_still_advances(tmp_path: Path) -> None:
+    layout = _initialized_workspace(tmp_path)
+    path = "work/feature-c"
+    extra = _DEFERRED_EXTRA + "- text: prior caveat\n  origin: coverage\n  recorded: '2026-08-01'\n"
+    _ready(layout, path, phase="execute", affects=("gw:workspace",), extra=extra)
+    _coverage(layout, path, b"- [ ] \xff\xfe broken\n")
+
+    result = stage.run_stage_advance(layout, path, today=TODAY, dry_run=False)
+
+    assert result.application is not None and result.application.ok
+    assert any(w.startswith("finish_obligations: coverage unreadable:") for w in result.warnings)
+    assert [(entry["origin"], entry["text"]) for entry in _obligations(layout, path)] == [
+        ("deferred", "Tag the release"),
+        ("coverage", "prior caveat"),
+    ]
+
+
+def test_no_coverage_and_no_obligations_leaves_the_key_absent(tmp_path: Path) -> None:
+    layout = _initialized_workspace(tmp_path)
+    path = "work/feature-d"
+    _ready(layout, path, phase="execute", affects=("gw:workspace",))
+
+    result = stage.run_stage_advance(layout, path, today=TODAY, dry_run=False)
+
+    assert "finish_obligations" not in (layout.bundle_dir / f"{path}.md").read_text(encoding="utf-8")
+    assert "finish_obligations" not in {change.key for change in result.outcome.plan.changes}
+
+
+def test_execute_advance_removes_malformed_obligations_without_coverage(tmp_path: Path) -> None:
+    layout = _initialized_workspace(tmp_path)
+    path = "work/feature-malformed"
+    _ready(layout, path, phase="execute", affects=("gw:workspace",), extra="finish_obligations: nope\n")
+
+    result = stage.run_stage_advance(layout, path, today=TODAY, dry_run=False)
+
+    assert result.application is not None and result.application.ok
+    assert "finish_obligations" not in (layout.bundle_dir / f"{path}.md").read_text(encoding="utf-8")
+    change = next(change for change in result.outcome.plan.changes if change.key == "finish_obligations")
+    assert change.before == "nope"
+    assert change.after == []
+
+
+def test_execute_advance_removes_explicit_null_obligations_without_coverage(tmp_path: Path) -> None:
+    layout = _initialized_workspace(tmp_path)
+    path = "work/feature-null"
+    _ready(layout, path, phase="execute", affects=("gw:workspace",), extra="finish_obligations:\n")
+
+    result = stage.run_stage_advance(layout, path, today=TODAY, dry_run=False)
+
+    assert result.application is not None and result.application.ok
+    assert "finish_obligations" not in (layout.bundle_dir / f"{path}.md").read_text(encoding="utf-8")
+    change = next(change for change in result.outcome.plan.changes if change.key == "finish_obligations")
+    assert change.before is None
+    assert change.after == []
+
+
+def test_execute_advance_keeps_valid_deferred_entries_from_a_malformed_list(tmp_path: Path) -> None:
+    layout = _initialized_workspace(tmp_path)
+    path = "work/feature-mixed"
+    _ready(layout, path, phase="execute", affects=("gw:workspace",), extra=_DEFERRED_EXTRA + "- invalid\n")
+
+    result = stage.run_stage_advance(layout, path, today=TODAY, dry_run=False)
+
+    assert result.application is not None and result.application.ok
+    assert _obligations(layout, path) == [{"text": "Tag the release", "origin": "deferred", "recorded": "2026-08-01"}]
+    change = next(change for change in result.outcome.plan.changes if change.key == "finish_obligations")
+    assert change.before == [
+        {"text": "Tag the release", "origin": "deferred", "recorded": "2026-08-01"},
+        "invalid",
+    ]
+    assert change.after == _obligations(layout, path)
+
+
 def test_run_orchestrate_reads_supervise_merges_from_the_manifest(tmp_path: Path, monkeypatch) -> None:
     _declare_repo(monkeypatch, tmp_path)
     layout = _workspace(tmp_path)
@@ -1992,3 +2131,32 @@ def test_shell_reader_refuses_duplicate_branch_checkouts(tmp_path: Path, legacy:
     assert not result.dispatches
     assert {b.kind for b in result.blocked} <= {"worktree-unprovable", "worktree-ambiguous"}
     assert result.blocked
+
+
+def test_run_orchestrate_routes_a_landed_sibling_under_the_reconcile_key(tmp_path: Path) -> None:
+    code = _git_repo(tmp_path / "code")
+    baseline = _git(code, "rev-parse", "HEAD").strip()
+    _git(
+        code,
+        "-c",
+        "user.name=Test",
+        "-c",
+        "user.email=test@example.com",
+        "commit",
+        "--allow-empty",
+        "-m",
+        "sibling landed",
+    )
+    landed = _git(code, "rev-parse", "HEAD").strip()
+    layout = _workspace(tmp_path / "ws", f"version: 1\nrepositories:\n  code:\n    path: {json.dumps(str(code))}\n")
+    subject, sibling = "work/feature-x", "work/feature-y"
+    _write(layout, subject, extra=f"spec_baseline:\n  code: {baseline}\n")
+    _artifact(layout, subject, "design")
+    _write(layout, sibling, phase=None, work_status="resolved", extra=f"resolved_in: {landed}\n")
+    reconciled = orchestrate.run_orchestrate(layout, subject).plan.dispatches[0]
+    assert reconciled.key.startswith("gw-reconcile-x-")
+    assert reconciled.skill == "gw:reconciling-spec"
+    _write(layout, subject, extra=f"spec_baseline:\n  code: {landed}\n")
+    planning = orchestrate.run_orchestrate(layout, subject).plan.dispatches[0]
+    assert planning.key.startswith("gw-plan-x-")
+    assert reconciled.prompt.replace(reconciled.key, planning.key) == planning.prompt

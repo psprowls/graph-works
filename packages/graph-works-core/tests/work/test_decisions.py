@@ -59,15 +59,15 @@ def _config(layout) -> Config:
     )
 
 
-@pytest.mark.parametrize("verb", ("add", "answer", "supersede", "overturn"))
+@pytest.mark.parametrize("verb", ("add", "answer", "amend", "supersede", "overturn"))
 def test_invalid_commit_config_precedes_decision_owner_lock(tmp_path: Path, verb: str) -> None:
     layout = _workspace(tmp_path)
     initial = work.run_decision_add(
         layout,
         OWNER,
         question="Original?",
-        status="answered" if verb == "overturn" else "open",
-        answer="yes" if verb == "overturn" else None,
+        status="answered" if verb in {"overturn", "amend"} else "open",
+        answer="yes" if verb in {"overturn", "amend"} else None,
         on=TODAY,
         decided_by="pat",
         dry_run=False,
@@ -93,6 +93,10 @@ def test_invalid_commit_config_precedes_decision_owner_lock(tmp_path: Path, verb
         if verb == "supersede":
             return work.run_decision_supersede(
                 layout, OWNER, "D-001", question="Next?", answer="no", on=TODAY, decided_by="pat", dry_run=dry_run
+            )
+        if verb == "amend":
+            return work.run_decision_amend(
+                layout, OWNER, "D-001", answer="no", note="changed", on=TODAY, decided_by="pat", dry_run=dry_run
             )
         return work.run_decision_overturn(
             layout,
@@ -784,3 +788,67 @@ def test_split_topology_overturn_validates_follow_up_against_the_declared_code_r
     )
     assert result.application.mutation is not None
     assert result.application.mutation.ok, result.warnings
+
+
+def _answered(layout, path: str) -> None:
+    added = work.run_decision_add(
+        layout, path, question="Ship?", status="answered", answer="yes", on=TODAY, decided_by="pat", dry_run=False
+    )
+    assert added.application is not None and added.application.ok
+
+
+def test_amend_dry_run_writes_nothing(tmp_path: Path) -> None:
+    layout = _workspace(tmp_path)
+    _answered(layout, OWNER)
+    ledger = layout.bundle_dir / OWNER / "references" / "00-decisions.md"
+    before = ledger.read_bytes()
+    result = work.run_decision_amend(
+        layout, OWNER, "D-001", answer="yes, behind a flag", note="scoped to the flag", on=TODAY, decided_by="pat"
+    )
+    assert result.application is None
+    assert result.plan is not None and result.plan.refusal is None
+    assert result.plan.primary is not None and "behind a flag" in result.plan.primary.prose
+    assert ledger.read_bytes() == before
+
+
+def test_amend_through_a_leaf_writes_the_owner_ledger(tmp_path: Path) -> None:
+    layout = _workspace(tmp_path)
+    _answered(layout, OWNER)
+    result = work.run_decision_amend(
+        layout, LEAF, "D-001", answer="yes, behind a flag", note="scoped", on=TODAY, decided_by="pat", dry_run=False
+    )
+    assert result.application is not None and result.application.ok
+    [entry] = work.run_decision_list(layout, OWNER).entries
+    assert (entry.id, entry.status) == ("D-001", "answered")
+    assert "**Amended:** 2026-08-23 by pat — scoped. Previously: yes" in entry.prose
+
+
+def test_amend_refusal_writes_nothing(tmp_path: Path) -> None:
+    layout = _workspace(tmp_path)
+    _answered(layout, OWNER)
+    ledger = layout.bundle_dir / OWNER / "references" / "00-decisions.md"
+    before = ledger.read_bytes()
+    result = work.run_decision_amend(
+        layout, OWNER, "D-001", answer="yes", note="nothing", on=TODAY, decided_by="pat", dry_run=False
+    )
+    assert result.plan is not None and result.plan.refusal == "answer-unchanged"
+    assert ledger.read_bytes() == before
+
+
+def test_amend_commits_its_own_subject(tmp_path: Path) -> None:
+    layout = apply_init(plan_init(tmp_path / "ws", today=TODAY, topic="Decisions")).layout
+    _write(layout, "work/feature-a", "Feature")
+    _init_git(layout.root)
+    _answered(layout, "work/feature-a")
+    amended = work.run_decision_amend(
+        layout,
+        "work/feature-a",
+        "D-001",
+        answer="yes, behind a flag",
+        note="scoped to the flag",
+        on=TODAY,
+        decided_by="pat",
+        dry_run=False,
+    )
+    assert amended.application is not None and amended.application.ok
+    assert_workspace_commit(layout.root, "workspace: amend feature-a decision D-001")

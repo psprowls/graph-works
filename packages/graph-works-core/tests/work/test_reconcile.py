@@ -196,3 +196,31 @@ def test_reconcile_refuses_an_untagged_item_among_several_repos(tmp_path: Path) 
     _declare_two(layout, tmp_path)
     with pytest.raises(WorkspaceError, match=SUBJECT):
         reconcile.run_reconcile_context(layout, SUBJECT)
+
+
+def test_reconcile_prefers_the_spec_baseline_commit(tmp_path: Path) -> None:
+    import subprocess
+
+    (tmp_path / "workspace").mkdir()
+    layout = _workspace(tmp_path / "workspace")
+    repo = tmp_path / "code"
+    repo.mkdir()
+    for args in (
+        ("init", "-b", "main"),
+        ("config", "user.email", "t@example.com"),
+        ("config", "user.name", "T"),
+        ("commit", "--allow-empty", "-m", "baseline"),
+    ):
+        subprocess.run(["git", *args], cwd=repo, check=True, capture_output=True)
+    sha = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=repo, check=True, capture_output=True, text=True
+    ).stdout.strip()
+    page = layout.bundle_dir / f"{SUBJECT}.md"
+    page.write_text(
+        page.read_text(encoding="utf-8").replace("phase: design\n", f"phase: design\nspec_baseline:\n  code: {sha}\n"),
+        encoding="utf-8",
+        newline="\n",
+    )
+    context = reconcile.run_reconcile_context(layout, SUBJECT, repo=repo)
+    assert context.spec_anchor_commit == sha
+    assert context.anchor_source == "spec-baseline"

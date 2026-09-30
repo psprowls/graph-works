@@ -84,11 +84,13 @@ def test_render_next_uses_path_and_work_status(capsys: pytest.CaptureFixture[str
         "guidance_warnings": [],
         "guidance_file": None,
         "blockers": [],
+        "carried_context": {"slots": {}, "warnings": []},
     }
     rendering.render_next(SimpleNamespace(warnings=(), guidance=None), payload)
     out = capsys.readouterr().out
     assert "work/feature-a: kind=Feature work_status=open" in out
     assert "  guidance: none\n" in out
+    assert "  carried context: none\n" in out
 
 
 def test_render_commit_handles_missing_sha_and_silent_skips(capsys: pytest.CaptureFixture[str]) -> None:
@@ -117,6 +119,7 @@ def test_render_next_guidance_line_when_assembled_but_not_written(capsys: pytest
         "guidance_warnings": [],
         "guidance_file": None,
         "blockers": [],
+        "carried_context": {"slots": {}, "warnings": []},
     }
     rendering.render_next(SimpleNamespace(warnings=(), guidance=SimpleNamespace(tokens=12)), payload)
     assert "  guidance: 2 entries, 12 tokens → not written\n" in capsys.readouterr().out
@@ -169,6 +172,7 @@ def test_dense_human_renderers_cover_every_optional_group(capsys: pytest.Capture
             "guidance": [{"path": "/adrs/x.md", "id": "D1", "kind": "claim", "why": "w", "tokens": 5}],
             "guidance_warnings": ["no graph"],
             "guidance_file": "/tmp/guidance-design.md",
+            "carried_context": {"slots": {}, "warnings": []},
             "blockers": ["one\ntwo"],
         },
     )
@@ -388,3 +392,50 @@ def test_decision_list_shows_the_hold_shape(capsys: pytest.CaptureFixture[str]) 
     out = capsys.readouterr().out
     assert "  D-001  open  [skip at plan] — q" in out
     assert "  D-002  open — r" in out
+
+
+def _next_payload(carried: dict[str, object]) -> dict[str, object]:
+    return {
+        "selected_path": "work/feature-a",
+        "kind": "Feature",
+        "work_status": "open",
+        "phase": "plan",
+        "normalized": None,
+        "commits": [],
+        "descent": None,
+        "dispatch": None,
+        "action": None,
+        "artifact": None,
+        "guidance": [],
+        "guidance_warnings": [],
+        "guidance_file": None,
+        "blockers": [],
+        "carried_context": carried,
+    }
+
+
+def test_render_next_reports_carried_context_slots_with_content(capsys: pytest.CaptureFixture[str]) -> None:
+    carried = {
+        "slots": {
+            "landed_since": {"title": "Landed since your design", "lines": ["- a", "- b"], "data": {}, "warnings": []},
+            "empty": {"title": "Empty", "lines": [], "data": {}, "warnings": []},
+        },
+        "warnings": [],
+    }
+    rendering.render_next(SimpleNamespace(warnings=(), guidance=None), _next_payload(carried))
+    out = capsys.readouterr().out
+    assert "  carried context: 1 slot(s) with content\n    Landed since your design: 2 line(s)\n" in out
+    assert "Empty:" not in out
+
+
+def test_render_next_carried_context_none_and_warnings_pass_through(capsys: pytest.CaptureFixture[str]) -> None:
+    carried = {
+        "slots": {
+            "landed_since": {"title": "T", "lines": [], "data": {}, "warnings": ["landed_since: unavailable: x"]}
+        },
+        "warnings": ["frame note"],
+    }
+    rendering.render_next(SimpleNamespace(warnings=(), guidance=None), _next_payload(carried))
+    captured = capsys.readouterr()
+    assert "  carried context: none\n" in captured.out
+    assert "landed_since: unavailable: x" in captured.err and "frame note" in captured.err

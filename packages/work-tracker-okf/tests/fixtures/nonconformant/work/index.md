@@ -16,4 +16,5 @@ Human catalog note preserved outside the generated region.
 - [Nested child](spike-wrong-parent-type/children/feature-accepted-no-plan.md) — accepted · design
 - [Gone](gone.md) — open · not started
 - [Bug: an unbalanced ] in link text](bug-unreadable-entry.md) — open · not started
+- [Malformed spec baseline](feature-malformed-baseline.md) — open · plan
 <!-- graph-works:work-items:end -->

@@ -30,7 +30,6 @@ from okf_io import Finding, Rule, RuleContext, Severity
 from work_tracker_okf import checkpoints
 from work_tracker_okf._rules._common import LaneConfig, active, items
 from work_tracker_okf.decisions import HOLD_PHASES, HOLD_SHAPES, VALID_STATUSES, Decision, LedgerParse, id_number, load
-from work_tracker_okf.hierarchy import decision_owner
 from work_tracker_okf.items import WorkItem
 from work_tracker_okf.paths import MANAGED_ARTIFACTS, ArtifactRef, artifact_ref, checkpoint_ref, parse_item_path
 from work_tracker_okf.vocabulary import PARENT_TYPES, SPEC_SOURCE_ID
@@ -297,13 +296,12 @@ def _spec_text(ctx: RuleContext, item: WorkItem) -> str | None:
 
 
 def citations(ctx: RuleContext) -> Iterable[Finding]:
-    """34: a design spec citing a `D-nnn` its owning epic's ledger has not got.
+    """34: a design spec citing a `D-nnn` absent from its ancestor ledgers.
 
-    Runs over **any** item with a resolvable epic ancestor, not only epics —
-    that is the rule's whole point, since a child's spec is what cites the
-    parent's decisions. Resolution walks the whole item set, archived included
-    (an archived ancestor still resolves); only active items are reported on,
-    matching `graph.references`.
+    Runs over any item with a design source. Lookup checks its own ledger when
+    it can own one, then parent-capable ancestors in nearest-first order.
+    Resolution walks the whole item set, archived included; only active items
+    are reported on, matching `graph.references`.
 
     Resolved by **number**, not string, mirroring `_supersedes_findings`: a
     hand-typed `D-1` still resolves against the ledger's zero-padded `D-001`
@@ -318,25 +316,39 @@ def citations(ctx: RuleContext) -> Iterable[Finding]:
         text = _spec_text(ctx, item)
         if text is None:
             continue
-        owner_path = decision_owner(everything, item.path)
-        if owner_path is None:
+        candidates = [
+            path
+            for path in (item.path, *reversed(item.ancestor_paths))
+            if (candidate := by_path.get(path)) is not None
+            and (candidate.type in PARENT_TYPES or (path == item.path and item.parent_path is None))
+        ]
+        if not candidates:
             continue
-        if owner_path not in known:
-            owner = by_path[owner_path]
-            ref = _ledger_ref(owner.path)
-            known[owner_path] = frozenset(entry.number for entry in load(ref.path(ctx.bundle.root)).entries)
+        for path in candidates:
+            if path not in known:
+                ref = _ledger_ref(path)
+                known[path] = frozenset(entry.number for entry in load(ref.path(ctx.bundle.root)).entries)
+        refs = {path: _ledger_ref(path).rel for path in candidates}
+        resolved: list[str] = []
+        missing: list[str] = []
         for cite in sorted({match.group(0) for match in _ID_RE.finditer(text)}):
             try:
                 number = id_number(cite)
             except ValueError:
                 continue
-            if number in known[owner_path]:
-                continue
+            winner = next((path for path in candidates if number in known[path]), None)
+            if winner is not None:
+                resolved.append(f"{cite} -> {refs[winner]}")
+            else:
+                missing.append(cite)
+        searched = ", ".join(refs[path] for path in candidates)
+        resolved_detail = f"; resolved citations: {', '.join(resolved)}" if resolved else ""
+        for cite in missing:
             yield _finding(
                 "decisions.cite-missing",
                 "error",
                 item,
-                f"design spec cites {cite!r}, which is not in owner {owner_path!r}'s ledger",
+                f"design spec cites {cite!r}, absent from searched ledgers: {searched}{resolved_detail}",
             )
 
 

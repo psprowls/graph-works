@@ -200,6 +200,19 @@ def render_next(result: NextResult, payload: dict[str, Any]) -> None:
         typer.echo("  guidance: none")
     for warning in payload["guidance_warnings"]:
         warn(warning)
+    carried = payload["carried_context"]
+    with_content = [slot for slot in carried["slots"].values() if slot["lines"]]
+    if with_content:
+        typer.echo(f"  carried context: {len(with_content)} slot(s) with content")
+        for slot in with_content:
+            typer.echo(f"    {slot['title']}: {len(slot['lines'])} line(s)")
+    else:
+        typer.echo("  carried context: none")
+    for slot in carried["slots"].values():
+        for warning in slot["warnings"]:
+            warn(warning)
+    for warning in carried["warnings"]:
+        warn(warning)
     for blocker in payload["blockers"]:
         echo_wrapped("  blocked: ", blocker)
     for warning in result.warnings:
@@ -353,6 +366,15 @@ def render_decision_list(payload: dict[str, Any]) -> None:
         shape = f"  [{entry['hold']} at {entry['phase'] or '-'}]" if entry.get("hold") else ""
         typer.echo(f"  {entry['id']}  {entry['status'] or '(no status)'}{shape}{question}")
     typer.echo("  counts: " + ", ".join(f"{key}={value}" for key, value in payload["counts"].items()))
+
+
+def render_obligations(payload: dict[str, Any]) -> None:
+    mode = "[ok]" if payload["applied"] else "[dry run]"
+    typer.echo(f"{mode} finish_obligations: {payload['path']}")
+    for entry in payload["obligations"]:
+        typer.echo(f"  - [{entry['origin']}] {entry['text']} (recorded {entry['recorded']})")
+    if not payload["applied"] and payload["changed"]:
+        typer.echo("  (dry run; pass --apply to write)")
 
 
 # ---------------------------------------------------------------------------

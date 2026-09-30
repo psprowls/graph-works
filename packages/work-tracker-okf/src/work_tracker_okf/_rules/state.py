@@ -28,9 +28,10 @@ CODES: tuple[str, ...] = (
     "state.stuck-open",
     "state.stuck-accepted",
     "state.archive-eligible",
+    "state.spec-baseline-malformed",
 )
 
-#: `Finding.spec` is "the thing that says so". None of these nine cites an OKF
+#: `Finding.spec` is "the thing that says so". None of these ten cites an OKF
 #: section: an item whose `work_status` is `superseded` with no
 #: `superseded_by` is a perfectly conformant OKF v0.2 document. They cite the
 #: module that defines them -- what `okf_ext.health` does with its own `_SPEC`,
@@ -168,10 +169,22 @@ def terminal(ctx: RuleContext) -> Iterable[Finding]:
         )
 
 
+def baselines(ctx: RuleContext) -> Iterable[Finding]:
+    """Malformed stamps warn: they disable landed-since without blocking routing."""
+    for item in active(ctx):
+        if "spec_baseline" in item.invalid_optional_fields:
+            yield _finding(
+                "state.spec-baseline-malformed",
+                "warn",
+                item,
+                "`spec_baseline` must be a mapping of `code`/`workspace` to full lowercase commit ids; ignored",
+            )
+
+
 def rules(config: LaneConfig) -> tuple[Rule, ...]:
     """Every topic exports `rules(config)`, including the two that inject nothing
     (C5-E). A heterogeneous registry -- some tuples, some callables -- would make
     the catalog-completeness test special-case half its own subjects, and that
     test is the whole reason the shape is worth constraining."""
     del config  # this topic injects nothing
-    return (coherence, companions, staleness, terminal)
+    return (coherence, companions, staleness, terminal, baselines)

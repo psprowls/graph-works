@@ -52,7 +52,9 @@ VALID_STATUSES = frozenset({"answered", "assumed", "open", "superseded"})
 
 DecisionRefusal = Literal[
     "answer-required",
+    "note-required",
     "if-wrong-required",
+    "answer-unchanged",
     "status-disallowed",
     "transition-disallowed",
     "unknown-decision",
@@ -753,6 +755,134 @@ def plan_update(
     )
 
 
+def _one_line(text: str) -> str:
+    """Collapse whitespace so an Amended block never spans a blank line."""
+    return " ".join(text.split())
+
+
+def _amend_sections(prose: str) -> list[str]:
+    """Keep paragraph continuations with their label, including unknown labels."""
+    return [section.strip() for section in re.split(r"(?m)(?=^[ \t]*\*\*[^\n*]+:\*\*)", prose) if section.strip()]
+
+
+def _amend_value(sections: Sequence[str], label: str) -> str:
+    prefix = f"**{label}:**"
+    return "\n\n".join(section[len(prefix) :].strip() for section in sections if section.startswith(prefix))
+
+
+def _amend_prose(sections: Sequence[str], *, answer: str, rationale: str | None, amended: str) -> str:
+    """Replace complete labelled sections without changing other planner behavior."""
+    blocks = list(sections)
+    for label, value in (("Answer", answer), ("Rationale", rationale)):
+        if value is None:
+            continue
+        prefix = f"**{label}:**"
+        found = [index for index, block in enumerate(blocks) if block.startswith(prefix)]
+        if found:
+            first = found[0]
+            blocks[first] = f"{prefix} {value.strip()}"
+            blocks = [block for index, block in enumerate(blocks) if index == first or not block.startswith(prefix)]
+        else:
+            earlier = set(_PROSE_LABELS[: _PROSE_LABELS.index(label)])
+            insertion = max(
+                (index + 1 for index, block in enumerate(blocks) if _prose_label(block) in earlier), default=0
+            )
+            blocks.insert(insertion, f"{prefix} {value.strip()}")
+    return "\n\n".join([*blocks, amended])
+
+
+def plan_amend(
+    ledger: Path,
+    decision_id: str,
+    *,
+    answer: str,
+    note: str,
+    rationale: str | None,
+    affects: Sequence[str] | None,
+    on: date,
+    decided_by: str,
+) -> DecisionPlan:
+    """Plan refining an `answered` decision in place. Writes nothing.
+
+    The Answer block (and Rationale, when given) is replaced, and one
+    unlabelled `**Amended:**` block is appended carrying the date, actor, note
+    and previous answer. `Amended` is deliberately not a `_PROSE_LABELS`
+    member. Complete labelled sections keep earlier amendments verbatim; repeated
+    amends stack oldest first. id, status, `decided` and If-wrong are kept.
+    """
+    snapshot = LedgerSnapshot(_read_text(ledger))
+    parsed = parse(snapshot.text)
+    found = _find(parsed.entries, decision_id)
+    if found is None:
+        return _plan_refusal(
+            ledger,
+            snapshot,
+            parsed,
+            "unknown-decision",
+            f"no decision {decision_id!r} in this ledger",
+        )
+    entry, index = found
+    if entry.status == "superseded":
+        return _plan_refusal(
+            ledger,
+            snapshot,
+            parsed,
+            "superseded-decision",
+            f"{entry.id} is superseded; amend the entry that replaced it",
+        )
+    if entry.status != "answered":
+        return _plan_refusal(
+            ledger,
+            snapshot,
+            parsed,
+            "transition-disallowed",
+            f"{entry.id} has status {entry.status!r}; answer it with gw work decision answer",
+        )
+    if not answer.strip():
+        return _plan_refusal(ledger, snapshot, parsed, "answer-required", "answer must not be empty")
+    if not note.strip():
+        return _plan_refusal(ledger, snapshot, parsed, "note-required", "an amendment must say what changed")
+
+    sections = _amend_sections(entry.prose)
+    previous = _one_line(_amend_value(sections, "Answer"))
+    rationale_changed = rationale is not None and _one_line(rationale) != _one_line(_amend_value(sections, "Rationale"))
+    affects_changed = affects is not None and tuple(affects) != entry.affects
+    if _one_line(answer) == previous and not rationale_changed and not affects_changed:
+        return _plan_refusal(
+            ledger,
+            snapshot,
+            parsed,
+            "answer-unchanged",
+            f"{entry.id} already says this; nothing to amend",
+        )
+
+    amended = (
+        f"**Amended:** {decided_stamp(on, decided_by)} — {_one_line(note).rstrip('.')}. "
+        f"Previously: {previous or '(no answer recorded)'}"
+    )
+    prose = _amend_prose(sections, answer=answer, rationale=rationale, amended=amended)
+    final_affects = tuple(affects) if affects is not None else entry.affects
+    updated = replace(
+        entry,
+        affects=final_affects,
+        prose=prose,
+        _present_keys=(entry._present_keys - frozenset({"affects"})) | _present_keys_for(affects=final_affects),
+    )
+    after = list(parsed.entries)
+    after[index] = updated
+    return DecisionPlan(
+        ledger=ledger,
+        snapshot=snapshot,
+        before=tuple(parsed.entries),
+        after=tuple(after),
+        primary=updated,
+        superseded=None,
+        warnings=tuple(parsed.warnings),
+        refusal=None,
+        detail=f"amend {updated.id}",
+    )
+
+
 def plan_supersede(
     ledger: Path,
     old_id: str,
@@ -1151,6 +1281,7 @@ __all__ = [
     "merge_prose",
     "next_id",
     "parse",
+    "plan_amend",
     "plan_append",
     "plan_refusal",
     "plan_supersede",

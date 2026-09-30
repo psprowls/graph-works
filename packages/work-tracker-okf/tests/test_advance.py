@@ -776,3 +776,18 @@ def test_a_refusal_carries_no_trigger():
     plan = advance((), "work/nope", today=TODAY)
     assert plan.refusal == "unknown-path"
     assert plan.trigger is None
+
+
+def test_plan_reconcile_completes_in_place_and_requests_stamp():
+    item = make_item("a", type="Feature", phase="plan", effort="medium")
+    plan = advance((item,), item.path, today=TODAY, expected_phase="plan", stale_spec=("x",))
+    assert plan.refusal is None
+    assert plan.transition == Transition(phase="plan", stamp_baseline=True)
+    assert plan.stamp_baseline is True
+    assert plan.trigger == "complete"
+    assert _keys(plan) == ["updated"]
+
+
+def test_design_completion_requests_stamp():
+    item = make_item("a", type="Feature", phase="design", effort="medium")
+    assert advance((item,), item.path, today=TODAY).stamp_baseline is True

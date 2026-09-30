@@ -4,7 +4,17 @@ import pytest
 from okf_io import Bundle
 from work_helpers import load_written_items, write_item
 from work_tracker_okf.dependencies import DependencyEdge
-from work_tracker_okf.items import Stamp, WorkItem, is_commit_oid, item_index, load_items, unreadable_detail
+from work_tracker_okf.items import (
+    SpecBaseline,
+    Stamp,
+    WorkItem,
+    is_commit_oid,
+    item_index,
+    load_items,
+    spec_baseline_of,
+    unreadable_detail,
+)
+from work_tracker_okf.obligations import Obligation
 
 
 def test_projection_derives_containment_and_every_direct_child(path_native_bundle: Bundle) -> None:
@@ -112,6 +122,54 @@ def test_a_non_mapping_repo_stamps_is_a_projection_problem(tmp_path) -> None:
     assert item.invalid_optional_fields == ("repo_stamps",)
 
 
+def test_finish_obligations_project_in_order(tmp_path) -> None:
+    write_item(
+        tmp_path,
+        "work/feature-a",
+        _BASE + "finish_obligations:\n"
+        "  - text: Tag the release\n    origin: deferred\n    recorded: 2026-09-20\n"
+        "  - text: Check coverage\n    origin: coverage\n    recorded: 2026-09-21\n",
+    )
+    (item,) = load_written_items(tmp_path)
+    assert item.finish_obligations == (
+        Obligation("Tag the release", "deferred", "2026-09-20"),
+        Obligation("Check coverage", "coverage", "2026-09-21"),
+    )
+    assert "finish_obligations" not in item.invalid_optional_fields
+
+
+def test_malformed_finish_obligations_keep_good_entries_and_are_named(tmp_path) -> None:
+    write_item(
+        tmp_path,
+        "work/feature-a",
+        _BASE + "finish_obligations:\n"
+        "  - text: Tag the release\n    origin: deferred\n    recorded: 2026-09-20\n"
+        "  - text: bad\n    origin: someday\n    recorded: 2026-09-20\n",
+    )
+    (item,) = load_written_items(tmp_path)
+    assert item.finish_obligations == (Obligation("Tag the release", "deferred", "2026-09-20"),)
+    assert "finish_obligations" in item.invalid_optional_fields
+
+
+def test_a_mapping_finish_obligations_projects_empty_and_is_named(tmp_path) -> None:
+    write_item(tmp_path, "work/feature-a", _BASE + "finish_obligations:\n  text: x\n")
+    (item,) = load_written_items(tmp_path)
+    assert item.finish_obligations == ()
+    assert "finish_obligations" in item.invalid_optional_fields
+
+
+def test_explicit_null_finish_obligations_is_malformed_but_absence_is_valid(tmp_path) -> None:
+    write_item(tmp_path, "work/feature-a", _BASE + "finish_obligations:\n")
+    (item,) = load_written_items(tmp_path)
+    assert item.finish_obligations == ()
+    assert "finish_obligations" in item.invalid_optional_fields
+
+    write_item(tmp_path, "work/feature-a", _BASE)
+    (absent,) = load_written_items(tmp_path)
+    assert absent.finish_obligations == ()
+    assert "finish_obligations" not in absent.invalid_optional_fields
+
+
 SHA = "0123456789abcdef0123456789abcdef01234567"
 
 
@@ -155,3 +213,37 @@ def test_a_repo_stamp_with_a_bad_start_sha_is_malformed(tmp_path) -> None:
 def test_commit_oid_accepts_sha1_and_sha256_only() -> None:
     assert is_commit_oid(SHA) and is_commit_oid("a" * 64)
     assert not any(is_commit_oid(v) for v in ("a" * 39, "a" * 41, "A" * 40, None, 1))
+
+
+@pytest.mark.parametrize(
+    ("authored", "expected", "invalid"),
+    [
+        (None, None, False),
+        ({"code": "a" * 40, "workspace": "b" * 40}, SpecBaseline("a" * 40, "b" * 40), False),
+        ({"workspace": "b" * 40}, SpecBaseline(workspace="b" * 40), False),
+        ({"code": "a" * 64}, SpecBaseline(code="a" * 64), False),
+        ({}, SpecBaseline(), False),
+        ({"code": "abc123"}, None, True),
+        ({"code": "A" * 40}, None, True),
+        ({"code": "a" * 40, "extra": "b" * 40}, None, True),
+        ("5c3c4fcea", None, True),
+        (["a" * 40], None, True),
+        ({"code": None}, None, True),
+        ({"workspace": 42}, None, True),
+    ],
+)
+def test_spec_baseline_coercion(authored, expected, invalid) -> None:
+    baseline, malformed = spec_baseline_of(authored)
+    assert baseline == expected
+    assert malformed is invalid
+
+
+@pytest.mark.parametrize("malformed", [False, True])
+def test_spec_baseline_projects_from_page(tmp_path, malformed) -> None:
+    baseline = (
+        "spec_baseline: nope\n" if malformed else f"spec_baseline:\n  code: {'a' * 40}\n  workspace: {'b' * 40}\n"
+    )
+    write_item(tmp_path, "work/feature-baseline", "type: Feature\n" + baseline)
+    item = load_written_items(tmp_path)[0]
+    assert item.spec_baseline == (None if malformed else SpecBaseline("a" * 40, "b" * 40))
+    assert ("spec_baseline" in item.invalid_optional_fields) is malformed

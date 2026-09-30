@@ -33,6 +33,12 @@ from samples_work import (
     status,
 )
 from work_tracker_okf.decisions import Decision
+from work_tracker_okf.workflow import Transition
+
+
+def test_transition_projects_the_unresolved_baseline_request() -> None:
+    assert work._transition(Transition(phase="plan", stamp_baseline=True))["stamp_baseline"] is True
+    assert work._transition(Transition())["stamp_baseline"] is False
 
 
 def test_commit_projection() -> None:
@@ -403,6 +409,7 @@ def test_projection_helpers_cover_live_and_preview_shapes(tmp_path: Path) -> Non
         requires=("owner",),
         sync_plan_table=True,
         stamp_source="plan",
+        stamp_baseline=False,
     )
     assert work._transition(transition)["requires"] == ["owner"]
     assert work._finding(finding)["line"] == 7
@@ -1005,3 +1012,62 @@ def test_wait_payload_projects_pending_questions_and_null():
     assert work.wait_payload(replace(base, pending_questions=()))["pending_questions"] == []
     assert work.wait_payload(replace(base, pending_questions=None))["pending_questions"] is None
     assert work.wait_payload(replace(base, warnings=("w",)))["warnings"] == ["w"]
+
+
+def test_next_payload_projects_carried_context_in_registry_order() -> None:
+    payload = work.next_payload(next_result(full=True), bundle_root=BUNDLE)
+    frame = payload["carried_context"]
+    assert list(frame["slots"]) == ["landed_since", "finish_obligations"]
+    assert frame == {
+        "slots": {
+            "landed_since": {
+                "title": "Landed since your design",
+                "lines": ["- a landed"],
+                "data": {"shas": ["abc"]},
+                "warnings": [],
+            },
+            "finish_obligations": {
+                "title": "Finish obligations",
+                "lines": [],
+                "data": {},
+                "warnings": ["finish_obligations: unavailable: x"],
+            },
+        },
+        "warnings": ["frame note"],
+    }
+    json.dumps(payload)
+
+
+def test_next_payload_always_carries_the_empty_frame() -> None:
+    payload = work.next_payload(next_result(full=False), bundle_root=BUNDLE)
+    assert payload["carried_context"] == {"slots": {}, "warnings": []}
+    assert type(payload["carried_context"]["slots"]) is dict
+    json.dumps(payload)
+
+
+def test_obligation_payload_shape() -> None:
+    import json
+
+    from graph_works_core.work.obligations import ObligationRecord
+    from graph_works_wire.work import obligation_payload
+    from work_tracker_okf.obligations import Obligation, ObligationPlan
+
+    added = Obligation("Tag the release", "deferred", "2026-09-29")
+    payload = obligation_payload(ObligationRecord(ObligationPlan("work/feature-a", (), (added,))))
+    assert payload == {
+        "path": "work/feature-a",
+        "obligations": [{"text": "Tag the release", "origin": "deferred", "recorded": "2026-09-29"}],
+        "before": [],
+        "changed": True,
+        "applied": False,
+        "rolled_back": False,
+        "failures": [],
+        "commit": None,
+        "warnings": [],
+        "refusal": None,
+    }
+    json.dumps(payload)
+
+    refused = obligation_payload(ObligationRecord(ObligationPlan("work/feature-a", (), (), "empty-text", "one line")))
+    assert refused["refusal"] == {"reason": "empty-text", "detail": "one line"}
+    assert refused["changed"] is False

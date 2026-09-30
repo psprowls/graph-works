@@ -1,6 +1,6 @@
 ---
 name: reconciling-spec
-description: Use when a design spec already exists for a work item and the item is entering or re-entering the design stage — updates the spec against whatever has landed since it was written instead of re-brainstorming from scratch, then advances, or holds when the spec and landed code genuinely contradict each other.
+description: "Use when a design spec already exists for a work item and the item is entering or re-entering the design stage, or is at `phase: plan` because a sibling landed since its spec baseline with overlapping `affects` — updates the spec against whatever has landed since it was written instead of re-brainstorming from scratch, then advances, or holds when the spec and landed code genuinely contradict each other."
 ---
 
 # Reconciling a Spec Against What Landed
@@ -24,6 +24,8 @@ a contradiction it could not resolve.
    `landed_siblings`, `commits_since`, `cited_decisions`, `contradictions`,
    `has_open_decision`, `diff_command`, `warnings`. Do not re-derive any of it
    by hand — it is mechanical precisely so your judgment goes elsewhere.
+
+   `reconcile-context` anchors on `spec_baseline.code` first (`anchor_source: spec-baseline`), then the spec's git history, the last `## Reconciled` head, then the `**Baseline commit:**` line.
 
    If the `reconcile-context` call itself errors (non-zero exit — an unknown
    path, a missing workspace), report the error verbatim and stop: do not
@@ -112,8 +114,9 @@ a contradiction it could not resolve.
      every phase, and `gw work advance` refuses a held item. That call is refused
      `blocked` with
      ``open decision D-nnn (question) holds <work-path>: answer via `gw work decision answer <work-path> D-nnn --answer ...`, then re-run``
-     (route reason: `open decision D-nnn holds this item (question at design)`)
-     instead of stamping `plan`. The item stays at `phase: design` until a human
+     (route reason names the entry phase: `open decision D-nnn holds this item (question at design)`
+     for design, or `open decision D-nnn holds this item (question at plan)` for plan)
+     instead of completing the stage. The item stays at its entry phase until a human
      answers it (`gw work decision answer <work-path> D-nnn --answer ...`), so a
      hold costs one human touch, not a burned worker slot every auto-drive cycle.
 
@@ -174,11 +177,13 @@ digraph reconcile {
 This skill never chains into another skill, and it never calls `gw work
 advance` itself, in either path. The workflow skill that dispatched it runs
 `gw work advance <work-path>` unconditionally in its own Step 5: for the
-ordinary-update path (4a) that call lands the item at `phase: plan`; for a
-hold (4b), the `open` decision just filed makes that same call fail, leaving
+design-phase ordinary-update path (4a) that call lands the item at `phase: plan`; for a
+design-phase hold (4b), the `open` decision just filed makes that same call fail, leaving
 the item at `phase: design`. `writing-plans` is dispatched on the NEXT `gw
 work next` call, by the routing table's own `design → plan` transition — same
 as `brainstorming`. Do not invoke it here.
+
+**Plan-phase entry.** When `gw work next` dispatches this skill at `phase: plan`, a sibling landed since the item's `spec_baseline` with overlapping `affects`. The workflow's Step 5 advance keeps `phase: plan` and re-stamps `spec_baseline` to the reconciled head, so the same siblings no longer count; `writing-plans` dispatches on the next `gw work next`. A hold refuses that advance exactly as at design, and the item reconciles again after the answer. The brief's **Landed since your design** block is the same evidence `reconcile-context` returns.
 
 ## Escape hatch
 

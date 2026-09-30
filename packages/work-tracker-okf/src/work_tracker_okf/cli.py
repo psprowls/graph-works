@@ -119,6 +119,7 @@ def _transition_json(transition: Transition | None) -> dict[str, Any] | None:
             "requires": list(transition.requires),
             "sync_plan_table": transition.sync_plan_table,
             "stamp_source": transition.stamp_source,
+            "stamp_baseline": transition.stamp_baseline,
         }
     )
 
@@ -267,6 +268,8 @@ def next_stage(
     item graph, so this command takes no `--today`.
     """
     items = load_items(_bundle(root))
+    # Passes no `stale_spec`: this package runs no git, so the plan-stage
+    # reconcile reroute is only visible through `gw work next`.
     state = state_for(items, path)
     if state is None:
         typer.echo(f"unknown path {path!r}: no item page at that canonical path", err=True)

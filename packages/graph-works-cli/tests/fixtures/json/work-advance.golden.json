@@ -9,7 +9,8 @@
     "document_status": "stable",
     "requires": [],
     "sync_plan_table": false,
-    "stamp_source": "design"
+    "stamp_source": "design",
+    "stamp_baseline": true
   },
   "changes": {
     "phase": [

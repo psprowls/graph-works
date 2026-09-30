@@ -27,6 +27,18 @@ def test_next_is_the_cli_twin_with_null_normalized(client: TestClient, workspace
     twin = cli_json(workspace, "work", "next", path)
     assert isinstance(twin, dict)
     assert body["guidance"] == [] and body["guidance_warnings"] == [] and body["guidance_file"] is None
+    assert body["carried_context"] == twin["carried_context"]
+    assert body["carried_context"] == {
+        "slots": {
+            "landed_since": {
+                "title": "Landed since your design",
+                "lines": ["No spec baseline recorded; landed-since unavailable."],
+                "data": {"code_baseline": None, "workspace_baseline": None},
+                "warnings": [],
+            }
+        },
+        "warnings": [],
+    }
     assert body == {**twin, "normalized": None, "guidance": [], "guidance_warnings": [], "guidance_file": None}
 
 

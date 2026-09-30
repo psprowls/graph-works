@@ -1580,7 +1580,10 @@ report worth writing.
      already records the settled dispatch, and §2.6's diff re-proposes the key
      once the phase moves back. If the item is not at `finish`, report that
      plainly and do not advance.
-   - **Accept anyway**: continue; the coverage file stands as the record.
+   - **Accept anyway**: continue; the coverage file stands as the record. The
+     advance already recorded each unchecked line as an `origin: coverage`
+     entry in the item's `finish_obligations`, and the finish question lists
+     them; the coordinator writes nothing.
 
 What this does and does not claim: it makes an omission visible to a human at
 the moment the worker settles, and gates nothing. It cannot repair a model

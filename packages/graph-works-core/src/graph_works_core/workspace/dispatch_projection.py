@@ -61,6 +61,26 @@ def build_dispatch_projection(layout: WorkspaceLayout) -> dict[str, object]:
             {"match": dict(rule.match), "fields": dict(rule.fields), "origin": asdict(rule.origin)}
             for rule in config.rules
         ],
+        "path": [
+            {
+                "name": layered.rule.name,
+                "match": {
+                    key: list(value) if isinstance(value, tuple) else value for key, value in layered.rule.match.items()
+                },
+                "stages": list(layered.rule.stages),
+                "origin": asdict(layered.origin),
+            }
+            for layered in config.path_rules
+        ],
+        "artifacts": {
+            stage: {
+                "file": artifact.file,
+                "source": artifact.source,
+                "required": artifact.required,
+                "origin": artifact.origin,
+            }
+            for stage, artifact in config.artifacts.items()
+        },
     }
     check_dispatch_inputs(before)
     check_dispatch_inputs(config.source_fingerprints)

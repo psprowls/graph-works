@@ -1,15 +1,13 @@
-"""The dispatch table: packaged default, workspace override, total over Variant."""
+"""The dispatch table: packaged defaults and workspace overrides by attributes."""
 
 from __future__ import annotations
 
 import re
-import typing
 
 import pytest
 from graph_works_core.workspace import pipeline
 from graph_works_core.workspace.pipeline import PACKAGED_PIPELINE, RELAY_TAIL_SEED, WORKSPACE_COMMIT_TAIL
 from subagents_io.dispatch import DISPATCH_MODES
-from work_tracker_okf.workflow import Variant
 
 
 def test_workspace_commit_tail_text() -> None:
@@ -19,11 +17,12 @@ def test_workspace_commit_tail_text() -> None:
 
 
 def test_every_packaged_tail_ends_with_the_commit_tail() -> None:
-    for variant, entry in PACKAGED_PIPELINE.items():
-        if variant == "branch":
+    for entry in PACKAGED_PIPELINE:
+        name = entry.name
+        if name == "finish":
             assert entry.prompt_tail is None  # the relay tail is workspace-owned (RELAY_TAIL_SEED)
             continue
-        assert entry.prompt_tail is not None and entry.prompt_tail.endswith(WORKSPACE_COMMIT_TAIL), variant
+        assert entry.prompt_tail is not None and entry.prompt_tail.endswith(WORKSPACE_COMMIT_TAIL), name
 
 
 def test_relay_seed_ends_with_the_commit_tail() -> None:
@@ -31,37 +30,55 @@ def test_relay_seed_ends_with_the_commit_tail() -> None:
     assert RELAY_TAIL_SEED.endswith(WORKSPACE_COMMIT_TAIL)
 
 
-def test_the_packaged_table_is_total_over_variant():
-    # This is what makes 3.2's "an override cannot leave a hole" true rather
-    # than hoped: a variant added in work-tracker-okf fails here until mapped.
-    assert set(pipeline.PACKAGED_PIPELINE) == set(typing.get_args(Variant))
+def test_the_packaged_table_has_the_ten_rules():
+    assert [rule.name for rule in PACKAGED_PIPELINE] == [
+        "design",
+        "design-bug",
+        "design-parent",
+        "design-reconcile",
+        "plan",
+        "plan-parent",
+        "plan-reconcile",
+        "execute",
+        "execute-planned",
+        "finish",
+    ]
 
 
 def test_every_packaged_mode_is_a_dispatch_mode():
-    assert {entry.mode for entry in pipeline.PACKAGED_PIPELINE.values()} <= DISPATCH_MODES
+    assert {entry.mode for entry in pipeline.PACKAGED_PIPELINE} <= DISPATCH_MODES
 
 
 def test_every_packaged_skill_is_plugin_qualified():
     # The name shape is load-bearing: the workflow skill invokes `action.skill`
     # verbatim, so a bare name here resolves to whichever plugin happens to
-    # claim it. This is the regression guard for a ninth variant, or for a row
+    # claim it. This is the regression guard for a new rule, or for a row
     # edited back to a bare name. Enforcement at dispatch time is a later
     # child's seam; this is the value-side half of the same property.
-    for variant, entry in pipeline.PACKAGED_PIPELINE.items():
+    for entry in pipeline.PACKAGED_PIPELINE:
+        name = entry.name
         plugin, sep, skill = entry.skill.partition(":")
-        assert sep == ":", f"{variant}: packaged skill {entry.skill!r} is not <plugin>:<skill>"
-        assert plugin, f"{variant}: packaged skill {entry.skill!r} has an empty plugin"
-        assert skill, f"{variant}: packaged skill {entry.skill!r} has an empty skill"
-        assert ":" not in skill, f"{variant}: packaged skill {entry.skill!r} is multiply qualified"
+        assert sep == ":", f"{name}: packaged skill {entry.skill!r} is not <plugin>:<skill>"
+        assert plugin, f"{name}: packaged skill {entry.skill!r} has an empty plugin"
+        assert skill, f"{name}: packaged skill {entry.skill!r} has an empty skill"
+        assert ":" not in skill, f"{name}: packaged skill {entry.skill!r} is multiply qualified"
 
 
 def test_packaged_only_resolution_needs_no_layout():
-    table = pipeline.PACKAGED_PIPELINE
-    assert table["exploration"] == pipeline.PipelineEntry(
-        skill="superpowers:brainstorming", mode="attend", prompt_tail=pipeline.ATTEND_TAIL
+    table = {rule.name: rule for rule in pipeline.PACKAGED_PIPELINE}
+    assert table["design"] == pipeline.PackagedRule(
+        name="design",
+        match={"stage": "design"},
+        skill="superpowers:brainstorming",
+        mode="attend",
+        prompt_tail=pipeline.ATTEND_TAIL,
     )
-    assert table["branch"] == pipeline.PipelineEntry(
-        skill="superpowers:finishing-a-development-branch", mode="relay", prompt_tail=None
+    assert table["finish"] == pipeline.PackagedRule(
+        name="finish",
+        match={"stage": "finish"},
+        skill="superpowers:finishing-a-development-branch",
+        mode="relay",
+        prompt_tail=None,
     )
 
 
@@ -69,7 +86,7 @@ def test_the_epic_design_entry_is_attend_with_the_neutral_tail():
     """An epic design is a human-in-the-room stage, same as `exploration`. The
     skill name is asserted by suffix so this test survives child 5's
     fully-qualified rename without becoming a second place to edit."""
-    entry = pipeline.PACKAGED_PIPELINE["epic-design"]
+    entry = next(rule for rule in PACKAGED_PIPELINE if rule.name == "design-parent")
     assert entry.skill.endswith("epic-design")
     assert entry.mode == "attend"
     assert entry.prompt_tail == pipeline.ATTEND_TAIL
@@ -94,7 +111,7 @@ def test_the_relay_seed_names_no_vendor():
 def test_the_packaged_branch_entry_stays_untailed():
     # The seed is a value the *workspace* owns. Shipping it in the packaged
     # table would make the `relay-untailed` blocker unreachable.
-    assert pipeline.PACKAGED_PIPELINE["branch"].prompt_tail is None
+    assert next(rule for rule in PACKAGED_PIPELINE if rule.name == "finish").prompt_tail is None
 
 
 @pytest.mark.parametrize("name", ["brainstorming", "graph-works:brainstorming", "a:b"])
@@ -122,16 +139,24 @@ def test_every_packaged_skill_name_is_well_formed():
     # `PACKAGED_PIPELINE` is a module constant, deliberately *not* checked at
     # runtime -- a bad packaged value should fail the suite, not every command
     # for every user. Same posture as the totality test above.
-    assert all(pipeline.is_valid_skill_name(entry.skill) for entry in pipeline.PACKAGED_PIPELINE.values())
+    assert all(pipeline.is_valid_skill_name(entry.skill) for entry in pipeline.PACKAGED_PIPELINE)
 
 
-def test_both_execute_variants_carry_the_coverage_obligation():
-    table = pipeline.PACKAGED_PIPELINE
-    assert table["planned"] == pipeline.PipelineEntry(
-        skill="superpowers:subagent-driven-development", mode="autonomous", prompt_tail=pipeline.EXECUTE_TAIL
+def test_both_execute_rules_carry_the_coverage_obligation():
+    table = {rule.name: rule for rule in pipeline.PACKAGED_PIPELINE}
+    assert table["execute-planned"] == pipeline.PackagedRule(
+        name="execute-planned",
+        match={"stage": "execute", "has_plan": True},
+        skill="superpowers:subagent-driven-development",
+        mode="autonomous",
+        prompt_tail=pipeline.EXECUTE_TAIL,
     )
-    assert table["unplanned"] == pipeline.PipelineEntry(
-        skill="superpowers:test-driven-development", mode="autonomous", prompt_tail=pipeline.EXECUTE_TAIL
+    assert table["execute"] == pipeline.PackagedRule(
+        name="execute",
+        match={"stage": "execute"},
+        skill="superpowers:test-driven-development",
+        mode="autonomous",
+        prompt_tail=pipeline.EXECUTE_TAIL,
     )
 
 
@@ -139,7 +164,8 @@ def test_the_execute_tail_names_the_artifact_and_its_placeholders():
     # The tail is substituted by `_prompt` with `str.replace` over a fixed
     # placeholder set; a tail naming a placeholder outside that set would ship
     # a literal brace to a worker.
-    assert "03-execute-coverage.md" in pipeline.EXECUTE_TAIL
+    assert "references/{execute_artifact}" in pipeline.EXECUTE_TAIL
+    assert "03-execute-coverage.md" not in pipeline.EXECUTE_TAIL
     assert "{workspace}" in pipeline.EXECUTE_TAIL
     assert "{path}" in pipeline.EXECUTE_TAIL
     assert "## Acceptance" in pipeline.EXECUTE_TAIL
@@ -209,7 +235,7 @@ def test_the_grace_period_pointer_names_the_plugin_skill_not_a_repo_path():
 def test_no_packaged_tail_names_an_unsubstituted_placeholder():
     # `_prompt`'s tail substitution is a literal `str.replace` over exactly
     # this set; a tail naming anything else ships a literal brace to a worker.
-    allowed = {"{path}", "{key}", "{phase}", "{workspace}", "{merge_target}"}
+    allowed = {"{path}", "{key}", "{phase}", "{workspace}", "{merge_target}", "{execute_artifact}"}
     for tail in (pipeline.ATTEND_TAIL, pipeline.EXECUTE_TAIL, pipeline.RELAY_TAIL_SEED):
         assert set(re.findall(r"\{[^}]*\}", tail)) <= allowed
 

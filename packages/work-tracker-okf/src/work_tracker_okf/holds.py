@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from work_tracker_okf import checkpoints
 from work_tracker_okf.decisions import DecisionRefusal
 from work_tracker_okf.items import WorkItem
+from work_tracker_okf.pipeline import DONE
 from work_tracker_okf.vocabulary import TERMINAL_STATUSES
 
 
@@ -39,7 +40,7 @@ def check_hold(
         return HoldRefusal("hold-status", f"a hold must be filed open, not {status!r}")
     if tuple(affects) != (item.path,):
         return HoldRefusal("hold-affects", f"a hold names exactly its own item {item.path!r}; got {list(affects)}")
-    if item.work_status in TERMINAL_STATUSES or item.phase == "done":
+    if item.work_status in TERMINAL_STATUSES or item.phase == DONE:
         return HoldRefusal(
             "hold-terminal", f"{item.path} is {item.work_status} at phase {item.phase!r}; nothing to hold"
         )

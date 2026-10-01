@@ -17,7 +17,7 @@ and auto-drive disagreeing about the same item is exactly the failure that
 reuse prevents, and `test_orchestrate_plan.py` pins the agreement as a property.
 
 Nothing Orca-shaped appears in this module. The four prompt lines are
-vendor-neutral; the one place a vendor command may appear is a variant's
+vendor-neutral; the one place a vendor command may appear is a rule's
 `prompt_tail`, which lives in workspace configuration (`pipeline.py`).
 """
 
@@ -40,14 +40,14 @@ from work_tracker_okf.asks import plan_checkpoints
 from work_tracker_okf.decisions import HoldFact
 from work_tracker_okf.hierarchy import PICK_ORDER, active_nonterminal_descendants, child_gated, decision_owner
 from work_tracker_okf.items import IGNORE, WorkItem, load_items
+from work_tracker_okf.pipeline import PACKAGED_DEFINITION, PipelineDefinition, dispatch_phases, read_only_phases
 from work_tracker_okf.placement import CODE_PHASES
 from work_tracker_okf.vocabulary import (
-    PHASES,
     PLAN_SOURCE_ID,
     SLUG_PREFIXES,
     TERMINAL_STATUSES,
 )
-from work_tracker_okf.workflow import VARIANTS_BY_STAGE, Dispatch, RouteResult, Stage, route, state_for
+from work_tracker_okf.workflow import BlockerKind, Dispatch, RouteResult, Stage, route, state_for
 
 from graph_works_core.orchestrate.anchors import (
     Anchor,
@@ -80,7 +80,7 @@ from graph_works_core.workspace.dispatch import (
     dispatch_attributes,
     resolve_dispatch,
 )
-from graph_works_core.workspace.dispatch_artifacts import missing_design_source
+from graph_works_core.workspace.dispatch_artifacts import routing_items
 from graph_works_core.workspace.dispatch_config import load_dispatch_config
 from graph_works_core.workspace.errors import WorkspaceError
 from graph_works_core.workspace.finish import FinishPlan, FinishTarget, resolve_finish_targets
@@ -105,8 +105,8 @@ WALK_DEPTH_CAP = 10_000
 #: is already blocked by the router's own validation.
 _UNKNOWN_TYPE_SEGMENT = "work"
 
-#: The phases a stage can be dispatched at. `done` is terminal.
-DISPATCH_PHASES: frozenset[str] = frozenset(PHASES - {"done"})
+#: The phases a stage can be dispatched at: every stage-table row. `done` is terminal.
+DISPATCH_PHASES: frozenset[str] = dispatch_phases()
 OWNER_TYPES: frozenset[str] = frozenset({"Epic", "Release"})
 
 #: The plugin skill a dispatched worker runs. Named rather than inlined so the
@@ -143,7 +143,8 @@ BLOCKED_KINDS: frozenset[str] = frozenset(
 class PlannedAdvance:
     """A node with nothing to dispatch but a transition the coordinator applies
     itself: `mode == "advance"` for a satisfied completion (an epic whose
-    children are all terminal), `mode == "return"` for a repair (an epic at
+    children are all terminal), `mode == "repair"` for an off-path phase,
+    `mode == "return"` for a backwards repair (an epic at
     `finish` reopened by a child filed afterwards) -- never a transition
     `advance()` would refuse with `children-open`."""
 
@@ -151,7 +152,7 @@ class PlannedAdvance:
     reason: str
     worktree: str | None = None
     branch: str | None = None
-    mode: Literal["advance", "return"] = "advance"
+    mode: Literal["advance", "return", "repair"] = "advance"
 
 
 @dataclass(frozen=True, slots=True)
@@ -256,7 +257,7 @@ def branch_name(path: str, type_: str) -> str:
     return f"{segment}/{_stable_stem(path, type_)}"
 
 
-#: Labels for dispatch variants sharing a phase, mapped back to that phase.
+#: Labels for dispatches sharing a phase, mapped back to that phase.
 SESSION_LABELS: Mapping[str, str] = MappingProxyType({"reconcile": "plan"})
 
 
@@ -271,14 +272,14 @@ def session_name(path: str, type_: str, phase: str, *, label: str | None = None)
     visibly the same work. The kind lives in the branch segment; the phase
     lives here. Neither repeats the other.
 
-    `label` replaces the phase head for variants sharing the same phase.
+    `label` replaces the phase head for dispatches sharing the same phase.
 
     Capped at `SESSION_NAME_MAX`. When the cap bites it is the *word* part
     that is truncated and the eight-hex tail that survives: the tail is the
     only thing making two same-basename siblings distinguishable, so
     trimming it would trade away exactly the property it exists to provide.
     """
-    # A label distinguishes variants that run at the same phase.
+    # A label distinguishes dispatches that run at the same phase.
     stem = _stable_stem(path, type_)
     head = f"gw-{label or phase}-"
     budget = SESSION_NAME_MAX - len(head)
@@ -353,16 +354,31 @@ def _fork_branch(path: str, type_: str, *, base: str, phase: str) -> str:
     return f"{derived}-{phase}" if derived == base else derived
 
 
-def _classify(reason: str) -> str:
-    if reason.startswith("blocked on dependencies"):
-        return "deps"
-    if reason.startswith("effort required"):
-        return "effort-required"
-    if reason.startswith("open decision"):
-        return "decisions"
-    if "never dispatches" in reason or "human-owned" in reason:
-        return "human"
-    return "invalid"
+#: Every route blocker kind maps into orchestrate's closed BLOCKED_KINDS.
+#: A totality test makes new BlockerKind members require a classification.
+BLOCKER_KIND_TO_BLOCKED: Mapping[BlockerKind, str] = MappingProxyType(
+    {
+        "dependencies": "deps",
+        "effort-required": "effort-required",
+        "hold": "decisions",
+        "terminal": "human",
+        "attribute-required": "human",
+        "invalid": "invalid",
+        "invalid-entry": "invalid",
+        "done": "invalid",
+        "no-children": "invalid",
+        "waiting-on-children": "invalid",
+        "phase-off-path": "invalid",
+        "path-invalid": "invalid",
+        # Appended by stage_advance, never seen by _frontier; here for totality.
+        "finish-incomplete": "invalid",
+    }
+)
+
+
+def _classify(kind: BlockerKind | None) -> str:
+    """Classify a blocked route; absent blocker detail is invalid."""
+    return "invalid" if kind is None else BLOCKER_KIND_TO_BLOCKED[kind]
 
 
 def _children_of(items: Sequence[WorkItem]) -> dict[str, list[WorkItem]]:
@@ -377,6 +393,7 @@ def _frontier(
     items: Sequence[WorkItem],
     root: str,
     *,
+    definition: PipelineDefinition,
     holds: Mapping[str, HoldFact] = MappingProxyType({}),
     stale: Mapping[str, tuple[str, ...]] = MappingProxyType({}),
 ) -> tuple[list[tuple[WorkItem, RouteResult]], list[PlannedAdvance], list[BlockedItem]]:
@@ -422,8 +439,11 @@ def _frontier(
         state = state_for(items, path, hold=holds.get(path), stale_spec=stale.get(path, ()))
         if state is None:  # pragma: no cover -- `path` came out of `by_path`
             continue
-        result = route(state)
-        if result.repair is not None:
+        result = route(state, definition=definition)
+        if result.repair is not None and tuple(b.kind for b in result.blockers) == ("phase-off-path",):
+            advances.append(PlannedAdvance(path=path, reason=result.reason, mode="repair"))
+            continue
+        if result.repair is not None and result.repair == result.on_return:
             advances.append(PlannedAdvance(path=path, reason=result.reason, mode="return"))
             continue
         if child_gated(items, node):
@@ -447,9 +467,22 @@ def _frontier(
         elif result.on_complete is not None and not result.blockers:
             advances.append(PlannedAdvance(path=path, reason=result.reason))
         else:
-            reason = result.blockers[0] if result.blockers else result.reason
-            blocked.append(BlockedItem(path=path, kind=_classify(reason), reason=reason))
+            first = result.blockers[0] if result.blockers else None
+            reason = first.message if first is not None else result.reason
+            blocked.append(BlockedItem(path=path, kind=_classify(None if first is None else first.kind), reason=reason))
     return candidates, advances, blocked
+
+
+def _session_label(result: RouteResult, stale_spec: tuple[str, ...]) -> str | None:
+    """Plan-stage reconcile keeps its existing session name."""
+    return (
+        "reconcile"
+        if result.dispatch == Dispatch("plan")
+        and stale_spec
+        and result.on_complete is not None
+        and result.on_complete.phase == "plan"
+        else None
+    )
 
 
 def _sorted(
@@ -578,12 +611,11 @@ def _adopt(item: WorkItem, *, inventory: Mapping[str, str]) -> tuple[str, str] |
 #: The phases whose stages write only into the vault. A stage in this set
 #: gets READER_ACTION and cannot produce a commit or acquire the placement stamp that
 #: decides where later commits land -- the governing invariant of this
-#: module's placement policy. Deliberately spelled out here rather than
-#: imported as the complement of `stage_advance.RESULTS_PHASES`: the two
-#: halves of `orchestrate` share no module-level symbol by design (D-001),
-#: and `test_the_read_only_and_results_phases_are_complements` pins them
-#: against each other instead.
-READ_ONLY_PHASES: frozenset[str] = frozenset({"design", "plan"})
+#: module's placement policy. Bound to the stage table's `read_only` column;
+#: `stage_advance.RESULTS_PHASES` reads the `results` column of the same table,
+#: so the two halves of `orchestrate` still share no module-level symbol (D-001)
+#: and `test_the_read_only_and_results_phases_are_complements` pins them.
+READ_ONLY_PHASES: frozenset[str] = read_only_phases()
 
 
 #: A dedicated checkout detached by the launcher at the observed committed tip.
@@ -1010,12 +1042,14 @@ def _prompt(
     merge_target: str,
     tail: str | None,
     mode: str,
+    execute_artifact: str,
     reader: tuple[str, str] | None = None,
     content_root: WorkspacePlacement | None = None,
 ) -> str:
     """Five vendor-neutral lines, the ask line off attend, the tail, reader baseline, then placement.
 
     The tail is substituted with `str.replace` over a fixed placeholder set
+    (`path`, `key`, `phase`, `workspace`, `merge_target`, `execute_artifact`)
     rather than `str.format`: a tail is workspace-authored text that may
     legitimately contain braces, and a formatting call that can raise on user
     config is a runtime failure where a literal is harmless.
@@ -1046,6 +1080,7 @@ def _prompt(
             ("{phase}", phase),
             ("{workspace}", workspace),
             ("{merge_target}", merge_target),
+            ("{execute_artifact}", execute_artifact),
         ):
             tail = tail.replace(placeholder, value)
         lines.append(tail)
@@ -1100,12 +1135,11 @@ def _live_is_attend(
         if state is None:
             raise WorkspaceError(f"no route state for {item.path!r}")
         stage = cast(Stage, live_phase)
-        for variant in VARIANTS_BY_STAGE[stage]:
-            current = dispatch_attributes(state, Dispatch(stage, variant))
-            for has_spec, has_plan in itertools.product((False, True), repeat=2):
-                attributes = {**current, "has_spec": has_spec, "has_plan": has_plan}
-                if resolve_dispatch(attributes, rules=rules).profile.mode == "attend":
-                    return True
+        current = dispatch_attributes(state, Dispatch(stage))
+        for has_spec, has_plan, spec_stale in itertools.product((False, True), repeat=3):
+            attributes = {**current, "has_spec": has_spec, "has_plan": has_plan, "spec_stale": spec_stale}
+            if resolve_dispatch(attributes, rules=rules).profile.mode == "attend":
+                return True
         return False
     except WorkspaceError:  # DispatchProfileError is a WorkspaceError
         warnings.append(f"live key {key}: dispatch profile unresolvable; counted against max_attend")
@@ -1117,6 +1151,7 @@ def plan(
     root: str,
     *,
     dispatch_rules: tuple[DispatchRule, ...],
+    definition: PipelineDefinition = PACKAGED_DEFINITION,
     max_parallel: int,
     max_attend: int = 1,
     supervise_merges: bool = False,
@@ -1142,6 +1177,9 @@ def plan(
     checkpoints: Mapping[str, HumanCheckpoints] = MappingProxyType({}),
 ) -> OrchestratePlan:
     """The whole dispatch plan for *root*'s subtree. Mutates nothing, reads nothing.
+
+    `definition` is the pipeline definition every node routes with;
+    `run_orchestrate` passes the workspace's.
 
     `holds` maps every canonical path currently named in an *open* decision to
     its lowest hold (resolved by `run_orchestrate` from the decision owner's
@@ -1222,10 +1260,10 @@ def plan(
 
     `max_attend` is the separate pool for dispatches whose resolved profile
     has `mode == "attend"`; `max_parallel` covers every other mode. A live
-    key is attend-classified when any variant of its stage resolves to
+    key is attend-classified when any rule for its stage resolves to
     `attend` against the item's current non-artifact attributes and either
-    value of both artifact flags. This is conservative because a live key
-    retains neither its launched variant nor the artifact flags at launch;
+    value of the artifact and staleness flags. This is conservative because a live key
+    retains neither its launched rule nor the artifact flags at launch;
     writing a spec or plan may change both during a run. An unresolvable
     live profile counts as attend, with a warning.
     """
@@ -1264,7 +1302,7 @@ def plan(
             attend_slots_free=0,
         )
 
-    candidates, advances, blocked = _frontier(items, root, holds=holds, stale=stale)
+    candidates, advances, blocked = _frontier(items, root, definition=definition, holds=holds, stale=stale)
     candidates = _sorted(candidates, dependent_counts(items, root))
 
     # `live_worktree_owners` stays an owner map for `_resolve_worktree`'s
@@ -1388,7 +1426,8 @@ def plan(
     # recorded from observation and left intact by an advance that carries no pair.
     if epic_worktree_path is not None:
         advances = [
-            replace(a, worktree=epic_worktree_path, branch=epic_branch) if a.path == root else a for a in advances
+            replace(a, worktree=epic_worktree_path, branch=epic_branch) if a.path == root and a.mode != "repair" else a
+            for a in advances
         ]
 
     # One ordered acceptance loop. Every reservation -- affects, the epic
@@ -1456,6 +1495,7 @@ def plan(
                     workspace=workspace,
                     merge_target=merge_target,
                     tail=entry.prompt_tail,
+                    execute_artifact=definition.artifacts["execute"].file,
                     mode=entry.mode,
                     reader=reader,
                     content_root=content_root,
@@ -1557,10 +1597,9 @@ def plan(
         # Ahead of `_resolve_worktree` deliberately: an item that cannot
         # dispatch should not claim the epic worktree slot or add to
         # `accepted_worktrees` on its way out. Keyed on `mode`, not on the
-        # `branch` variant -- a workspace may set any variant to `relay`, and
+        # `finish` stage -- a workspace may set any stage to `relay`, and
         # mode is the property that means "no human is in the room but a
         # decision is needed".
-        variant = result.dispatch.variant
         state = state_for(items, item.path, hold=holds.get(item.path), stale_spec=stale.get(item.path, ()))
         assert state is not None
         try:
@@ -1570,7 +1609,10 @@ def plan(
                 BlockedItem(
                     path=item.path,
                     kind=exc.kind,
-                    reason=f"dispatch rules for variant {variant!r}: {exc}; check the shared/local dispatch file",
+                    reason=(
+                        f"dispatch rules for stage {result.dispatch.stage!r}: {exc}; "
+                        "check the shared/local dispatch file"
+                    ),
                 )
             )
             continue
@@ -1703,7 +1745,7 @@ def plan(
                 reader_action,
                 merge_target,
                 item_repo,
-                label="reconcile" if result.dispatch == Dispatch("plan", "reconcile") else None,
+                label=_session_label(result, stale.get(item.path, ())),
                 reader=(source[1], reader_action.start_sha),
                 content_root=content_root,
             )
@@ -1925,7 +1967,7 @@ def plan(
             action,
             merge_target,
             item_repo,
-            label="reconcile" if result.dispatch == Dispatch("plan", "reconcile") else None,
+            label=_session_label(result, stale.get(item.path, ())),
             auto_merge=auto_merge,
             targets=targets,
             claims=claims,
@@ -2280,11 +2322,8 @@ def run_orchestrate(
     docstring; this shell resolves no backend itself; that is a caller's job.
     """
     bundle = load_bundle(layout.bundle_dir, ignore=IGNORE)
-    items = tuple(
-        replace(item, has_design_artifact=True) if missing_design_source(bundle.root, item) is not None else item
-        for item in load_items(bundle)
-    )
     config = load_dispatch_config(layout)
+    items = routing_items(bundle.root, load_items(bundle), definition=config.definition)
     # Checked, not coerced. A silent `2` from a mistyped `max_parallel` is
     # indistinguishable from a deliberate `2`. Dispatch configuration is
     # independently validated above.
@@ -2418,6 +2457,7 @@ def run_orchestrate(
         planning_items,
         path,
         dispatch_rules=config.rules,
+        definition=config.definition,
         max_parallel=max_parallel,
         max_attend=max_attend,
         supervise_merges=supervise_merges,
@@ -2493,6 +2533,7 @@ def run_orchestrate(
 
 __all__ = [
     "BLOCKED_KINDS",
+    "BLOCKER_KIND_TO_BLOCKED",
     "DISPATCH_COMMAND",
     "DISPATCH_PHASES",
     "READER_ACTION",

@@ -19,8 +19,8 @@ stable catalog to the responsible repair.
 
 ## Plan
 
-- `plan.accepted-without-plan` — restore the canonical `plan` source and
-  `references/02-plan.md` artifact.
+- `plan.accepted-without-plan` — restore the canonical `plan` source and the
+  item's plan artifact (`artifacts.plan.path` in `gw work next --json`).
 - `plan.table-malformed` — repair the `## Plan` table shape.
 - `plan.done-when-missing` — supply a testable Done when cell.
 - `plan.action-target-missing` — repair the referenced repository target.

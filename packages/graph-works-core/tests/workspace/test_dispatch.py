@@ -7,12 +7,12 @@ from graph_works_core.workspace.dispatch import parse_rules, resolve_dispatch
 from graph_works_core.workspace.errors import WorkspaceError
 from graph_works_core.workspace.pipeline import ATTEND_TAIL, EXECUTE_TAIL, WORKSPACE_COMMIT_TAIL
 
-ATTRIBUTES = frozenset({"stage", "type", "effort", "blast_radius", "has_spec", "has_plan", "variant"})
+ATTRIBUTES = frozenset({"stage", "type", "effort", "blast_radius", "has_spec", "has_plan", "spec_stale"})
 
 
 def _resolve(*raw: object, attributes: dict[str, str | bool | None] | None = None):
     rules = parse_rules(list(raw), source="/workspace/dispatch.yaml", attributes=ATTRIBUTES)
-    return resolve_dispatch(attributes or {"stage": "execute", "variant": "planned"}, rules=rules)
+    return resolve_dispatch(attributes or {"stage": "execute", "has_plan": True}, rules=rules)
 
 
 def test_agent_switch_clears_inherited_preferences():
@@ -24,7 +24,7 @@ def test_agent_switch_clears_inherited_preferences():
         source="/workspace/dispatch.yaml",
         attributes=ATTRIBUTES,
     )
-    result = resolve_dispatch({"stage": "execute", "variant": "planned"}, rules=rules)
+    result = resolve_dispatch({"stage": "execute", "has_plan": True}, rules=rules)
     assert result.profile.agent == "codex"
     assert result.profile.model is None
     assert result.profile.reasoning_effort is None
@@ -83,22 +83,22 @@ def test_clearing_model_alone_retains_effort_and_is_finally_refused():
 
 
 @pytest.mark.parametrize(
-    ("stage", "variant", "skill", "mode", "tail"),
+    ("attributes", "skill", "mode", "tail"),
     [
-        ("design", "exploration", "superpowers:brainstorming", "attend", ATTEND_TAIL),
-        ("design", "diagnosis", "superpowers:systematic-debugging", "attend", ATTEND_TAIL),
-        ("design", "reconcile", "gw:reconciling-spec", "autonomous", WORKSPACE_COMMIT_TAIL),
-        ("design", "epic-design", "gw:epic-design", "attend", ATTEND_TAIL),
-        ("plan", "decompose", "gw:planning-epics", "autonomous", WORKSPACE_COMMIT_TAIL),
-        ("plan", "single", "superpowers:writing-plans", "autonomous", WORKSPACE_COMMIT_TAIL),
-        ("execute", "planned", "superpowers:subagent-driven-development", "autonomous", EXECUTE_TAIL),
-        ("execute", "unplanned", "superpowers:test-driven-development", "autonomous", EXECUTE_TAIL),
-        ("finish", "branch", "superpowers:finishing-a-development-branch", "relay", "ours"),
+        ({"stage": "design"}, "superpowers:brainstorming", "attend", ATTEND_TAIL),
+        ({"stage": "design", "type": "Bug"}, "superpowers:systematic-debugging", "attend", ATTEND_TAIL),
+        ({"stage": "design", "has_spec": True}, "gw:reconciling-spec", "autonomous", WORKSPACE_COMMIT_TAIL),
+        ({"stage": "design", "type": "Epic"}, "gw:epic-design", "attend", ATTEND_TAIL),
+        ({"stage": "plan", "type": "Epic"}, "gw:planning-epics", "autonomous", WORKSPACE_COMMIT_TAIL),
+        ({"stage": "plan"}, "superpowers:writing-plans", "autonomous", WORKSPACE_COMMIT_TAIL),
+        ({"stage": "execute", "has_plan": True}, "superpowers:subagent-driven-development", "autonomous", EXECUTE_TAIL),
+        ({"stage": "execute", "has_plan": False}, "superpowers:test-driven-development", "autonomous", EXECUTE_TAIL),
+        ({"stage": "finish"}, "superpowers:finishing-a-development-branch", "relay", "ours"),
     ],
 )
-def test_packaged_profile_matrix(stage, variant, skill, mode, tail):
-    raw = () if variant != "branch" else ({"match": {"variant": "branch"}, "prompt_tail": "ours"},)
-    result = _resolve(*raw, attributes={"stage": stage, "variant": variant})
+def test_packaged_profile_matrix(attributes, skill, mode, tail):
+    raw = () if attributes["stage"] != "finish" else ({"match": {"stage": "finish"}, "prompt_tail": "ours"},)
+    result = _resolve(*raw, attributes=attributes)
     assert (result.profile.skill, result.profile.mode, result.profile.prompt_tail) == (skill, mode, tail)
     assert result.profile.agent == "claude"
     assert result.profile.model is None
@@ -108,20 +108,20 @@ def test_packaged_profile_matrix(stage, variant, skill, mode, tail):
 
 def test_packaged_only_finish_is_refused():
     with pytest.raises(WorkspaceError, match=r"relay.*prompt_tail"):
-        resolve_dispatch({"stage": "finish", "variant": "branch"}, rules=())
+        resolve_dispatch({"stage": "finish"}, rules=())
 
 
 def test_constraints_are_anded_and_lists_match_any_member():
     result = _resolve(
         {"match": {"stage": ["design", "execute"], "has_spec": True}, "model": "winner"},
-        attributes={"stage": "execute", "variant": "planned", "has_spec": True},
+        attributes={"stage": "execute", "has_plan": True, "has_spec": True},
     )
     assert result.profile.model == "winner"
 
 
 @pytest.mark.parametrize("value", [None, False, 1])
 def test_missing_null_and_non_boolean_values_do_not_match_boolean_constraints(value):
-    attributes = {"stage": "execute", "variant": "planned"}
+    attributes = {"stage": "execute", "has_plan": True}
     if value is not None:
         attributes["has_spec"] = value  # type: ignore[assignment]
     result = _resolve({"match": {"has_spec": True}, "model": "wrong"}, attributes=attributes)

@@ -3,7 +3,6 @@ from dataclasses import dataclass
 from work_tracker_okf.dependencies import (
     DependencyEdge,
     DependencyFact,
-    entry_phase,
     gates,
     parse_dependencies,
     resolve_facts,
@@ -111,7 +110,3 @@ def test_dependency_parser_and_gate_predicates_cover_invalid_values_and_boundari
         DependencyFact("work/a", known=True, terminal=False, phase="plan"),
     )
     assert gates(duplicate, "finish") and gates(DependencyEdge("work/a", "unknown", "resolved"), "design")
-    assert entry_phase("Feature", None) == "design"
-    assert entry_phase("TestGap", None) is None
-    assert entry_phase("TestGap", "small") == "execute"
-    assert entry_phase("TestGap", "large") == "plan"

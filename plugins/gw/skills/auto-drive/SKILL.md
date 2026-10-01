@@ -272,7 +272,7 @@ On success, the result contains:
   dispatch's finish-relay `merge` question itself; true only for a non-root
   item at `finish` whose merge target is its owner's integration branch, with
   `supervise_merges` off), `prompt`.
-- `advances[]` — each: `path`, `reason`, `mode` (`advance` or `return`), `worktree`/`branch` (the epic's
+- `advances[]` — each: `path`, `reason`, `mode` (`advance`, `return`, or `repair`), `worktree`/`branch` (the epic's
   already-known worktree, when one exists — `null` otherwise, e.g. before any
   worker has ever been dispatched for this epic).
 - `workspace_preparations[]` — workspace branch anchors to prepare before
@@ -395,9 +395,16 @@ Nothing else in this cycle runs.
 Before each entry, run `gw work next <path from entry> --json` for that exact
 path and capture `expected-phase` from its `phase` before mutating anything.
 JSON null maps to CLI `none`.
-Revalidate the planned gate or return condition against the fresh next result before acting.
+Revalidate the planned gate, return, or repair condition against the fresh next result before acting.
 For `mode: advance`, require empty `blockers`, null `action`, and a non-null
-`on_complete` whose destination is the intended transition. For `mode:
+`on_complete` whose destination is the intended transition.
+For `mode: repair`, require `blocker_kinds` exactly `["phase-off-path"]`, null
+`action`, and a fresh §2.2 plan with a matching entry for this exact path,
+`mode: repair`, and reason. Run the normal guarded advance below without
+`--return` or placement flags; it moves only to the next on-path phase and
+performs no skipped-stage completion effects. Any extra blocker, including
+`dispatch-preflight`, means report it and replan without advancing.
+For `mode:
 return`, `gw work next` does not expose `repair`: require `phase: finish`, the
 specific `waiting on children filed after finish` blocker, and a fresh
 §2.2 plan using the same root and live-key convention with a matching entry
@@ -411,7 +418,7 @@ authorization for an entry planned earlier.
 For every applicable entry in `advances[]`: `gw work advance <path from entry> --from <expected-phase> --no-infer-worktree`,
 adding `--return` when `mode: return` and forwarding any other planned
 return/mode flags. Add `--worktree <entry.worktree> --branch <entry.branch>` only when the entry
-carries them (non-`null`). **`--no-infer-worktree` is what keeps it location-independent**: the advance
+carries them (non-`null`) and its mode is not `repair`. **`--no-infer-worktree` is what keeps it location-independent**: the advance
 never infers a placement from wherever the coordinator happens to be running.
 Only the orchestration root's entry can carry a
 pair — `plan()` never attaches the epic worktree to a descendant's advance, and
@@ -1557,15 +1564,14 @@ external script run.
 Runs from the Success branch only — on `accepted-success`, after §2.1's
 `settled` result and after `worker-release`, never on `claimed-unconfirmed`
 (§4.1.1 owns that path) and never before the ack rules. The producer is
-`EXECUTE_TAIL`: every execute dispatch is told to write
-`<workspace>/okf/<path>/references/03-execute-coverage.md`, one `- [x]` /
-`- [ ]` line per design-spec `## Acceptance` item, and to pass it as
-`--report-path`. Nothing gates on its contents; this step is what makes the
-report worth writing.
+`EXECUTE_TAIL`: every execute dispatch is told to write the item's execute
+stage artifact, one `- [x]` / `- [ ]` line per design-spec `## Acceptance`
+item, and to pass it as `--report-path`. Nothing gates on its contents; this
+step is what makes the report worth writing.
 
-1. Read `<workspace>/okf/<path>/references/03-execute-coverage.md`. Absent →
-   one-line note and continue. The obligation is unenforced, and a missing file
-   is not a failure.
+1. Run `gw work next <path> --json --file ""` and read the file at its
+   `artifacts.execute.path`. Absent → one-line note and continue. The obligation
+   is unenforced, and a missing file is not a failure.
 2. Surface the enumeration **as-is** — print the file's lines, do not
    summarize them.
 3. If any line is `- [ ]` (a marker scan, not comprehension), raise one

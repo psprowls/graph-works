@@ -136,6 +136,26 @@ def test_dispatch_helpers_cover_gating_unknown_edges_and_blocked_descent() -> No
     assert result.blocked_at == release.path
 
 
+def test_descend_skips_child_whose_entry_dependency_is_blocked_on_its_path() -> None:
+    root = "work/epic-x"
+    test_gap_path = f"{root}/children/test-gap-y"
+    bug_path = f"{root}/children/bug-z"
+    items = (
+        make_item(root, type="Epic", phase="execute", work_status="accepted", child_paths=(test_gap_path, bug_path)),
+        make_item(
+            test_gap_path,
+            type="TestGap",
+            effort="small",
+            work_status="open",
+            parent_path=root,
+            ancestor_paths=(root,),
+            dependency_edges=(DependencyEdge(bug_path, "execute", "resolved"),),
+        ),
+        make_item(bug_path, type="Bug", work_status="open", parent_path=root, ancestor_paths=(root,)),
+    )
+    assert descend(items, root).leaf == bug_path
+
+
 def test_child_gated_sees_open_grandchildren_beneath_a_terminal_child() -> None:
     epic = make_item(
         "work/epic",
@@ -271,3 +291,18 @@ def test_declared_repo_skips_a_missing_ancestor() -> None:
     index = _chain(epic="code")
     del index[_F]
     assert declared_repo(index[_B], index) == ("code", _E)
+
+
+def test_descend_selects_a_child_whose_dependency_only_blocks_a_skipped_stage():
+    parent = make_item("work/epic", type="Epic", phase="execute", child_paths=("work/epic/children/bug",))
+    child = make_item(
+        "work/epic/children/bug",
+        parent_path=parent.path,
+        ancestor_paths=(parent.path,),
+        type="Bug",
+        effort="small",
+        phase="execute",
+        dependency_edges=(DependencyEdge("work/pending", "plan", "resolved"),),
+    )
+    dependency = make_item("work/pending", phase="design")
+    assert descend((parent, child, dependency), parent.path).leaf == child.path

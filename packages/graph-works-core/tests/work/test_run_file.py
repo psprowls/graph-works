@@ -206,7 +206,8 @@ def _split_workspace(tmp_path):
     (code / "packages/foo").mkdir(parents=True)
     layout = apply_init(plan_init(vault / ".works", today=TODAY, topic="Split")).layout
     layout.manifest_path.write_text(
-        f'version: 1\nrepositories:\n  "code":\n    path: {json.dumps(str(code))}\n',
+        "version: 1\nworkflow: {dispatch_rules: dispatch.yaml}\nrepositories:\n"
+        f'  "code":\n    path: {json.dumps(str(code))}\n',
         encoding="utf-8",
     )
     return layout
@@ -236,7 +237,7 @@ def _two_repo_workspace(tmp_path):
     (other / "apps/ui").mkdir(parents=True)
     code = tmp_path / "code"
     layout.manifest_path.write_text(
-        "version: 1\nrepositories:\n"
+        "version: 1\nworkflow: {dispatch_rules: dispatch.yaml}\nrepositories:\n"
         f'  "code":\n    path: {json.dumps(str(code))}\n'
         f'  "other":\n    path: {json.dumps(str(other))}\n',
         encoding="utf-8",

@@ -1,3 +1,4 @@
+from dataclasses import replace
 from datetime import date
 from pathlib import Path
 
@@ -18,11 +19,14 @@ from work_tracker_okf.compose import (
     ensure_plan_row,
     plan_file_and_reconcile,
     plan_row_splice,
+    stage_artifact_for_source,
+    stage_artifact_ref,
     stamp_for,
 )
 from work_tracker_okf.filing import FilingSeed
 from work_tracker_okf.init import install_bundle
 from work_tracker_okf.paths import MANAGED_ARTIFACTS, artifact_ref
+from work_tracker_okf.pipeline import PACKAGED_DEFINITION, ArtifactSpec, parse_path_rules
 from work_tracker_okf.resources import assets_root
 from work_tracker_okf.rules import PLAN_TABLE_SPEC
 from work_tracker_okf.vocabulary import PLAN_SOURCE_ID, SPEC_SOURCE_ID
@@ -59,7 +63,7 @@ def test_stamp_for_uses_canonical_managed_names_and_reads_h1(root: Path) -> None
     target = root / ITEM / "references" / "01-design.md"
     target.parent.mkdir(parents=True)
     target.write_text("# Canonical design\n", encoding="utf-8")
-    ref, title = stamp_for(root, make_item(ITEM, title="Cutover"), SPEC_SOURCE_ID)
+    ref, title = stamp_for(root, make_item(ITEM, title="Cutover"), SPEC_SOURCE_ID, definition=PACKAGED_DEFINITION)
     assert ref == artifact_ref(ITEM, MANAGED_ARTIFACTS["design"])
     assert ref.resource == f"/{ITEM}/references/01-design.md"
     assert title == "Canonical design"
@@ -67,14 +71,14 @@ def test_stamp_for_uses_canonical_managed_names_and_reads_h1(root: Path) -> None
 
 def test_stamp_for_plan_and_fallback_title_are_canonical(tmp_path: Path) -> None:
     item = make_item(ITEM, title="Cutover")
-    ref, title = stamp_for(tmp_path, item, PLAN_SOURCE_ID)
+    ref, title = stamp_for(tmp_path, item, PLAN_SOURCE_ID, definition=PACKAGED_DEFINITION)
     assert ref.rel == f"{ITEM}/references/02-plan.md"
     assert title == "Plan — Cutover"
 
 
 def test_stamp_for_refuses_an_unmanaged_transition_source(tmp_path: Path) -> None:
     with pytest.raises(KeyError):
-        stamp_for(tmp_path, make_item(ITEM), "legacy-design-spec")
+        stamp_for(tmp_path, make_item(ITEM), "legacy-design-spec", definition=PACKAGED_DEFINITION)
 
 
 def test_plan_row_splice_is_pure_and_uses_root_absolute_resource(tmp_path: Path) -> None:
@@ -122,6 +126,28 @@ def test_advance_and_stamp_defaults_to_a_write_free_dry_run(root: Path) -> None:
     outcome = advance_and_stamp(load_bundle(root, ignore=IGNORE), ITEM, today=TODAY, effort="small")
     assert not outcome.written
     assert page.read_bytes() == before
+
+
+def test_advance_and_stamp_routes_design_completion_by_the_given_definition(root: Path) -> None:
+    page = _write_feature(root)
+    target = root / ITEM / "references" / "01-design.md"
+    target.parent.mkdir(parents=True)
+    target.write_text("# Design\n", encoding="utf-8", newline="")
+    skip_plan = replace(
+        PACKAGED_DEFINITION,
+        path_rules=PACKAGED_DEFINITION.path_rules
+        + parse_path_rules([{"match": {"type": "Feature"}, "stages": ["design", "execute", "finish"]}], source="test"),
+    )
+    before = _snapshot_bytes(root)
+    outcome = advance_and_stamp(
+        load_bundle(root, ignore=IGNORE), ITEM, today=TODAY, effort="medium", dry_run=True, definition=skip_plan
+    )
+    assert outcome.plan.refusal is None
+    assert next(change.after for change in outcome.plan.changes if change.key == "phase") == "execute"
+    assert outcome.stamped is not None and outcome.stamped.resource == f"/{ITEM}/references/01-design.md"
+    assert not outcome.written
+    assert page.read_bytes() == before[page.relative_to(root).as_posix()]
+    assert _snapshot_bytes(root) == before
 
 
 def test_plan_complete_stamps_plan_and_syncs_the_row(root: Path) -> None:
@@ -437,3 +463,142 @@ def test_plan_reconcile_passes_staleness_and_keeps_the_baseline_request(root: Pa
     assert outcome.plan.transition.phase == "plan"
     assert outcome.stamped is None
     assert not outcome.written
+
+
+def _renamed(**files: str | tuple[str, bool]):
+    artifacts = dict(PACKAGED_DEFINITION.artifacts)
+    for stage, value in files.items():
+        file, required = value if isinstance(value, tuple) else (value, artifacts[stage].required)
+        artifacts[stage] = ArtifactSpec(stage, file, artifacts[stage].source, required)
+    return replace(PACKAGED_DEFINITION, artifacts=artifacts)
+
+
+def test_stage_artifact_ref_accepts_a_name_without_an_ordinal() -> None:
+    ref = stage_artifact_ref("work/feature-x", ArtifactSpec("design", "spec.md", "design"))
+    assert (ref.rel, ref.source_id) == ("work/feature-x/references/spec.md", "design")
+
+
+def test_stage_artifact_for_source_finds_every_configured_stage_and_nothing_else() -> None:
+    assert stage_artifact_for_source(PACKAGED_DEFINITION, "design").file == "01-design.md"
+    assert stage_artifact_for_source(PACKAGED_DEFINITION, "plan").file == "02-plan.md"
+    assert stage_artifact_for_source(PACKAGED_DEFINITION, "execute-coverage").stage == "execute"
+    with pytest.raises(KeyError):
+        stage_artifact_for_source(PACKAGED_DEFINITION, "decisions")
+
+
+@pytest.mark.parametrize(
+    "source, definition, filename, title",
+    [
+        ("design", _renamed(design="spec.md"), "spec.md", "Design spec — Cutover"),
+        ("execute-coverage", PACKAGED_DEFINITION, "03-execute-coverage.md", "Execute coverage — Cutover"),
+    ],
+)
+def test_stamp_for_uses_the_definition_file(tmp_path, source, definition, filename, title) -> None:
+    ref, stamp_title = stamp_for(tmp_path, make_item(ITEM, title="Cutover"), source, definition=definition)
+    assert ref.rel == f"{ITEM}/references/{filename}"
+    assert stamp_title == title
+    with pytest.raises(KeyError):
+        stamp_for(tmp_path, make_item(ITEM), "decisions", definition=definition)
+
+
+def test_renamed_design_refuses_when_absent_and_stamps_when_present(root: Path) -> None:
+    definition = _renamed(design="spec.md")
+    page = _write_feature(root)
+    before = _snapshot_bytes(root)
+    refused = advance_and_stamp(
+        load_bundle(root, ignore=IGNORE), ITEM, today=TODAY, effort="medium", dry_run=False, definition=definition
+    )
+    assert refused.plan.refusal == "artifact-missing"
+    assert refused.plan.detail.endswith("references/spec.md")
+    assert _snapshot_bytes(root) == before
+    target = root / ITEM / "references/spec.md"
+    target.parent.mkdir(parents=True)
+    target.write_text("# Renamed design\n", encoding="utf-8", newline="")
+    stamped = advance_and_stamp(
+        load_bundle(root, ignore=IGNORE), ITEM, today=TODAY, effort="medium", dry_run=False, definition=definition
+    )
+    assert stamped.plan.refusal is None and stamped.written
+    assert stamped.stamped is not None and stamped.stamped.rel.endswith("references/spec.md")
+    assert stamped.stamped.source_id == "design"
+    assert stamped.stamp_title == "Renamed design"
+    source = load(page).fm_data()["sources"][0]
+    assert (source["id"], source["resource"]) == ("design", f"/{ITEM}/references/spec.md")
+
+
+def test_plan_not_required_completes_without_its_file(root: Path) -> None:
+    _write_feature(root, phase="plan")
+    outcome = advance_and_stamp(
+        load_bundle(root, ignore=IGNORE),
+        ITEM,
+        today=TODAY,
+        dry_run=False,
+        definition=_renamed(plan=("02-plan.md", False)),
+    )
+    assert outcome.plan.refusal is None and outcome.written
+
+
+@pytest.mark.parametrize("directory", [False, True])
+def test_required_execute_artifact_refuses_completion_without_the_file(root: Path, directory: bool) -> None:
+    _write_feature(root, phase="execute", work_status="in-progress")
+    target = root / ITEM / "references/coverage.md"
+    if directory:
+        target.mkdir(parents=True)
+    before = _snapshot_bytes(root)
+    outcome = advance_and_stamp(
+        load_bundle(root, ignore=IGNORE),
+        ITEM,
+        today=TODAY,
+        owner="pat",
+        dry_run=False,
+        definition=_renamed(execute=("coverage.md", True)),
+    )
+    assert outcome.plan.refusal == "artifact-missing"
+    assert outcome.plan.detail.endswith("references/coverage.md")
+    assert outcome.written is False
+    assert outcome.plan.changes == () and outcome.plan.trigger is None
+    assert _snapshot_bytes(root) == before
+
+
+def test_required_execute_artifact_allows_completion_with_the_file(root: Path) -> None:
+    page = _write_feature(root, phase="execute", work_status="in-progress")
+    target = root / ITEM / "references/coverage.md"
+    target.parent.mkdir(parents=True)
+    target.write_text("# Coverage\n", encoding="utf-8", newline="")
+    outcome = advance_and_stamp(
+        load_bundle(root, ignore=IGNORE),
+        ITEM,
+        today=TODAY,
+        owner="pat",
+        dry_run=False,
+        definition=_renamed(execute=("coverage.md", True)),
+    )
+    assert outcome.plan.refusal is None and outcome.written
+    assert load(page).fm_data()["phase"] == "finish"
+
+
+def test_packaged_execute_never_refuses_for_coverage(root: Path) -> None:
+    _write_feature(root, phase="execute", work_status="in-progress")
+    outcome = advance_and_stamp(
+        load_bundle(root, ignore=IGNORE), ITEM, today=TODAY, owner="pat", definition=PACKAGED_DEFINITION
+    )
+    assert outcome.plan.refusal is None
+
+
+@pytest.mark.parametrize("present", [False, True])
+def test_optional_plan_registers_only_an_existing_file(root: Path, present: bool) -> None:
+    page = _write_feature(root, phase="plan")
+    target = root / ITEM / "references" / "plan.md"
+    if present:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text("# Plan\n", encoding="utf-8", newline="")
+    outcome = advance_and_stamp(
+        load_bundle(root, ignore=IGNORE),
+        ITEM,
+        today=TODAY,
+        dry_run=False,
+        definition=_renamed(plan=("plan.md", False)),
+    )
+    assert outcome.written
+    assert bool(outcome.stamped) is present
+    assert outcome.plan_row is present
+    assert any(source.id == "plan" for source in load(page).fm.sources) is present

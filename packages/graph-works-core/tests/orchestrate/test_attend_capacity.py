@@ -118,7 +118,7 @@ def test_live_non_design_keys_count_against_max_parallel_only() -> None:
         orchestrate.session_name(finish.path, "Feature", "finish"),
     )
     result = _plan(
-        items, live=live, max_parallel=3, dispatch_rules=(_rule({"variant": "branch"}, {"prompt_tail": "decide"}),)
+        items, live=live, max_parallel=3, dispatch_rules=(_rule({"stage": "finish"}, {"prompt_tail": "decide"}),)
     )
     assert result.slots_free == 0
     assert result.attend_slots_free == 1
@@ -166,7 +166,7 @@ def test_live_attend_keeps_slot_after_artifact_appears(phase, artifact, rules) -
 
 
 def test_custom_rule_moves_plan_stage_into_attend_pool() -> None:
-    rules = (_rule({"variant": "single"}, {"mode": "attend"}),)
+    rules = (_rule({"stage": "plan"}, {"mode": "attend"}),)
     running, p, q = _planning("a"), _planning("p"), _planning("q")
     items = (_epic(running, p, q), running, p, q)
     live = (orchestrate.session_name(running.path, "Feature", "plan"),)
@@ -184,7 +184,7 @@ def test_unresolvable_live_profile_counts_as_attend_and_warns() -> None:
     real = orchestrate.resolve_dispatch
 
     def resolve(attributes, *, rules):
-        if attributes["variant"] in ("single", "decompose") and attributes["stage"] == "plan":
+        if attributes["stage"] == "plan":
             raise orchestrate.DispatchProfileError("broken")
         return real(attributes, rules=rules)
 
@@ -246,7 +246,7 @@ def test_max_attend_zero_blocks_every_attend_candidate_only() -> None:
 def test_broken_profile_outranks_capacity() -> None:
     first, second = _planning("p"), _planning("q")
     items = (_epic(first, second), first, second)
-    rules = (_rule({"variant": "single"}, {"model": None, "reasoning_effort": "high"}),)
+    rules = (_rule({"stage": "plan"}, {"model": None, "reasoning_effort": "high"}),)
     result = _plan(items, max_parallel=0, dispatch_rules=rules)
     assert {kind for _, kind in _kinds(result)} == {"invalid"}
 
@@ -257,3 +257,13 @@ def test_terminal_root_reports_zero_attend_slots() -> None:
     assert result.terminal
     assert result.attend_slots_free == 0
     assert result.max_attend == 1
+
+
+def test_stale_plan_attend_rule_counts_a_live_plan_key() -> None:
+    running, waiting = _planning("a"), _design("b")
+    items = (_epic(running, waiting), running, waiting)
+    live = (orchestrate.session_name(running.path, "Feature", "plan"),)
+    rules = (_rule({"stage": "plan", "spec_stale": True}, {"mode": "attend"}),)
+    result = _plan(items, live=live, dispatch_rules=rules)
+    assert result.attend_slots_free == 0
+    assert (waiting.path, "capacity") in _kinds(result)

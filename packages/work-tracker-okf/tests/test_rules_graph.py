@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import date
+from itertools import pairwise, product
 from pathlib import Path
 
 import pytest
@@ -8,6 +9,8 @@ from okf_io import load
 from work_helpers import lane_report, make_item, write_item
 from work_tracker_okf._rules.graph import _phase_dependency_graph
 from work_tracker_okf.dependencies import DependencyEdge
+from work_tracker_okf.pipeline import DECOMPOSING_TYPES, DONE, child_gated
+from work_tracker_okf.vocabulary import PHASES, TYPES
 
 TODAY = date(2026, 8, 3)
 
@@ -135,6 +138,17 @@ def test_an_epic_past_decomposition_with_no_children_is_a_warn(tmp_path: Path) -
     assert lane_report(tmp_path, today=TODAY).by_code("graph.epic-without-children")[0].severity == "warn"
 
 
+def test_a_release_past_decomposition_with_no_children_warns_naming_release(tmp_path: Path) -> None:
+    write_item(
+        tmp_path,
+        "work/release-x",
+        "type: Release\nwork_status: accepted\nphase: execute\nreleased_at: 2026-08-01\n",
+    )
+    [finding] = lane_report(tmp_path, today=TODAY).by_code("graph.epic-without-children")
+    assert finding.severity == "warn"
+    assert finding.message == "`type: Release` at `phase: execute` has no children"
+
+
 def test_an_epic_with_a_direct_resolved_child_is_silent(tmp_path: Path) -> None:
     epic = "work/epic-x"
     write_item(tmp_path, epic, "type: Epic\nwork_status: open\nphase: execute\n")
@@ -147,3 +161,34 @@ def test_the_module_declares_five_graph_codes() -> None:
 
     assert len(graph.CODES) == 5
     assert all(code.startswith("graph.") for code in graph.CODES)
+
+
+def test_epic_without_children_fires_exactly_at_child_gated_phases_plus_done(tmp_path: Path) -> None:
+    pairs = list(product(sorted(TYPES), sorted(PHASES)))
+    for type_, phase in pairs:
+        write_item(tmp_path, f"{type_.lower()}-{phase}", f"type: {type_}\nwork_status: open\nphase: {phase}\n")
+    report = lane_report(tmp_path)
+    flagged = {f.path for f in report.by_code("graph.epic-without-children")}
+    expected = {
+        f"work/{t.lower()}-{p}.md" for t, p in pairs if t in DECOMPOSING_TYPES and (child_gated(t, p) or p == DONE)
+    }
+    assert flagged == expected
+    assert {p for t, p in pairs if f"work/{t.lower()}-{p}.md" in expected} == {"execute", "finish", "done"}
+    assert not any("feature-" in path for path in flagged)  # Feature is child-gated but not decomposing
+
+
+def test_the_dependency_chain_is_the_stage_order() -> None:
+    from work_tracker_okf.pipeline import STAGES
+
+    graph = _phase_dependency_graph([make_item("bug-a")])
+    for current, following in pairwise(STAGES):
+        assert f"work/bug-a#{following}:entry" in graph[f"work/bug-a#{current}:complete"]
+    assert "work/bug-a#resolved" in graph[f"work/bug-a#{STAGES[-1]}:complete"]
+
+
+def test_cycle_check_ignores_dependency_gates_on_skipped_stages(tmp_path: Path) -> None:
+    write_item(
+        tmp_path, "work/bug-a", "type: Bug\nwork_status: open\neffort: small\n" + _edge("work/feature-b", blocks="plan")
+    )
+    write_item(tmp_path, "work/feature-b", "type: Feature\nwork_status: open\n" + _edge("work/bug-a", blocks="execute"))
+    assert "graph.depends-on-cycle" not in codes_for(tmp_path)

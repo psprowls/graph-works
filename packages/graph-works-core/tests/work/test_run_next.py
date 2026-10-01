@@ -253,7 +253,8 @@ def _split_layout(tmp_path: Path):
     (code / "packages/a").mkdir(parents=True)
     layout = apply_init(plan_init(vault / ".works", today=TODAY, topic="Split")).layout
     layout.manifest_path.write_text(
-        f'version: 1\nrepositories:\n  "code":\n    path: {json.dumps(str(code))}\n',
+        "version: 1\nworkflow: {dispatch_rules: dispatch.yaml}\nrepositories:\n"
+        f'  "code":\n    path: {json.dumps(str(code))}\n',
         encoding="utf-8",
     )
     (layout.bundle_dir / "work").mkdir(parents=True, exist_ok=True)
@@ -328,7 +329,7 @@ def test_a_plan_item_with_an_overlapping_landed_sibling_routes_to_reconciling_sp
 
     layout, _, _, _ = _landed_plan(tmp_path)
     result = work.run_next(layout, CHILD, dry_run=dry_run)
-    assert result.route.dispatch == Dispatch("plan", "reconcile")
+    assert result.route.dispatch == Dispatch("plan")
     assert result.dispatch_resolution.profile.skill == "gw:reconciling-spec"
     assert result.route.on_complete == Transition(phase="plan", stamp_baseline=True)
     assert result.artifact is None
@@ -339,7 +340,7 @@ def test_without_overlap_it_routes_to_writing_plans(tmp_path: Path) -> None:
 
     layout, _, sibling, landed = _landed_plan(tmp_path, overlap=False)
     result = work.run_next(layout, CHILD)
-    assert result.route.dispatch == Dispatch("plan", "single")
+    assert result.route.dispatch == Dispatch("plan")
     (slot,) = result.carried.slots
     assert slot.name == "landed_since"
     assert slot.fill.data["siblings"] == [{"path": sibling, "resolved_in": landed, "overlaps": False}]
@@ -350,12 +351,12 @@ def test_a_plan_stage_reconcile_completion_ends_the_loop(tmp_path: Path) -> None
     from work_tracker_okf.workflow import Dispatch
 
     layout, repo, _, _ = _landed_plan(tmp_path)
-    assert work.run_next(layout, CHILD).route.dispatch == Dispatch("plan", "reconcile")
+    assert work.run_next(layout, CHILD).route.dispatch == Dispatch("plan")
     advanced = run_stage_advance(
         layout, CHILD, today=TODAY, expected_phase="plan", cwd=repo, infer_worktree=False, dry_run=False
     )
     assert advanced.outcome.written
-    assert work.run_next(layout, CHILD).route.dispatch == Dispatch("plan", "single")
+    assert work.run_next(layout, CHILD).route.dispatch == Dispatch("plan")
 
 
 def test_descend_selects_the_stale_plan_leaf(tmp_path: Path) -> None:
@@ -364,4 +365,4 @@ def test_descend_selects_the_stale_plan_leaf(tmp_path: Path) -> None:
     layout, _, _, _ = _landed_plan(tmp_path)
     result = work.run_next(layout, EPIC, descend=True)
     assert result.selected_path == CHILD
-    assert result.route.dispatch == Dispatch("plan", "reconcile")
+    assert result.route.dispatch == Dispatch("plan")

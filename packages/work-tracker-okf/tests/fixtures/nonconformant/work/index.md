@@ -3,6 +3,7 @@
 Human catalog note preserved outside the generated region.
 
 <!-- graph-works:work-items:start -->
+- [Bug: Small bug parked at plan](bug-off-path.md) — open · plan
 - [Epic: The stalled decomposition](epic-stalled-decomposition.md) — open · execute
 - [Spike: A Spike used as a parent](spike-wrong-parent-type.md) — resolved · done
 - [Feature: A Feature at a bug-prefixed path](bug-superseded-orphan.md) — superseded · not started

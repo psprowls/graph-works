@@ -18,6 +18,7 @@ from pathlib import Path
 from okf_io import Document, RuleContext
 
 from work_tracker_okf.items import WorkItem, load_items
+from work_tracker_okf.pipeline import PACKAGED_DEFINITION, PipelineDefinition
 
 
 @dataclass(frozen=True, slots=True)
@@ -47,6 +48,7 @@ class LaneConfig:
     repo_root: Path | None = None
     vault_root: Path | None = None
     repo_roots: tuple[Path, ...] = ()
+    definition: PipelineDefinition = PACKAGED_DEFINITION
 
     @property
     def code_roots(self) -> tuple[Path, ...]:

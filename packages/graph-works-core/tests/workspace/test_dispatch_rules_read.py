@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 from graph_works_core import apply_init, plan_init
-from graph_works_core.workspace.dispatch import packaged_rule, packaged_rules, rule_matches
+from graph_works_core.workspace.dispatch import packaged_rules, rule_matches
 from graph_works_core.workspace.dispatch_config import run_dispatch_rules
 from graph_works_core.workspace.errors import WorkspaceError
 from graph_works_core.workspace.pipeline import PACKAGED_PIPELINE
@@ -30,11 +30,10 @@ def _rules(layout, shared: str, local: str | None = None) -> None:
 def test_packaged_rows_follow_the_packaged_pipeline() -> None:
     rows = packaged_rules()
 
-    assert [row.origin.name for row in rows] == list(PACKAGED_PIPELINE)
+    assert [row.origin.name for row in rows] == [rule.name for rule in PACKAGED_PIPELINE]
     assert [row.origin.index for row in rows] == list(range(len(PACKAGED_PIPELINE)))
     assert all(row.origin.source == "packaged" for row in rows)
-    assert rows == tuple(packaged_rule(variant) for variant in PACKAGED_PIPELINE)
-    assert dict(rows[0].match) == {"variant": next(iter(PACKAGED_PIPELINE))}
+    assert dict(rows[0].match) == {"stage": "design"}
     assert set(rows[0].fields) == {"skill", "mode", "prompt_tail", "agent", "model", "reasoning_effort"}
     assert rows[0].fields["agent"] == "claude"
 
@@ -49,7 +48,7 @@ def test_rules_are_in_fold_order_shared_then_local(tmp_path: Path) -> None:
 
     ruleset = run_dispatch_rules(layout)
 
-    assert ruleset.attributes == ("blast_radius", "effort", "has_plan", "has_spec", "stage", "type", "variant")
+    assert ruleset.attributes == ("blast_radius", "effort", "has_plan", "has_spec", "spec_stale", "stage", "type")
     assert ruleset.packaged == packaged_rules()
     assert [(Path(r.origin.source).name, r.origin.index, r.origin.name) for r in ruleset.rules] == [
         ("dispatch.yaml", 0, None),

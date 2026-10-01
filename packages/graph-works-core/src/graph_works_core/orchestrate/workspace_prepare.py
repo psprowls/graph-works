@@ -18,6 +18,7 @@ from typing import Literal
 
 from okf_io import load_bundle
 from work_tracker_okf.items import IGNORE, WorkItem, load_items
+from work_tracker_okf.pipeline import code_phases
 
 from graph_works_core.orchestrate.anchors import workspace_chain, workspace_worktree_path
 from graph_works_core.orchestrate.commands import branch_name
@@ -31,7 +32,7 @@ from graph_works_core.workspace.workspace_branch import WORKSPACE_REPO, workspac
 WorkspacePrepareRefusal = Literal[
     "unknown-path", "not-entitled", "workspace-unprovable", "workspace-ambiguous", "stamp-refused"
 ]
-_ITEM_PHASES = frozenset({"execute", "finish"})
+_ITEM_PHASES = code_phases()
 
 
 @dataclass(frozen=True, slots=True)

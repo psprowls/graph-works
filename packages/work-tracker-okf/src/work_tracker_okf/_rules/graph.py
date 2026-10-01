@@ -8,9 +8,18 @@ from itertools import pairwise
 from okf_io import Finding, Rule, RuleContext, Severity
 
 from work_tracker_okf._rules._common import LaneConfig, active, items
-from work_tracker_okf.dependencies import PHASE_ORDER
 from work_tracker_okf.graph import cycle_nodes
 from work_tracker_okf.items import WorkItem
+from work_tracker_okf.pipeline import (
+    DECOMPOSING_TYPES,
+    DONE,
+    PACKAGED_DEFINITION,
+    STAGES,
+    PipelineDefinition,
+    child_gated,
+    path_attributes,
+    resolve_path,
+)
 from work_tracker_okf.vocabulary import TERMINAL_STATUSES
 
 CODES: tuple[str, ...] = (
@@ -22,8 +31,6 @@ CODES: tuple[str, ...] = (
 )
 
 _SPEC = "work_tracker_okf._rules.graph"
-_DECOMPOSED_PHASES = frozenset({"execute", "finish", "done"})
-_PHASE_CHAIN = PHASE_ORDER[:-1]
 _RESOLVED = "resolved"
 
 
@@ -79,30 +86,50 @@ def references(ctx: RuleContext) -> Iterable[Finding]:
                 )
 
 
-def _phase_dependency_graph(work_items: Sequence[WorkItem]) -> dict[str, list[str]]:
+def _phase_dependency_graph(
+    work_items: Sequence[WorkItem], *, definition: PipelineDefinition = PACKAGED_DEFINITION
+) -> dict[str, list[str]]:
     graph: dict[str, list[str]] = {}
     for item in work_items:
-        for phase in _PHASE_CHAIN:
+        for phase in STAGES:
             graph[_entry_node(item.path, phase)] = []
             graph[_completion_node(item.path, phase)] = []
         graph[_resolved_node(item.path)] = []
 
     by_path = {item.path: item for item in work_items}
     for item in work_items:
-        for phase in _PHASE_CHAIN:
+        for phase in STAGES:
             graph[_entry_node(item.path, phase)].append(_completion_node(item.path, phase))
-        for current, following in pairwise(_PHASE_CHAIN):
+        for current, following in pairwise(STAGES):
             graph[_completion_node(item.path, current)].append(_entry_node(item.path, following))
-        graph[_completion_node(item.path, _PHASE_CHAIN[-1])].append(_resolved_node(item.path))
+        graph[_completion_node(item.path, STAGES[-1])].append(_resolved_node(item.path))
 
     for item in work_items:
+        # Lint has no Git observation of staleness. Retain a gate if any
+        # possible path includes it; omit gates that no path can traverse.
+        stages = {
+            stage
+            for stale in (False, True)
+            for candidate in resolve_path(
+                definition,
+                path_attributes(
+                    type_=item.type,
+                    effort=item.effort,
+                    blast_radius=item.blast_radius,
+                    has_spec=item.has_design_artifact,
+                    has_plan=item.has_plan_artifact,
+                    spec_stale=stale,
+                ),
+            ).candidates
+            for stage in candidate.stages
+        }
         for edge in item.dependency_edges:
             dependency = by_path.get(edge.path)
-            if dependency is None or dependency.work_status in TERMINAL_STATUSES or edge.blocks not in _PHASE_CHAIN:
+            if dependency is None or dependency.work_status in TERMINAL_STATUSES or edge.blocks not in stages:
                 continue
             if edge.needs == _RESOLVED:
                 source = _resolved_node(edge.path)
-            elif edge.needs in _PHASE_CHAIN:
+            elif edge.needs in STAGES:
                 source = _completion_node(edge.path, edge.needs)
             else:
                 continue
@@ -110,27 +137,34 @@ def _phase_dependency_graph(work_items: Sequence[WorkItem]) -> dict[str, list[st
     return graph
 
 
-def cycles(ctx: RuleContext) -> Iterable[Finding]:
-    """Report dependency cycles through the shared iterative graph primitive."""
-    active_items = tuple(active(ctx))
-    by_path = {item.path: item for item in active_items}
-    paths = {node.partition("#")[0] for node in cycle_nodes(_phase_dependency_graph(active_items))}
-    for path in sorted(paths):
-        yield _finding("graph.depends-on-cycle", "error", by_path[path], "`depends_on` participates in a cycle")
+def _cycles(definition: PipelineDefinition) -> Rule:
+    """Report dependency cycles through gates on the configured paths."""
+
+    def rule(ctx: RuleContext) -> Iterable[Finding]:
+        active_items = tuple(active(ctx))
+        by_path = {item.path: item for item in active_items}
+        paths = {
+            node.partition("#")[0] for node in cycle_nodes(_phase_dependency_graph(active_items, definition=definition))
+        }
+        for path in sorted(paths):
+            yield _finding("graph.depends-on-cycle", "error", by_path[path], "`depends_on` participates in a cycle")
+
+    return rule
 
 
 def derived(ctx: RuleContext) -> Iterable[Finding]:
-    """Warn when an executing epic has not yet acquired a direct child."""
+    """Warn at child-gated phases and `done` when a decomposing item has no child."""
     for item in active(ctx):
-        if item.type != "Epic" or item.phase not in _DECOMPOSED_PHASES:
+        if item.type not in DECOMPOSING_TYPES:
+            continue
+        if not (child_gated(item.type, item.phase) or item.phase == DONE):
             continue
         if item.child_paths:
             continue
         yield _finding(
-            "graph.epic-without-children", "warn", item, f"`type: Epic` at `phase: {item.phase}` has no children"
+            "graph.epic-without-children", "warn", item, f"`type: {item.type}` at `phase: {item.phase}` has no children"
         )
 
 
 def rules(config: LaneConfig) -> tuple[Rule, ...]:
-    del config
-    return (references, cycles, derived)
+    return (references, _cycles(config.definition), derived)

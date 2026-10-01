@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 from graph_works_core.work import commands as work
-from graph_works_core.workspace.dispatch import packaged_rule, rule_matches
+from graph_works_core.workspace.dispatch import packaged_rules_matching, rule_matches
 from graph_works_core.workspace.errors import WorkspaceError
 from test_run_next import CHILD, EPIC, _layout, _spec, _write
 
@@ -32,8 +32,8 @@ def test_a_plan_stage_item_explains_the_same_resolution_next_computes(tmp_path: 
     nexted = work.run_next(layout, path, dry_run=True)
 
     assert explained.resolution == nexted.dispatch_resolution
-    assert explained.attributes is not None and explained.attributes["variant"] == "single"
-    assert explained.packaged_rule == packaged_rule("single")
+    assert explained.attributes is not None and explained.attributes["stage"] == "plan"
+    assert explained.packaged_rules == packaged_rules_matching(explained.attributes)
     assert [matched for _rule, matched in explained.rules] == [False, True]
     assert all(matched == rule_matches(rule.match, explained.attributes) for rule, matched in explained.rules)
     assert explained.resolution is not None
@@ -48,7 +48,7 @@ def test_an_agent_change_reset_is_explained(tmp_path: Path) -> None:
     _dispatch(
         layout,
         shared="  - match: {}\n    model: opus\n    reasoning_effort: high\n",
-        local="  - match: {variant: single}\n    agent: codex\n",
+        local="  - match: {stage: plan}\n    agent: codex\n",
     )
 
     explained = work.run_dispatch_explain(layout, path)
@@ -68,7 +68,7 @@ def test_a_blocked_epic_has_no_dispatch_and_nexts_blockers(tmp_path: Path) -> No
     nexted = work.run_next(layout, EPIC, dry_run=True)
 
     assert explained.attributes is None
-    assert explained.packaged_rule is None
+    assert explained.packaged_rules is None
     assert explained.resolution is None
     assert [matched for _rule, matched in explained.rules] == [False]
     assert explained.next_result.route.blockers == nexted.route.blockers

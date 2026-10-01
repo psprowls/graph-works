@@ -27,7 +27,10 @@ def _git_workspace_with_code(tmp_path):
         _git(repo, "config", "user.email", "test@example.test")
         _git(repo, "add", "-A")
         _git(repo, "commit", "--allow-empty", "-m", "base")
-    layout.manifest_path.write_text(f"version: 1\nrepositories:\n  code: {{path: {code}}}\n", encoding="utf-8")
+    layout.manifest_path.write_text(
+        f"version: 1\nworkflow: {{dispatch_rules: dispatch.yaml}}\nrepositories:\n  code: {{path: {code}}}\n",
+        encoding="utf-8",
+    )
     _git(layout.root, "add", "-A")
     _git(layout.root, "commit", "-m", "configure code")
     return layout, code
@@ -145,7 +148,7 @@ def setup(tmp_path, monkeypatch, *, scalar=True, nested=False, base_checkout=Fal
         encoding="utf-8",
     )
     (layout.root / "dispatch.yaml").write_text(
-        "pipeline:\n  rules:\n    - match: {variant: branch}\n"
+        "pipeline:\n  rules:\n    - match: {stage: finish}\n"
         '      prompt_tail: "Auto-drive context: merge target {merge_target}"\n',
         encoding="utf-8",
     )
@@ -281,7 +284,7 @@ def test_next_and_orchestrate_have_identical_finish_targets(tmp_path, monkeypatc
     monkeypatch.setattr(commands, "repository_identity", lambda p: str(p))
     # Relay dispatch requires an explicit tail, as in initialized workspaces.
     (layout.root / "dispatch.yaml").write_text(
-        "pipeline:\n  rules:\n    - match: {variant: branch}\n"
+        "pipeline:\n  rules:\n    - match: {stage: finish}\n"
         '      prompt_tail: "Auto-drive context: merge target {merge_target}"\n',
         encoding="utf-8",
     )
@@ -449,7 +452,10 @@ def test_unstamped_descendant_receipt_verifies_against_anchor_tip(tmp_path):
     git(repo, "config", "user.name", "Test")
     git(repo, "config", "user.email", "test@example.test")
     git(repo, "commit", "--allow-empty", "-m", "base")
-    layout.manifest_path.write_text(f"version: 1\nrepositories:\n  code: {{path: {repo}}}\n", encoding="utf-8")
+    layout.manifest_path.write_text(
+        f"version: 1\nworkflow: {{dispatch_rules: dispatch.yaml}}\nrepositories:\n  code: {{path: {repo}}}\n",
+        encoding="utf-8",
+    )
     anchor = tmp_path / "anchor"
     git(repo, "worktree", "add", "-b", "epic/x", str(anchor))
     git(anchor, "commit", "--allow-empty", "-m", "child work")
@@ -544,7 +550,9 @@ def test_real_git_foreign_only_owner_targets_nearest_anchor(tmp_path, nested):
         git(repo, "commit", "--allow-empty", "-m", "base")
         repos[name] = repo
     layout.manifest_path.write_text(
-        "version: 1\nrepositories:\n" + "".join(f"  {n}: {{path: {p}}}\n" for n, p in repos.items()), encoding="utf-8"
+        "version: 1\nworkflow: {dispatch_rules: dispatch.yaml}\nrepositories:\n"
+        + "".join(f"  {n}: {{path: {p}}}\n" for n, p in repos.items()),
+        encoding="utf-8",
     )
     parent = tmp_path / "parent"
     source = tmp_path / "source"

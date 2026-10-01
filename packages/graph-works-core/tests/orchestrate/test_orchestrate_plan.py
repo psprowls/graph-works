@@ -19,6 +19,7 @@ from graph_works_core.workspace.repo_context import RepositoryContext
 from graph_works_core.workspace.repos import ItemRepo
 from work_tracker_okf.dependencies import DependencyEdge
 from work_tracker_okf.items import Stamp, WorkItem
+from work_tracker_okf.pipeline import PACKAGED_DEFINITION, ArtifactSpec, parse_path_rules
 from work_tracker_okf.workflow import RETURN_TO_EXECUTE, RouteState, route
 
 
@@ -958,11 +959,11 @@ def test_result_facade_forwards_every_plain_plan_field() -> None:
 
 
 def test_blocker_classification_and_descendant_walk_cover_every_fallback() -> None:
-    assert orchestrate._classify("effort required before execute") == "effort-required"
-    assert orchestrate._classify("open decision D-001") == "decisions"
-    assert orchestrate._classify("this type never dispatches") == "human"
-    assert orchestrate._classify("human-owned transition") == "human"
-    assert orchestrate._classify("unexpected") == "invalid"
+    assert orchestrate._classify("effort-required") == "effort-required"
+    assert orchestrate._classify("hold") == "decisions"
+    assert orchestrate._classify("terminal") == "human"
+    assert orchestrate._classify("attribute-required") == "human"
+    assert orchestrate._classify(None) == "invalid"
 
     root = _item("work/epic", type="Epic")
     child = _item("work/epic/children/feature")
@@ -1608,6 +1609,25 @@ def test_a_planned_fork_carries_its_parent_through_plan() -> None:
     assert forks[0].worktree.parent_path == "/epic"
 
 
+@pytest.mark.parametrize("effort", ["small", "medium"])
+@pytest.mark.parametrize("filename", ["coverage.md", "03-execute-coverage.md"])
+def test_execute_tail_names_the_definitions_coverage_file(effort: str, filename: str) -> None:
+    definition = dataclasses.replace(
+        PACKAGED_DEFINITION,
+        artifacts={
+            **PACKAGED_DEFINITION.artifacts,
+            "execute": ArtifactSpec("execute", filename, "execute-coverage", False),
+        },
+    )
+    item = _execute_item("work/feature-x", effort=effort)
+    result = _plan((item,), item.path, definition=definition, worktree_exists={"/repo": True})
+    [dispatch] = result.dispatches
+    assert f"/ws/okf/work/feature-x/references/{filename}" in dispatch.prompt
+    assert "{execute_artifact}" not in dispatch.prompt
+    if filename != "03-execute-coverage.md":
+        assert "03-execute-coverage.md" not in dispatch.prompt
+
+
 def test_prompt_substitutes_tail() -> None:
     prompt = orchestrate._prompt(
         path="work/feature-a",
@@ -1616,6 +1636,7 @@ def test_prompt_substitutes_tail() -> None:
         workspace="/ws",
         merge_target="main",
         tail="{path} {key} {phase} {workspace} {merge_target} {literal}",
+        execute_artifact="coverage.md",
         mode="autonomous",
     )
     assert "work/feature-a work/feature-a#execute execute /ws main {literal}" in prompt
@@ -1635,6 +1656,7 @@ def test_an_execute_dispatch_prompt_carries_the_coverage_obligation() -> None:
         workspace="/ws",
         merge_target="main",
         tail=EXECUTE_TAIL,
+        execute_artifact="03-execute-coverage.md",
         mode="autonomous",
     )
     assert "/ws/okf/work/feature-a/references/03-execute-coverage.md" in prompt
@@ -1731,7 +1753,7 @@ def test_frontier_reports_a_parent_cycle_in_a_gated_tree() -> None:
     root = _item(root_path, type="Epic", phase="execute", parent_path=child_path, child_paths=(child_path,))
     child = _item(child_path, type="Epic", phase="execute", parent_path=root_path, child_paths=(root_path,))
 
-    _candidates, _advances, blocked = orchestrate._frontier((root, child), root_path)
+    _candidates, _advances, blocked = orchestrate._frontier((root, child), root_path, definition=PACKAGED_DEFINITION)
 
     assert blocked[0].kind == "invalid"
     assert "parent cycle" in blocked[0].reason
@@ -1742,7 +1764,7 @@ def test_frontier_plans_an_advance_when_the_current_artifact_is_complete() -> No
     child_path = "work/epic-a/children/feature-done"
     item = _item(path, type="Epic", phase="execute", child_paths=(child_path,))
     child = _item(child_path, work_status="resolved")
-    _candidates, advances, blocked = orchestrate._frontier((item, child), path)
+    _candidates, advances, blocked = orchestrate._frontier((item, child), path, definition=PACKAGED_DEFINITION)
     assert blocked == []
     assert advances[0].path == path
     assert advances[0].mode == "advance"
@@ -1760,13 +1782,15 @@ def test_frontier_repairs_an_epic_reopened_by_a_post_finish_child() -> None:
     late = _item(late_child, type="Bug", work_status="open", phase="execute")
     items = (epic, done, late)
 
-    _candidates, advances, blocked = orchestrate._frontier(items, root)
+    _candidates, advances, blocked = orchestrate._frontier(items, root, definition=PACKAGED_DEFINITION)
     assert blocked == []
     assert [advance.path for advance in advances] == [root]
     assert advances[0].mode == "return"
 
     reopened = dataclasses.replace(epic, phase="execute")
-    candidates2, advances2, blocked2 = orchestrate._frontier((reopened, done, late), root)
+    candidates2, advances2, blocked2 = orchestrate._frontier(
+        (reopened, done, late), root, definition=PACKAGED_DEFINITION
+    )
     assert blocked2 == []
     assert advances2 == []
     assert [node.path for node, _result in candidates2] == [late_child]
@@ -1783,7 +1807,7 @@ def test_frontier_sees_an_open_grandchild_beneath_a_terminal_direct_child() -> N
     gc = _item(grandchild, type="Bug", work_status="open", phase="execute")
     items = (epic, feature, gc)
 
-    candidates, advances, blocked = orchestrate._frontier(items, root)
+    candidates, advances, blocked = orchestrate._frontier(items, root, definition=PACKAGED_DEFINITION)
     assert blocked == []
     assert advances == []
     assert [node.path for node, _result in candidates] == [grandchild]
@@ -1802,7 +1826,7 @@ def test_descend_and_frontier_agree_on_the_widened_execute_window() -> None:
     gc = _item(grandchild, type="Bug", work_status="open", phase="execute")
     items = (epic, feature, gc)
 
-    candidates, _advances, _blocked = orchestrate._frontier(items, root)
+    candidates, _advances, _blocked = orchestrate._frontier(items, root, definition=PACKAGED_DEFINITION)
     descended = descend(items, root)
 
     assert descended.leaf == grandchild
@@ -1829,13 +1853,15 @@ def test_regression_the_real_epic_reopens_then_dispatches_its_four_children() ->
     )
     items = (epic, old, *children)
 
-    _candidates, advances, blocked = orchestrate._frontier(items, root)
+    _candidates, advances, blocked = orchestrate._frontier(items, root, definition=PACKAGED_DEFINITION)
     assert blocked == []
     assert [advance.path for advance in advances] == [root]
     assert advances[0].mode == "return"
 
     reopened = dataclasses.replace(epic, phase="execute")
-    candidates2, advances2, blocked2 = orchestrate._frontier((reopened, old, *children), root)
+    candidates2, advances2, blocked2 = orchestrate._frontier(
+        (reopened, old, *children), root, definition=PACKAGED_DEFINITION
+    )
     assert blocked2 == []
     assert advances2 == []
     assert sorted(node.path for node, _result in candidates2) == sorted(child_paths)
@@ -2369,9 +2395,9 @@ def test_dispatch_profile_errors_preserve_relay_blocker_and_do_not_claim_placeme
     root = "work/epic-a"
     child = f"{root}/children/feature-a"
     rules = parse_rules(
-        [{"match": {"variant": "single"}, "mode": "relay", "prompt_tail": None}],
+        [{"match": {"stage": "plan"}, "mode": "relay", "prompt_tail": None}],
         source="/ws/dispatch.yaml",
-        attributes=frozenset({"variant"}),
+        attributes=frozenset({"stage"}),
     )
     result = _plan(
         (_item(root, type="Epic", phase="execute", child_paths=(child,)), _item(child)),
@@ -2469,7 +2495,7 @@ def test_dispatch_profile_error_reserves_no_affects() -> None:
     rules = parse_rules(
         [{"match": {"type": "Bug"}, "mode": "relay", "prompt_tail": None}],
         source="/ws/dispatch.yaml",
-        attributes=frozenset({"variant", "type"}),
+        attributes=frozenset({"stage", "type"}),
     )
     items, (first, second) = _overlapping_children("bug-a", "feature-b", first={"type": "Bug", "phase": "plan"})
     result = _plan(items, _RESERVE_ROOT, dispatch_rules=rules, worktree_exists={"/wt/epic": True})
@@ -2684,9 +2710,9 @@ def _branch_tail_rules():
     from graph_works_core.workspace.dispatch import parse_rules
 
     return parse_rules(
-        [{"match": {"variant": "branch"}, "prompt_tail": "Auto-drive context: merge target is `{merge_target}`."}],
+        [{"match": {"stage": "finish"}, "prompt_tail": "Auto-drive context: merge target is `{merge_target}`."}],
         source="/ws/dispatch.yaml",
-        attributes=frozenset({"variant"}),
+        attributes=frozenset({"stage"}),
     )
 
 
@@ -2948,17 +2974,17 @@ def test_every_dispatch_prompt_hands_placement_to_the_coordinator(phase: str, is
     assert "--worktree`/`--branch` explicitly" not in dispatch.prompt
 
 
-@pytest.mark.parametrize("variant", ["single", "exploration", "branch"])
-def test_planned_dispatch_reports_findings_with_or_without_a_tail(variant: str) -> None:
+@pytest.mark.parametrize("stage", ["plan", "design", "finish"])
+def test_planned_dispatch_reports_findings_with_or_without_a_tail(stage: str) -> None:
     slug = "work/feature-findings"
     item = _item(
         slug,
-        phase={"single": "plan", "exploration": "design", "branch": "finish"}[variant],
-        has_design_artifact=variant != "exploration",
-        work_status="in-progress" if variant == "branch" else "open",
-        owner="pat" if variant == "branch" else None,
-        worktree="/repo" if variant == "branch" else None,
-        branch="main" if variant == "branch" else None,
+        phase=stage,
+        has_design_artifact=stage != "design",
+        work_status="in-progress" if stage == "finish" else "open",
+        owner="pat" if stage == "finish" else None,
+        worktree="/repo" if stage == "finish" else None,
+        branch="main" if stage == "finish" else None,
     )
     dispatch = _only_dispatch(
         _plan((item,), slug, dispatch_rules=_branch_tail_rules(), worktree_exists={"/repo": True})
@@ -2968,9 +2994,12 @@ def test_planned_dispatch_reports_findings_with_or_without_a_tail(variant: str) 
     assert "outside this item's scope" in lines[done + 1]
     assert lines[done + 1] == pipeline.FINDINGS_LINE
     assert lines.count(pipeline.FINDINGS_LINE) == 1
-    if variant == "single":
-        assert pipeline.PACKAGED_PIPELINE[variant].prompt_tail == pipeline.WORKSPACE_COMMIT_TAIL
-    elif variant == "exploration":
+    if stage == "plan":
+        assert (
+            next(rule for rule in pipeline.PACKAGED_PIPELINE if rule.name == "plan").prompt_tail
+            == pipeline.WORKSPACE_COMMIT_TAIL
+        )
+    elif stage == "design":
         attend = pipeline.ATTEND_TAIL.replace("{path}", slug).replace("{phase}", "design").replace("{workspace}", "/ws")
         assert attend in dispatch.prompt
         assert f'--body "{slug} design: waiting' in dispatch.prompt
@@ -2978,17 +3007,17 @@ def test_planned_dispatch_reports_findings_with_or_without_a_tail(variant: str) 
         assert "Auto-drive context:" in dispatch.prompt
 
 
-@pytest.mark.parametrize(("variant", "expected"), [("single", 1), ("exploration", 0), ("branch", 1)])
-def test_the_ask_line_follows_findings_on_every_non_attend_dispatch(variant: str, expected: int) -> None:
+@pytest.mark.parametrize(("stage", "expected"), [("plan", 1), ("design", 0), ("finish", 1)])
+def test_the_ask_line_follows_findings_on_every_non_attend_dispatch(stage: str, expected: int) -> None:
     slug = "work/feature-asks"
     item = _item(
         slug,
-        phase={"single": "plan", "exploration": "design", "branch": "finish"}[variant],
-        has_design_artifact=variant != "exploration",
-        work_status="in-progress" if variant == "branch" else "open",
-        owner="pat" if variant == "branch" else None,
-        worktree="/repo" if variant == "branch" else None,
-        branch="main" if variant == "branch" else None,
+        phase=stage,
+        has_design_artifact=stage != "design",
+        work_status="in-progress" if stage == "finish" else "open",
+        owner="pat" if stage == "finish" else None,
+        worktree="/repo" if stage == "finish" else None,
+        branch="main" if stage == "finish" else None,
     )
     dispatch = _only_dispatch(
         _plan((item,), slug, dispatch_rules=_branch_tail_rules(), worktree_exists={"/repo": True})
@@ -2997,7 +3026,7 @@ def test_the_ask_line_follows_findings_on_every_non_attend_dispatch(variant: str
     assert lines.count(pipeline.ASK_LINE) == expected
     if expected:
         assert lines[lines.index(pipeline.FINDINGS_LINE) + 1] == pipeline.ASK_LINE
-    assert dispatch.mode == {"single": "autonomous", "exploration": "attend", "branch": "relay"}[variant]
+    assert dispatch.mode == {"plan": "autonomous", "design": "attend", "finish": "relay"}[stage]
 
 
 def test_session_name_label_replaces_the_phase_head() -> None:
@@ -3029,3 +3058,40 @@ def test_a_live_reconcile_key_resolves_to_its_item_at_plan() -> None:
     assert key not in computed.dispatch_resolutions
     assert not computed.blocked
     assert not computed.dispatches
+
+
+def test_off_path_repair_is_planned_as_an_advance_not_a_return() -> None:
+    item = _item("work/bug-x", type="Bug", effort="small", phase="plan")
+    result = _plan((item,), item.path)
+    assert result.blocked == ()
+    [repair] = result.advances
+    assert repair.path == item.path
+    assert repair.mode == "repair"
+    assert result.dispatches == ()
+
+
+def test_plan_stage_reconcile_keeps_its_session_label() -> None:
+    item = _item("work/feature-x", phase="plan")
+    result = _plan((item,), item.path, stale={item.path: ("work/landed",)})
+    [dispatch] = result.dispatches
+    assert dispatch.key == orchestrate.session_name(item.path, item.type, "plan", label="reconcile")
+
+
+def test_stale_testgap_entry_keeps_plain_plan_session_label() -> None:
+    item = _item("work/gap-entry", type="TestGap", phase=None, effort="large")
+    result = _plan((item,), item.path, stale={item.path: ("work/landed",)})
+    [dispatch] = result.dispatches
+    assert dispatch.key == orchestrate.session_name(item.path, item.type, "plan")
+
+
+def test_off_path_repair_does_not_adopt_a_descendants_worktree() -> None:
+    root = _item("work/feature-root", phase="plan")
+    child = _item(f"{root.path}/children/bug-child", phase="execute", worktree="/child", branch="child")
+    definition = dataclasses.replace(
+        PACKAGED_DEFINITION,
+        path_rules=parse_path_rules([{"match": {}, "stages": ["design", "execute", "finish"]}], source="test"),
+    )
+    result = _plan((root, child), root.path, definition=definition)
+    [repair] = result.advances
+    assert repair.mode == "repair"
+    assert repair.worktree is None and repair.branch is None

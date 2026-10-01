@@ -364,7 +364,8 @@ def _split_layout(tmp_path: Path):
     (code / "packages/a").mkdir(parents=True)
     layout = apply_init(plan_init(vault / ".works", today=TODAY, topic="Split")).layout
     layout.manifest_path.write_text(
-        f'version: 1\nrepositories:\n  "code":\n    path: {json.dumps(str(code))}\n',
+        "version: 1\nworkflow: {dispatch_rules: dispatch.yaml}\nrepositories:\n"
+        f'  "code":\n    path: {json.dumps(str(code))}\n',
         encoding="utf-8",
     )
     (layout.bundle_dir / "work").mkdir(parents=True, exist_ok=True)
@@ -424,7 +425,7 @@ def test_two_declared_repos_archive_validates_against_every_declared_repo(tmp_pa
     other.mkdir()
     code = tmp_path / "code"
     layout.manifest_path.write_text(
-        "version: 1\nrepositories:\n"
+        "version: 1\nworkflow: {dispatch_rules: dispatch.yaml}\nrepositories:\n"
         f'  "other":\n    path: {json.dumps(str(other))}\n'
         f'  "code":\n    path: {json.dumps(str(code))}\n',
         encoding="utf-8",

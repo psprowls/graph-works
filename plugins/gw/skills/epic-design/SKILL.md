@@ -54,8 +54,9 @@ Create a todo per item and complete them in order.
    architecture and its seams, the thin child index, verification, risks, out of
    scope, done criteria.
 5. **Record every settled decision in the ledger** (see "Decisions" below).
-6. **Write the design artifact** to the brief's `artifact.path` — by default
-   `<workspace>/okf/<work-path>/references/01-design.md`.
+6. **Write the design artifact** to the brief's `artifact.path`. Without a
+   brief, use `artifacts.design.path` from
+   `gw work next <work-path> --json --file ""`.
 7. **Spec self-review** — placeholder scan, internal consistency, scope check,
    ambiguity check. Fix inline; no re-review.
 8. **User review gate** — ask your human partner to read the written artifact and
@@ -79,8 +80,8 @@ on an Epic. They are not optional.
   `planning-epics` files them during the plan stage, records the canonical `path`
   the CLI returns for each, and writes the dependency graph. Filing here would
   produce a pathless draft that has to be adopted later, and it would put each
-  child's design somewhere other than its own owned
-  `<child-path>/references/01-design.md`.
+  child's design somewhere other than the child's own design artifact,
+  which its `gw work next` reports once it is filed.
 - **Record settled decisions against the canonical owner path.** Every choice the
   human made during this stage, with its rationale and its blast radius.
 

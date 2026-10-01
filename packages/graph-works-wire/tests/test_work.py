@@ -15,7 +15,7 @@ from graph_works_core.orchestrate.wait import Absorbed, WaitResult
 from graph_works_core.work.commands import DispatchExplanation, OpenDecision
 from graph_works_core.work.reconcile import CitedDecision, CommitRef, LandedSibling, ReconcileContext
 from graph_works_core.workspace.commits import CommitOutcome
-from graph_works_core.workspace.dispatch import packaged_rule, resolve_dispatch
+from graph_works_core.workspace.dispatch import packaged_rules_matching, resolve_dispatch
 from graph_works_wire import config as wire_config
 from graph_works_wire import work
 from samples_work import (
@@ -33,7 +33,7 @@ from samples_work import (
     status,
 )
 from work_tracker_okf.decisions import Decision
-from work_tracker_okf.workflow import Transition
+from work_tracker_okf.workflow import Blocker, Transition
 
 
 def test_transition_projects_the_unresolved_baseline_request() -> None:
@@ -234,7 +234,7 @@ def test_worker_dispatch_payload_exact_success_shape() -> None:
 
 
 def test_dispatch_resolution_keyword_remains_supported() -> None:
-    resolution = resolve_dispatch({"variant": "single"}, rules=())
+    resolution = resolve_dispatch({"stage": "plan"}, rules=())
     assert work.dispatch_payload(resolution=resolution) == work.dispatch_payload(resolution)
 
 
@@ -421,7 +421,7 @@ def test_projection_helpers_cover_live_and_preview_shapes(tmp_path: Path) -> Non
         finish_targets=(),
         selected_path="work/a",
         descent=SimpleNamespace(path=("work/e", "work/a"), leaf=None, blocked_at="work/a", reason="blocked"),
-        route=SimpleNamespace(blockers=("base",)),
+        route=SimpleNamespace(blockers=(Blocker("invalid", "base"),)),
         dispatch_preflight=None,
     )
     assert work.descent_payload(result)["from"] == "work/e"
@@ -546,7 +546,7 @@ def test_complex_payloads_project_explicit_current_fields(tmp_path: Path) -> Non
         workspace_preparations=(),
         plan=SimpleNamespace(
             finish_targets={},
-            dispatch_resolutions={dispatch.key: resolve_dispatch({"variant": "planned"}, rules=())},
+            dispatch_resolutions={dispatch.key: resolve_dispatch({"stage": "execute", "has_plan": True}, rules=())},
             human_checkpoints={},
             workspace_placements={},
         ),
@@ -685,12 +685,12 @@ def test_work_list_payload_maps_parent_path_to_parent() -> None:
 
 
 def test_dispatch_explain_payload_with_a_dispatch() -> None:
-    resolution = resolve_dispatch({"variant": "single"}, rules=())
-    row = packaged_rule("single")
+    resolution = resolve_dispatch({"stage": "plan"}, rules=())
+    row = packaged_rules_matching({"stage": "plan"})[0]
     explanation = DispatchExplanation(
         path="work/a",
-        attributes={"stage": "plan", "variant": "single", "has_spec": True},
-        packaged_rule=row,
+        attributes={"stage": "plan", "has_spec": True},
+        packaged_rules=(row,),
         rules=((row, True),),
         resolution=resolution,
         next_result=ns(route=ns(blockers=()), descent=None, dispatch_preflight=None),
@@ -699,8 +699,8 @@ def test_dispatch_explain_payload_with_a_dispatch() -> None:
     payload = work.dispatch_explain_payload(explanation)
 
     assert payload["path"] == "work/a"
-    assert payload["attributes"] == {"stage": "plan", "variant": "single", "has_spec": True}
-    assert payload["packaged_rule"] == wire_config.rule_payload(row)
+    assert payload["attributes"] == {"stage": "plan", "has_spec": True}
+    assert payload["packaged_rules"] == [wire_config.rule_payload(row)]
     assert payload["rules"] == [{**wire_config.rule_payload(row), "matched": True}]
     assert {"profile": payload["profile"], "provenance": payload["provenance"]} == work.dispatch_payload(resolution)
     assert payload["blockers"] == []
@@ -721,7 +721,7 @@ def _queue_entry(title: str, path: str, *, resolution, preflight, requires=("own
 
 
 def test_work_queue_payload_follows_next_payloads_rules() -> None:
-    resolution = resolve_dispatch({"variant": "single"}, rules=())
+    resolution = resolve_dispatch({"stage": "plan"}, rules=())
     ready = _queue_entry("A", "work/a", resolution=resolution, preflight=None)
     refused = _queue_entry("B", "work/b", resolution=None, preflight="dispatch.yaml: rule 0: bad")
     blocked = ns(
@@ -729,7 +729,7 @@ def test_work_queue_payload_follows_next_payloads_rules() -> None:
         result=ns(
             selected_path="work/e",
             state=ns(type="Epic", phase="execute", work_status="in-progress"),
-            route=ns(reason="waiting", blockers=("waiting on children",), on_dispatch=None),
+            route=ns(reason="waiting", blockers=(Blocker("invalid", "waiting on children"),), on_dispatch=None),
             descent=None,
             dispatch_resolution=None,
             dispatch_preflight=None,
@@ -748,6 +748,7 @@ def test_work_queue_payload_follows_next_payloads_rules() -> None:
         "mode": resolution.profile.mode,
         "reason": "plan it",
         "blockers": [],
+        "blocker_kinds": [],
         "requires": ["owner"],
     }
     assert (rows[1]["skill"], rows[1]["mode"], rows[1]["reason"], rows[1]["requires"]) == (None, None, None, [])
@@ -759,15 +760,17 @@ def test_dispatch_explain_payload_without_a_dispatch() -> None:
     explanation = DispatchExplanation(
         path="work/e",
         attributes=None,
-        packaged_rule=None,
+        packaged_rules=None,
         rules=(),
         resolution=None,
-        next_result=ns(route=ns(blockers=("waiting on children",)), descent=None, dispatch_preflight="bad"),
+        next_result=ns(
+            route=ns(blockers=(Blocker("invalid", "waiting on children"),)), descent=None, dispatch_preflight="bad"
+        ),
     )
 
     payload = work.dispatch_explain_payload(explanation)
 
-    assert payload["attributes"] is None and payload["packaged_rule"] is None
+    assert payload["attributes"] is None and payload["packaged_rules"] is None
     assert payload["profile"] is None and payload["provenance"] is None
     assert payload["blockers"] == ["waiting on children", "bad"]
 
@@ -1071,3 +1074,77 @@ def test_obligation_payload_shape() -> None:
     refused = obligation_payload(ObligationRecord(ObligationPlan("work/feature-a", (), (), "empty-text", "one line")))
     assert refused["refusal"] == {"reason": "empty-text", "detail": "one line"}
     assert refused["changed"] is False
+
+
+def test_blocker_kinds_parallel_descend_and_preflight_entries() -> None:
+    result = ns(
+        route=ns(blockers=(Blocker("effort-required", "size it"),)),
+        descent=ns(leaf=None, reason="no leaf"),
+        dispatch_preflight="bad dispatch",
+    )
+    assert work.next_blocker_kinds(result) == ["effort-required", "descend", "dispatch-preflight"]
+    assert len(work.next_blocker_kinds(result)) == len(work.next_blockers(result))
+
+
+def test_next_payload_carries_unresolved_effort_and_path_candidates() -> None:
+    from samples_work import next_result
+    from work_tracker_okf.workflow import RouteState, route
+
+    result = next_result(full=False)
+    result.route = route(RouteState(type="Bug", work_status="open", phase="design"))
+    payload = work.next_payload(result, bundle_root=Path("/bundle"))
+    assert payload["on_complete"]["phase"] is None
+    assert payload["on_complete"]["requires"] == ["effort"]
+    assert {tuple(c["stages"]) for c in payload["path_candidates"]} == {
+        ("design", "plan", "execute", "finish"),
+        ("design", "execute", "finish"),
+    }
+    assert len(payload["blocker_kinds"]) == len(payload["blockers"])
+
+
+def test_next_payload_projects_path_and_all_stage_artifacts() -> None:
+    from graph_works_core.work.path_report import PathCandidateReport, PathReport, PathRuleRef, StageArtifactReport
+
+    result = next_result(full=True)
+    rule = PathRuleRef("short", "/ws/dispatch.yaml", 0)
+    result.path = PathReport(("design", "execute", "finish"), "design", "execute", rule, ())
+    result.artifacts = (StageArtifactReport("plan", "plan.md", "plan", True, False, Path("/ws/plan.md"), True),)
+    payload = work.next_payload(result, bundle_root=BUNDLE)
+    assert payload["path"] == {
+        "stages": ["design", "execute", "finish"],
+        "current": "design",
+        "next": "execute",
+        "rule": {"name": "short", "source": "/ws/dispatch.yaml", "index": 0},
+        "candidates": [],
+    }
+    assert payload["artifacts"] == {
+        "plan": {
+            "file": "plan.md",
+            "source": "plan",
+            "required": True,
+            "on_path": False,
+            "path": "/ws/plan.md",
+            "exists": True,
+        },
+    }
+    result.path = PathReport(None, None, None, None, (PathCandidateReport(("execute", "finish"), rule),))
+    assert work.next_payload(result, bundle_root=BUNDLE)["path"] == {
+        "stages": None,
+        "current": None,
+        "next": None,
+        "rule": None,
+        "candidates": [
+            {"stages": ["execute", "finish"], "rule": {"name": "short", "source": "/ws/dispatch.yaml", "index": 0}}
+        ],
+    }
+
+
+def test_next_payload_always_has_empty_path_and_artifacts_defaults() -> None:
+    from graph_works_core.work.commands import NextResult
+    from work_tracker_okf.workflow import RouteState, route
+
+    state = RouteState(type="Feature", work_status="resolved", phase="done")
+    result = NextResult("work/a", "work/a", state, route(state), None, None, ())
+    payload = work.next_payload(result, bundle_root=BUNDLE)
+    assert payload["path"] is None
+    assert payload["artifacts"] == {}

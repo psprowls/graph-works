@@ -57,7 +57,7 @@ def test_finish_hold_is_journaled_blocks_and_can_be_answered(tmp_path: Path, sha
     )
     assert any("operation-specific" in note for note in result.warnings)
     assert [f.path for f in _finish_errors(layout)] == [f"{FEATURE}.md"]
-    assert work.run_next(layout, target).route.blockers[0].startswith(f"open decision {entry.id} ({shape})")
+    assert work.run_next(layout, target).route.blockers[0].message.startswith(f"open decision {entry.id} ({shape})")
     assert stage.run_stage_advance(layout, target, today=TODAY, dry_run=False).outcome.plan.refusal == "blocked"
     checkpoint = layout.bundle_dir / target / "references/04-finish-checkpoint-D-001.md"
     if draft:
@@ -69,7 +69,7 @@ def test_finish_hold_is_journaled_blocks_and_can_be_answered(tmp_path: Path, sha
     )
     assert answered.application is not None and answered.application.ok
     assert not _finish_errors(layout)
-    assert not any("open decision" in b for b in work.run_next(layout, target).route.blockers)
+    assert not any("open decision" in b.message for b in work.run_next(layout, target).route.blockers)
     if draft:
         assert checkpoint.is_file()
 
@@ -84,7 +84,7 @@ def test_multiple_finish_holds_block_until_the_last_is_released(tmp_path: Path) 
         layout, FEATURE, first.plan.primary.id, answer="go", on=TODAY, decided_by="user", dry_run=False
     )
     assert answered.application.ok
-    assert second.plan.primary.id in work.run_next(layout, FEATURE).route.blockers[0]
+    assert second.plan.primary.id in work.run_next(layout, FEATURE).route.blockers[0].message
     superseded = work.run_decision_supersede(
         layout,
         FEATURE,
@@ -97,7 +97,7 @@ def test_multiple_finish_holds_block_until_the_last_is_released(tmp_path: Path) 
     )
     assert superseded.application.ok
     assert not _finish_errors(layout)
-    assert not any("open decision" in b for b in work.run_next(layout, FEATURE).route.blockers)
+    assert not any("open decision" in b.message for b in work.run_next(layout, FEATURE).route.blockers)
 
 
 @pytest.mark.parametrize("affects", [(), ("work/missing",)])
@@ -118,7 +118,7 @@ def test_owner_can_file_a_named_question_for_its_child_at_finish(tmp_path: Path)
     _page(layout, child, type="Bug")
     result = _add(layout, affects=(child,))
     assert result.application is not None and result.application.ok
-    assert "open decision D-001" in work.run_next(layout, child).route.blockers[0]
+    assert "open decision D-001" in work.run_next(layout, child).route.blockers[0].message
 
 
 def test_finish_park_rolls_back_every_effect_on_unrelated_validation_error(tmp_path: Path, monkeypatch) -> None:
@@ -239,7 +239,7 @@ def test_standalone_fallback_owner_has_the_same_finish_policy(tmp_path: Path) ->
     )
     assert any("operation-specific validation allowance" in note for note in result.warnings)
     assert not any("pre-existing" in note for note in result.application.warnings)
-    assert "open decision D-001 (skip)" in work.run_next(layout, path).route.blockers[0]
+    assert "open decision D-001 (skip)" in work.run_next(layout, path).route.blockers[0].message
 
 
 @pytest.mark.parametrize("tamper", [False, True])
@@ -267,4 +267,4 @@ def test_finish_hold_completion_evidence_includes_the_allowance(tmp_path: Path, 
         assert _snapshot(layout) == before
     else:
         assert (layout.bundle_dir / FEATURE / "references/04-finish-checkpoint-D-001.md").is_file()
-        assert "open decision D-001" in work.run_next(layout, FEATURE).route.blockers[0]
+        assert "open decision D-001" in work.run_next(layout, FEATURE).route.blockers[0].message

@@ -39,7 +39,7 @@ def test_local_rules_append_without_rewriting_shared(tmp_path: Path) -> None:
     before = shared.read_bytes()
 
     config = load_dispatch_config(layout)
-    result = resolve_dispatch({"stage": "execute", "variant": "planned"}, rules=config.rules)
+    result = resolve_dispatch({"stage": "execute", "has_plan": True}, rules=config.rules)
 
     assert result.profile.agent == "codex"
     assert result.profile.model is None
@@ -63,7 +63,7 @@ def test_duplicate_labels_are_not_deduplicated(tmp_path: Path) -> None:
     config = load_dispatch_config(layout)
 
     assert [rule.origin.name for rule in config.rules] == ["same", "same"]
-    assert resolve_dispatch({"variant": "planned"}, rules=config.rules).profile.model == "second"
+    assert resolve_dispatch({"stage": "execute", "has_plan": True}, rules=config.rules).profile.model == "second"
 
 
 @pytest.mark.parametrize("local", [None, "{}\n", "pipeline:\n  rules: []\n"])
@@ -83,14 +83,14 @@ def test_attributes_default_and_local_declaration_override(tmp_path: Path) -> No
     shared = tmp_path / "config/custom.yml"
     shared.parent.mkdir()
     shared.write_text(
-        "pipeline:\n  attributes: [stage, variant]\n  rules:\n    - match: {stage: execute}\n      model: shared\n",
+        "pipeline:\n  attributes: [stage, has_plan]\n  rules:\n    - match: {stage: execute}\n      model: shared\n",
         encoding="utf-8",
         newline="",
     )
     local = tmp_path / "config/custom.local.yml"
     local.write_text(
         "pipeline:\n"
-        "  attributes: [stage, variant, effort]\n"
+        "  attributes: [stage, has_plan, effort]\n"
         "  rules:\n"
         "    - match: {effort: large}\n"
         "      model: local\n",
@@ -102,7 +102,7 @@ def test_attributes_default_and_local_declaration_override(tmp_path: Path) -> No
 
     assert config.shared_path == shared
     assert config.local_path == local
-    assert config.attributes == frozenset({"stage", "variant", "effort"})
+    assert config.attributes == frozenset({"stage", "has_plan", "effort"})
     assert len(config.rules) == 2
 
 
@@ -248,7 +248,7 @@ def test_plan_validates_combination_and_apply_refuses_stale_other_layer(tmp_path
 def test_plan_rejects_invalid_prospective_combination_without_writing(tmp_path: Path) -> None:
     layout = _workspace(tmp_path)
     shared = tmp_path / "dispatch.yaml"
-    shared.write_text("pipeline: {attributes: [variant]}\n", encoding="utf-8", newline="")
+    shared.write_text("pipeline: {attributes: [has_plan]}\n", encoding="utf-8", newline="")
     before = shared.read_bytes()
 
     with pytest.raises(WorkspaceError, match="unknown or undeclared"):
@@ -294,13 +294,19 @@ def test_apply_can_remove_existing_local_rules_without_touching_shared(tmp_path:
         newline="",
     )
     before = shared.read_bytes()
-    assert resolve_dispatch({"variant": "planned"}, rules=load_dispatch_config(layout).rules).profile.model == "local"
+    assert (
+        resolve_dispatch({"stage": "execute", "has_plan": True}, rules=load_dispatch_config(layout).rules).profile.model
+        == "local"
+    )
 
     plan = plan_dispatch_write(layout, layer="local", document={"pipeline": {"rules": []}})
     apply_dispatch_write(plan)
 
     assert shared.read_bytes() == before
-    assert resolve_dispatch({"variant": "planned"}, rules=load_dispatch_config(layout).rules).profile.model == "shared"
+    assert (
+        resolve_dispatch({"stage": "execute", "has_plan": True}, rules=load_dispatch_config(layout).rules).profile.model
+        == "shared"
+    )
 
 
 @pytest.mark.parametrize("layer", ["shared", "local"])
@@ -394,3 +400,12 @@ def test_apply_refuses_inputs_changed_during_reload(tmp_path, monkeypatch, layer
     assert {path: path.read_bytes() for path in paths if path != changed_path} == {
         path: content for path, content in before.items() if path != changed_path
     }
+
+
+def test_declared_variant_attribute_is_refused_with_retirement_note(tmp_path: Path) -> None:
+    layout = _workspace(tmp_path)
+    (layout.root / "dispatch.yaml").write_text(
+        "pipeline: {attributes: [stage, variant], rules: []}\n", encoding="utf-8", newline=""
+    )
+    with pytest.raises(WorkspaceError, match=r"unknown declared attributes: .*variant.*routing variants are retired"):
+        load_dispatch_config(layout)

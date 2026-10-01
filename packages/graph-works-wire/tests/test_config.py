@@ -204,9 +204,9 @@ def test_rule_payload_renders_list_constraints_as_lists_and_scalars_as_scalars()
 
 def test_dispatch_rules_payload() -> None:
     packaged = packaged_rules()
-    payload = config.dispatch_rules_payload(DispatchRuleSet(("stage", "variant"), packaged, (_RULE,)))
+    payload = config.dispatch_rules_payload(DispatchRuleSet(("stage", "spec_stale"), packaged, (_RULE,)))
 
-    assert payload["attributes"] == ["stage", "variant"]
+    assert payload["attributes"] == ["stage", "spec_stale"]
     assert payload["packaged"] == [config.rule_payload(row) for row in packaged]
     assert payload["rules"] == [config.rule_payload(_RULE)]
 

@@ -402,6 +402,8 @@ test-plugin: preflight
     bash tests/test-finish-strategy-contract.sh
     echo "--- test-finish-obligations-docs"
     bash tests/test-finish-obligations-docs.sh
+    echo "--- test-no-stage-artifact-literals"
+    bash tests/test-no-stage-artifact-literals.sh
     echo "--- codex/test-marketplace-manifest"
     bash tests/codex/test-marketplace-manifest.sh
     echo "--- codex/test-package-codex-plugin"

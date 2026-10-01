@@ -49,7 +49,7 @@ def test_each_entry_is_the_dry_run_next_for_its_path(tmp_path: Path) -> None:
     design = by_path[DESIGN].dispatch_resolution
     assert design is not None and design.profile.mode == "attend"
     assert by_path[EPIC].route.dispatch is None and by_path[EPIC].route.blockers
-    assert any("effort required" in blocker for blocker in by_path[UNSIZED].route.blockers)
+    assert any("effort required" in blocker.message for blocker in by_path[UNSIZED].route.blockers)
 
 
 def test_archived_and_terminal_items_are_left_out(tmp_path: Path) -> None:
@@ -62,7 +62,8 @@ def test_archived_and_terminal_items_are_left_out(tmp_path: Path) -> None:
     assert [entry.item.path for entry in work.run_work_queue(layout)] == ["work/feature-live"]
 
 
-def test_a_malformed_dispatch_file_is_each_dispatchable_items_preflight(tmp_path: Path) -> None:
+def test_a_malformed_dispatch_file_blocks_offered_transitions_only(tmp_path: Path) -> None:
+    """D-004: dispatches and transitions are blocked; waiting items remain visible."""
     layout = _layout(tmp_path)
     _fixture(layout)
     _dispatch(layout, shared="  - match: {}\n    colour: red\n")
@@ -73,7 +74,9 @@ def test_a_malformed_dispatch_file_is_each_dispatchable_items_preflight(tmp_path
     assert by_path[READY].dispatch_preflight is not None
     assert "dispatch.yaml: rule 0" in by_path[READY].dispatch_preflight
     assert by_path[READY].dispatch_preflight == work.run_next(layout, READY, dry_run=True).dispatch_preflight
+    assert by_path[EPIC].route.on_complete is None
     assert by_path[EPIC].dispatch_preflight is None
+    assert by_path[UNSIZED].dispatch_preflight is None
 
 
 def test_the_bundle_and_the_dispatch_config_are_each_loaded_once(tmp_path: Path, monkeypatch) -> None:

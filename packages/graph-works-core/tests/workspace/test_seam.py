@@ -58,7 +58,7 @@ def _workspace(tmp_path: Path):
     (layout.bundle_dir / "work").mkdir(parents=True, exist_ok=True)
     layout.cache_dir.mkdir(parents=True, exist_ok=True)
     (root / "dispatch.yaml").write_text(
-        "pipeline:\n  rules:\n  - match: {variant: diagnosis}\n    skill: gw:custom-diagnosis\n", encoding="utf-8"
+        "pipeline:\n  rules:\n  - match: {stage: design, type: Bug}\n    skill: gw:custom-diagnosis\n", encoding="utf-8"
     )
     return layout
 

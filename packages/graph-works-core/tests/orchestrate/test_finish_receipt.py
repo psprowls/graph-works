@@ -36,7 +36,8 @@ def setup(tmp_path):
     root.mkdir()
     layout = apply_init(plan_init(root, today=TODAY, topic="Finish")).layout
     layout.manifest_path.write_text(
-        "version: 1\nrepositories:\n" + "".join(f"  {n}: {{path: {r}}}\n" for n, (r, _) in repos.items()),
+        "version: 1\nworkflow: {dispatch_rules: dispatch.yaml}\nrepositories:\n"
+        + "".join(f"  {n}: {{path: {r}}}\n" for n, (r, _) in repos.items()),
         encoding="utf-8",
     )
     page = layout.bundle_dir / (OWNER + ".md")

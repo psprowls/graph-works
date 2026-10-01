@@ -19,9 +19,9 @@ bundle-relative path returned by the CLI. Never derive identity from a page stem
 1. Run `gw work next <work-path> --json` if the dispatch brief lacks current
    routing data.
 2. Read the item page at `<workspace>/okf/<work-path>.md`.
-3. Read the design artifact at
-   `<workspace>/okf/<work-path>/references/01-design.md`, or the exact
-   source path supplied by the dispatch brief.
+3. Read the design artifact at `artifacts.design.path` from the
+   `gw work next <work-path> --json --file ""` output, or the exact source path
+   supplied by the dispatch brief.
 
 `gw` being on PATH doesn't prove it's this repo's build — a stale entry point can
 own the name. Verify identity, not presence: `gw util describe-surface --json
@@ -81,20 +81,17 @@ gw work file --json \
 
 Record the result’s `path` before filing the next child. Each child page lives
 at `<workspace>/okf/<child-path>.md`; its owned directory is
-`<workspace>/okf/<child-path>/`, and its later design artifact belongs at
-`<workspace>/okf/<child-path>/references/01-design.md`.
+`<workspace>/okf/<child-path>/`, and its later design artifact is the one the
+child's own `gw work next` reports as `artifacts.design.path`.
 
 Do not pre-write or transplant child designs during decomposition. Each child’s
 design stage owns its canonical design artifact.
 
 ## Write the plan
 
-Write the decomposition record to the dispatch brief’s `artifact.path`, or by
-default to:
-
-```text
-<workspace>/okf/<work-path>/references/02-plan.md
-```
+Write the decomposition record to the dispatch brief’s `artifact.path`, or,
+without a brief, to `artifacts.plan.path` from
+`gw work next <work-path> --json --file ""`.
 
 Include:
 

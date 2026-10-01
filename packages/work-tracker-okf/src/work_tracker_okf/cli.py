@@ -42,7 +42,7 @@ from work_tracker_okf.items import ARCHIVE_IGNORE, IGNORE, load_items
 from work_tracker_okf.mutation import WorkMutationPlan, directory_manifest_digest
 from work_tracker_okf.paths import item_page
 from work_tracker_okf.projection import rollup, select_resume
-from work_tracker_okf.workflow import RouteResult, Transition, route, state_for
+from work_tracker_okf.workflow import RouteResult, Transition, blocker_messages, route, state_for
 
 app = typer.Typer(add_completion=False, no_args_is_help=True)
 
@@ -283,13 +283,11 @@ def next_stage(
                 "work_status": state.work_status,
                 "phase": state.phase,
                 "effort": state.effort,
-                "dispatch": None
-                if result.dispatch is None
-                else {"stage": result.dispatch.stage, "variant": result.dispatch.variant},
+                "dispatch": None if result.dispatch is None else {"stage": result.dispatch.stage},
                 "reason": result.reason,
                 "on_dispatch": _transition_json(result.on_dispatch),
                 "on_complete": _transition_json(result.on_complete),
-                "blockers": list(result.blockers),
+                "blockers": list(blocker_messages(result)),
                 "child_rollup": _rollup_json(state.child_rollup),
             }
         )
@@ -298,8 +296,8 @@ def next_stage(
     if result.dispatch is None:
         typer.echo(f"{path}: nothing to dispatch -- {result.reason}")
     else:
-        typer.echo(f"{path}: {result.dispatch.stage}/{result.dispatch.variant} -- {result.reason}")
-    for blocker in result.blockers:
+        typer.echo(f"{path}: {result.dispatch.stage} -- {result.reason}")
+    for blocker in blocker_messages(result):
         typer.echo(f"  blocked: {blocker}")
 
 

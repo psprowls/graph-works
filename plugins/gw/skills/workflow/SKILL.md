@@ -76,14 +76,24 @@ Do not replace the expectation with a fresh phase to make a stale action pass.
   - If a blocker reports a **terminal status** (`resolved`, `wontfix`, or
     `superseded`) or **`phase=done`**, run **Terminal handling** (below): the
     pipeline is finished and the remaining work is ingest.
-  - Otherwise report each blocker and **stop** — *except* the **effort-required**
-    blocker and the **"waiting on children"** blocker, which are handled by the
-    dedicated bullets below (a non-null `on_complete` with empty `blockers` is the
+  - Otherwise report each blocker and **stop** — *except* when `blocker_kinds`
+    (parallel to `blockers`) holds `effort-required` or `waiting-on-children`, or is exactly
+    `["phase-off-path"]`,
+    which the dedicated bullets below handle (a non-null `on_complete` with empty `blockers` is the
     separate **satisfied gate**, also below). Do not improvise around `mitigated`
     items, invalid enums, or unknown paths — these are human decisions.
-- If the only blocker says **effort required**: ask the user to size the item
-  (xtra-small / small / medium / large / xtra-large — xtra-small/small means a bug-like item skips the planning stage),
-  then run `gw work advance <work-path> --from <expected-phase> --effort <value>` and re-run `gw work next`.
+- If `blocker_kinds` is exactly `["phase-off-path"]`: run
+  `gw work advance <work-path> --from <expected-phase>`, then re-run `gw work next`
+  and capture the new expectation. This repairs only the phase to the next stage
+  on the configured path; it does not complete the skipped stage or dispatch a
+  skill. A refusal stops this action. If any other blocker is present, report
+  all blockers and stop instead of attempting repair.
+- If `blocker_kinds` is exactly `["effort-required"]`: ask the user to size the
+  item (xtra-small / small / medium / large / xtra-large). When `path_candidates`
+  is non-empty, show each candidate's `stages` beside its `assignment` (the
+  attribute values that select it), so the user sees which stages each size
+  walks; the workspace's pipeline configuration, not this skill, decides that.
+  Then run `gw work advance <work-path> --from <expected-phase> --effort <value>` and re-run `gw work next`.
   The sizing answer uses the expectation captured before asking; a successful
   sizing transition starts a distinct action with a newly resolved expectation.
 - If `action.skill` is **null**, `blockers` is empty, and `on_complete` is
@@ -97,7 +107,7 @@ Do not replace the expectation with a fresh phase to make a stale action pass.
   skill: run `gw work advance <work-path> --from <expected-phase>` directly (step 5) — its own terminal
   check governs what happens next (Terminal handling if the advance lands on
   `phase: done` / `work_status: resolved`, otherwise the step 6 hand-off).
-- If `action.skill` is **null** and a blocker says **"waiting on children"** —
+- If `action.skill` is **null** and `blocker_kinds` contains `waiting-on-children` —
   the epic's execute gate is unsatisfied. If the invocation carried `--descend`
   (or the user asks to auto-continue), re-run `gw next <work-path> --json --descend`:
   the JSON now describes the next actionable *leaf* in `selected_path`, with
@@ -240,20 +250,22 @@ another stage, same as the stock skill it replaces.
   or an `assumed` change goes to the ledger owning the entry it touches (an
   epic's, when a child changes an epic decision); a new question goes to this
   item's nearest-owner ledger.
-- **Execute-stage coverage (step 3).** When the stage just dispatched is
+- **Execute-stage tail (step 3).** When the stage just dispatched is
   `execute` — keyed on the stage, not on `action.skill`, which is used verbatim
-  and may be any configured skill — add: "Before you advance, write
-  `<workspace>/okf/<work-path>/references/03-execute-coverage.md`: one markdown
-  task-list line per item in this stage's design spec `## Acceptance` section,
-  each line `- [x]` when delivered or `- [ ]` when not, each with a one-line
-  justification. Where the spec has no `## Acceptance` section, enumerate its
-  `## Scope` / `## What this design changes` headings instead and say in the
-  file that you did. Mark honestly — an unchecked box is a normal, expected
-  outcome; an inaccurate checked box is not." This is the same text
-  `EXECUTE_TAIL` gives an unattended worker, and it is a bullet here rather
-  than a rider because riders carry behavior only for stock skills.
-- **Execute-stage gate (step 3).** For an execute stage, also add: "The gate is `gw work gate run <work-path>`, then `gw work gate wait <work-path>` until it finishes. Run it on the committed, clean tree before you advance. Use `--scope scoped` for fix-wave rechecks. Never run the repository's check command directly as the gate, and never write gate logs to a shared tmp path." This is the same text `EXECUTE_TAIL` gives an unattended worker. `gw work advance` refuses `no-gate-receipt` without a satisfying receipt, and `no-gate-configured` when the repository declares no `gate.full`; surface either refusal to the user and never pass `--skip-gate` on your own.
-- **Execute-stage deferrals (step 3).** For an execute stage, also add: "When the plan marks a step `Deferred to finish`, record it with `gw work obligation add <work-path> --text "<the step>" --apply` instead of doing it or leaving it in prose." This is the same text `EXECUTE_TAIL` gives an unattended worker. Unchecked coverage lines need no instruction: the `execute -> finish` advance records them as finish obligations, and the finish brief's `## Carried context` block lists them.
+  and may be any configured skill — append `dispatch.profile.prompt_tail` from
+  the `gw work next` JSON that dispatched this stage to the brief, verbatim,
+  substituting `{workspace}` with the resolved workspace path, `{path}` with
+  `<work-path>`, and `{execute_artifact}` with `artifacts.execute.file`. A `null` tail adds nothing.
+  Core's `EXECUTE_TAIL`, or the workspace rule that replaces it, is the only
+  author of that text: it carries the coverage report, the `Deferred to finish`
+  obligation and the gate, exactly as a supervised worker receives them. Its
+  clause about passing `--report-path` on `worker_done` applies only to an
+  Orca-dispatched session. `gw work advance` refuses `no-gate-receipt` without
+  a satisfying receipt, and `no-gate-configured` when the repository declares
+  no `gate.full`; surface either refusal to the user and never pass
+  `--skip-gate` on your own. Unchecked coverage lines need no instruction: the
+  `execute -> finish` advance records them as finish obligations, and the
+  finish brief's `## Carried context` block lists them.
 - **Stage directives (riders).** Look `action.skill` up in the rider table
   below, keyed on its **last segment** — the part after the colon in a qualified
   `superpowers:brainstorming`. If a rider exists, open
@@ -295,14 +307,13 @@ The stock skills honor user-preference path overrides; they stay unmodified.
 ### 4. Verify the artifact
 
 When `artifact.path` is set, check the file exists after the stage completes.
-The brainstorming and writing-plans skills' own stock locations are already
-the pipeline path — `<work-path>/references/01-design.md` and `02-plan.md`
-respectively — the same path `artifact.path` points to, so the file should
-already be there. If the skill instead wrote elsewhere, move the file to
-`artifact.path` and say so.
+The brief names `artifact.path` and the routing hook points the stock
+brainstorming and writing-plans skills at it, so the file should already be
+there. If the skill instead wrote elsewhere, move the file to `artifact.path`
+and say so.
 
-**Execute-stage coverage (step 4).** For an execute stage, also read
-`<workspace>/okf/<work-path>/references/03-execute-coverage.md` back. Absent →
+**Execute-stage coverage (step 4).** For an execute stage, also read the file
+at `artifacts.execute.path` (from step 1's `gw work next` JSON) back. Absent →
 note it and continue; the obligation is reported, not enforced. Present → show
 its lines as-is, and if any line is `- [ ]` (a marker scan, not comprehension)
 ask the user whether to stay in `execute` rather than advance; on *stay*, do not
@@ -362,7 +373,8 @@ Held outcomes run no cleanup. The relay row stays "no advance" and adds nothing 
 already cleaned up, and the coordinator removed its deferred worktree.
 
 Report lint findings from any advance — they are the item's health check,
-not noise. If the command errors with *effort required*, ask the user to size
+not noise. If the command refuses with `refusal.reason` `effort-required`, ask
+the user to size
 the item as in step 1 — never pick an effort yourself — then retry with the
 same captured expectation. A phase-mismatch stops the action for replanning.
 
@@ -425,7 +437,7 @@ context window).
 
 ### Detaching a child
 
-When `gw work advance <work-path>` refuses with *"waiting on children"*, either
+When `gw work advance <work-path>` refuses with `refusal.reason` `children-open`, either
 finish the children (`gw next <work-path> --descend`) or explicitly move a
 complete child subtree with `gw work reparent <child-path> --parent
 <new-parent-path>`. Physical placement is ownership; do not add a hierarchy

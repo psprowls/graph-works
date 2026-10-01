@@ -41,7 +41,7 @@ def test_the_path_native_surface_ends_at_zero_errors(tmp_path: Path) -> None:
     assert result.exit_code == 0
     payload = json.loads(result.stdout)
     assert payload["path"] == PATH
-    assert payload["dispatch"] == {"stage": "design", "variant": "exploration"}
+    assert payload["dispatch"] == {"stage": "design"}
 
     _run("advance", root, PATH, "--today", TODAY)
     artifact = tmp_path / REFERENCES / "01-design.md"

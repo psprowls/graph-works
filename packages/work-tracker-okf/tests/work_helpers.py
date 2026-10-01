@@ -9,6 +9,7 @@ from typing import Any
 from okf_io import Finding, Report, load, load_bundle, validate
 from work_tracker_okf.items import IGNORE, WorkItem
 from work_tracker_okf.paths import item_page
+from work_tracker_okf.pipeline import PACKAGED_DEFINITION, PipelineDefinition
 
 CONFORMANT_ROOT = Path(__file__).parent / "fixtures" / "conformant"
 CONFORMANT_TODAY = date(2026, 3, 7)
@@ -92,7 +93,12 @@ def make_terminal(root: Path, path: str, *, status: str = "resolved") -> None:
 
 
 def lane_report(
-    root: Path, *, today: date = NONCONFORMANT_TODAY, repo_root: Path | None = None, vault_root: Path | None = None
+    root: Path,
+    *,
+    today: date = NONCONFORMANT_TODAY,
+    repo_root: Path | None = None,
+    vault_root: Path | None = None,
+    definition: PipelineDefinition = PACKAGED_DEFINITION,
 ) -> Report:
     """Validate *root* with the complete work-tracker lane rule bundle."""
     from work_tracker_okf.rules import lane_rules
@@ -100,7 +106,7 @@ def lane_report(
     return validate(
         load_bundle(root, ignore=IGNORE),
         today=today,
-        extra_rules=lane_rules(repo_root=repo_root, vault_root=vault_root),
+        extra_rules=lane_rules(repo_root=repo_root, vault_root=vault_root, definition=definition),
     )
 
 

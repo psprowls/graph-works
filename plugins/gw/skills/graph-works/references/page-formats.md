@@ -399,9 +399,9 @@ updated: 2026-08-23
 owner: pat
 sources:
   - id: design
-    resource: /work/release-cutover/children/epic-filing/children/feature-path-native/references/01-design.md
+    resource: /work/release-cutover/children/epic-filing/children/feature-path-native/references/<design artifact>
   - id: plan
-    resource: /work/release-cutover/children/epic-filing/children/feature-path-native/references/02-plan.md
+    resource: /work/release-cutover/children/epic-filing/children/feature-path-native/references/<plan artifact>
 ---
 
 # Path-native filing
@@ -418,8 +418,9 @@ File and route every item by permanent canonical path, or keep page-stem identit
 ```
 
 The page lives at `<workspace>/okf/<work-path>.md`. Managed artifacts live at
-`<workspace>/okf/<work-path>/references/` and are registered in `sources[]` by
-filename-derived id. `Release` is root-only; only `Release`, `Epic`, and `Feature`
+`<workspace>/okf/<work-path>/references/`; stage artifacts are registered in
+`sources[]` by their fixed source ids from `pipeline.artifacts`. `Release` is
+root-only; only `Release`, `Epic`, and `Feature`
 may own child lanes. Every lane and local archive carries its own Markdown
 `index.md`. There is no hierarchy frontmatter or JSON index sidecar. Live-state keys
 (`phase`, `work_status`, `worktree`, `branch`, `released_at`, …) are written by

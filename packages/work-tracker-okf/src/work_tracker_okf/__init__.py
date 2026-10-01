@@ -14,6 +14,7 @@ and the `WorkItem` projection every other module in the lane reads.
 The decision layer's submodules import strictly downward:
 
     items -> hierarchy -> workflow -> {advance, children, placement, projection}
+    vocabulary -> pipeline -> {dependencies, decisions, hierarchy, workflow}
 
     from work_tracker_okf.workflow import route, state_for
     from work_tracker_okf.advance import advance, apply

@@ -18,10 +18,12 @@ from dataclasses import dataclass
 from pathlib import PurePosixPath
 from typing import Final
 
+from work_tracker_okf.pipeline import DECOMPOSING_TYPES
+
 WORKSPACE_AFFECTS: Final = "gw:workspace"
 
 #: Types that decompose rather than change code; their children declare `affects`.
-_CONTAINER_TYPES: Final = frozenset({"Epic", "Release"})
+_CONTAINER_TYPES: Final = DECOMPOSING_TYPES
 
 #: A writing-plans file bullet: `- Create: `path``, `- Modify: `path:12-40` — note`, ...
 _FILE_BULLET: Final = re.compile(r"^\s*-\s*(?:Create|Modify|Test|Delete):\s*`([^`]+)`")

@@ -14,7 +14,10 @@ LANDED = f"{OWNER}/children/feature-a"
 
 
 def _layout(tmp_path: Path):
-    (tmp_path / "workspace.yaml").write_text("version: 1\n", encoding="utf-8")
+    (tmp_path / "workspace.yaml").write_text(
+        "version: 1\nworkflow:\n  dispatch_rules: dispatch.yaml\n", encoding="utf-8"
+    )
+    (tmp_path / "dispatch.yaml").write_text("pipeline:\n  rules: []\n", encoding="utf-8")
     layout = layout_for(tmp_path)
     (layout.bundle_dir / "work").mkdir(parents=True)
     return layout
@@ -160,7 +163,8 @@ def _declare_two(layout, tmp_path: Path) -> tuple[Path, Path]:
     code.mkdir()
     ui.mkdir()
     layout.manifest_path.write_text(
-        f'version: 1\nrepositories:\n  code:\n    path: "{code.as_posix()}"\n  ui:\n    path: "{ui.as_posix()}"\n',
+        "version: 1\nworkflow:\n  dispatch_rules: dispatch.yaml\n"
+        f'repositories:\n  code:\n    path: "{code.as_posix()}"\n  ui:\n    path: "{ui.as_posix()}"\n',
         encoding="utf-8",
     )
     return code.resolve(), ui.resolve()

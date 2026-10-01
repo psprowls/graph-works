@@ -10,6 +10,7 @@ from work_tracker_okf import cli
 from work_tracker_okf.cli import app
 from work_tracker_okf.mutation import MutationRefusal
 from work_tracker_okf.resources import SEED_RELATIVE_PATHS
+from work_tracker_okf.workflow import Blocker
 
 runner = CliRunner()
 TODAY = "2026-08-22"
@@ -533,7 +534,7 @@ def test_next_human_output_reports_no_dispatch_and_each_blocker(tmp_path: Path, 
         reason="waiting",
         on_dispatch=None,
         on_complete=None,
-        blockers=("dependency", "children"),
+        blockers=(Blocker("dependencies", "dependency"), Blocker("waiting-on-children", "children")),
     )
     monkeypatch.setattr(cli, "_bundle", lambda root: object())
     monkeypatch.setattr(cli, "load_items", lambda bundle: ())

@@ -55,6 +55,8 @@ from okf_ext.tags import VOCABULARY_FILENAME, VocabularyError, load_vocabulary, 
 from okf_io import Finding, Rule, RuleContext
 from work_tracker_okf.compose import rule_set
 
+from graph_works_core.workspace.dispatch_config import load_dispatch_config
+from graph_works_core.workspace.errors import WorkspaceError
 from graph_works_core.workspace.layout import WorkspaceLayout
 
 #: The two lane names a default workspace composes, in report order.
@@ -303,6 +305,7 @@ def _compose_work(
             repo_roots=repo_roots,
             vault_root=layout.bundle_dir,
             declarations_dir=config.declarations_dir,
+            definition=load_dispatch_config(layout).definition,
         ),
     )
 
@@ -338,7 +341,7 @@ def compose_lanes(
     for name, build in builders:
         try:
             lanes.append(build())
-        except _DECLARATION_ERRORS as exc:
+        except (*_DECLARATION_ERRORS, WorkspaceError) as exc:
             errors.append(f"{name} lane: {exc}")
     projection_error = _check_config_projection(layout)
     if projection_error is not None:

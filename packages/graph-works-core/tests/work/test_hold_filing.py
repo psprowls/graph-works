@@ -84,7 +84,7 @@ def test_a_skip_is_filed_open_with_its_phase_and_default_affects(tmp_path: Path)
         None,
         (FEATURE,),
     )
-    assert work.run_next(layout, FEATURE).route.blockers[0].startswith(f"open decision {entry.id} (skip)")
+    assert work.run_next(layout, FEATURE).route.blockers[0].message.startswith(f"open decision {entry.id} (skip)")
 
 
 def test_a_park_files_ledger_and_stamped_checkpoint_together(tmp_path: Path) -> None:

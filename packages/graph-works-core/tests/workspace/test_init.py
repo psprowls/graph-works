@@ -658,6 +658,49 @@ def test_a_plan_over_a_customized_workspace_previews_that_workspace(tmp_path):
 # --- the seeded relay tail --------------------------------------------------
 
 
+def test_seed_text_loads_to_the_seed_data():
+    from graph_works_core.workspace.init import SEED_DISPATCH, SEED_DISPATCH_TEXT
+    from graph_works_core.workspace.pipeline import RELAY_TAIL_SEED
+    from ruamel.yaml import YAML
+
+    loaded = YAML(typ="safe").load(SEED_DISPATCH_TEXT)
+    assert loaded == SEED_DISPATCH
+    assert loaded["pipeline"]["rules"][0]["prompt_tail"] == RELAY_TAIL_SEED
+    assert loaded["pipeline"]["rules"][0]["match"] == {"stage": "finish"}
+    assert "packages/graph-works-core/docs/dispatch-rules.md" in SEED_DISPATCH_TEXT
+
+
+def test_bootstrap_writes_the_seed_text_verbatim(tmp_path):
+    from graph_works_core.workspace.init import SEED_DISPATCH_TEXT
+
+    result = _init(tmp_path / "works")
+    written = (result.layout.root / "dispatch.yaml").read_text(encoding="utf-8")
+    assert written == SEED_DISPATCH_TEXT
+
+
+def _uncomment_example(text: str) -> tuple[str, int]:
+    lines = text.split("\n")
+    out = [("  " + line[4:]) if line.startswith("  # ") else line for line in lines]
+    return "\n".join(out), sum(a != b for a, b in zip(lines, out, strict=True))
+
+
+def test_seed_example_uncomments_to_a_valid_config(tmp_path):
+    from graph_works_core.workspace.dispatch_config import load_dispatch_config
+    from graph_works_core.workspace.init import SEED_DISPATCH_TEXT
+
+    uncommented, changed = _uncomment_example(SEED_DISPATCH_TEXT)
+    assert changed == 6
+    result = _init(tmp_path / "works")
+    shared = result.layout.root / "dispatch.yaml"
+    shared.write_text(uncommented, encoding="utf-8", newline="")
+    config = load_dispatch_config(result.layout)
+    assert config.path_rules[-1].rule.name == "features-skip-plan"
+    assert config.path_rules[-1].rule.stages == ("design", "execute", "finish")
+    assert config.artifacts["design"].file == "01-design.md"
+    assert config.artifacts["design"].origin == str(shared)
+    assert len(config.rules) == 1
+
+
 def test_a_fresh_workspace_is_born_with_a_relay_tail(tmp_path):
     from graph_works_core.workspace.dispatch import resolve_dispatch
     from graph_works_core.workspace.dispatch_config import load_dispatch_config
@@ -667,10 +710,7 @@ def test_a_fresh_workspace_is_born_with_a_relay_tail(tmp_path):
     config = load_dispatch_config(result.layout)
     assert len(config.rules) == 1
     assert config.rules[0].fields["prompt_tail"] == RELAY_TAIL_SEED
-    assert (
-        resolve_dispatch({"stage": "finish", "variant": "branch"}, rules=config.rules).profile.prompt_tail
-        == RELAY_TAIL_SEED
-    )
+    assert resolve_dispatch({"stage": "finish"}, rules=config.rules).profile.prompt_tail == RELAY_TAIL_SEED
     assert RELAY_TAIL_SEED.startswith("Auto-drive context:")
     assert "{merge_target}" in RELAY_TAIL_SEED
 

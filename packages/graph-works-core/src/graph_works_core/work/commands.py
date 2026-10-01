@@ -91,6 +91,7 @@ from work_tracker_okf.mutation import (
     WorkMutationPlan,
 )
 from work_tracker_okf.paths import ArtifactRef, checkpoint_ref, child_lane, item_page, references_dir
+from work_tracker_okf.pipeline import PACKAGED_DEFINITION, PipelineDefinition
 from work_tracker_okf.projection import ResumeSelection, Rollup, rollup, select_resume
 from work_tracker_okf.reparent import plan_release_adoption, plan_reparent
 from work_tracker_okf.sources import upsert
@@ -100,6 +101,7 @@ from work_tracker_okf.workflow import RouteResult, RouteState, Transition, route
 from graph_works_core.guidance.assembly import Guidance, assemble_guidance, write_guidance
 from graph_works_core.work import carried as _carried
 from graph_works_core.work.carried import CarriedContext, SlotInput
+from graph_works_core.work.path_report import PathReport, StageArtifactReport, artifact_reports, path_report
 from graph_works_core.workspace import provenance
 from graph_works_core.workspace.commits import (
     COMMIT_FAILED_PREFIX,
@@ -120,12 +122,12 @@ from graph_works_core.workspace.dispatch import (
     DispatchResolution,
     DispatchRule,
     dispatch_attributes,
-    packaged_rule,
+    packaged_rules_matching,
     resolve_dispatch,
     rule_matches,
 )
-from graph_works_core.workspace.dispatch_artifacts import missing_design_source
-from graph_works_core.workspace.dispatch_config import load_dispatch_config
+from graph_works_core.workspace.dispatch_artifacts import missing_design_source, routing_items
+from graph_works_core.workspace.dispatch_config import DispatchConfig, load_dispatch_config
 from graph_works_core.workspace.errors import WorkspaceError
 from graph_works_core.workspace.finish import FinishTarget, resolve_finish_targets
 from graph_works_core.workspace.landed import stale_spec_for
@@ -576,13 +578,17 @@ class NextResult:
     guidance: Guidance | None = None
     guidance_file: Path | None = None
     carried: CarriedContext = field(default_factory=CarriedContext)
+    path: PathReport | None = None
+    artifacts: tuple[StageArtifactReport, ...] = ()
 
 
-def _plan_source_normalization(bundle_root: Path, item: WorkItem) -> SourceNormalization | None:
+def _plan_source_normalization(
+    bundle_root: Path, item: WorkItem, *, definition: PipelineDefinition
+) -> SourceNormalization | None:
     """Plan the canonical design stamp when the artifact exists and no
     authored source already owns that id.
     """
-    missing = missing_design_source(bundle_root, item)
+    missing = missing_design_source(bundle_root, item, definition=definition)
     if missing is None:
         return None
     ref, title = missing
@@ -636,7 +642,9 @@ def _apply_normalizations(
     return NextApplication(normalized=tuple(normalized), commits=tuple(commits)), tuple(warnings)
 
 
-def _stage_artifact(bundle_root: Path, item: WorkItem, result: RouteResult) -> ArtifactRef | None:
+def _stage_artifact(
+    bundle_root: Path, item: WorkItem, result: RouteResult, *, definition: PipelineDefinition
+) -> ArtifactRef | None:
     """Where the dispatched stage writes its output, or `None`.
 
     `Transition.stamp_source` is the routing table's own statement of which
@@ -647,42 +655,52 @@ def _stage_artifact(bundle_root: Path, item: WorkItem, result: RouteResult) -> A
     """
     if result.on_complete is None or result.on_complete.stamp_source is None:
         return None
-    ref, _title = stamp_for(bundle_root, item, result.on_complete.stamp_source)
+    ref, _title = stamp_for(bundle_root, item, result.on_complete.stamp_source, definition=definition)
     return ref
 
 
-def _load_rules(layout: WorkspaceLayout) -> tuple[DispatchRule, ...] | WorkspaceError:
-    """The workspace's dispatch rules, or the error loading them raised."""
+def _load_config(layout: WorkspaceLayout) -> DispatchConfig | WorkspaceError:
+    """The workspace's dispatch configuration, or the error loading it raised."""
     try:
-        return load_dispatch_config(layout).rules
+        return load_dispatch_config(layout)
     except WorkspaceError as exc:
         return exc
 
 
+def _definition_of(config: DispatchConfig | WorkspaceError) -> PipelineDefinition:
+    """Route load errors with packaged defaults for display only.
+
+    `_resolve_dispatch_with` blocks every offered transition on a load error (D-004).
+    """
+    return PACKAGED_DEFINITION if isinstance(config, WorkspaceError) else config.definition
+
+
+def _offers_transition(computed: RouteResult) -> bool:
+    return any((computed.dispatch, computed.on_dispatch, computed.on_complete, computed.on_return, computed.repair))
+
+
 def _resolve_dispatch_with(
-    rules: tuple[DispatchRule, ...] | WorkspaceError, state: RouteState, computed: RouteResult
+    config: DispatchConfig | WorkspaceError, state: RouteState, computed: RouteResult
 ) -> tuple[DispatchResolution | None, str | None]:
-    """Fold *computed*'s dispatch with *rules*; a load error or refused profile is the preflight."""
+    """Fold the dispatch with workspace rules; load errors block any offered transition."""
+    if isinstance(config, WorkspaceError):
+        return None, (str(config) if _offers_transition(computed) else None)
     if computed.dispatch is None:
         return None, None
-    if isinstance(rules, WorkspaceError):
-        return None, str(rules)
     try:
-        return resolve_dispatch(dispatch_attributes(state, computed.dispatch), rules=rules), None
+        return resolve_dispatch(dispatch_attributes(state, computed.dispatch), rules=config.rules), None
     except WorkspaceError as exc:
         return None, str(exc)
 
 
-def _resolve_next_dispatch(
-    layout: WorkspaceLayout, state: RouteState, computed: RouteResult
-) -> tuple[DispatchResolution | None, str | None]:
-    if computed.dispatch is None:
-        return None, None
-    return _resolve_dispatch_with(_load_rules(layout), state, computed)
-
-
 def _plan_route(
-    layout: WorkspaceLayout, bundle: Bundle, items: Sequence[WorkItem], path: str, *, descend: bool
+    layout: WorkspaceLayout,
+    bundle: Bundle,
+    items: Sequence[WorkItem],
+    path: str,
+    *,
+    descend: bool,
+    definition: PipelineDefinition,
 ) -> tuple[NextResult, WorkItem]:
     """The dry-run routing preview for *path* over an already-loaded bundle.
 
@@ -698,17 +716,16 @@ def _plan_route(
             raise ValueError(f"{path}.md {detail}")
         raise ValueError(f"unknown work item {path!r}")
 
-    descent_result = descend_to_leaf(items, path) if descend else None
+    planned_items = routing_items(bundle.root, items, definition=definition)
+    descent_result = descend_to_leaf(planned_items, path, definition=definition) if descend else None
     selected_path = descent_result.leaf if descent_result is not None and descent_result.leaf is not None else path
     selected = next(item for item in items if item.path == selected_path)
 
     normalization_items = (requested,) if requested.path == selected.path else (requested, selected)
     normalizations = tuple(
-        change for item in normalization_items if (change := _plan_source_normalization(bundle.root, item)) is not None
-    )
-    normalized_paths = {change.path for change in normalizations}
-    planned_items = tuple(
-        replace(item, has_design_artifact=True) if item.path in normalized_paths else item for item in items
+        change
+        for item in normalization_items
+        if (change := _plan_source_normalization(bundle.root, item, definition=definition)) is not None
     )
     state = state_for(
         planned_items,
@@ -717,7 +734,8 @@ def _plan_route(
         stale_spec=stale_spec_for(layout, planned_items, selected),
     )
     assert state is not None
-    computed = route(state)
+    computed = route(state, definition=definition)
+    report = path_report(state, computed, definition)
     preview = NextResult(
         requested_path=path,
         selected_path=selected_path,
@@ -726,16 +744,20 @@ def _plan_route(
         child_rollup=state.child_rollup,
         descent=descent_result,
         normalizations=normalizations,
-        artifact=_stage_artifact(bundle.root, selected, computed),
+        artifact=_stage_artifact(bundle.root, selected, computed, definition=definition),
+        path=report,
+        artifacts=artifact_reports(bundle.root, selected_path, definition, report),
     )
     return preview, selected
 
 
-def _plan_next(layout: WorkspaceLayout, path: str, *, descend: bool) -> tuple[NextResult, Bundle, WorkItem]:
+def _plan_next(
+    layout: WorkspaceLayout, path: str, *, descend: bool, definition: PipelineDefinition
+) -> tuple[NextResult, Bundle, WorkItem]:
     """Load the bundle once and plan *path* over it (`_plan_route`)."""
     bundle = load_bundle(layout.bundle_dir, ignore=IGNORE)
     items = tuple(load_items(bundle))
-    preview, selected = _plan_route(layout, bundle, items, path, descend=descend)
+    preview, selected = _plan_route(layout, bundle, items, path, descend=descend, definition=definition)
     if preview.route.dispatch is not None and preview.route.dispatch.stage == "finish":
         finish = resolve_finish_targets(layout, items, preview.selected_path)
         preview = replace(preview, finish_targets=finish.targets, dispatch_preflight="; ".join(finish.blockers) or None)
@@ -825,7 +847,7 @@ def run_next(
     dry_run: bool = True,
     guidance: GuidanceRequest | None = None,
 ) -> NextResult:
-    """Plan what to dispatch for *path* and optionally descend to its leaf.
+    """Route with the workspace pipeline.path and optionally descend to *path*'s leaf.
 
     Resolves the hold for *this path* specifically, not just "the owner has
     some open decision" — the behavioral improvement over the standalone
@@ -842,16 +864,21 @@ def run_next(
     always did; `test_run_next.py` and `test_run_next_guidance.py` pin both.
     The carried-context frame (`NextResult.carried`) is read-only and assembled
     on every call for a usable dispatch.
+    `path` / `artifacts` report the resolved path and every configured stage artifact;
+    both are empty for terminal, invalid or unreadable-config items.
     """
-    preview, bundle, selected = _plan_next(layout, path, descend=descend)
+    config = _load_config(layout)
+    definition = _definition_of(config)
+    preview, bundle, selected = _plan_next(layout, path, descend=descend, definition=definition)
     if dry_run:
-        resolution, preflight = _resolve_next_dispatch(layout, preview.state, preview.route)
+        resolution, preflight = _resolve_dispatch_with(config, preview.state, preview.route)
         resolved = replace(
             preview, dispatch_resolution=resolution, dispatch_preflight=preview.dispatch_preflight or preflight
         )
         items = tuple(load_items(bundle))
         guided = _with_guidance(layout, resolved, bundle, items if guidance else (), guidance)
-        return _with_carried(layout, guided, bundle, items)
+        result = _with_carried(layout, guided, bundle, items)
+        return replace(result, path=None, artifacts=()) if isinstance(config, WorkspaceError) else result
 
     application, warnings = _apply_normalizations(layout, preview.normalizations, bundle=bundle)
     persisted_bundle = load_bundle(layout.bundle_dir, ignore=IGNORE)
@@ -869,8 +896,9 @@ def run_next(
         ),
     )
     assert persisted_state is not None
-    persisted_route = route(persisted_state)
-    resolution, preflight = _resolve_next_dispatch(layout, persisted_state, persisted_route)
+    persisted_route = route(persisted_state, definition=definition)
+    resolution, preflight = _resolve_dispatch_with(config, persisted_state, persisted_route)
+    report = path_report(persisted_state, persisted_route, definition)
     applied = replace(
         preview,
         dispatch_resolution=resolution,
@@ -878,12 +906,15 @@ def run_next(
         state=persisted_state,
         route=persisted_route,
         child_rollup=persisted_state.child_rollup,
-        artifact=_stage_artifact(persisted_bundle.root, selected, persisted_route),
+        artifact=_stage_artifact(persisted_bundle.root, selected, persisted_route, definition=definition),
+        path=report,
+        artifacts=artifact_reports(persisted_bundle.root, preview.selected_path, definition, report),
         application=application,
         warnings=warnings,
     )
     guided = _with_guidance(layout, applied, persisted_bundle, tuple(persisted_items), guidance)
-    return _with_carried(layout, guided, persisted_bundle, tuple(persisted_items))
+    result = _with_carried(layout, guided, persisted_bundle, tuple(persisted_items))
+    return replace(result, path=None, artifacts=()) if isinstance(config, WorkspaceError) else result
 
 
 @dataclass(frozen=True, slots=True)
@@ -894,13 +925,13 @@ class DispatchExplanation:
     this read's resolution or preflight folded in, so an interface derives
     blockers through the one function both use. With no dispatch -- a
     blocked, terminal or gate item, or a profile the fold refuses --
-    `attributes`, `packaged_rule` and `resolution` are `None` and no rule is
+    `attributes`, `packaged_rules` and `resolution` are `None` and no rule is
     marked matched.
     """
 
     path: str
     attributes: Mapping[str, AttributeValue] | None
-    packaged_rule: DispatchRule | None
+    packaged_rules: tuple[DispatchRule, ...] | None
     rules: tuple[tuple[DispatchRule, bool], ...]
     resolution: DispatchResolution | None
     next_result: NextResult
@@ -915,8 +946,9 @@ def run_dispatch_explain(layout: WorkspaceLayout, path: str) -> DispatchExplanat
     refuses (`DispatchProfileError`) is still the preflight `next` reports.
     Raises `ValueError` for an unknown or unreadable *path*.
     """
-    preview, _bundle, _selected = _plan_next(layout, path, descend=False)
-    rules = load_dispatch_config(layout).rules
+    config = load_dispatch_config(layout)
+    preview, _bundle, _selected = _plan_next(layout, path, descend=False, definition=config.definition)
+    rules = config.rules
     unmatched = tuple((rule, False) for rule in rules)
     dispatch = preview.route.dispatch
     if dispatch is None:
@@ -929,7 +961,7 @@ def run_dispatch_explain(layout: WorkspaceLayout, path: str) -> DispatchExplanat
     return DispatchExplanation(
         path=path,
         attributes=attributes,
-        packaged_rule=packaged_rule(dispatch.variant),
+        packaged_rules=packaged_rules_matching(attributes),
         rules=tuple((rule, rule_matches(rule.match, attributes)) for rule in rules),
         resolution=resolution,
         next_result=replace(preview, dispatch_resolution=resolution),
@@ -953,20 +985,22 @@ def run_work_queue(layout: WorkspaceLayout) -> tuple[QueueEntry, ...]:
     """Route every active, non-terminal item as a dry-run `run_next` would. Never writes.
 
     The bundle and the dispatch config are each loaded once for the whole
-    queue. A malformed dispatch file is each dispatchable item's preflight
-    blocker, exactly as `next` reports it, rather than a failure of the read.
+    queue. A malformed dispatch file is each item's preflight blocker whenever
+    its route offers a dispatch or a transition, exactly as `next` reports it,
+    rather than a failure of the read.
     Epics waiting on their children are included with that blocker, so no
     active item is silently dropped.
     """
     bundle = load_bundle(layout.bundle_dir, ignore=IGNORE)
     items = tuple(load_items(bundle))
-    rules = _load_rules(layout)
+    config = _load_config(layout)
+    definition = _definition_of(config)
     entries: list[QueueEntry] = []
     for item in sorted(items, key=lambda candidate: candidate.path):
         if item.archived or item.work_status in TERMINAL_STATUSES:
             continue
-        preview, _selected = _plan_route(layout, bundle, items, item.path, descend=False)
-        resolution, preflight = _resolve_dispatch_with(rules, preview.state, preview.route)
+        preview, _selected = _plan_route(layout, bundle, items, item.path, descend=False, definition=definition)
+        resolution, preflight = _resolve_dispatch_with(config, preview.state, preview.route)
         entries.append(QueueEntry(item, replace(preview, dispatch_resolution=resolution, dispatch_preflight=preflight)))
     return tuple(entries)
 
@@ -1011,6 +1045,7 @@ def run_lint(
         repo_roots=repo_roots,
         vault_root=layout.bundle_dir,
         declarations_dir=config.declarations_dir,
+        definition=load_dispatch_config(layout).definition,
     )
     if path is None:
         return okf_validate(bundle, today=today, extra_rules=rules, strict=strict)

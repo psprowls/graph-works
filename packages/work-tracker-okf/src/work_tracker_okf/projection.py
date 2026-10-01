@@ -11,6 +11,7 @@ from types import MappingProxyType
 from work_tracker_okf.hierarchy import ChildRollup, child_rollup
 from work_tracker_okf.items import WorkItem
 from work_tracker_okf.paths import item_page
+from work_tracker_okf.pipeline import DECOMPOSING_TYPES
 from work_tracker_okf.vocabulary import PARENT_TYPES, TERMINAL_STATUSES
 
 NON_ACTIONABLE_STATUSES: frozenset[str] = TERMINAL_STATUSES | {"mitigated"}
@@ -50,7 +51,7 @@ def rollup(items: Sequence[WorkItem]) -> Rollup:
         if item.type not in PARENT_TYPES:
             continue
         rolled = child_rollup(items, item.path)
-        if item.type not in {"Release", "Epic"} and rolled.total == 0:
+        if item.type not in DECOMPOSING_TYPES and rolled.total == 0:
             continue
         children[item.path] = rolled
     return Rollup(

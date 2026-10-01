@@ -8,7 +8,7 @@ and whether a managed artifact filename agrees with its source id.
 
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from pathlib import Path, PurePosixPath
 
 from okf_io import Finding, Rule, RuleContext
@@ -16,6 +16,7 @@ from okf_io import Finding, Rule, RuleContext
 from work_tracker_okf._rules._common import LaneConfig, active
 from work_tracker_okf.affects import code_affects, needs_affects_hint
 from work_tracker_okf.paths import source_id_for_filename
+from work_tracker_okf.pipeline import ArtifactSpec, PipelineDefinition, Stage
 from work_tracker_okf.vocabulary import TERMINAL_STATUSES
 
 CODES: tuple[str, ...] = (
@@ -32,19 +33,26 @@ _SPEC = "work_tracker_okf._rules.targets"
 _SPEC_SOURCES = "§5.1"
 
 
-def _derived_id(resource: str) -> str | None:
+def _derived_id(resource: str, by_file: Mapping[str, str]) -> str | None:
     """The `sources[].id` *resource*'s own filename implies, or `None`.
 
     ``source_id_for_filename`` raises when the ordinal form is absent, so an
     unrecognizable artifact is silently not this rule's finding.
     """
+    name = PurePosixPath(resource).name
+    if name in by_file:
+        return by_file[name]
     try:
-        return source_id_for_filename(PurePosixPath(resource).name)
+        return source_id_for_filename(name)
     except ValueError:
         return None
 
 
-def artifacts(ctx: RuleContext) -> Iterable[Finding]:
+def _files(artifacts: Mapping[Stage, ArtifactSpec]) -> Mapping[str, str]:
+    return {spec.file: spec.source for spec in artifacts.values()}
+
+
+def _artifacts(definition: PipelineDefinition) -> Rule:
     """Check source-id agreement only after structure resolved the resource.
 
     `source-id-mismatch` allows a suffix, because `SOURCE_ID_PATTERN` admits
@@ -53,27 +61,34 @@ def artifacts(ctx: RuleContext) -> Iterable[Finding]:
     (`design`, `plan`) cannot carry a suffix, and that falls out of the pattern
     without a second check here.
     """
-    for item in active(ctx):
-        for index, source in enumerate(item.sources):
-            resource = source.resource
-            if not resource:
-                continue  # `provenance.source-resource-missing` owns this
-            if not ctx.bundle.has_member(resource.removeprefix("/")):
-                continue
-            expected = _derived_id(resource)
-            authored = source.id
-            if expected is None or authored is None:
-                continue
-            if authored == expected or authored.startswith(f"{expected}-"):
-                continue
-            yield Finding(
-                code="targets.source-id-mismatch",
-                severity="warn",
-                message=(f"`sources[{index}].id` {authored!r} disagrees with its filename, which implies {expected!r}"),
-                spec=_SPEC_SOURCES,
-                path=item.page_path,
-                line=None,
-            )
+    by_file = _files(definition.artifacts)
+
+    def rule(ctx: RuleContext) -> Iterable[Finding]:
+        for item in active(ctx):
+            for index, source in enumerate(item.sources):
+                resource = source.resource
+                if not resource:
+                    continue  # `provenance.source-resource-missing` owns this
+                if not ctx.bundle.has_member(resource.removeprefix("/")):
+                    continue
+                expected = _derived_id(resource, by_file)
+                authored = source.id
+                if expected is None or authored is None:
+                    continue
+                if authored == expected or authored.startswith(f"{expected}-"):
+                    continue
+                yield Finding(
+                    code="targets.source-id-mismatch",
+                    severity="warn",
+                    message=(
+                        f"`sources[{index}].id` {authored!r} disagrees with its filename, which implies {expected!r}"
+                    ),
+                    spec=_SPEC_SOURCES,
+                    path=item.page_path,
+                    line=None,
+                )
+
+    return rule
 
 
 def _affects(repo_roots: tuple[Path, ...]) -> Rule:
@@ -131,6 +146,7 @@ def rules(config: LaneConfig) -> tuple[Rule, ...]:
     """No repo root at all **skips** `targets.affects-missing`, as it skips
     `plan.action-target-missing`, for the same reason. `targets.affects-empty`
     needs no root and always runs."""
+    checked = _artifacts(config.definition)
     if not config.code_roots:
-        return (artifacts, empty)
-    return (artifacts, empty, _affects(config.code_roots))
+        return (checked, empty)
+    return (checked, empty, _affects(config.code_roots))

@@ -152,7 +152,7 @@ def override_skill(workspace: Path, value: str) -> None:
     """Hand-edit the shared dispatch document, bypassing write-time validation."""
     path = workspace / "dispatch.yaml"
     path.write_text(
-        f"pipeline:\n  rules:\n  - match: {{variant: exploration}}\n    skill: {json.dumps(value)}\n",
+        f"pipeline:\n  rules:\n  - match: {{stage: design}}\n    skill: {json.dumps(value)}\n",
         encoding="utf-8",
     )
 

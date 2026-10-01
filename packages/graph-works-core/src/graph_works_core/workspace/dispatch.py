@@ -9,8 +9,9 @@ from pathlib import Path
 from types import MappingProxyType
 
 from subagents_io.dispatch import DISPATCH_MODES
-from work_tracker_okf.vocabulary import BLAST_RADII, EFFORTS, TYPES
-from work_tracker_okf.workflow import Dispatch, RouteState, Stage, Variant
+from work_tracker_okf.pipeline import ATTRIBUTES as _ATTRIBUTE_VALUES
+from work_tracker_okf.pipeline import matches, variant_refusal
+from work_tracker_okf.workflow import Dispatch, RouteState
 
 from graph_works_core.workspace.errors import WorkspaceError
 from graph_works_core.workspace.pipeline import PACKAGED_PIPELINE, check_skill_name
@@ -18,19 +19,7 @@ from graph_works_core.workspace.pipeline import PACKAGED_PIPELINE, check_skill_n
 AttributeValue = str | bool | None
 ProfileValue = str | None
 
-_STAGES = frozenset(typing.get_args(Stage))
-_VARIANTS = frozenset(typing.get_args(Variant))
-_ATTRIBUTE_VALUES: Mapping[str, frozenset[str] | None] = MappingProxyType(
-    {
-        "stage": _STAGES,
-        "variant": _VARIANTS,
-        "type": TYPES,
-        "effort": EFFORTS,
-        "blast_radius": BLAST_RADII,
-        "has_spec": None,
-        "has_plan": None,
-    }
-)
+ATTRIBUTES: frozenset[str] = frozenset(_ATTRIBUTE_VALUES)
 _PROFILE_FIELDS = frozenset({"skill", "mode", "prompt_tail", "agent", "model", "reasoning_effort"})
 _OPTIONAL_FIELDS = frozenset({"prompt_tail", "model", "reasoning_effort"})
 _AGENTS = frozenset({"claude", "codex"})
@@ -85,12 +74,15 @@ def dispatch_attributes(state: RouteState, dispatch: Dispatch) -> Mapping[str, A
     return MappingProxyType(
         {
             "stage": dispatch.stage,
-            "variant": dispatch.variant,
             "type": state.type,
             "effort": state.effort,
             "blast_radius": state.blast_radius,
             "has_spec": state.has_spec_doc,
             "has_plan": state.has_plan_doc,
+            # Entry at plan (notably TestGap) starts a first plan, even if a
+            # stale-spec observation exists. Reconciliation requires an
+            # already-entered plan phase.
+            "spec_stale": bool(state.stale_spec) and state.phase == "plan",
         }
     )
 
@@ -138,7 +130,8 @@ def parse_rules(raw: object, *, source: str, attributes: frozenset[str]) -> tupl
     """Validate and defensively copy one source's ordered dispatch rules."""
     unknown_attributes = attributes - _ATTRIBUTE_VALUES.keys()
     if unknown_attributes:
-        _refuse(source, None, f"unknown declared attributes: {sorted(unknown_attributes)}")
+        note = "; routing variants are retired — remove `variant`" if "variant" in unknown_attributes else ""
+        _refuse(source, None, f"unknown declared attributes: {sorted(unknown_attributes)}{note}")
     if not isinstance(raw, list):
         _refuse(source, None, "pipeline.rules must be a list")
     parsed: list[DispatchRule] = []
@@ -156,6 +149,8 @@ def parse_rules(raw: object, *, source: str, attributes: frozenset[str]) -> tupl
         raw_match = typing.cast(Mapping[object, object], candidate["match"])
         match: dict[str, str | bool | tuple[str | bool, ...]] = {}
         for attribute, value in raw_match.items():
+            if attribute == "variant":
+                _refuse(source, index, variant_refusal(value))
             if not isinstance(attribute, str) or attribute not in attributes:
                 _refuse(source, index, f"unknown or undeclared match attribute {attribute!r}")
             match[attribute] = _constraint(value, attribute=attribute, source=source, index=index)
@@ -182,53 +177,48 @@ def rule_matches(
 ) -> bool:
     """Whether every constraint holds. An attribute that is absent or null never
     matches, and a list constraint matches any one of its values."""
-    for attribute, constraint in constraints.items():
-        actual = attributes.get(attribute)
-        if actual is None:
-            return False
-        choices = constraint if isinstance(constraint, tuple) else (constraint,)
-        if not any(type(actual) is type(choice) and actual == choice for choice in choices):
-            return False
-    return True
-
-
-def packaged_rule(variant: str) -> DispatchRule:
-    """The packaged default for *variant* as a rule row: every profile field set, origin `packaged`."""
-    entry = PACKAGED_PIPELINE[variant]
-    index = tuple(PACKAGED_PIPELINE).index(variant)
-    fields: dict[str, ProfileValue] = {
-        "skill": entry.skill,
-        "mode": entry.mode,
-        "prompt_tail": entry.prompt_tail,
-        "agent": "claude",
-        "model": None,
-        "reasoning_effort": None,
-    }
-    return DispatchRule(
-        match=MappingProxyType({"variant": variant}),
-        fields=MappingProxyType(fields),
-        origin=RuleOrigin("packaged", index, variant),
-    )
+    return matches(constraints, attributes)
 
 
 def packaged_rules() -> tuple[DispatchRule, ...]:
-    """Every packaged row, in `PACKAGED_PIPELINE` declaration order."""
-    return tuple(packaged_rule(variant) for variant in PACKAGED_PIPELINE)
+    """Every packaged rule, in precedence order: every profile field set, origin `packaged`."""
+    return tuple(
+        DispatchRule(
+            match=rule.match,
+            fields=MappingProxyType(
+                {
+                    "skill": rule.skill,
+                    "mode": rule.mode,
+                    "prompt_tail": rule.prompt_tail,
+                    "agent": "claude",
+                    "model": None,
+                    "reasoning_effort": None,
+                }
+            ),
+            origin=RuleOrigin("packaged", index, rule.name),
+        )
+        for index, rule in enumerate(PACKAGED_PIPELINE)
+    )
+
+
+def packaged_rules_matching(attributes: Mapping[str, AttributeValue]) -> tuple[DispatchRule, ...]:
+    return tuple(rule for rule in packaged_rules() if rule_matches(rule.match, attributes))
 
 
 def resolve_dispatch(
     attributes: Mapping[str, AttributeValue], *, rules: tuple[DispatchRule, ...]
 ) -> DispatchResolution:
     """Fold packaged defaults and matching custom rules into one explained profile."""
-    variant = attributes.get("variant")
-    if not isinstance(variant, str) or variant not in PACKAGED_PIPELINE:
-        raise WorkspaceError(f"dispatch attributes require a known variant; got {variant!r}")
-    packaged = packaged_rule(variant)
-    values = dict(packaged.fields)
-    origins = {
-        field: FieldOrigin(packaged.origin, "explicit-null" if value is None else "set")
-        for field, value in values.items()
-    }
+    packaged = packaged_rules_matching(attributes)
+    if not packaged:
+        shown = {key: attributes[key] for key in sorted(attributes)}
+        raise WorkspaceError(f"no packaged dispatch rule matches attributes {shown}")
+    values: dict[str, ProfileValue] = {}
+    origins: dict[str, FieldOrigin] = {}
+    for rule in packaged:
+        for field, value in rule.fields.items():
+            values[field] = value
+            origins[field] = FieldOrigin(rule.origin, "explicit-null" if value is None else "set")
     for rule in rules:
         if not rule_matches(rule.match, attributes):
             continue
@@ -260,6 +250,7 @@ def resolve_dispatch(
 
 
 __all__ = [
+    "ATTRIBUTES",
     "AttributeValue",
     "DispatchProfile",
     "DispatchProfileError",
@@ -269,8 +260,8 @@ __all__ = [
     "ProfileValue",
     "RuleOrigin",
     "dispatch_attributes",
-    "packaged_rule",
     "packaged_rules",
+    "packaged_rules_matching",
     "parse_rules",
     "resolve_dispatch",
     "rule_matches",

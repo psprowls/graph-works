@@ -426,13 +426,20 @@ assert_contains "skills/auto-drive/references/multi-repo-acceptance.md" \
     "installed-package adapter runtime" \
     "acceptance separates installed runtime evidence from source checks"
 
-# The execute-coverage report has a producer (core's EXECUTE_TAIL) and two
-# consumers, both prose: auto-drive §4.1's Coverage read (unattended) and the
-# workflow skill's step 3 obligation + step 4 read-back (attended). Nothing else
-# ties the prose to the producer, so pin each half; see
-# work/bug-auto-drive-execute-coverage-read.
-GATE_LINE='The gate is `gw work gate run <work-path>`, then `gw work gate wait <work-path>` until it finishes.'
-assert_contains "skills/workflow/SKILL.md" "$GATE_LINE" "workflow's execute bullet names the gate verbs"
+# The execute-coverage report has one producer (core's EXECUTE_TAIL, which
+# names the file through {execute_artifact}) and two readers: auto-drive
+# §4.1's Coverage read (unattended) and workflow step 4 (attended). The
+# attended brief appends the dispatched prompt_tail rather than copying it
+# (epic ledger D-020), so the readers are pinned to the path field, never a
+# filename; see work/bug-auto-drive-execute-coverage-read.
+assert_contains "skills/workflow/SKILL.md" "dispatch.profile.prompt_tail" \
+    "workflow's execute bullet appends the dispatched prompt_tail"
+assert_contains "skills/workflow/SKILL.md" '`{execute_artifact}` with `artifacts.execute.file`' \
+    "workflow substitutes {execute_artifact} from artifacts.execute.file"
+assert_contains "skills/workflow/SKILL.md" 'A `null` tail adds nothing.' \
+    "workflow's execute bullet handles a null tail"
+assert_not_matches "skills/workflow/SKILL.md" 'same text `EXECUTE_TAIL` gives|\*\*Execute-stage (gate|deferrals) \(step 3\)\.\*\*' \
+    "workflow no longer copies EXECUTE_TAIL's bullets"
 assert_contains "skills/finishing-relay/SKILL.md" "gw work gate check <work-path>" "relay R1 checks for a receipt first"
 assert_contains "skills/finishing-relay/SKILL.md" "gw work gate check <work-path> --worktree <target worktree>" "relay R4 checks the merged tree"
 assert_contains "skills/finishing-relay/SKILL.md" 'git log <target_branch>..<source_branch>' "relay R2 settles an empty range without gating"
@@ -450,8 +457,8 @@ assert_contains "skills/auto-drive/SKILL.md" \
     "### Coverage read (execute dispatches only)" \
     "auto-drive carries the execute-stage Coverage read section"
 assert_contains "skills/auto-drive/SKILL.md" \
-    "references/03-execute-coverage.md" \
-    "auto-drive's Coverage read names the coverage file"
+    "artifacts.execute.path" \
+    "auto-drive's Coverage read reads the execute artifact path"
 assert_contains "skills/auto-drive/SKILL.md" \
     'any line is `- [ ]`' \
     "auto-drive's Coverage read scans for unchecked items"
@@ -462,11 +469,11 @@ assert_contains "skills/auto-drive/SKILL.md" \
     "run the coverage read" \
     "auto-drive's success branch runs the coverage read for execute dispatches"
 assert_contains "skills/workflow/SKILL.md" \
-    "references/03-execute-coverage.md" \
-    "workflow names the coverage file for an execute stage"
+    "artifacts.execute.path" \
+    "workflow step 4 reads the execute artifact path"
 assert_contains "skills/workflow/SKILL.md" \
-    "**Execute-stage coverage (step 3).**" \
-    "workflow step 3 states the coverage obligation for an execute stage"
+    "**Execute-stage tail (step 3).**" \
+    "workflow step 3 appends the execute tail for an execute stage"
 assert_contains "skills/workflow/SKILL.md" \
     "**Execute-stage coverage (step 4).**" \
     "workflow step 4 reads the coverage file back and surfaces unchecked items"
@@ -729,6 +736,49 @@ done
 assert_contains "skills/workflow/references/brief-riders.md" \
     "step 3 **Decision ledger** bullet" \
     "brief-riders points at the Decision ledger bullet instead of copying it"
+
+# The stage path is workspace data, so plugin prose must say so.
+assert_contains "skills/graph-works/README.md" \
+    "which stages an item walks" \
+    "the plugin README says dispatch.yaml also sets the pipeline path"
+assert_contains "skills/auto-drive/references/dispatch-configuration.md" \
+    "pipeline.path" \
+    "the dispatch-configuration reference points at the path section"
+assert_contains "skills/workflow/references/editing-work-items.md" \
+    "skips the plan stage under the packaged path" \
+    "the editing guide's effort row names the packaged path"
+assert_contains "skills/workflow/references/editing-work-items.md" \
+    "by effort under the packaged path" \
+    "the editing guide's phase row names the packaged path"
+
+# Workflow branches on blocker kinds and shows resolved path candidates.
+assert_contains "skills/workflow/SKILL.md" "blocker_kinds" \
+    "workflow reads blocker_kinds"
+assert_contains "skills/workflow/SKILL.md" '`effort-required`' \
+    "workflow names the effort-required kind"
+assert_contains "skills/workflow/SKILL.md" '`waiting-on-children`' \
+    "workflow names the waiting-on-children kind"
+assert_contains "skills/workflow/SKILL.md" '`children-open`' \
+    "workflow's detach section keys on the children-open refusal"
+assert_contains "skills/workflow/SKILL.md" "path_candidates" \
+    "workflow's sizing question shows the path candidates"
+assert_not_matches "skills/workflow/SKILL.md" 'skips the planning stage|blocker says \*\*|only blocker says|errors with \*effort required\*|refuses with \*"waiting on children"\*' \
+    "workflow does not branch on blocker prose or assert the packaged path"
+
+# --- stage-artifact paths come from gw work next ----------------------------
+# Filenames are configured; these skills read the path, never spell it.
+assert_contains "skills/file/SKILL.md" "artifacts.design.path" \
+    "file anchor 2 writes the design to artifacts.design.path"
+assert_contains "skills/file/SKILL.md" 'gw work next <work-path> --json --file ""' \
+    "file anchor 2 resolves the path with gw work next"
+assert_contains "skills/epic-design/SKILL.md" "the brief's \`artifact.path\`" \
+    "epic-design writes to the brief's artifact.path"
+assert_contains "skills/epic-design/SKILL.md" "which its \`gw work next\` reports" \
+    "epic-design names a child's design artifact by stage"
+assert_contains "skills/planning-epics/SKILL.md" "artifacts.design.path" \
+    "planning-epics reads the design at artifacts.design.path"
+assert_contains "skills/planning-epics/SKILL.md" "artifacts.plan.path" \
+    "planning-epics falls back to artifacts.plan.path"
 
 if [[ "$FAILURES" -gt 0 ]]; then
     echo "STATUS: FAILED ($FAILURES failure(s))"

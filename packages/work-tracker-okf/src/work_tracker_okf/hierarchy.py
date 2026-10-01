@@ -6,9 +6,17 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 
 from work_tracker_okf._selection import path_index
-from work_tracker_okf.dependencies import DependencyEdge, entry_phase, resolve_facts, unmet
+from work_tracker_okf.dependencies import DependencyEdge, resolve_facts, unmet
 from work_tracker_okf.items import WorkItem
-from work_tracker_okf.vocabulary import PARENT_TYPES, TERMINAL_STATUSES
+from work_tracker_okf.pipeline import (
+    PACKAGED_DEFINITION,
+    PipelineDefinition,
+    entry_stage,
+    path_attributes,
+    resolve_path,
+)
+from work_tracker_okf.pipeline import child_gated as _row_child_gated
+from work_tracker_okf.vocabulary import TERMINAL_STATUSES
 
 PICK_ORDER: dict[str, int] = {"in-progress": 0, "accepted": 1, "open": 2}
 
@@ -156,7 +164,7 @@ def child_gated(items: Sequence[WorkItem], item: WorkItem) -> bool:
     """Gated iff `advance()`'s children-open guard would refuse. One authority."""
     if not active_nonterminal_descendants(items, item.path):
         return False
-    return item.type in PARENT_TYPES and item.phase in {"execute", "finish"}
+    return _row_child_gated(item.type, item.phase)
 
 
 def nearest_epic(items: Sequence[WorkItem], path: str) -> str | None:
@@ -174,14 +182,25 @@ def nearest_epic(items: Sequence[WorkItem], path: str) -> str | None:
     return None
 
 
-def _dependency_blocked(items: Sequence[WorkItem], child: WorkItem) -> bool:
-    phase = child.phase or entry_phase(child.type, child.effort)
+def _dependency_blocked(items: Sequence[WorkItem], child: WorkItem, definition: PipelineDefinition) -> bool:
+    attrs = path_attributes(
+        type_=child.type,
+        effort=child.effort,
+        blast_radius=child.blast_radius,
+        has_spec=child.has_design_artifact,
+        has_plan=child.has_plan_artifact,
+        spec_stale=False,
+    )
+    phase = child.phase or entry_stage(definition, attrs)
+    stages = {stage for candidate in resolve_path(definition, attrs).candidates for stage in candidate.stages}
     return phase is not None and bool(
-        unmet(child.dependency_edges, resolve_facts(items, child.dependency_edges), phase)
+        unmet(child.dependency_edges, resolve_facts(items, child.dependency_edges), phase, stages=stages)
     )
 
 
-def descend(items: Sequence[WorkItem], path: str) -> DescendResult:
+def descend(
+    items: Sequence[WorkItem], path: str, *, definition: PipelineDefinition = PACKAGED_DEFINITION
+) -> DescendResult:
     index = path_index(items)
     node = index.get(path)
     if node is None:
@@ -196,7 +215,7 @@ def descend(items: Sequence[WorkItem], path: str) -> DescendResult:
             child
             for child in children
             if not child.archived
-            and not _dependency_blocked(items, child)
+            and not _dependency_blocked(items, child, definition)
             and (
                 child.work_status in PICK_ORDER
                 or (child.work_status in TERMINAL_STATUSES and active_nonterminal_descendants(items, child.path))

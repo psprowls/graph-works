@@ -17,6 +17,7 @@ from graph_works_core.workspace.errors import WorkspaceError
 from graph_works_core.workspace.layout import layout_for
 from graph_works_core.workspace.repos import ItemRepo
 from okf_io import load
+from work_tracker_okf.pipeline import PACKAGED_DEFINITION
 
 TODAY = date(2026, 8, 23)
 
@@ -666,7 +667,9 @@ def test_a_missing_plan_artifact_is_a_warning_not_an_error(tmp_path: Path) -> No
     path = "work/feature-a"
     _write(layout, path, phase="plan")
     item = next(i for i in load_items(load_bundle(layout.bundle_dir, ignore=IGNORE)) if i.path == path)
-    assert stage._affects_drift_warnings(layout.bundle_dir, item) == ("affects drift: no plan artifact to read",)
+    assert stage._affects_drift_warnings(layout.bundle_dir, item, definition=PACKAGED_DEFINITION) == (
+        "affects drift: no plan artifact to read",
+    )
 
 
 def test_an_explicit_start_sha_writes_the_execute_results_stub(tmp_path: Path) -> None:
@@ -752,7 +755,13 @@ def test_a_derived_start_sha_equal_to_head_still_writes_a_stub_carrying_the_empt
     _ready(layout, path)
     item = _item(layout, path)
     start = stage._effective_start_sha(
-        None, phase="execute", facts_root=repo, bundle_root=layout.bundle_dir, item=item, repo_name=None
+        None,
+        definition=PACKAGED_DEFINITION,
+        phase="execute",
+        facts_root=repo,
+        bundle_root=layout.bundle_dir,
+        item=item,
+        repo_name=None,
     )
     assert start is not None
     facts = stage.provenance.results_facts(
@@ -769,7 +778,13 @@ def test_a_derivation_that_finds_nothing_writes_no_stub(tmp_path: Path, monkeypa
     _ready(layout, path)
     monkeypatch.setattr(stage.anchor, "phase_start_sha", lambda *args: None)
     start = stage._effective_start_sha(
-        None, phase="execute", facts_root=repo, bundle_root=layout.bundle_dir, item=_item(layout, path), repo_name=None
+        None,
+        definition=PACKAGED_DEFINITION,
+        phase="execute",
+        facts_root=repo,
+        bundle_root=layout.bundle_dir,
+        item=_item(layout, path),
+        repo_name=None,
     )
     assert start is None
 
@@ -781,7 +796,13 @@ def test_a_recorded_baseline_is_used_for_the_stub_before_any_derivation(tmp_path
     _ready(layout, path, extra=f"start_sha: {fork}\n")
     monkeypatch.setattr(stage.anchor, "phase_start_sha", lambda *args: pytest.fail("derived despite a baseline"))
     start = stage._effective_start_sha(
-        None, phase="execute", facts_root=repo, bundle_root=layout.bundle_dir, item=_item(layout, path), repo_name=None
+        None,
+        definition=PACKAGED_DEFINITION,
+        phase="execute",
+        facts_root=repo,
+        bundle_root=layout.bundle_dir,
+        item=_item(layout, path),
+        repo_name=None,
     )
     assert start == fork
 
@@ -1928,13 +1949,12 @@ def test_the_opt_out_still_applies_a_deliberate_explicit_pair(tmp_path: Path, mo
 
 
 def test_the_read_only_and_results_phases_are_complements() -> None:
-    """The two halves of `orchestrate` name this vocabulary separately, by
-    design (D-001: no shared module-level symbol). This is what keeps them
-    from drifting apart."""
-    from work_tracker_okf.vocabulary import PHASES
+    """Both halves of `orchestrate` import the one stage table (D-001 kept: they
+    still share no module-level symbol with each other)."""
+    from work_tracker_okf.pipeline import STAGE_TABLE
 
     assert frozenset() == orchestrate.READ_ONLY_PHASES & stage.RESULTS_PHASES
-    assert PHASES - {"done"} == orchestrate.READ_ONLY_PHASES | stage.RESULTS_PHASES
+    assert frozenset(row.stage for row in STAGE_TABLE) == orchestrate.READ_ONLY_PHASES | stage.RESULTS_PHASES
 
 
 def test_an_open_decision_at_design_stops_advance_stamping_plan(tmp_path: Path) -> None:

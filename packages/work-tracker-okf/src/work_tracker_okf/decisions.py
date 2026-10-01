@@ -46,7 +46,7 @@ from typing import Literal
 from okf_ext.locking import locked as _locked_file
 
 from work_tracker_okf.paths import MANAGED_ARTIFACTS, ArtifactRef, artifact_ref
-from work_tracker_okf.vocabulary import PHASES
+from work_tracker_okf.pipeline import hold_phases
 
 VALID_STATUSES = frozenset({"answered", "assumed", "open", "superseded"})
 
@@ -83,7 +83,7 @@ RECOGNIZED_KEYS = ("status", "affects", "decided", "supersedes", "hold", "phase"
 HOLD_SHAPES: frozenset[str] = frozenset({"park", "skip"})
 
 #: `entry` means the held item had no `phase` yet. Only a `skip` may sit there.
-HOLD_PHASES: frozenset[str] = frozenset(PHASES | {"entry"})
+HOLD_PHASES: frozenset[str] = hold_phases()
 
 #: `## D-014 — question`. The separator/question tail is optional; an em dash, an
 #: en dash, or one-or-more hyphens all work, because agents type all three.

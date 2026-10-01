@@ -56,6 +56,7 @@ from work_tracker_okf.indexes import reconcile_entries, render_entry
 from work_tracker_okf.items import IGNORE, WorkItem, load_items
 from work_tracker_okf.mutation import WorkMutationPlan, directory_manifest_digest
 from work_tracker_okf.paths import parse_item_path
+from work_tracker_okf.pipeline import PACKAGED_DEFINITION
 
 from graph_works_core.workspace import anchors
 from graph_works_core.workspace.anchors import Anchor, open_absolute_anchor, open_anchor
@@ -67,6 +68,7 @@ from graph_works_core.workspace.commits import (
     commit_workspace,
     plan_paths,
 )
+from graph_works_core.workspace.dispatch_config import load_dispatch_config
 from graph_works_core.workspace.layout import WorkspaceLayout
 
 _HELD_BUNDLE_LOCKS: ContextVar[frozenset[str]] = ContextVar("_HELD_BUNDLE_LOCKS", default=frozenset())
@@ -2249,17 +2251,26 @@ def _extra_rules(
 
     *repo_root* and *repo_roots* together are the code roots a repo path may
     resolve under (any one suffices); with neither, `layout.repo_root`.
+    Legacy migration can call this gate before a workspace manifest exists;
+    that path uses the packaged definition. A configured workspace always
+    loads and validates its dispatch definition.
     """
     validation_root = layout.bundle_dir
     declarations_dir = layout.config_dir if (layout.config_dir / "schema").is_dir() else validation_root
     roots = repo_roots if repo_root is None else (repo_root, *repo_roots)
     if not roots and layout.repo_root is not None:
         roots = (layout.repo_root,)
+    definition = (
+        load_dispatch_config(layout).definition
+        if layout.manifest_path.exists() or layout.local_manifest_path.exists()
+        else PACKAGED_DEFINITION
+    )
     return rule_set(
         validation_root,
         repo_roots=roots,
         vault_root=layout.bundle_dir,
         declarations_dir=declarations_dir,
+        definition=definition,
     )
 
 

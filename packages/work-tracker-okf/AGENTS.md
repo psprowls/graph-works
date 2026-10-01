@@ -57,6 +57,7 @@ items -> hierarchy -> workflow -> {advance, children, placement, projection}
 paths -> {filing, sources, results, mutation, reparent, archive, decisions, checkpoints}
 decisions, checkpoints -> holds
 vocabulary -> asks
+vocabulary -> pipeline -> {dependencies, decisions, hierarchy, workflow}
 ```
 
 `filing.apply` and `advance.apply` are deliberately different functions with
@@ -142,7 +143,7 @@ factories (state, plan, graph, structure, targets, decisions — see
 `_rules/`) into one `extra_rules=` tuple for `okf_io.validate()`. It's a
 **factory per capability**, not a module-level tuple, because `RuleContext`
 carries no filesystem and two codes need to know about a repository.
-The catalog has 44 codes across six topics; `targets` declares three:
+The catalog has 45 codes across six topics; `targets` declares three:
 `targets.affects-missing`, `targets.affects-empty`, and
 `targets.source-id-mismatch`. `targets.affects-empty` warns on an active,
 non-terminal nested leaf with no `affects`, even without a repository root.
@@ -150,6 +151,10 @@ non-terminal nested leaf with no `affects`, even without a repository root.
 (workspace vs. code repo are different git repos) — either being `None`
 *skips* its rule rather than failing it, since not knowing where a root is
 says nothing about whether paths under it are good.
+
+No module but `pipeline.py` and `vocabulary.py` spells a phase literal:
+`tests/test_phase_literal_ban.py` checks phase sets, comparisons and matches.
+Read the constants, accessors and row columns in `pipeline.py` instead.
 
 ## Testing
 

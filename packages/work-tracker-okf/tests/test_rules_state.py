@@ -5,8 +5,84 @@ from pathlib import Path
 
 import pytest
 from work_helpers import lane_report, write_item
+from work_tracker_okf.pipeline import PACKAGED_DEFINITION, STAGE_TABLE, PipelineDefinition, parse_path_rules
 
 TODAY = date(2026, 8, 3)
+
+
+def _feature_skips_plan() -> PipelineDefinition:
+    return PipelineDefinition(
+        stage_table=STAGE_TABLE,
+        path_rules=parse_path_rules(
+            [{"name": "feature-skips-plan", "match": {"type": "Feature"}, "stages": ["design", "execute", "finish"]}],
+            source="test",
+        ),
+        artifacts=PACKAGED_DEFINITION.artifacts,
+    )
+
+
+def test_a_sized_small_bug_at_plan_is_off_path(tmp_path: Path) -> None:
+    write_item(tmp_path, "bug-x", "type: Bug\nwork_status: open\nphase: plan\neffort: small\n")
+    [finding] = lane_report(tmp_path, today=TODAY).by_code("state.phase-off-path")
+    assert finding.severity == "warn"
+    assert "small-bug-like-skips-plan" in finding.message
+
+
+def test_an_unsized_bug_at_plan_has_a_candidate_that_admits_plan(tmp_path: Path) -> None:
+    write_item(tmp_path, "bug-x", "type: Bug\nwork_status: open\nphase: plan\n")
+    assert lane_report(tmp_path, today=TODAY).by_code("state.phase-off-path") == ()
+
+
+def test_a_custom_definition_is_honoured_by_state_rule(tmp_path: Path) -> None:
+    write_item(tmp_path, "feature-x", "type: Feature\nwork_status: open\nphase: plan\n")
+    assert lane_report(tmp_path, today=TODAY).by_code("state.phase-off-path") == ()
+    [finding] = lane_report(tmp_path, today=TODAY, definition=_feature_skips_plan()).by_code("state.phase-off-path")
+    assert finding.path == "work/feature-x.md"
+    assert "feature-skips-plan" in finding.message
+
+
+def test_no_matching_path_rule_is_not_an_off_path_finding(tmp_path: Path) -> None:
+    definition = PipelineDefinition(
+        stage_table=STAGE_TABLE,
+        path_rules=parse_path_rules(
+            [{"name": "features", "match": {"type": "Feature"}, "stages": ["design", "execute", "finish"]}],
+            source="test",
+        ),
+        artifacts=PACKAGED_DEFINITION.artifacts,
+    )
+    write_item(tmp_path, "bug-x", "type: Bug\nwork_status: open\nphase: plan\n")
+    assert lane_report(tmp_path, today=TODAY, definition=definition).by_code("state.phase-off-path") == ()
+
+
+def test_an_unknown_phase_is_left_to_phase_vocabulary_validation(tmp_path: Path) -> None:
+    write_item(tmp_path, "bug-x", "type: Bug\nwork_status: open\nphase: bogus\neffort: small\n")
+    assert lane_report(tmp_path, today=TODAY).by_code("state.phase-off-path") == ()
+
+
+def test_spec_staleness_candidates_are_unioned(tmp_path: Path) -> None:
+    definition = PipelineDefinition(
+        stage_table=STAGE_TABLE,
+        path_rules=parse_path_rules(
+            [
+                {"name": "fresh", "match": {"type": "Feature"}, "stages": ["design", "plan", "execute", "finish"]},
+                {
+                    "name": "stale",
+                    "match": {"type": "Feature", "spec_stale": True},
+                    "stages": ["design", "execute", "finish"],
+                },
+            ],
+            source="test",
+        ),
+        artifacts=PACKAGED_DEFINITION.artifacts,
+    )
+    write_item(tmp_path, "feature-x", "type: Feature\nwork_status: open\nphase: plan\n")
+    assert lane_report(tmp_path, today=TODAY, definition=definition).by_code("state.phase-off-path") == ()
+
+
+@pytest.mark.parametrize("status,phase", [("resolved", "done"), ("wontfix", "plan"), ("open", "execute")])
+def test_done_terminal_and_on_path_phases_do_not_warn(tmp_path: Path, status: str, phase: str) -> None:
+    write_item(tmp_path, "bug-x", f"type: Bug\nwork_status: {status}\nphase: {phase}\neffort: small\n")
+    assert lane_report(tmp_path, today=TODAY).by_code("state.phase-off-path") == ()
 
 
 def _findings(root: Path, today: date = TODAY) -> tuple:
@@ -85,6 +161,27 @@ def test_an_epic_is_exempt_from_resolved_without_ref(tmp_path: Path) -> None:
         slug="epic-x",
     )
     assert "state.resolved-without-ref" not in codes
+
+
+def test_an_unstamped_release_is_exempt_from_resolved_without_ref(tmp_path: Path) -> None:
+    codes = codes_for(
+        tmp_path,
+        "type: Release\nwork_status: resolved\nphase: done\nreleased_at: 2026-08-01\n",
+        slug="release-x",
+    )
+    assert "state.resolved-without-ref" not in codes
+
+
+@pytest.mark.parametrize(
+    "stamps",
+    [
+        "branch: epic/x\nworktree: /tmp/x\n",
+        "repo_stamps:\n  code:\n    branch: epic/x\n    worktree: /tmp/x\n",
+    ],
+)
+def test_a_stamped_epic_resolved_without_ref_warns(tmp_path: Path, stamps: str) -> None:
+    codes = codes_for(tmp_path, "type: Epic\nwork_status: resolved\nphase: done\n" + stamps, slug="epic-x")
+    assert "state.resolved-without-ref" in codes
 
 
 def test_superseded_without_link_is_an_error(tmp_path: Path) -> None:
@@ -213,10 +310,10 @@ def test_archive_eligible_is_silent_for_a_terminal_root_with_an_open_descendant(
 # --- the module's shape -----------------------------------------------------
 
 
-def test_the_module_declares_ten_codes_all_prefixed_state() -> None:
+def test_the_module_declares_eleven_codes_all_prefixed_state() -> None:
     from work_tracker_okf._rules import state
 
-    assert len(state.CODES) == 10
+    assert len(state.CODES) == 11
     assert all(code.startswith("state.") for code in state.CODES)
 
 

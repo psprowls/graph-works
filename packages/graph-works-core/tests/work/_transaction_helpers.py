@@ -28,6 +28,11 @@ from work_tracker_okf.mutation import DirectoryPrecondition, PlannedWrite, WorkM
 
 def _workspace(tmp_path: Path) -> WorkspaceLayout:
     layout = layout_for(tmp_path / "workspace")
+    layout.root.mkdir(parents=True, exist_ok=True)
+    layout.manifest_path.write_text(
+        "version: 1\nworkflow: {dispatch_rules: dispatch.yaml}\n", encoding="utf-8", newline="\n"
+    )
+    (layout.root / "dispatch.yaml").write_text("{}\n", encoding="utf-8", newline="\n")
     layout.bundle_dir.mkdir(parents=True)
     layout.cache_dir.mkdir(parents=True)
     installed = install_bundle(layout.bundle_dir, today=date(2026, 8, 22), dry_run=False)

@@ -145,6 +145,8 @@ MIT.
 
 Attended workflow and auto-drive consume the same core-resolved dispatch
 profile. Shared/local rules choose Claude or Codex per stage, with agent-owned
-permissions and frozen retry preferences. See
+permissions and frozen retry preferences. The same files also set which stages an item walks
+(`pipeline.path`) and the artifact each stage leaves
+(`pipeline.artifacts`). See
 [Dispatch configuration](../auto-drive/references/dispatch-configuration.md)
 for the plugin launch/accounting contract and the source configuration guide.

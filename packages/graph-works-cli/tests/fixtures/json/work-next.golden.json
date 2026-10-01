@@ -13,6 +13,48 @@
   "artifact": {
     "path": "<tmp>/works/okf/work/feature-alpha/references/01-design.md"
   },
+  "path": {
+    "stages": [
+      "design",
+      "plan",
+      "execute",
+      "finish"
+    ],
+    "current": "design",
+    "next": "plan",
+    "rule": {
+      "name": "default",
+      "source": "packaged",
+      "index": 0
+    },
+    "candidates": []
+  },
+  "artifacts": {
+    "design": {
+      "file": "01-design.md",
+      "source": "design",
+      "required": true,
+      "on_path": true,
+      "path": "<tmp>/works/okf/work/feature-alpha/references/01-design.md",
+      "exists": false
+    },
+    "plan": {
+      "file": "02-plan.md",
+      "source": "plan",
+      "required": true,
+      "on_path": true,
+      "path": "<tmp>/works/okf/work/feature-alpha/references/02-plan.md",
+      "exists": false
+    },
+    "execute": {
+      "file": "03-execute-coverage.md",
+      "source": "execute-coverage",
+      "required": false,
+      "on_path": true,
+      "path": "<tmp>/works/okf/work/feature-alpha/references/03-execute-coverage.md",
+      "exists": false
+    }
+  },
   "on_dispatch": {
     "phase": "design",
     "work_status": null,
@@ -33,7 +75,9 @@
     "stamp_source": "design",
     "stamp_baseline": true
   },
+  "path_candidates": [],
   "blockers": [],
+  "blocker_kinds": [],
   "dispatch": {
     "profile": {
       "skill": "superpowers:brainstorming",
@@ -48,7 +92,7 @@
         "rule": {
           "source": "packaged",
           "index": 0,
-          "name": "exploration"
+          "name": "design"
         },
         "reason": "set"
       },
@@ -56,7 +100,7 @@
         "rule": {
           "source": "packaged",
           "index": 0,
-          "name": "exploration"
+          "name": "design"
         },
         "reason": "set"
       },
@@ -64,7 +108,7 @@
         "rule": {
           "source": "packaged",
           "index": 0,
-          "name": "exploration"
+          "name": "design"
         },
         "reason": "set"
       },
@@ -72,7 +116,7 @@
         "rule": {
           "source": "packaged",
           "index": 0,
-          "name": "exploration"
+          "name": "design"
         },
         "reason": "set"
       },
@@ -80,7 +124,7 @@
         "rule": {
           "source": "packaged",
           "index": 0,
-          "name": "exploration"
+          "name": "design"
         },
         "reason": "explicit-null"
       },
@@ -88,7 +132,7 @@
         "rule": {
           "source": "packaged",
           "index": 0,
-          "name": "exploration"
+          "name": "design"
         },
         "reason": "explicit-null"
       }

@@ -134,10 +134,11 @@ Anchors 2 and 3 below apply to every other kind.
 When the design is approved, write the spec as follows instead of to any
 default location:
 
-1. **Write the design artifact** to
-   `<workspace>/okf/<work-path>/references/01-design.md`. The owned directory
-   already exists — `gw work file` created it. The `skill-doc-routing` hook
-   injects the resolved absolute workspace path into your context; use it.
+1. **Write the design artifact** to the path `gw work next` reports: run
+   `gw work next <work-path> --json --file ""` immediately after filing and
+   write to its `artifacts.design.path`. The workspace's pipeline configuration
+   names the file; never type a filename. The owned directory already exists —
+   `gw work file` created it.
 2. **Advance the item:** `gw work advance <work-path> --effort <confirmed-effort>`.
    This is the same design-complete transition the `workflow` skill applies: it
    stamps the canonical `design` source and advances the phase.

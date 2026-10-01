@@ -39,6 +39,16 @@ from okf_io import Document
 
 from work_tracker_okf.items import COMMIT_OID as _OID
 from work_tracker_okf.items import WorkItem, is_commit_oid
+from work_tracker_okf.pipeline import (
+    DECOMPOSING_TYPES,
+    DONE,
+    EXECUTE,
+    PACKAGED_DEFINITION,
+    PipelineDefinition,
+    code_phases,
+    dispatch_phases,
+    read_only_phases,
+)
 from work_tracker_okf.vocabulary import EFFORTS, PHASES, TERMINAL_STATUSES, TYPES, WORK_STATUSES
 from work_tracker_okf.workflow import route, state_for
 
@@ -62,10 +72,10 @@ PlacementRefusal = Literal[
 PLACEMENT_REFUSALS: frozenset[str] = frozenset(get_args(PlacementRefusal))
 
 #: The phases whose stages commit, and so the only ones a descendant records at.
-CODE_PHASES: frozenset[str] = frozenset({"execute", "finish"})
+CODE_PHASES: frozenset[str] = code_phases()
 
 #: Every phase a stage can be dispatched at.
-_DISPATCH_PHASES: frozenset[str] = PHASES - {"done"}
+_DISPATCH_PHASES: frozenset[str] = dispatch_phases()
 
 ReaderRefusal = Literal[
     "unknown-path",
@@ -81,7 +91,7 @@ ReaderRefusal = Literal[
 ]
 
 READER_REFUSALS: frozenset[str] = frozenset(get_args(ReaderRefusal))
-READER_PHASES: frozenset[str] = frozenset({"design", "plan"})
+READER_PHASES: frozenset[str] = read_only_phases()
 _ATTEMPT = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]*")
 
 
@@ -107,7 +117,13 @@ class ReaderReceiptPlan:
 
 
 def plan_reader_receipt(
-    items: Sequence[WorkItem], path: str, *, root: str, phase: str, observation: ReaderObservation
+    items: Sequence[WorkItem],
+    path: str,
+    *,
+    root: str,
+    phase: str,
+    observation: ReaderObservation,
+    definition: PipelineDefinition = PACKAGED_DEFINITION,
 ) -> ReaderReceiptPlan:
     """Check a design/plan reader observation without reading or writing state."""
     index = {item.path: item for item in items}
@@ -133,11 +149,11 @@ def plan_reader_receipt(
         return refused("invalid-observation", problem, item.phase)
     if phase not in READER_PHASES:
         return refused("code-phase", f"a {phase} stage writes code and has no reader receipt", item.phase)
-    if item.work_status in TERMINAL_STATUSES or item.work_status == "mitigated" or item.phase == "done":
+    if item.work_status in TERMINAL_STATUSES or item.work_status == "mitigated" or item.phase == DONE:
         return refused(
             "terminal", f"{path} is {item.work_status} at phase {item.phase!r}; nothing is dispatched", item.phase
         )
-    current = item.phase if item.phase is not None else _entry_phase(items, item)
+    current = item.phase if item.phase is not None else _entry_phase(items, item, definition)
     if current is None:
         return refused("entry-unprovable", f"{path} has no phase and its routing entry cannot be proved")
     if current != phase:
@@ -206,6 +222,7 @@ def plan_placement(
     repo: str | None = None,
     start_sha: str | None = None,
     require_start_sha: bool = False,
+    definition: PipelineDefinition = PACKAGED_DEFINITION,
 ) -> PlacementPlan:
     """Plan recording (*worktree*, *branch*) on *path* for a *phase* dispatch
     of the subtree rooted at *root*. Mutates nothing, reads no clock.
@@ -271,17 +288,17 @@ def plan_placement(
             f"{path} is a descendant of {root}; a {phase} stage writes no code and records no placement",
             item.phase,
         )
-    if item.work_status in TERMINAL_STATUSES or item.work_status == "mitigated" or item.phase == "done":
+    if item.work_status in TERMINAL_STATUSES or item.work_status == "mitigated" or item.phase == DONE:
         return refused(
             "terminal", f"{path} is {item.work_status} at phase {item.phase!r}; nothing is dispatched", item.phase
         )
-    if path == root and item.type in {"Epic", "Release"} and phase not in CODE_PHASES:
+    if path == root and item.type in DECOMPOSING_TYPES and phase not in CODE_PHASES:
         return refused(
             "read-only-owner",
             f"{path} is an {item.type} reading at {phase}; its anchors are recorded by execute-time preparation",
             item.phase,
         )
-    current = item.phase if item.phase is not None else _entry_phase(items, item)
+    current = item.phase if item.phase is not None else _entry_phase(items, item, definition)
     if current is None:
         return refused("entry-unprovable", f"{path} has no phase and its routing entry cannot be proved")
     if current != phase:
@@ -416,9 +433,9 @@ def plan_baseline(
         return refused("invalid-item", problem)
     if "start_sha" in item.invalid_optional_fields:
         return refused("invalid-item", f"{path} has a malformed start_sha; repair it first")
-    if item.work_status in TERMINAL_STATUSES or item.work_status == "mitigated" or item.phase == "done":
+    if item.work_status in TERMINAL_STATUSES or item.work_status == "mitigated" or item.phase == DONE:
         return refused("terminal", f"{path} is {item.work_status} at phase {item.phase!r}")
-    if item.phase != "execute":
+    if item.phase != EXECUTE:
         return refused("not-execute", f"{path} is at phase {item.phase!r}; a baseline is recorded as execute starts")
     if not is_commit_oid(observed_head):
         return refused("invalid-baseline", f"observed HEAD {observed_head!r} is not a full commit object ID")
@@ -466,7 +483,7 @@ def _item_problem(item: WorkItem) -> str | None:
     return None
 
 
-def _entry_phase(items: Sequence[WorkItem], item: WorkItem) -> str | None:
+def _entry_phase(items: Sequence[WorkItem], item: WorkItem, definition: PipelineDefinition) -> str | None:
     """The phase a never-entered item's entry transition opens, or `None`.
 
     `hold=` is deliberately not supplied: an open hold blocks transitions,
@@ -478,7 +495,7 @@ def _entry_phase(items: Sequence[WorkItem], item: WorkItem) -> str | None:
     state = state_for(items, item.path)
     if state is None:  # pragma: no cover -- `item` was drawn from `items`
         return None
-    result = route(state)
+    result = route(state, definition=definition)
     if result.blockers or result.dispatch is None or result.on_dispatch is None:
         return None
     return result.on_dispatch.phase

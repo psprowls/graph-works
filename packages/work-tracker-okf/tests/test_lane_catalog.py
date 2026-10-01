@@ -68,15 +68,15 @@ def test_every_declared_code_carries_its_module_prefix() -> None:
             assert code.startswith(f"{topic}."), (topic, code)
 
 
-def test_the_catalog_is_forty_four_codes_across_six_topics() -> None:
-    assert len(_rules.CATALOG) == 44
+def test_the_catalog_is_forty_five_codes_across_six_topics() -> None:
+    assert len(_rules.CATALOG) == 45
     assert len(_rules.TOPICS) == 6
-    assert sum(len(codes) for codes in _rules.CODES_BY_TOPIC.values()) == 44
+    assert sum(len(codes) for codes in _rules.CODES_BY_TOPIC.values()) == 45
 
 
 def test_the_per_topic_counts_match_the_design_spec() -> None:
     assert {topic: len(codes) for topic, codes in _rules.CODES_BY_TOPIC.items()} == {
-        "state": 10,
+        "state": 11,
         "plan": 4,
         "graph": 5,
         "structure": 14,
@@ -85,10 +85,10 @@ def test_the_per_topic_counts_match_the_design_spec() -> None:
     }
 
 
-def test_the_severity_split_is_twenty_one_errors_and_twenty_three_warns() -> None:
+def test_the_severity_split_is_twenty_one_errors_and_twenty_four_warns() -> None:
     assert len(ERROR_CODES) == 21
     assert ERROR_CODES < _rules.CATALOG
-    assert len(_rules.CATALOG - ERROR_CODES) == 23
+    assert len(_rules.CATALOG - ERROR_CODES) == 24
 
 
 def test_no_lane_topic_collides_with_a_built_in_or_an_okf_ext_prefix() -> None:
@@ -104,16 +104,16 @@ def test_the_registry_is_homogeneous() -> None:
     assert set(_rules.RULES_BY_TOPIC) == set(_rules.CODES_BY_TOPIC)
 
 
-def test_lane_rules_is_nineteen_functions_with_a_repo_root(tmp_path: Path) -> None:
-    assert len(lane_rules(repo_root=tmp_path)) == 19
+def test_lane_rules_is_twenty_functions_with_a_repo_root(tmp_path: Path) -> None:
+    assert len(lane_rules(repo_root=tmp_path)) == 20
 
 
-def test_lane_rules_is_nineteen_functions_with_several_repo_roots(tmp_path: Path) -> None:
-    assert len(lane_rules(repo_roots=(tmp_path, tmp_path / "other"))) == 19
+def test_lane_rules_is_twenty_functions_with_several_repo_roots(tmp_path: Path) -> None:
+    assert len(lane_rules(repo_roots=(tmp_path, tmp_path / "other"))) == 20
 
 
 def test_lane_rules_drops_the_two_repo_rules_without_one() -> None:
-    assert len(lane_rules()) == 17
+    assert len(lane_rules()) == 18
 
 
 def test_lane_rules_is_stable_across_calls(tmp_path: Path) -> None:
@@ -159,7 +159,7 @@ def golden_report() -> Report:
 
 
 def test_the_vault_triggers_every_catalog_code(golden_report: Report) -> None:
-    """One walk, all 44. This is what catches a rule that stops firing."""
+    """One walk, all 45. This is what catches a rule that stops firing."""
     assert {f.code for f in _lane_findings(golden_report)} == _rules.CATALOG
 
 

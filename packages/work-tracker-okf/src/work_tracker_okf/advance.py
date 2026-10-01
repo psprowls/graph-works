@@ -22,10 +22,9 @@ from okf_io import Document
 from work_tracker_okf.decisions import HoldFact
 from work_tracker_okf.hierarchy import active_nonterminal_descendants
 from work_tracker_okf.items import WorkItem
+from work_tracker_okf.pipeline import PACKAGED_DEFINITION, ExpectedPhase, PipelineDefinition
 from work_tracker_okf.vocabulary import PARENT_TYPES
-from work_tracker_okf.workflow import PLAN_OR_EXECUTE, RouteResult, Transition, route, state_for
-
-ExpectedPhase = Literal["none", "design", "plan", "execute", "finish", "done"]
+from work_tracker_okf.workflow import RouteResult, Transition, blocker_messages, route, state_for
 
 RefusalReason = Literal[
     "unknown-path",
@@ -35,6 +34,7 @@ RefusalReason = Literal[
     "blocked",
     "nothing-to-advance",
     "effort-required",
+    "attribute-required",
     "owner-required",
     "resolved-in-required",
     "finish-incomplete",
@@ -61,10 +61,11 @@ RefusalReason = Literal[
 #: Which routing-table transition a plan picked. `dispatch` is an entry
 #: (`on_dispatch`, applied at the *start* of a stage's session); `complete`
 #: is an exit (`on_complete`, applied at its *end*); `return` is `on_return`.
+#: `repair` moves an off-path phase forward without completing a stage.
 #: One band up, the active-work pointer is stamped only for `dispatch`: an
 #: exit runs inside the session it ends, so stamping the next phase then
 #: mislabels that session's own transcript.
-Trigger = Literal["dispatch", "complete", "return"]
+Trigger = Literal["dispatch", "complete", "return", "repair"]
 
 #: The execute -> finish commit gate's codes, raised one band up by
 #: `graph_works_core.orchestrate.stage_advance`, which cannot own the
@@ -157,6 +158,7 @@ def advance(
     unreadable: Mapping[str, str] | None = None,
     hold: HoldFact | None = None,
     stale_spec: tuple[str, ...] = (),
+    definition: PipelineDefinition = PACKAGED_DEFINITION,
 ) -> AdvancePlan:
     """Plan the next transition for *path*. Mutates nothing, reads no clock.
 
@@ -185,15 +187,20 @@ def advance(
         if detail is not None:
             return _refused(path, None, None, "unreadable-member", f"{path}.md {detail}")
         return _refused(path, None, None, "unknown-path", f"unknown path {path!r}")
-    result = route(state)
+    result = route(state, definition=definition)
     actual_phase = item.phase if item.phase is not None else "none"
     if expected_phase is not None and actual_phase != expected_phase:
         return _refused(
             path, result, None, "phase-mismatch", f"expected phase {expected_phase!r}; observed phase {actual_phase!r}"
         )
-    if result.blockers:
-        return _refused(path, result, None, "blocked", "; ".join(result.blockers))
-    if return_:
+    repair = result.repair if not return_ and tuple(b.kind for b in result.blockers) == ("phase-off-path",) else None
+    if result.blockers and repair is None:
+        return _refused(path, result, None, "blocked", "; ".join(blocker_messages(result)))
+    trigger: Trigger
+    transition: Transition | None
+    if repair is not None:
+        transition, trigger = repair, "repair"
+    elif return_:
         if resolved_in is not None:
             return _refused(
                 path,
@@ -211,7 +218,7 @@ def advance(
                 "return-not-available",
                 f"no return path from phase {item.phase!r}: --return applies to an item at phase 'finish'",
             )
-        trigger: Trigger = "return"
+        trigger = "return"
     else:
         if result.on_dispatch is not None:
             transition, trigger = result.on_dispatch, "dispatch"
@@ -219,9 +226,8 @@ def advance(
             transition, trigger = result.on_complete, "complete"
         else:
             return _refused(path, result, None, "nothing-to-advance", f"nothing to advance: {result.reason}")
-    # Two independent guards on the sentinel, because a leak writes an invalid
-    # enum value into a real page.
-    if "effort" in transition.requires or transition.phase == PLAN_OR_EXECUTE:
+    # A derived fork has no completion phase until the caller supplies effort.
+    if "effort" in transition.requires:
         return _refused(
             path,
             result,
@@ -229,7 +235,27 @@ def advance(
             "effort-required",
             "effort required to advance: pass effort=xtra-small|small|medium|large|xtra-large",
         )
+    if trigger == "complete" and transition.phase is None:
+        missing = tuple(requirement for requirement in transition.requires if requirement not in {"effort"})
+        required = ", ".join(missing) if missing else "the unresolved path attribute"
+        return _refused(
+            path,
+            result,
+            transition,
+            "attribute-required",
+            "attribute required to advance: set " + required,
+        )
     if state.type in PARENT_TYPES and transition.work_status == "resolved":
+        open_descendants = active_nonterminal_descendants(items, item.path)
+        if open_descendants:
+            return _refused(
+                path,
+                result,
+                transition,
+                "children-open",
+                "waiting on descendants: " + ", ".join(open_descendants),
+            )
+    if "children-terminal" in transition.requires:
         open_descendants = active_nonterminal_descendants(items, item.path)
         if open_descendants:
             return _refused(

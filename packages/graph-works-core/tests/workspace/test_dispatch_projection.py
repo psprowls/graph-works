@@ -1,9 +1,14 @@
 """Projection inputs are complete, validated, and checked before publication."""
 
+import json
 from pathlib import Path
 
 import pytest
-from graph_works_core.workspace.dispatch_projection import build_dispatch_projection, write_dispatch_projection
+from graph_works_core.workspace.dispatch_projection import (
+    _check_projection_inputs,
+    build_dispatch_projection,
+    write_dispatch_projection,
+)
 from graph_works_core.workspace.errors import WorkspaceError
 from graph_works_core.workspace.layout import layout_for
 
@@ -29,6 +34,54 @@ def test_projection_tracks_all_inputs_and_rule_origins(tmp_path):
     assert payload["_meta"]["source_sha256"] == inputs["manifest"]["sha256"]
     assert payload["_meta"]["overlay_sha256"] is None
     assert "profile" not in payload["dispatch"]
+
+
+def test_projection_carries_the_full_path_fold_and_artifacts(tmp_path):
+    layout = workspace(tmp_path)
+    (tmp_path / "dispatch.local.yaml").write_text(
+        "pipeline:\n  path:\n    - name: f\n      match: {type: [Feature, Bug]}\n"
+        "      stages: [design, execute, finish]\n"
+        "  artifacts:\n    plan: {file: plan.md}\n",
+        encoding="utf-8",
+        newline="",
+    )
+    payload = build_dispatch_projection(layout)
+    path = payload["dispatch"]["path"]
+    assert path[0] == {
+        "name": "default",
+        "match": {},
+        "stages": ["design", "plan", "execute", "finish"],
+        "origin": {"source": "packaged", "index": 0, "name": "default"},
+    }
+    assert path[-1] == {
+        "name": "f",
+        "match": {"type": ["Feature", "Bug"]},
+        "stages": ["design", "execute", "finish"],
+        "origin": {"source": str(tmp_path / "dispatch.local.yaml"), "index": 0, "name": "f"},
+    }
+    assert payload["dispatch"]["artifacts"]["plan"] == {
+        "file": "plan.md",
+        "source": "plan",
+        "required": True,
+        "origin": str(tmp_path / "dispatch.local.yaml"),
+    }
+    assert payload["dispatch"]["artifacts"]["execute"]["origin"] == "packaged"
+    json.loads(json.dumps(payload, default=str))
+
+
+@pytest.mark.parametrize(
+    "edit",
+    [
+        "pipeline:\n  path:\n    - match: {}\n      stages: [execute, finish]\n",
+        "pipeline:\n  artifacts:\n    design: {file: spec.md}\n",
+    ],
+)
+def test_editing_either_new_block_stales_the_projection(tmp_path, edit):
+    layout = workspace(tmp_path)
+    payload = build_dispatch_projection(layout)
+    (tmp_path / "dispatch.local.yaml").write_text(edit, encoding="utf-8", newline="")
+    with pytest.raises(WorkspaceError, match="configuration changed"):
+        _check_projection_inputs(payload)
 
 
 def test_failed_sync_preserves_previous_projection(tmp_path):

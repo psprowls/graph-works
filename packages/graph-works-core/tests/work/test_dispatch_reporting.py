@@ -37,20 +37,20 @@ def _git_worktree(layout, target: Path, branch: str) -> Path:
 
 
 @pytest.mark.parametrize(
-    ("kind", "phase", "spec", "variant"),
+    ("kind", "phase", "spec", "rule_name"),
     [
-        ("Feature", "design", False, "exploration"),
-        ("Bug", "design", False, "diagnosis"),
-        ("Feature", "design", True, "reconcile"),
-        ("Epic", "design", False, "epic-design"),
-        ("Epic", "plan", False, "decompose"),
-        ("Feature", "plan", False, "single"),
-        ("Feature", "execute", False, "unplanned"),
-        ("Feature", "execute", True, "planned"),
-        ("Feature", "finish", False, "branch"),
+        ("Feature", "design", False, "design"),
+        ("Bug", "design", False, "design-bug"),
+        ("Feature", "design", True, "design-reconcile"),
+        ("Epic", "design", False, "design-parent"),
+        ("Epic", "plan", False, "plan-parent"),
+        ("Feature", "plan", False, "plan"),
+        ("Feature", "execute", False, "execute"),
+        ("Feature", "execute", True, "execute-planned"),
+        ("Feature", "finish", False, "finish"),
     ],
 )
-def test_next_and_orchestrate_share_resolution(tmp_path: Path, kind, phase, spec, variant):
+def test_next_and_orchestrate_share_resolution(tmp_path: Path, kind, phase, spec, rule_name):
     layout = _layout(tmp_path)
     worktree = _git_worktree(layout, tmp_path / "feature-worktree", "feature/a")
     path = "work/feature-a"
@@ -73,9 +73,9 @@ def test_next_and_orchestrate_share_resolution(tmp_path: Path, kind, phase, spec
             (layout.bundle_dir / f"{path}/references/02-plan.md").write_text("# Plan\n", encoding="utf-8")
     shared = layout.root / "dispatch.yaml"
     shared.write_text(
-        "version: 1\npipeline:\n  attributes: [stage, variant, type, effort, blast_radius, has_spec, has_plan]\n"
+        "version: 1\npipeline:\n  attributes: [stage, type, effort, blast_radius, has_spec, has_plan]\n"
         "  rules:\n  - match: {}\n    model: inherited\n    reasoning_effort: high\n"
-        '  - match: {variant: branch}\n    prompt_tail: "merge {merge_target}"\n',
+        '  - match: {stage: finish}\n    prompt_tail: "merge {merge_target}"\n',
         encoding="utf-8",
     )
     (layout.root / "dispatch.local.yaml").write_text(
@@ -86,7 +86,7 @@ def test_next_and_orchestrate_share_resolution(tmp_path: Path, kind, phase, spec
     next_result = run_next(layout, path, dry_run=False)
     planned_result = run_orchestrate(layout, path)
     planned = planned_result.dispatches[0]
-    assert next_result.route.dispatch.variant == variant
+    assert next_result.route.dispatch.stage == phase
     resolution = next_result.dispatch_resolution
     assert planned.agent == resolution.profile.agent == "codex"
     assert planned.model == resolution.profile.model is None
@@ -128,7 +128,7 @@ def test_failed_normalization_resolves_persisted_route(tmp_path, monkeypatch):
     _spec(layout, path)
     monkeypatch.setattr(work, "_apply_normalizations", lambda *args, **kwargs: (work.NextApplication(), ("failed",)))
     result = run_next(layout, path, dry_run=False)
-    assert result.route.dispatch.variant == "exploration"
+    assert result.route.dispatch.stage == "design"
     assert result.dispatch_resolution.profile.skill == "superpowers:brainstorming"
 
 

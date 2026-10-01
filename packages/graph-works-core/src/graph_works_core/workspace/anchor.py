@@ -16,22 +16,23 @@ from __future__ import annotations
 from pathlib import Path
 
 from work_tracker_okf import anchors
+from work_tracker_okf.compose import stage_artifact_ref
 from work_tracker_okf.items import WorkItem
-from work_tracker_okf.paths import MANAGED_ARTIFACTS, artifact_ref
+from work_tracker_okf.pipeline import PipelineDefinition
 from work_tracker_okf.vocabulary import SPEC_SOURCE_ID
 
 from graph_works_core.workspace import provenance
 
 
-def spec_ref(item: WorkItem) -> str:
+def spec_ref(item: WorkItem, *, definition: PipelineDefinition) -> str:
     """*item*'s design spec, bundle-relative.
 
     `sources[]` first: it is where an adopted or relocated spec is recorded,
     and the conventional path computed unconditionally would miss it -- an
     item whose spec was adopted from elsewhere or relocated after filing has
     no `sources[]`-independent way to find it otherwise. Falling back to the
-    conventional artifact path covers every item that never needed an
-    override.
+    definition's design artifact covers every item that never needed an
+    override. *definition* is the workspace's loaded pipeline definition.
 
     Shared by `work`'s reconcile pass and `orchestrate`'s stage advance --
     both need "where is this item's spec" and neither may import the other,
@@ -40,7 +41,7 @@ def spec_ref(item: WorkItem) -> str:
     for source in item.sources:
         if source.id == SPEC_SOURCE_ID and source.resource:
             return source.resource.lstrip("/")
-    return artifact_ref(item.path, MANAGED_ARTIFACTS[SPEC_SOURCE_ID]).rel
+    return stage_artifact_ref(item.path, definition.artifacts["design"]).rel
 
 
 def resolve_anchor(

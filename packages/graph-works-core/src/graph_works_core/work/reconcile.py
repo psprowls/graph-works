@@ -42,6 +42,7 @@ from work_tracker_okf.paths import item_page
 
 from graph_works_core.workspace import provenance
 from graph_works_core.workspace.anchor import resolve_anchor, spec_ref
+from graph_works_core.workspace.dispatch_config import load_dispatch_config
 from graph_works_core.workspace.landed import LandedSibling, landed_siblings
 from graph_works_core.workspace.layout import WorkspaceLayout
 from graph_works_core.workspace.repos import resolve_item_repo
@@ -119,12 +120,14 @@ def run_reconcile_context(
     not a degrade this module invents around.
 
     Raises:
+        WorkspaceError: dispatch configuration is missing or malformed, or repository selection is invalid.
         ValueError: for a path naming no work item. §3.2 of the consuming spec
             calls it a hard caller error, and it is the same door
             `commands.py:run_next` and `commands.py:_decision_context` already
             open.
     """
     bundle = load_bundle(layout.bundle_dir, ignore=IGNORE)
+    definition = load_dispatch_config(layout).definition
     items = load_items(bundle)
     item = next((candidate for candidate in items if candidate.path == path), None)
     if item is None:
@@ -144,7 +147,7 @@ def run_reconcile_context(
     if owner_path is None:
         warnings.append(f"no decision owner for {path!r}; ledger drift unavailable")
 
-    spec_path = bundle.root / spec_ref(item)
+    spec_path = bundle.root / spec_ref(item, definition=definition)
     spec_text = spec_path.read_text(encoding="utf-8") if spec_path.exists() else ""
     if not spec_text:
         warnings.append(f"no design spec at {spec_path}; nothing to reconcile against")

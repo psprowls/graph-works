@@ -226,9 +226,10 @@ work/<release>/children/<epic>/children/<feature>
 `Release` is root-only. `Release`, `Epic`, and `Feature` may own a `children/`
 lane; `Bug`, `TechDebt`, `TestGap`, and `Spike` are leaves. Every item owns the
 directory beside its page. Managed artifacts live under its `references/`
-directory: `00-decisions.md`, `01-design.md`, `02-plan.md`,
-`03-execute-results.md`, `03-execute-transcript.jsonl`, and
-`04-finish-results.md`. Each lane has its own `index.md`. Physical placement defines ancestry; no
+directory: one file per stage artifact in `pipeline.artifacts` (design, plan,
+execute coverage; `gw work next` reports each one's configured name and path),
+plus the fixed `00-decisions.md`, `03-execute-results.md`,
+`03-execute-transcript.jsonl`, and `04-finish-results.md`. Each lane has its own `index.md`. Physical placement defines ancestry; no
 `parent` or `children` frontmatter aliases exist.
 
 ```yaml
@@ -252,9 +253,9 @@ updated: 2026-08-23
 owner: pat
 sources:
   - id: design
-    resource: /work/release-cutover/children/epic-filing/children/feature-path-native/references/01-design.md
+    resource: /work/release-cutover/children/epic-filing/children/feature-path-native/references/<design artifact>
   - id: plan
-    resource: /work/release-cutover/children/epic-filing/children/feature-path-native/references/02-plan.md
+    resource: /work/release-cutover/children/epic-filing/children/feature-path-native/references/<plan artifact>
 ---
 ```
 
@@ -263,8 +264,9 @@ archived canonical item; `blocks` is `design | plan | execute | finish`; `needs`
 is `design | plan | execute | finish | resolved`. The CLI form is equally
 explicit: `--dep path=<canonical>,blocks=<phase>,needs=<phase>`.
 
-The plan is the `## Plan` body table. `sources[]` registers owned artifacts by
-filename-derived id; `resource` is root-absolute within the OKF bundle.
+The plan is the `## Plan` body table. `sources[]` registers stage artifacts by
+their fixed source ids from `pipeline.artifacts`; `resource` is root-absolute
+within the OKF bundle.
 
 Archive moves a top-level item, with its owned directory and whole `children/`
 subtree unchanged, to `work/_archive/<name>`. A child is never archived on its

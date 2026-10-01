@@ -15,6 +15,7 @@ import pytest
 from graph_works_core.workspace import anchor
 from okf_io import Source
 from work_tracker_okf.items import WorkItem
+from work_tracker_okf.pipeline import PACKAGED_DEFINITION
 from work_tracker_okf.vocabulary import SPEC_SOURCE_ID
 
 
@@ -149,12 +150,12 @@ def test_spec_ref_prefers_a_sources_hit() -> None:
         "work/widget",
         sources=(Source(id=SPEC_SOURCE_ID, resource="/work/widget/references/adopted-spec.md"),),
     )
-    assert anchor.spec_ref(item) == "work/widget/references/adopted-spec.md"
+    assert anchor.spec_ref(item, definition=PACKAGED_DEFINITION) == "work/widget/references/adopted-spec.md"
 
 
 def test_spec_ref_falls_back_to_the_conventional_artifact_path() -> None:
     item = _item("work/widget")
-    assert anchor.spec_ref(item) == "work/widget/references/01-design.md"
+    assert anchor.spec_ref(item, definition=PACKAGED_DEFINITION) == "work/widget/references/01-design.md"
 
 
 def test_spec_baseline_arm_precedes_spec_history(repo: Path) -> None:

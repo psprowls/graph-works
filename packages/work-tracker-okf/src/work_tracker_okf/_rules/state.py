@@ -17,6 +17,17 @@ from okf_io import Finding, Rule, RuleContext, Severity
 from work_tracker_okf._rules._common import LaneConfig, active, days_since, items, text_key, with_documents
 from work_tracker_okf.hierarchy import sweep_eligible
 from work_tracker_okf.items import WorkItem
+from work_tracker_okf.pipeline import (
+    DECOMPOSING_TYPES,
+    STAGES,
+    PathCandidate,
+    PathOrigin,
+    PipelineDefinition,
+    path_attributes,
+    phase_compat,
+    resolve_path,
+)
+from work_tracker_okf.vocabulary import TERMINAL_STATUSES
 
 CODES: tuple[str, ...] = (
     "state.phase-status-incoherent",
@@ -29,30 +40,16 @@ CODES: tuple[str, ...] = (
     "state.stuck-accepted",
     "state.archive-eligible",
     "state.spec-baseline-malformed",
+    "state.phase-off-path",
 )
 
-#: `Finding.spec` is "the thing that says so". None of these ten cites an OKF
+#: `Finding.spec` is "the thing that says so". None of these cites an OKF
 #: section: an item whose `work_status` is `superseded` with no
 #: `superseded_by` is a perfectly conformant OKF v0.2 document. They cite the
 #: module that defines them -- what `okf_ext.health` does with its own `_SPEC`,
 #: for the same reason. Inventing a section number for a lane invariant would be
 #: a false citation that outlives the person who wrote it.
 _SPEC = "work_tracker_okf._rules.state"
-
-#: Which phases each constrained `work_status` admits. Statuses absent from
-#: the map -- `open`, `mitigated`, `wontfix`, `superseded` -- are unconstrained.
-#:
-#: Module-private with one consumer, exactly as `okf_io._rules.lifecycle` keeps
-#: `_KNOWN_STATUS` local. It is bonded to `workflow.route()` by
-#: `test_phase_compat.py` rather than derived from it: the epic spec's argument
-#: for keeping the routing table at tier 3 is that the lint rules encode the
-#: same state machine, and that argument is worth nothing unless the two cannot
-#: drift (C5-I).
-_PHASE_COMPAT: dict[str, frozenset[str]] = {
-    "accepted": frozenset({"execute", "finish", "done"}),
-    "in-progress": frozenset({"execute", "finish"}),
-    "resolved": frozenset({"done"}),
-}
 
 #: work-io's two thresholds, unchanged.
 _STUCK_OPEN_DAYS = 30
@@ -72,8 +69,9 @@ def coherence(ctx: RuleContext) -> Iterable[Finding]:
     statement about where the item is rather than about whether its page
     conforms.
     """
+    compat = phase_compat()
     for item in active(ctx):
-        allowed = _PHASE_COMPAT.get(item.work_status)
+        allowed = compat.get(item.work_status)
         if item.phase is None or allowed is None or item.phase in allowed:
             continue
         yield _finding(
@@ -93,9 +91,9 @@ def companions(ctx: RuleContext) -> Iterable[Finding]:
 
     Three notes a rewrite drops by not knowing about them:
 
-    - **The epic exemption on `resolved`.** An epic resolves through the
-      children-terminal gate, not a `resolved_in` ref, so requiring one would
-      fire on every correctly-finished epic.
+    - **The decomposing-type exemption on `resolved`.** An Epic or Release
+      with no branch or repository stamps resolves through its children.
+      A stamped item must record a `resolved_in` ref.
     - **Rule 5 narrows to `owner` alone** (C5-C). work-io also accepted
       `related_prs`; `sources[]` is the lane's pointer surface now, and a second
       parallel list of references is the duplication the port exists to remove.
@@ -109,7 +107,9 @@ def companions(ctx: RuleContext) -> Iterable[Finding]:
             yield _finding(
                 "state.in-progress-without-owner", "error", item, "`work_status: in-progress` with no `owner`"
             )
-        if status == "resolved" and item.type != "Epic" and not item.resolved_in:
+        owns_no_branch = not item.branch and not item.repo_stamps
+        exempt = item.type in DECOMPOSING_TYPES and owns_no_branch
+        if status == "resolved" and not exempt and not item.resolved_in:
             yield _finding("state.resolved-without-ref", "warn", item, "`work_status: resolved` with no `resolved_in`")
         if status == "superseded" and not item.superseded_by:
             yield _finding(
@@ -181,10 +181,49 @@ def baselines(ctx: RuleContext) -> Iterable[Finding]:
             )
 
 
+def _candidates(definition: PipelineDefinition, item: WorkItem) -> tuple[PathCandidate, ...]:
+    """Enumerate every possible path; lint cannot know whether a spec is stale."""
+    return tuple(
+        candidate
+        for stale in (False, True)
+        for candidate in resolve_path(
+            definition,
+            path_attributes(
+                type_=item.type,
+                effort=item.effort,
+                blast_radius=item.blast_radius,
+                has_spec=item.has_design_artifact,
+                has_plan=item.has_plan_artifact,
+                spec_stale=stale,
+            ),
+        ).candidates
+    )
+
+
+def _rule_label(origin: PathOrigin) -> str:
+    return origin.name if origin.name is not None else f"{origin.source}#{origin.index}"
+
+
+def _off_path(definition: PipelineDefinition) -> Rule:
+    """Warn when no candidate path admits the item's current stage."""
+
+    def rule(ctx: RuleContext) -> Iterable[Finding]:
+        for item in active(ctx):
+            if item.phase not in STAGES or item.work_status in TERMINAL_STATUSES:
+                continue
+            candidates = _candidates(definition, item)
+            if not candidates or any(item.phase in candidate.stages for candidate in candidates):
+                continue
+            paths = "; ".join(
+                dict.fromkeys(f"[{', '.join(c.stages)}] (rule `{_rule_label(c.rule)}`)" for c in candidates)
+            )
+            yield _finding(
+                "state.phase-off-path", "warn", item, f"phase `{item.phase}` is not on this item's path {paths}"
+            )
+
+    return rule
+
+
 def rules(config: LaneConfig) -> tuple[Rule, ...]:
-    """Every topic exports `rules(config)`, including the two that inject nothing
-    (C5-E). A heterogeneous registry -- some tuples, some callables -- would make
-    the catalog-completeness test special-case half its own subjects, and that
-    test is the whole reason the shape is worth constraining."""
-    del config  # this topic injects nothing
-    return (coherence, companions, staleness, terminal, baselines)
+    """The state rules, including a path check using the supplied definition."""
+    return (coherence, companions, staleness, terminal, baselines, _off_path(config.definition))

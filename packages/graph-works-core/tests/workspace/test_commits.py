@@ -26,11 +26,8 @@ def _write(root: Path, rel: str, text: str) -> None:
 
 
 def _set_mode(layout, value: str) -> None:
-    layout.manifest_path.parent.mkdir(parents=True, exist_ok=True)
-    existing = layout.manifest_path.read_text(encoding="utf-8") if layout.manifest_path.exists() else ""
-    layout.manifest_path.write_text(
-        existing + f"workflow:\n  workspace_commits: {value}\n", encoding="utf-8", newline="\n"
-    )
+    layout.local_manifest_path.parent.mkdir(parents=True, exist_ok=True)
+    layout.local_manifest_path.write_text(f"workflow:\n  workspace_commits: {value}\n", encoding="utf-8", newline="\n")
 
 
 def _own_repo(tmp_path: Path):

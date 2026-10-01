@@ -637,7 +637,7 @@ def create_control_plane(layout: WorkspaceLayout) -> list[Path]:
     shared = layout.root / "dispatch.yaml"
     if not shared.exists():
         shared.write_text(
-            "pipeline:\n  rules:\n  - match: {variant: branch}\n    prompt_tail: " + json.dumps(RELAY_TAIL_SEED) + "\n",
+            "pipeline:\n  rules:\n  - match: {stage: finish}\n    prompt_tail: " + json.dumps(RELAY_TAIL_SEED) + "\n",
             encoding="utf-8",
             newline="",
         )

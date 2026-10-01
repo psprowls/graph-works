@@ -45,10 +45,10 @@ clock.
 from __future__ import annotations
 
 import os
+import textwrap
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import date
-from io import StringIO
 from pathlib import Path
 from typing import Literal, Protocol
 
@@ -85,6 +85,29 @@ AGENTS_FILENAME = "AGENTS.md"
 CLAUDE_FILENAME = "CLAUDE.md"
 
 _GITIGNORE_HEADER = "# Written by graph-works-core at workspace init.\n"
+
+#: The shared dispatch document's data a new workspace is seeded with.
+SEED_DISPATCH: Mapping[str, object] = {
+    "pipeline": {"rules": [{"match": {"stage": "finish"}, "prompt_tail": RELAY_TAIL_SEED}]}
+}
+
+#: Authored YAML with a commented path/artifacts example, written verbatim.
+SEED_DISPATCH_TEXT = (
+    "# Dispatch rules, pipeline path and stage artifacts for this workspace.\n"
+    "# Guide: packages/graph-works-core/docs/dispatch-rules.md in the graph-works repository.\n"
+    "pipeline:\n"
+    "  rules:\n"
+    "    # The branch relay: a finish worker relays the integration decision to its coordinator.\n"
+    "    - match: {stage: finish}\n"
+    "      prompt_tail: |-\n" + textwrap.indent(RELAY_TAIL_SEED, " " * 8) + "\n"
+    "# Uncomment to change which stages an item walks, or the file a stage leaves:\n"
+    "  # path:\n"
+    "  #   - name: features-skip-plan\n"
+    "  #     match: {type: Feature}\n"
+    "  #     stages: [design, execute, finish]\n"
+    "  # artifacts:\n"
+    "  #   design: {file: 01-design.md}\n"
+)
 
 
 class InstallResult(Protocol):
@@ -356,17 +379,11 @@ def _dispatch_init_writes(
         writes.append(PlannedWrite(MANIFEST_FILENAME, layout.manifest_path, updated, "create"))
     elif manifest_text is not None:
         writes.append(PlannedWrite(MANIFEST_FILENAME, layout.manifest_path, manifest_text, "create"))
-    seed: dict[str, object] = {
-        "pipeline": {"rules": [{"match": {"variant": "branch"}, "prompt_tail": RELAY_TAIL_SEED}]}
-    }
+    seed = dict(SEED_DISPATCH)
     config = load_prospective_dispatch_config(layout, base=base, overlay=overlay, seed=seed)
     if config.source_fingerprints[config.shared_path] is None:
-        buffer = StringIO()
-        writer = YAML()
-        writer.default_flow_style = False
-        writer.dump(seed, buffer)
         label = os.path.relpath(config.shared_path, layout.root)
-        writes.append(PlannedWrite(label, config.shared_path, buffer.getvalue(), "create"))
+        writes.append(PlannedWrite(label, config.shared_path, SEED_DISPATCH_TEXT, "create"))
     notices = (
         ()
         if config.local_path == layout.root / "dispatch.local.yaml"

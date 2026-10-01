@@ -8,16 +8,20 @@ from dataclasses import dataclass
 from pathlib import Path
 from types import MappingProxyType
 
+from work_tracker_okf.pipeline import STAGE_TABLE
+from work_tracker_okf.vocabulary import PLAN_SOURCE_ID, SPEC_SOURCE_ID
+
 _BASENAME_RE = re.compile(r"[a-z0-9]+(?:-[a-z0-9]+)*")
 _ARTIFACT_RE = re.compile(r"[0-9]{2}-(?P<source_id>[a-z0-9]+(?:-[a-z0-9]+)*)\.[a-z0-9]+")
 _RESERVED_BASENAMES = frozenset({"children", "index", "references"})
 
+#: Keyed by source id; stage-artifact ids are source ids, not phases.
 MANAGED_ARTIFACTS: Mapping[str, str] = MappingProxyType(
     {
         "decisions": "00-decisions.md",
-        "design": "01-design.md",
+        SPEC_SOURCE_ID: "01-design.md",
         "design-transcript": "01-design-transcript.jsonl",
-        "plan": "02-plan.md",
+        PLAN_SOURCE_ID: "02-plan.md",
         "plan-transcript": "02-plan-transcript.jsonl",
         "execute-results": "03-execute-results.md",
         "execute-coverage": "03-execute-coverage.md",
@@ -31,7 +35,9 @@ MANAGED_ARTIFACTS: Mapping[str, str] = MappingProxyType(
 
 #: The managed-artifact ordinal each parkable phase's own artifacts carry
 #: (``01-design.md``, ``02-plan.md``, ``03-execute-*``, ``04-finish-*``).
-PHASE_ORDINALS: Mapping[str, str] = MappingProxyType({"design": "01", "plan": "02", "execute": "03", "finish": "04"})
+PHASE_ORDINALS: Mapping[str, str] = MappingProxyType(
+    {row.stage: f"{rank + 1:02d}" for rank, row in enumerate(STAGE_TABLE)}
+)
 
 _DECISION_ID_RE = re.compile(r"D-\d+")
 

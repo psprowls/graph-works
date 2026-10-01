@@ -1,9 +1,9 @@
 """The routing table: a work item's state -> what to dispatch and what changes.
 
-Pure. `route` answers a `RouteState` with a `(stage, variant)` pair plus the
-dispatch-time and completion-time transitions; mapping the seven pairs to
-seven skill names is tier 4's job at this seam (E-C), which is why nothing
-here names a skill.
+Pure. `route` interprets a `PipelineDefinition` (stage table plus path rules)
+for a `RouteState`: what stage to dispatch, the transitions the stage table
+offers, and typed blockers. Mapping a stage to a skill is the dispatch rules'
+job, one band up.
 
 `Transition`s are frozen data, never control flow: `advance` reads them, and
 `advance` is the only mutation point.
@@ -11,9 +11,8 @@ here names a skill.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from types import MappingProxyType
 from typing import Literal
 
 from work_tracker_okf.decisions import HoldFact
@@ -22,49 +21,38 @@ from work_tracker_okf.dependencies import (
     DependencyFact,
     DependencyIssue,
     describe,
-    entry_phase,
     resolve_facts,
     unmet,
     validate_dependencies,
 )
 from work_tracker_okf.hierarchy import ChildRollup, active_nonterminal_descendants, child_rollup
 from work_tracker_okf.items import WorkItem
+from work_tracker_okf.pipeline import (
+    DECOMPOSING_TYPES,
+    DESIGN,
+    DONE,
+    EXECUTE,
+    FINISH,
+    PACKAGED_DEFINITION,
+    PLAN,
+    AttributeValue,
+    PathCandidate,
+    PathResolution,
+    PipelineDefinition,
+    Stage,
+    StageRow,
+    path_attributes,
+    phase_ordinals,
+    resolve_path,
+    row,
+)
 from work_tracker_okf.vocabulary import (
-    BUG_LIKE_TYPES,
-    DIAGNOSIS_TYPES,
     EFFORTS,
     PARENT_TYPES,
     PHASES,
-    PLAN_SOURCE_ID,
-    SMALL_EFFORTS,
-    SPEC_SOURCE_ID,
     TERMINAL_STATUSES,
     TYPES,
     WORK_STATUSES,
-)
-
-#: The phase **reported** when the design-complete fork cannot be decided
-#: without an effort value. Never written to frontmatter: it only ever appears
-#: with `requires=("effort",)`, `advance` refuses it on its own besides, and it
-#: is absent from `vocabulary.PHASES` so the schema would reject it anyway.
-PLAN_OR_EXECUTE = "plan-or-execute"
-
-Stage = Literal["design", "plan", "execute", "finish"]
-Variant = Literal[
-    "exploration", "diagnosis", "reconcile", "epic-design", "decompose", "single", "planned", "unplanned", "branch"
-]
-
-#: Which variants each stage can dispatch. `route()` pairs every `Dispatch`
-#: with a variant from its own stage's tuple; orchestrate uses the mapping to
-#: classify a live key whose exact variant it cannot recover (a live key names
-#: a phase, not a variant). `reconcile` is the one variant offered by two stages.
-VARIANTS_BY_STAGE: Mapping[Stage, tuple[Variant, ...]] = MappingProxyType(
-    {
-        "design": ("exploration", "diagnosis", "reconcile", "epic-design"),
-        "plan": ("decompose", "single", "reconcile"),
-        "execute": ("planned", "unplanned"),
-        "finish": ("branch",),
-    }
 )
 
 
@@ -119,84 +107,6 @@ class Transition:
     stamp_baseline: bool = False
 
 
-#: The one backwards transition the table offers: `finish` -> `execute`, with
-#: the item put back in progress. Named once because both `_finish` arms
-#: return it and a second literal is a second thing to keep in step.
-RETURN_TO_EXECUTE = Transition(phase="execute", work_status="in-progress")
-
-
-@dataclass(frozen=True, slots=True)
-class Dispatch:
-    """What to run. One field, not two, so `stage` and `variant` cannot disagree."""
-
-    stage: Stage
-    variant: Variant
-
-
-@dataclass(frozen=True, slots=True)
-class RouteResult:
-    """What to dispatch, and the three transitions the table offers.
-
-    `on_return` is the only one that moves an item **backwards**, and it is a
-    field of the table rather than a special case in `advance` because a phase
-    change belongs where every other phase change is written. Only `_finish`
-    sets it: an item that has already reached `finish` -- because it got there
-    before the `execute -> finish` gate existed, because the relay put it on
-    `hold`, or because a later stage-gate sends it back -- otherwise has no
-    supported route home, and hand-editing frontmatter is not one.
-    """
-
-    dispatch: Dispatch | None
-    reason: str
-    on_dispatch: Transition | None = None
-    on_complete: Transition | None = None
-    blockers: tuple[str, ...] = ()
-    on_return: Transition | None = None
-    repair: Transition | None = None
-
-
-def route(state: RouteState) -> RouteResult:
-    """The table. Order is load-bearing: validation first so a malformed page
-    reports *what* is malformed, terminal checks next so a resolved item says
-    so, then the hold gate before every phase-specific branch."""
-    blockers = _validate(state)
-    if blockers:
-        return RouteResult(dispatch=None, reason="invalid item", blockers=tuple(blockers))
-    if state.phase == "done":
-        return RouteResult(
-            dispatch=None,
-            reason="pipeline complete",
-            blockers=("phase=done: nothing to dispatch; archive once the item ages out",),
-        )
-    if state.work_status in TERMINAL_STATUSES or state.work_status == "mitigated":
-        return RouteResult(
-            dispatch=None,
-            reason="disposition is human-owned",
-            blockers=(
-                f"work_status {state.work_status!r} never dispatches; set it to 'open' to re-enter the pipeline",
-            ),
-        )
-    # Every phase, one place (D-002): after validation and the terminal
-    # checks so a malformed or finished item still says so, and before any
-    # branch so a held item gets no dispatch, no transition and no repair.
-    # The literal `open decision` prefix is what `orchestrate._classify` keys on.
-    if state.hold is not None:
-        return RouteResult(
-            dispatch=None,
-            reason=hold_reason(state.hold, state.phase),
-            blockers=(hold_blocker(state.hold),),
-        )
-    if state.phase is None:
-        return _entry(state)
-    branches: dict[str, Callable[[RouteState], RouteResult]] = {
-        "design": _design,
-        "plan": _plan,
-        "execute": _execute,
-        "finish": _finish,
-    }
-    return branches[state.phase](state)
-
-
 def hold_blocker(hold: HoldFact) -> str:
     """The one hold blocker string.
 
@@ -227,265 +137,6 @@ def _validate(state: RouteState) -> list[str]:
         blockers.append(f"effort {state.effort!r} not in {sorted(EFFORTS)}; re-size the item")
     blockers.extend(f"depends_on[{issue.index}] {issue.code}: {issue.detail}" for issue in state.dependency_issues)
     return blockers
-
-
-def _dependency_blocker(state: RouteState, phase: str) -> RouteResult | None:
-    pairs = unmet(state.dependency_edges, state.dependency_facts, phase)
-    if not pairs:
-        return None
-    fragments = "\n  ".join(describe(edge, fact) for edge, fact in pairs)
-    return RouteResult(
-        dispatch=None,
-        reason=f"blocked on dependencies ({phase})",
-        blockers=(f"blocked on dependencies for {phase}:\n  {fragments}",),
-    )
-
-
-def _entry(state: RouteState) -> RouteResult:
-    """First dispatch: no phase. Sets the entry phase via `on_dispatch`."""
-    if state.work_status != "open":
-        return RouteResult(
-            dispatch=None,
-            reason="invalid entry",
-            blockers=(
-                f"no phase and work_status {state.work_status!r}; set it to 'open' to enter at design, "
-                "or hand-set phase (e.g. phase: execute for an accepted item with a plan) "
-                "to adopt an in-flight item mid-pipeline",
-            ),
-        )
-    # The gap is identified at filing time, so there is no design stage to
-    # advance out of -- which is why the effort fork lands here instead,
-    # and why both rows carry `document_status` (spec 3.3): otherwise the
-    # item that skipped design keeps W-D's draft exemption for life.
-    if state.type == "TestGap" and state.effort is None:
-        return RouteResult(
-            dispatch=None,
-            reason="test-gap entry forks on effort",
-            blockers=(
-                "effort required: TestGap routes to execute (xtra-small/small) or plan "
-                "(medium/large/xtra-large); size the item and advance with the effort",
-            ),
-        )
-    phase = entry_phase(state.type, state.effort)
-    if phase is not None:
-        blocker = _dependency_blocker(state, phase)
-        if blocker is not None:
-            return blocker
-    if state.type == "TestGap":
-        if state.effort in SMALL_EFFORTS:
-            return RouteResult(
-                dispatch=Dispatch("execute", "unplanned"),
-                reason=f"TestGap with effort {state.effort}: skip design and plan",
-                on_dispatch=Transition(
-                    phase="execute", work_status="in-progress", document_status="stable", requires=("owner",)
-                ),
-                on_complete=Transition(phase="finish"),
-            )
-        return RouteResult(
-            dispatch=Dispatch("plan", "single"),
-            reason=f"TestGap with effort {state.effort}: skip design, plan first",
-            on_dispatch=Transition(phase="plan", document_status="stable"),
-            on_complete=Transition(
-                phase="execute", work_status="accepted", sync_plan_table=True, stamp_source=PLAN_SOURCE_ID
-            ),
-        )
-    reason = (
-        f"{state.type} entering design with a pre-seeded spec: reconciling"
-        if state.has_spec_doc
-        else f"{state.type} entering the pipeline at design"
-    )
-    return RouteResult(
-        dispatch=Dispatch("design", _design_variant(state)),
-        reason=reason,
-        on_dispatch=Transition(phase="design"),
-        on_complete=_design_complete(state),
-    )
-
-
-def _design_variant(state: RouteState) -> Variant:
-    # Order matters: `reconcile` keeps precedence over the type check. An Epic
-    # filed from a template has a spec to reconcile against, and reconciling one
-    # beats re-designing it from a blank page for every type (D-002).
-    if state.has_spec_doc:
-        return "reconcile"
-    if state.type in {"Release", "Epic"}:
-        return "epic-design"
-    return "diagnosis" if state.type in DIAGNOSIS_TYPES else "exploration"
-
-
-def _design_complete(state: RouteState) -> Transition:
-    """The effort fork: small bug-like work skips planning.
-
-    `Epic` is **not** bug-like and falls through to `plan` for every effort.
-    Decomposition happens at plan and is mandatory; an epic sized small that
-    skipped planning would reach execute with no children and immediately hit
-    the epic gate's no-children blocker.
-    """
-    if state.type in BUG_LIKE_TYPES:
-        if state.effort is None:
-            return Transition(
-                phase=PLAN_OR_EXECUTE,
-                document_status="stable",
-                requires=("effort",),
-                stamp_source=SPEC_SOURCE_ID,
-                stamp_baseline=True,
-            )
-        if state.effort in SMALL_EFFORTS:
-            return Transition(
-                phase="execute", document_status="stable", stamp_source=SPEC_SOURCE_ID, stamp_baseline=True
-            )
-    return Transition(
-        phase="plan",
-        document_status="stable",
-        stamp_source=SPEC_SOURCE_ID,
-        stamp_baseline=True,
-        requires=("effort",) if state.effort is None else (),
-    )
-
-
-def _design(state: RouteState) -> RouteResult:
-    # Phase-specific dependency checks happen inside each branch.
-    blocker = _dependency_blocker(state, "design")
-    if blocker is not None:
-        return blocker
-    reason = (
-        f"{state.type} at design stage with an existing spec: reconciling"
-        if state.has_spec_doc
-        else f"{state.type} at design stage"
-    )
-    return RouteResult(
-        dispatch=Dispatch("design", _design_variant(state)),
-        reason=reason,
-        on_complete=_design_complete(state),
-    )
-
-
-def _plan(state: RouteState) -> RouteResult:
-    blocker = _dependency_blocker(state, "plan")
-    if blocker is not None:
-        return blocker
-    if state.stale_spec:
-        return RouteResult(
-            dispatch=Dispatch("plan", "reconcile"),
-            reason=f"spec baseline stale: {', '.join(state.stale_spec)} landed since with overlapping affects",
-            on_complete=Transition(phase="plan", stamp_baseline=True),
-        )
-    if state.type in {"Release", "Epic"}:
-        # A release or epic decomposes into children and has no implementation row to
-        # add, so no plan table to sync.
-        return RouteResult(
-            dispatch=Dispatch("plan", "decompose"),
-            reason=f"{state.type} at plan stage",
-            on_complete=Transition(phase="execute", work_status="accepted", stamp_source=PLAN_SOURCE_ID),
-        )
-    return RouteResult(
-        dispatch=Dispatch("plan", "single"),
-        reason=f"{state.type} at plan stage",
-        on_complete=Transition(
-            phase="execute", work_status="accepted", sync_plan_table=True, stamp_source=PLAN_SOURCE_ID
-        ),
-    )
-
-
-def _parent_execute_gate(state: RouteState) -> RouteResult:
-    """The Release/Epic gate blocks dispatch while child work remains.
-
-    The decision reads `open_descendants` (any depth), not the direct-child
-    rollup: a terminal direct child can still hold an open grandchild, and the
-    rollup alone would call that satisfied. `child_rollup` stays only for the
-    "no children" blocker and the `n/m terminal` counts in the message."""
-    rollup = state.child_rollup
-    if rollup is None or rollup.total == 0:
-        return RouteResult(
-            dispatch=None,
-            reason=f"{state.type.lower()} execute: no children",
-            blockers=(f"{state.type.lower()} has no children; run the plan stage to decompose it",),
-        )
-    if state.open_descendants:
-        return RouteResult(
-            dispatch=None,
-            reason=f"{state.type.lower()} execute: waiting on children",
-            blockers=(
-                f"waiting on children: {rollup.terminal}/{rollup.total} terminal; "
-                f"open: {', '.join(state.open_descendants)}",
-            ),
-        )
-    return RouteResult(
-        dispatch=None,
-        reason=f"{state.type.lower()} children complete",
-        on_complete=Transition(phase="finish"),
-    )
-
-
-def _feature_children_requires(state: RouteState) -> tuple[str, ...]:
-    """The feature gate: it rides `Transition.requires`, because a feature has
-    work of its own to dispatch. It can act; it cannot finish."""
-    if state.type == "Feature" and state.open_descendants:
-        return ("children-terminal",)
-    return ()
-
-
-def _execute(state: RouteState) -> RouteResult:
-    blocker = _dependency_blocker(state, "execute")
-    if blocker is not None:
-        return blocker
-    if state.type in {"Release", "Epic"}:
-        return _parent_execute_gate(state)
-    if state.has_plan_doc:
-        variant: Variant = "planned"
-        reason = "execute stage with a written plan"
-    else:
-        variant = "unplanned"
-        reason = "execute stage via the test-driven path (no plan)"
-    on_dispatch = None
-    if state.work_status != "in-progress":
-        on_dispatch = Transition(work_status="in-progress", requires=("owner",))
-    return RouteResult(
-        dispatch=Dispatch("execute", variant),
-        reason=reason,
-        on_dispatch=on_dispatch,
-        on_complete=Transition(phase="finish", requires=_feature_children_requires(state)),
-    )
-
-
-def _finish(state: RouteState) -> RouteResult:
-    blocker = _dependency_blocker(state, "finish")
-    if blocker is not None:
-        return blocker
-    if state.type in {"Release", "Epic"}:
-        if state.open_descendants:
-            # A child filed after this item reached `finish` reopens the gate:
-            # `advance()`'s children-open guard would refuse `on_complete` here,
-            # so plan the repair instead of a transition that will be refused.
-            return RouteResult(
-                dispatch=None,
-                reason=f"{state.type.lower()} at finish stage: reopened by later children",
-                blockers=(f"waiting on children filed after finish: {', '.join(state.open_descendants)}",),
-                on_return=RETURN_TO_EXECUTE,
-                repair=RETURN_TO_EXECUTE,
-            )
-        if not state.has_branch:
-            # An unstamped (hand-driven) parent owns no branch -- its
-            # descendants carry `resolved_in`.
-            return RouteResult(
-                dispatch=None,
-                reason=f"{state.type.lower()} at finish stage",
-                on_complete=Transition(phase="done", work_status="resolved"),
-                on_return=RETURN_TO_EXECUTE,
-            )
-        # A stamped parent owns an integration branch (D-002): use branch
-        # finish and require a resolution reference. The reference alone
-        # is not proof of Git integration (D-003).
-    return RouteResult(
-        dispatch=Dispatch("finish", "branch"),
-        reason=f"{state.type} at finish stage",
-        on_complete=Transition(
-            phase="done",
-            work_status="resolved",
-            requires=("resolved_in", *_feature_children_requires(state)),
-        ),
-        on_return=RETURN_TO_EXECUTE,
-    )
 
 
 def state_for(
@@ -527,7 +178,7 @@ def state_for(
     if item.type in PARENT_TYPES:
         rollup = child_rollup(items, path)
         open_descendants = active_nonterminal_descendants(items, path)
-        if item.type not in {"Release", "Epic"} and rollup.total == 0:
+        if item.type not in DECOMPOSING_TYPES and rollup.total == 0:
             rollup = None
     structural_issues = tuple(
         issue
@@ -553,17 +204,357 @@ def state_for(
     )
 
 
+RETURN_TO_EXECUTE = Transition(phase="execute", work_status="in-progress")
+
+
+BlockerKind = Literal[
+    "invalid",
+    "done",
+    "terminal",
+    "hold",
+    "invalid-entry",
+    "dependencies",
+    "effort-required",
+    "attribute-required",
+    "no-children",
+    "waiting-on-children",
+    "phase-off-path",
+    "path-invalid",
+    "finish-incomplete",
+]
+
+
+@dataclass(frozen=True, slots=True)
+class Blocker:
+    """Why nothing dispatches. `message` is the prose callers have always shown;
+    `kind` is what a caller branches on. `finish-incomplete` is appended one band
+    up by `stage_advance`, never produced here."""
+
+    kind: BlockerKind
+    message: str
+
+
+@dataclass(frozen=True, slots=True)
+class Dispatch:
+    """What to run. The stage alone: the dispatch rules choose the skill from
+    the item's attributes (epic D-008)."""
+
+    stage: Stage
+
+
+@dataclass(frozen=True, slots=True)
+class RouteResult:
+    """What to dispatch, the offered transitions, and typed blockers.
+
+    `on_return` offers the backwards finish-to-execute transition; `repair`
+    also identifies a transition that fixes an off-path phase.
+    `path_candidates` lists paths that agree on the current stage but disagree
+    on the next one. Completion then has `phase=None` and requires sizing.
+    """
+
+    dispatch: Dispatch | None
+    reason: str
+    on_dispatch: Transition | None = None
+    on_complete: Transition | None = None
+    blockers: tuple[Blocker, ...] = ()
+    on_return: Transition | None = None
+    repair: Transition | None = None
+    path_candidates: tuple[PathCandidate, ...] = ()
+
+
+def blocker_messages(result: RouteResult) -> tuple[str, ...]:
+    return tuple(blocker.message for blocker in result.blockers)
+
+
+def _blocked(kind: BlockerKind, reason: str, message: str) -> RouteResult:
+    return RouteResult(dispatch=None, reason=reason, blockers=(Blocker(kind, message),))
+
+
+def route_attributes(state: RouteState) -> Mapping[str, AttributeValue]:
+    return path_attributes(
+        type_=state.type,
+        effort=state.effort,
+        blast_radius=state.blast_radius,
+        has_spec=state.has_spec_doc,
+        has_plan=state.has_plan_doc,
+        spec_stale=bool(state.stale_spec),
+    )
+
+
+def route(state: RouteState, *, definition: PipelineDefinition = PACKAGED_DEFINITION) -> RouteResult:
+    """The interpreter. Gate order is load-bearing and unchanged: validation,
+    done, terminal, hold, entry guard; then the path, the phase on it, the
+    dependency gate, the row's child gate, and the row's transitions."""
+    problems = _validate(state)
+    if problems:
+        return RouteResult(
+            dispatch=None, reason="invalid item", blockers=tuple(Blocker("invalid", p) for p in problems)
+        )
+    if state.phase == DONE:
+        return _blocked("done", "pipeline complete", "phase=done: nothing to dispatch; archive once the item ages out")
+    if state.work_status in TERMINAL_STATUSES or state.work_status == "mitigated":
+        return _blocked(
+            "terminal",
+            "disposition is human-owned",
+            f"work_status {state.work_status!r} never dispatches; set it to 'open' to re-enter the pipeline",
+        )
+    if state.hold is not None:
+        return _blocked("hold", hold_reason(state.hold, state.phase), hold_blocker(state.hold))
+    if state.phase is None and state.work_status != "open":
+        return _blocked(
+            "invalid-entry",
+            "invalid entry",
+            f"no phase and work_status {state.work_status!r}; set it to 'open' to enter at design, "
+            "or hand-set phase (e.g. phase: execute for an accepted item with a plan) "
+            "to adopt an in-flight item mid-pipeline",
+        )
+    resolution = resolve_path(definition, route_attributes(state))
+    if not resolution.complete or not resolution.candidates:
+        return _blocked(
+            "path-invalid",
+            "no path rule matches",
+            f"no path rule matches {state.type}; add a catch-all path rule (match: {{}})",
+        )
+    for candidate in resolution.candidates:
+        if state.type in DECOMPOSING_TYPES and PLAN not in candidate.stages:
+            return _blocked(
+                "path-invalid",
+                "path cannot decompose",
+                f"{state.type} path [{', '.join(candidate.stages)}] (rule {candidate.rule.name!r}) lacks plan; "
+                "a path rule may not stop decomposition",
+            )
+    located = {candidate: _locate(candidate.stages, state.phase) for candidate in resolution.candidates}
+    if len(set(located.values())) > 1:
+        return _fork_blocker(state, resolution, located)
+    stage, off_path = next(iter(located.values()))
+    if off_path:
+        first = resolution.candidates[0]
+        return RouteResult(
+            dispatch=None,
+            reason=f"phase {state.phase} is not on this item's path",
+            blockers=(
+                Blocker(
+                    "phase-off-path",
+                    f"phase {state.phase!r} is not on this item's path [{', '.join(first.stages)}] "
+                    f"(rule {first.rule.name!r}); repair moves it to {stage!r}",
+                ),
+            ),
+            repair=Transition(phase=stage),
+        )
+    blocker = _dependency_blocker(
+        state, stage, frozenset(s for candidate in resolution.candidates for s in candidate.stages)
+    )
+    if blocker is not None:
+        return blocker
+    nexts = {_after(candidate.stages, stage) for candidate in resolution.candidates}
+    next_phase = next(iter(nexts)) if len(nexts) == 1 else None
+    forked = resolution.candidates if len(nexts) > 1 else ()
+    unset = resolution.unset if forked else ()
+    return _emit(state, definition, row(stage), resolution.candidates[0].stages, next_phase, forked, unset)
+
+
+def _locate(stages: tuple[Stage, ...], phase: str | None) -> tuple[Stage, bool]:
+    """(stage to run now, whether the phase was off this path). An off-path
+    phase locates at the first stage after it -- the repair target."""
+    if phase is None:
+        return stages[0], False
+    if phase in stages:
+        return next(stage for stage in stages if stage == phase), False
+    ordinals = phase_ordinals()
+    return next(stage for stage in stages if ordinals[stage] > ordinals[phase]), True
+
+
+def _after(stages: tuple[Stage, ...], stage: Stage) -> str:
+    index = stages.index(stage)
+    return stages[index + 1] if index + 1 < len(stages) else "done"
+
+
+def _fork_blocker(
+    state: RouteState, resolution: PathResolution, located: Mapping[PathCandidate, tuple[Stage, bool]]
+) -> RouteResult:
+    """Candidates disagree on the stage to run now (D-005, amended)."""
+    groups: dict[str, list[str]] = {}
+    for candidate in resolution.candidates:
+        values = [candidate.assignment[a] for a in resolution.unset]
+        label = (
+            values[0]
+            if len(values) == 1
+            else ", ".join(f"{a}={v}" for a, v in zip(resolution.unset, values, strict=True))
+        )
+        groups.setdefault(located[candidate][0], []).append(label)
+    routes = " or ".join(f"{stage} ({'/'.join(labels)})" for stage, labels in groups.items())
+    if resolution.unset == ("effort",):
+        kind: BlockerKind = "effort-required"
+        message = f"effort required: {state.type} routes to {routes}; size the item and advance with the effort"
+    else:
+        names = ", ".join(resolution.unset)
+        kind = "effort-required" if "effort" in resolution.unset else "attribute-required"
+        message = f"{names} required: {state.type} routes to {routes}; set {names} on the item and re-run"
+    return RouteResult(
+        dispatch=None,
+        reason=(
+            "test-gap entry forks on effort"
+            if state.type == "TestGap" and state.phase is None and resolution.unset == ("effort",)
+            else f"{state.type.lower()} path forks on {', '.join(resolution.unset)}"
+        ),
+        blockers=(Blocker(kind, message),),
+    )
+
+
+def _dependency_blocker(state: RouteState, phase: str, stages: frozenset[str]) -> RouteResult | None:
+    pairs = unmet(state.dependency_edges, state.dependency_facts, phase, stages=stages)
+    if not pairs:
+        return None
+    fragments = "\n  ".join(describe(edge, fact) for edge, fact in pairs)
+    return _blocked(
+        "dependencies", f"blocked on dependencies ({phase})", f"blocked on dependencies for {phase}:\n  {fragments}"
+    )
+
+
+def _children_requires(state: RouteState, stage_row: StageRow) -> tuple[str, ...]:
+    """A child-gated type that is not decomposing (Feature) acts, but cannot
+    complete while descendants are open."""
+    if state.type in stage_row.child_gated_types and state.type not in DECOMPOSING_TYPES and state.open_descendants:
+        return ("children-terminal",)
+    return ()
+
+
+def _emit(
+    state: RouteState,
+    definition: PipelineDefinition,
+    stage_row: StageRow,
+    stages: tuple[Stage, ...],
+    next_phase: str | None,
+    forked: tuple[PathCandidate, ...],
+    unset: tuple[str, ...],
+) -> RouteResult:
+    stage = stage_row.stage
+    decomposing = state.type in DECOMPOSING_TYPES
+    on_return = None
+    if stage_row.return_target is not None and stage_row.return_target in stages:
+        on_return = Transition(phase=stage_row.return_target, work_status=stage_row.return_status)
+    if stage == EXECUTE and decomposing and state.type in stage_row.child_gated_types:
+        return _parent_execute_gate(state, next_phase)
+    if stage == FINISH and decomposing and state.type in stage_row.child_gated_types:
+        if state.open_descendants:
+            return RouteResult(
+                dispatch=None,
+                reason=f"{state.type.lower()} at finish stage: reopened by later children",
+                blockers=(
+                    Blocker(
+                        "waiting-on-children",
+                        f"waiting on children filed after finish: {', '.join(state.open_descendants)}",
+                    ),
+                ),
+                on_return=on_return,
+                repair=on_return,
+            )
+        if not state.has_branch:
+            return RouteResult(
+                dispatch=None,
+                reason=f"{state.type.lower()} at finish stage",
+                on_complete=Transition(phase="done", work_status=stage_row.on_complete.work_status),
+                on_return=on_return,
+            )
+    effect = stage_row.on_complete
+    requires = list(effect.requires)
+    if stage == DESIGN and state.effort is None:
+        requires.append("effort")
+    requires.extend(a for a in unset if a not in requires)
+    requires.extend(_children_requires(state, stage_row))
+    on_complete = Transition(
+        phase=next_phase,
+        work_status=effect.work_status,
+        document_status=effect.document_status,
+        requires=tuple(requires),
+        sync_plan_table=effect.sync_plan_table and not decomposing,
+        stamp_source=effect.stamp_source,
+        stamp_baseline=effect.stamp_baseline,
+    )
+    reason = _reason(state, stage)
+    if stage == PLAN and state.phase is not None and state.stale_spec:
+        on_complete = Transition(phase="plan", stamp_baseline=True)
+        reason = f"spec baseline stale: {', '.join(state.stale_spec)} landed since with overlapping affects"
+    return RouteResult(
+        dispatch=Dispatch(stage),
+        reason=reason,
+        on_dispatch=_on_dispatch(state, stage_row),
+        on_complete=on_complete,
+        on_return=on_return,
+        path_candidates=forked,
+    )
+
+
+def _on_dispatch(state: RouteState, stage_row: StageRow) -> Transition | None:
+    """Entry sets the phase (and `document_status=stable` when design is
+    skipped); the row's `on_enter` applies unless its status already holds."""
+    enter = stage_row.on_enter
+    applies = enter is not None and state.work_status != enter.work_status
+    if state.phase is not None:
+        if not applies or enter is None:
+            return None
+        return Transition(work_status=enter.work_status, requires=enter.requires)
+    return Transition(
+        phase=stage_row.stage,
+        work_status=enter.work_status if applies and enter is not None else None,
+        document_status=None if stage_row.stage == DESIGN else "stable",
+        requires=enter.requires if applies and enter is not None else (),
+    )
+
+
+def _parent_execute_gate(state: RouteState, next_phase: str | None) -> RouteResult:
+    """Baseline `_parent_execute_gate`, with typed blockers and the next path stage."""
+    rollup = state.child_rollup
+    if rollup is None or rollup.total == 0:
+        return _blocked(
+            "no-children",
+            f"{state.type.lower()} execute: no children",
+            f"{state.type.lower()} has no children; run the plan stage to decompose it",
+        )
+    if state.open_descendants:
+        return _blocked(
+            "waiting-on-children",
+            f"{state.type.lower()} execute: waiting on children",
+            f"waiting on children: {rollup.terminal}/{rollup.total} terminal; "
+            f"open: {', '.join(state.open_descendants)}",
+        )
+    return RouteResult(
+        dispatch=None, reason=f"{state.type.lower()} children complete", on_complete=Transition(phase=next_phase)
+    )
+
+
+def _reason(state: RouteState, stage: str) -> str:
+    if stage == DESIGN:
+        entering = (
+            "entering design with a pre-seeded spec: reconciling"
+            if state.phase is None
+            else "at design stage with an existing spec: reconciling"
+        )
+        plain = "entering the pipeline at design" if state.phase is None else "at design stage"
+        return f"{state.type} {entering if state.has_spec_doc else plain}"
+    if state.phase is None:
+        return f"{state.type} with effort {state.effort}: enters at {stage}"
+    if stage == EXECUTE:
+        return (
+            "execute stage with a written plan"
+            if state.has_plan_doc
+            else "execute stage via the test-driven path (no plan)"
+        )
+    return f"{state.type} at {stage} stage"
+
+
 __all__ = [
-    "PLAN_OR_EXECUTE",
-    "VARIANTS_BY_STAGE",
+    "Blocker",
+    "BlockerKind",
     "Dispatch",
     "RouteResult",
     "RouteState",
     "Stage",
     "Transition",
-    "Variant",
+    "blocker_messages",
     "hold_blocker",
     "hold_reason",
     "route",
+    "route_attributes",
     "state_for",
 ]

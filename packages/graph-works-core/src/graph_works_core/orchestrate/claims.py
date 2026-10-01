@@ -24,6 +24,7 @@ from pathlib import PurePosixPath
 from typing import Literal
 
 from work_tracker_okf.affects import code_affects, touches_workspace
+from work_tracker_okf.pipeline import code_phases
 
 Mode = Literal["read", "write"]
 
@@ -117,7 +118,7 @@ def affects_claims(owner: str, identity: str, affects: Iterable[str], mode: Mode
     return tuple(claims)
 
 
-CODE_WRITE_PHASES: frozenset[str] = frozenset({"execute", "finish"})
+CODE_WRITE_PHASES: frozenset[str] = code_phases()
 
 
 def claims_for(owner: str, phase: str, identity: str, affects: Iterable[str]) -> tuple[Claim, ...]:

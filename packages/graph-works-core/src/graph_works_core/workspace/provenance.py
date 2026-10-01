@@ -28,8 +28,8 @@ from pathlib import Path
 from typing import Literal
 
 from work_tracker_okf.paths import parse_item_path
+from work_tracker_okf.pipeline import dispatch_phases
 from work_tracker_okf.results import ResultsFacts
-from work_tracker_okf.vocabulary import PHASES
 
 from graph_works_core.workspace.errors import WorkspaceError
 from graph_works_core.workspace.layout import WorkspaceLayout
@@ -39,7 +39,7 @@ from graph_works_core.workspace.manifest import resolve_checked_key
 #: item. It lands in `layout.cache_dir` -- gitignored machine state, which is
 #: what the cache directory is for -- not in the committed config directory.
 ACTIVE_WORK_FILENAME = "active-work.json"
-ACTIVE_WORK_PHASES = PHASES - {"done"}
+ACTIVE_WORK_PHASES: frozenset[str] = dispatch_phases()
 
 #: Every git call is capped. A hung `git` on the advance path is the failure
 #: this exists to make impossible.

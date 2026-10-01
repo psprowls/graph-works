@@ -55,6 +55,49 @@ def test_a_default_workspace_composes_the_wiki_lane_then_the_work_lane(workspace
     assert lanes.errors == ()
 
 
+def test_the_work_lane_reads_the_workspace_pipeline_path(workspace):
+    from graph_works_core.workspace.dispatch_config import load_dispatch_config
+    from ruamel.yaml import YAML
+
+    page = workspace.layout.bundle_dir / "work" / "feature-x.md"
+    page.parent.mkdir(parents=True, exist_ok=True)
+    page.write_text(
+        "---\ntype: Feature\ntitle: X\ndescription: d\nwork_status: open\nphase: plan\n"
+        "opened: 2026-08-13\nupdated: 2026-08-13\n---\n\n"
+        "## Plan\n\n| Action | Done when | Rationale |\n| --- | --- | --- |\n",
+        encoding="utf-8",
+        newline="\n",
+    )
+    _wiki, work = _compose(workspace).lanes
+    report = validate(load_bundle(work.root, ignore=work.ignore), today=TODAY, extra_rules=work.rules)
+    assert report.by_code("state.phase-off-path") == ()
+
+    shared = load_dispatch_config(workspace.layout).shared_path
+    yaml = YAML()
+    data = yaml.load(shared.read_text(encoding="utf-8")) if shared.exists() else {}
+    data = data or {}
+    data.setdefault("pipeline", {})["path"] = [
+        {"name": "feature-skips-plan", "match": {"type": "Feature"}, "stages": ["design", "execute", "finish"]}
+    ]
+    with shared.open("w", encoding="utf-8", newline="\n") as handle:
+        yaml.dump(data, handle)
+    _wiki, work = _compose(workspace).lanes
+    report = validate(load_bundle(work.root, ignore=work.ignore), today=TODAY, extra_rules=work.rules)
+    [finding] = report.by_code("state.phase-off-path")
+    assert finding.path == "work/feature-x.md"
+    assert "feature-skips-plan" in finding.message
+
+
+def test_a_malformed_dispatch_file_is_a_work_lane_error(workspace):
+    from graph_works_core.workspace.dispatch_config import load_dispatch_config
+
+    shared = load_dispatch_config(workspace.layout).shared_path
+    shared.write_text("pipeline:\n  path: not-a-list\n", encoding="utf-8", newline="\n")
+    lanes = _compose(workspace)
+    assert [lane.name for lane in lanes.lanes] == ["wiki"]
+    assert any(error.startswith("work lane:") for error in lanes.errors)
+
+
 def test_both_lanes_root_at_the_bundle_dir(workspace):
     for lane in _compose(workspace).lanes:
         assert lane.root == workspace.layout.bundle_dir

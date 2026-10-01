@@ -99,7 +99,7 @@ grep -F 'dispatching: run `gw work advance <work-path> --from <expected-phase>`'
 grep -F 'For non-finish stages and satisfied gates, run `gw work advance <work-path> --from <expected-phase>`' "$WORKFLOW" >/dev/null || fail "workflow completion must be guarded"
 grep -F '| Attended finish | `merge` (a successful `gw work integrate` by any strategy, tests green on the merged result) | `gw work advance <work-path> --from finish --resolved-in <merge commit SHA>` |' "$WORKFLOW" >/dev/null || fail "attended merge must be guarded"
 grep -F '| Attended finish | `confirm` (commits already on the merge target) | `gw work advance <work-path> --from finish --resolved-in <HEAD SHA>` |' "$WORKFLOW" >/dev/null || fail "attended confirm must be guarded"
-grep -F 'Revalidate the planned gate or return condition against the fresh next result before acting.' "$AUTO_DRIVE" >/dev/null || fail "fresh phase is not authorization for a stale action"
+grep -F 'Revalidate the planned gate, return, or repair condition against the fresh next result before acting.' "$AUTO_DRIVE" >/dev/null || fail "fresh phase is not authorization for a stale action"
 grep -F 'gw work advance <path from entry> --from <expected-phase> --no-infer-worktree' "$AUTO_DRIVE" >/dev/null || fail "coordinator gate must be guarded"
 grep -F 'gw work advance <work-path> --from <expected-phase> --effort <value> --no-infer-worktree' "$AUTO_DRIVE" >/dev/null || fail "coordinator sizing must be guarded"
 # Finish outcomes must not resolve unintegrated work or double-advance relay.

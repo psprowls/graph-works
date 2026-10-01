@@ -1,22 +1,18 @@
-import ast
 import dataclasses
 import itertools
-import typing
-from pathlib import Path
 
 import pytest
 from work_tracker_okf import workflow
 from work_tracker_okf.decisions import HoldFact
 from work_tracker_okf.dependencies import DependencyEdge, DependencyFact, DependencyIssue
 from work_tracker_okf.hierarchy import ChildRollup
+from work_tracker_okf.pipeline import PACKAGED_DEFINITION, STAGE_TABLE, PipelineDefinition, parse_path_rules
 from work_tracker_okf.vocabulary import EFFORTS, PHASES, TYPES, WORK_STATUSES
 from work_tracker_okf.workflow import (
-    PLAN_OR_EXECUTE,
-    VARIANTS_BY_STAGE,
     Dispatch,
     RouteState,
     Transition,
-    Variant,
+    blocker_messages,
     hold_blocker,
     route,
 )
@@ -24,17 +20,6 @@ from work_tracker_okf.workflow import (
 #: Epic §2.2's stage/variant pairs, written out rather than derived. Nine since
 #: `epic-design` joined the design stage — Epic and Release with no spec doc get
 #: their own design skill rather than sharing `exploration` with Features.
-NINE_PAIRS = {
-    ("design", "exploration"),
-    ("design", "diagnosis"),
-    ("design", "reconcile"),
-    ("design", "epic-design"),
-    ("plan", "decompose"),
-    ("plan", "single"),
-    ("execute", "planned"),
-    ("execute", "unplanned"),
-    ("finish", "branch"),
-}
 
 #: One routable state per phase slot, each of which dispatches when unheld.
 _PHASE_STATES = {
@@ -49,48 +34,6 @@ _PHASE_STATES = {
 def _state(**overrides) -> RouteState:
     base = {"type": "Feature", "work_status": "open"}
     return RouteState(**{**base, **overrides})
-
-
-def test_variants_by_stage_covers_every_variant() -> None:
-    listed = [variant for variants in VARIANTS_BY_STAGE.values() for variant in variants]
-    assert sorted(set(listed)) == sorted(typing.get_args(Variant))
-    assert {v for v in listed if listed.count(v) > 1} == {"reconcile"}
-    assert VARIANTS_BY_STAGE["plan"] == ("decompose", "single", "reconcile")
-    assert set(VARIANTS_BY_STAGE) == {"design", "plan", "execute", "finish"}
-
-
-def test_every_dispatch_route_pairs_a_variant_with_its_own_stage() -> None:
-    tree = ast.parse(Path(workflow.__file__).read_text(encoding="utf-8"))
-    pairs = [
-        (node.args[0].value, node.args[1].value)
-        for node in ast.walk(tree)
-        if isinstance(node, ast.Call)
-        and isinstance(node.func, ast.Name)
-        and node.func.id == "Dispatch"
-        and len(node.args) == 2
-        and isinstance(node.args[0], ast.Constant)
-        and isinstance(node.args[1], ast.Constant)
-    ]
-    assert pairs, "no literal Dispatch(...) calls found"
-    for stage, variant in pairs:
-        assert variant in VARIANTS_BY_STAGE[stage], (stage, variant)
-
-    for type_ in ("Feature", "Bug", "Epic"):
-        for has_spec_doc in (False, True):
-            dispatch = route(_state(type=type_, phase="design", has_spec_doc=has_spec_doc)).dispatch
-            assert dispatch is not None
-            assert dispatch.stage == "design"
-            assert dispatch.variant in VARIANTS_BY_STAGE[dispatch.stage]
-
-    stale_dispatch = route(_state(phase="plan", stale_spec=("x",))).dispatch
-    assert stale_dispatch is not None
-    assert stale_dispatch.variant in VARIANTS_BY_STAGE[stale_dispatch.stage]
-
-    for has_plan_doc in (False, True):
-        dispatch = route(_state(phase="execute", work_status="accepted", has_plan_doc=has_plan_doc)).dispatch
-        assert dispatch is not None
-        assert dispatch.stage == "execute"
-        assert dispatch.variant in VARIANTS_BY_STAGE[dispatch.stage]
 
 
 def state_with_edge(
@@ -132,7 +75,7 @@ def _sweep():
 def test_route_never_raises_and_always_answers():
     for type_, status, phase, effort in _sweep():
         result = route(_state(type=type_, work_status=status, phase=phase, effort=effort))
-        assert result.dispatch is not None or result.blockers or result.on_complete is not None, (
+        assert result.dispatch is not None or blocker_messages(result) or result.on_complete is not None, (
             type_,
             status,
             phase,
@@ -140,30 +83,10 @@ def test_route_never_raises_and_always_answers():
         )
 
 
-def test_the_table_produces_exactly_nine_distinct_pairs():
-    seen = set()
-    for type_, status, phase, effort in _sweep():
-        for has_plan in (False, True):
-            for has_spec in (False, True):
-                result = route(
-                    _state(
-                        type=type_,
-                        work_status=status,
-                        phase=phase,
-                        effort=effort,
-                        has_plan_doc=has_plan,
-                        has_spec_doc=has_spec,
-                    )
-                )
-                if result.dispatch is not None:
-                    seen.add((result.dispatch.stage, result.dispatch.variant))
-    assert seen == NINE_PAIRS
-
-
 def test_the_sentinel_phase_is_not_a_real_phase():
     """Third guard of three (spec 3.6): even with both `advance` guards gone,
     the schema would reject the value."""
-    assert PLAN_OR_EXECUTE not in PHASES
+    assert None not in PHASES
 
 
 @pytest.mark.parametrize("phase", ["design", "plan", "execute", "finish"])
@@ -172,7 +95,7 @@ def test_each_branch_checks_its_own_phase(phase: str) -> None:
     result = route(state)
     assert result.dispatch is None
     assert result.reason == f"blocked on dependencies ({phase})"
-    assert f"for {phase}" in result.blockers[0]
+    assert f"for {phase}" in blocker_messages(result)[0]
 
 
 def test_phase_less_feature_checks_design() -> None:
@@ -200,41 +123,41 @@ def test_dependency_issues_block_routing_before_any_phase_dispatch() -> None:
         )
     )
     assert result.reason == "invalid item"
-    assert "invalid-blocks" in result.blockers[0]
+    assert "invalid-blocks" in blocker_messages(result)[0]
 
 
 def test_an_invalid_field_blocks_and_names_itself():
     result = route(_state(type="Widget", work_status="nope", phase="nowhere", effort="huge"))
     assert result.dispatch is None
-    assert len(result.blockers) == 4
-    assert any("Widget" in blocker for blocker in result.blockers)
+    assert len(blocker_messages(result)) == 4
+    assert any("Widget" in blocker for blocker in blocker_messages(result))
 
 
 def test_validation_runs_before_the_phase_branches():
     """A malformed page reports what is malformed rather than falling into a
     branch that would report something else."""
     result = route(_state(type="Widget", phase="done"))
-    assert any("Widget" in blocker for blocker in result.blockers)
+    assert any("Widget" in blocker for blocker in blocker_messages(result))
 
 
 def test_a_done_item_has_nothing_to_dispatch():
     result = route(_state(phase="done"))
     assert result.dispatch is None
-    assert "nothing to dispatch" in result.blockers[0]
+    assert "nothing to dispatch" in blocker_messages(result)[0]
 
 
 def test_a_terminal_status_never_dispatches():
     for status in ("resolved", "wontfix", "superseded", "mitigated"):
         result = route(_state(work_status=status, phase="execute"))
         assert result.dispatch is None, status
-        assert "never dispatches" in result.blockers[0]
+        assert "never dispatches" in blocker_messages(result)[0]
 
 
 def test_the_dependency_gate_runs_after_the_terminal_checks():
     """A resolved item blocked on an unfinished dep reports 'resolved', not
     'blocked on dependencies'."""
     result = route(state_with_edge(phase="execute", work_status="resolved", blocks="execute", needs="resolved"))
-    assert "never dispatches" in result.blockers[0]
+    assert "never dispatches" in blocker_messages(result)[0]
 
 
 def test_unmet_dependencies_block_and_are_named():
@@ -248,22 +171,22 @@ def test_unmet_dependencies_block_and_are_named():
     )
     result = route(_state(phase="plan", dependency_edges=edges, dependency_facts=facts))
     assert result.dispatch is None
-    assert "dep-a" in result.blockers[0]
-    assert "dep-b" in result.blockers[0]
+    assert "dep-a" in blocker_messages(result)[0]
+    assert "dep-b" in blocker_messages(result)[0]
 
 
 def test_entry_with_a_non_open_status_is_a_human_decision():
     result = route(_state(work_status="accepted", phase=None))
     assert result.dispatch is None
-    assert result.blockers
+    assert blocker_messages(result)
 
 
 def test_entry_routes_a_bug_to_diagnosis_an_epic_to_epic_design_and_the_rest_to_exploration():
-    assert route(_state(type="Bug")).dispatch == Dispatch("design", "diagnosis")
+    assert route(_state(type="Bug")).dispatch == Dispatch("design")
     for type_ in ("Epic", "Release"):
-        assert route(_state(type=type_)).dispatch == Dispatch("design", "epic-design"), type_
+        assert route(_state(type=type_)).dispatch == Dispatch("design"), type_
     for type_ in ("Feature", "Spike", "TechDebt"):
-        assert route(_state(type=type_)).dispatch == Dispatch("design", "exploration"), type_
+        assert route(_state(type=type_)).dispatch == Dispatch("design"), type_
 
 
 def test_entry_with_a_pre_seeded_spec_reconciles_instead_of_restarting():
@@ -272,17 +195,17 @@ def test_entry_with_a_pre_seeded_spec_reconciles_instead_of_restarting():
     and this beats the diagnosis/exploration split for every type."""
     for type_ in ("Bug", "Feature"):
         result = route(_state(type=type_, has_spec_doc=True))
-        assert result.dispatch == Dispatch("design", "reconcile"), type_
+        assert result.dispatch == Dispatch("design"), type_
 
 
 def test_design_reentry_with_an_existing_spec_reconciles_rather_than_restarts():
     result = route(_state(type="Feature", phase="design", has_spec_doc=True))
-    assert result.dispatch == Dispatch("design", "reconcile")
+    assert result.dispatch == Dispatch("design")
 
 
 def test_design_reentry_without_a_spec_still_brainstorms_or_diagnoses():
-    assert route(_state(type="Bug", phase="design")).dispatch == Dispatch("design", "diagnosis")
-    assert route(_state(type="Feature", phase="design")).dispatch == Dispatch("design", "exploration")
+    assert route(_state(type="Bug", phase="design")).dispatch == Dispatch("design")
+    assert route(_state(type="Feature", phase="design")).dispatch == Dispatch("design")
 
 
 def test_design_reentry_for_an_epic_without_a_spec_uses_epic_design():
@@ -290,7 +213,7 @@ def test_design_reentry_for_an_epic_without_a_spec_uses_epic_design():
     the child index it produces is thin by construction, which is the shape
     `planning-epics` consumes at the plan stage."""
     for type_ in ("Epic", "Release"):
-        assert route(_state(type=type_, phase="design")).dispatch == Dispatch("design", "epic-design"), type_
+        assert route(_state(type=type_, phase="design")).dispatch == Dispatch("design"), type_
 
 
 def test_a_pre_seeded_spec_beats_epic_design_for_an_epic():
@@ -298,10 +221,8 @@ def test_a_pre_seeded_spec_beats_epic_design_for_an_epic():
     something to reconcile against, not a blank page. The `has_spec_doc` check
     runs BEFORE the type check in `_design_variant`, deliberately."""
     for type_ in ("Epic", "Release"):
-        assert route(_state(type=type_, has_spec_doc=True)).dispatch == Dispatch("design", "reconcile"), type_
-        assert route(_state(type=type_, phase="design", has_spec_doc=True)).dispatch == Dispatch(
-            "design", "reconcile"
-        ), type_
+        assert route(_state(type=type_, has_spec_doc=True)).dispatch == Dispatch("design"), type_
+        assert route(_state(type=type_, phase="design", has_spec_doc=True)).dispatch == Dispatch("design"), type_
 
 
 @pytest.mark.parametrize("slot", sorted(_PHASE_STATES))
@@ -314,8 +235,8 @@ def test_a_held_item_never_dispatches_at_any_phase(slot: str, shape: str) -> Non
     assert result.dispatch is None
     assert (result.on_dispatch, result.on_complete, result.on_return, result.repair) == (None, None, None, None)
     assert result.reason == f"open decision D-007 holds this item ({shape} at {slot})"
-    assert result.blockers == (hold_blocker(hold),)
-    assert result.blockers[0] == (
+    assert blocker_messages(result) == (hold_blocker(hold),)
+    assert blocker_messages(result)[0] == (
         f"open decision D-007 ({shape}) holds work/feature-a: answer via "
         "`gw work decision answer work/feature-a D-007 --answer ...`, then re-run"
     )
@@ -334,7 +255,7 @@ def test_a_held_epic_at_a_satisfied_execute_gate_offers_no_completion() -> None:
             hold=HoldFact("work/epic-a", "D-001", "skip", "execute"),
         )
     )
-    assert held.on_complete is None and held.blockers
+    assert held.on_complete is None and blocker_messages(held)
 
 
 def test_the_hold_beats_a_dependency_blocker() -> None:
@@ -360,12 +281,12 @@ def test_entry_sets_the_design_phase_on_dispatch():
 def test_an_unsized_test_gap_at_entry_asks_for_effort():
     result = route(_state(type="TestGap"))
     assert result.dispatch is None
-    assert "effort required" in result.blockers[0]
+    assert "effort required" in blocker_messages(result)[0]
 
 
 def test_a_small_test_gap_at_entry_skips_straight_to_execute():
     result = route(_state(type="TestGap", effort="small"))
-    assert result.dispatch == Dispatch("execute", "unplanned")
+    assert result.dispatch == Dispatch("execute")
     assert result.on_dispatch is not None
     assert result.on_dispatch.phase == "execute"
     assert result.on_dispatch.work_status == "in-progress"
@@ -377,7 +298,7 @@ def test_a_small_test_gap_at_entry_skips_straight_to_execute():
 
 def test_a_medium_test_gap_at_entry_plans_first():
     result = route(_state(type="TestGap", effort="medium"))
-    assert result.dispatch == Dispatch("plan", "single")
+    assert result.dispatch == Dispatch("plan")
     assert result.on_dispatch is not None
     assert result.on_dispatch.phase == "plan"
     assert result.on_dispatch.document_status == "stable"
@@ -387,10 +308,10 @@ def test_a_medium_test_gap_at_entry_plans_first():
 
 
 def test_the_design_complete_fork_asks_for_effort_on_bug_like_work():
-    for type_ in ("Bug", "TechDebt", "TestGap"):
+    for type_ in ("Bug", "TechDebt"):
         result = route(_state(type=type_, phase="design"))
         assert result.on_complete is not None
-        assert result.on_complete.phase == PLAN_OR_EXECUTE, type_
+        assert result.on_complete.phase is None, type_
         assert result.on_complete.requires == ("effort",)
 
 
@@ -402,7 +323,7 @@ def test_design_completion_requires_effort_before_stable(kind: str, phase: str |
     assert transition is not None
     assert transition.document_status == "stable"
     assert "effort" in transition.requires
-    assert transition.phase == ("plan" if kind in {"Epic", "Release", "Feature", "Spike"} else PLAN_OR_EXECUTE)
+    assert transition.phase == ("plan" if kind in {"Epic", "Release", "Feature", "Spike"} else None)
 
 
 def test_every_non_draft_transition_has_or_requires_effort() -> None:
@@ -439,7 +360,7 @@ def test_every_design_complete_transition_stamps_the_spec_and_stabilises():
 
 def test_an_epic_at_plan_decomposes_and_syncs_no_table():
     result = route(_state(type="Epic", phase="plan"))
-    assert result.dispatch == Dispatch("plan", "decompose")
+    assert result.dispatch == Dispatch("plan")
     assert result.on_complete is not None
     assert result.on_complete.sync_plan_table is False
     assert result.on_complete.stamp_source == "plan"
@@ -447,14 +368,14 @@ def test_an_epic_at_plan_decomposes_and_syncs_no_table():
 
 def test_anything_else_at_plan_writes_a_single_plan_and_syncs_the_table():
     result = route(_state(type="Feature", phase="plan"))
-    assert result.dispatch == Dispatch("plan", "single")
+    assert result.dispatch == Dispatch("plan")
     assert result.on_complete is not None
     assert result.on_complete.sync_plan_table is True
 
 
 def test_execute_dispatches_planned_or_unplanned_on_the_plan_doc():
-    assert route(_state(phase="execute", has_plan_doc=True)).dispatch == Dispatch("execute", "planned")
-    assert route(_state(phase="execute", has_plan_doc=False)).dispatch == Dispatch("execute", "unplanned")
+    assert route(_state(phase="execute", has_plan_doc=True)).dispatch == Dispatch("execute")
+    assert route(_state(phase="execute", has_plan_doc=False)).dispatch == Dispatch("execute")
 
 
 def test_execute_claims_an_owner_only_when_not_already_in_progress():
@@ -469,7 +390,7 @@ def test_execute_claims_an_owner_only_when_not_already_in_progress():
 def test_an_epic_at_execute_with_no_children_says_to_decompose_it():
     result = route(_state(type="Epic", phase="execute", child_rollup=ChildRollup(0, 0, ())))
     assert result.dispatch is None
-    assert "no children" in result.blockers[0]
+    assert "no children" in blocker_messages(result)[0]
 
 
 def test_the_epic_gate_withholds_the_dispatch_while_the_feature_gate_rides_requires():
@@ -478,12 +399,12 @@ def test_the_epic_gate_withholds_the_dispatch_while_the_feature_gate_rides_requi
     rollup = ChildRollup(total=2, terminal=1, open_paths=("work/kid",))
     epic = route(_state(type="Epic", phase="execute", child_rollup=rollup, open_descendants=("work/kid",)))
     assert epic.dispatch is None
-    assert "1/2 terminal" in epic.blockers[0]
-    assert "kid" in epic.blockers[0]
+    assert "1/2 terminal" in blocker_messages(epic)[0]
+    assert "kid" in blocker_messages(epic)[0]
 
     feature = route(_state(type="Feature", phase="execute", child_rollup=rollup, open_descendants=("work/kid",)))
-    assert feature.dispatch == Dispatch("execute", "unplanned")
-    assert feature.blockers == ()
+    assert feature.dispatch == Dispatch("execute")
+    assert blocker_messages(feature) == ()
     assert feature.on_complete is not None
     assert feature.on_complete.requires == ("children-terminal",)
 
@@ -493,7 +414,7 @@ def test_an_epic_whose_children_are_all_terminal_is_a_satisfied_gate():
     skill keys off: nothing to run, something to advance."""
     result = route(_state(type="Epic", phase="execute", child_rollup=ChildRollup(2, 2, ())))
     assert result.dispatch is None
-    assert result.blockers == ()
+    assert blocker_messages(result) == ()
     assert result.on_complete is not None
     assert result.on_complete.phase == "finish"
 
@@ -507,7 +428,7 @@ def test_the_epic_gate_reads_open_descendants_not_the_direct_rollup():
     )
     assert result.dispatch is None
     assert result.on_complete is None
-    assert any("gc" in blocker for blocker in result.blockers)
+    assert any("gc" in blocker for blocker in blocker_messages(result))
 
 
 def test_a_childless_feature_carries_no_gate():
@@ -519,14 +440,14 @@ def test_a_childless_feature_carries_no_gate():
 def test_an_epic_at_finish_is_a_satisfied_gate_to_done():
     result = route(_state(type="Epic", phase="finish"))
     assert result.dispatch is None
-    assert result.blockers == ()
+    assert blocker_messages(result) == ()
     assert result.on_complete is not None
     assert (result.on_complete.phase, result.on_complete.work_status) == ("done", "resolved")
 
 
 def test_anything_else_at_finish_dispatches_the_branch_and_needs_a_ref():
     result = route(_state(type="Feature", phase="finish"))
-    assert result.dispatch == Dispatch("finish", "branch")
+    assert result.dispatch == Dispatch("finish")
     assert result.on_complete is not None
     assert result.on_complete.requires == ("resolved_in",)
 
@@ -545,7 +466,7 @@ def test_an_epic_at_finish_with_a_post_finish_child_repairs_instead_of_resolving
     assert result.on_complete is None
     assert result.repair == Transition(phase="execute", work_status="in-progress")
     assert result.on_return == Transition(phase="execute", work_status="in-progress")
-    assert any("late" in blocker for blocker in result.blockers)
+    assert any("late" in blocker for blocker in blocker_messages(result))
 
 
 def test_an_epic_at_finish_with_no_open_descendants_still_resolves():
@@ -561,9 +482,9 @@ def test_an_epic_at_finish_with_no_open_descendants_still_resolves():
 @pytest.mark.parametrize("type_", ["Epic", "Release"])
 def test_a_branch_stamped_parent_at_finish_dispatches_the_branch_and_needs_a_ref(type_: str) -> None:
     result = route(_state(type=type_, phase="finish", work_status="in-progress", has_branch=True))
-    assert result.dispatch == Dispatch("finish", "branch")
+    assert result.dispatch == Dispatch("finish")
     assert result.reason == f"{type_} at finish stage"
-    assert result.blockers == ()
+    assert blocker_messages(result) == ()
     assert result.repair is None
     assert result.on_complete == Transition(phase="done", work_status="resolved", requires=("resolved_in",))
     assert result.on_return == Transition(phase="execute", work_status="in-progress")
@@ -574,7 +495,7 @@ def test_an_unstamped_parent_at_finish_keeps_its_direct_resolution(type_: str) -
     result = route(_state(type=type_, phase="finish", work_status="in-progress"))
     assert result.dispatch is None
     assert result.reason == f"{type_.lower()} at finish stage"
-    assert result.blockers == ()
+    assert blocker_messages(result) == ()
     assert result.repair is None
     assert result.on_complete == Transition(phase="done", work_status="resolved")
     assert result.on_return == Transition(phase="execute", work_status="in-progress")
@@ -599,14 +520,14 @@ def test_a_parent_reopened_at_finish_repairs_whether_or_not_it_is_stamped(
     assert result.on_complete is None
     assert result.repair == Transition(phase="execute", work_status="in-progress")
     assert result.on_return == Transition(phase="execute", work_status="in-progress")
-    assert any(descendant in blocker for blocker in result.blockers)
+    assert any(descendant in blocker for blocker in blocker_messages(result))
 
 
 @pytest.mark.parametrize("type_", ["Feature", "Bug"])
 @pytest.mark.parametrize("has_branch", [False, True])
 def test_branch_ownership_does_not_change_an_ordinary_finish(type_: str, has_branch: bool) -> None:
     result = route(_state(type=type_, phase="finish", work_status="in-progress", has_branch=has_branch))
-    assert result.dispatch == Dispatch("finish", "branch")
+    assert result.dispatch == Dispatch("finish")
     assert result.on_complete is not None
     assert result.on_complete.requires == ("resolved_in",)
 
@@ -627,7 +548,7 @@ def test_a_parent_still_holds_on_a_finish_dependency_regardless_of_branch_owners
     assert result.repair is None
     assert result.on_return is None
     assert result.reason == "blocked on dependencies (finish)"
-    assert result.blockers
+    assert blocker_messages(result)
 
 
 @pytest.mark.parametrize("type_", ["Epic", "Release"])
@@ -648,7 +569,7 @@ def test_a_held_parent_at_finish_blocks_before_other_gates_regardless_of_branch_
     )
     result = route(state)
     assert result.reason == "open decision D-008 holds this item (skip at finish)"
-    assert result.blockers == (hold_blocker(hold),)
+    assert blocker_messages(result) == (hold_blocker(hold),)
     assert result.dispatch is None
     assert result.on_dispatch is None
     assert result.on_complete is None
@@ -702,7 +623,7 @@ def test_foreign_stamp_owns_finish_branch(tmp_path):
     routed = route(state)
     assert routed.dispatch is not None
     assert routed.dispatch.stage == "finish"
-    assert routed.dispatch.variant == "branch"
+    assert routed.dispatch.stage == "finish"
 
 
 def test_foreign_stamp_release_still_requires_release_date(tmp_path):
@@ -731,7 +652,7 @@ def test_a_stale_spec_at_plan_routes_to_reconcile_in_place(type_: str) -> None:
             type=type_, phase="plan", effort="medium", has_spec_doc=True, stale_spec=("work/epic/children/feature-a",)
         )
     )
-    assert result.dispatch == Dispatch("plan", "reconcile")
+    assert result.dispatch == Dispatch("plan")
     assert result.on_complete == Transition(phase="plan", stamp_baseline=True)
     assert result.on_dispatch is None
     assert "work/epic/children/feature-a" in result.reason
@@ -739,7 +660,7 @@ def test_a_stale_spec_at_plan_routes_to_reconcile_in_place(type_: str) -> None:
 
 def test_dependency_blocker_beats_staleness() -> None:
     result = route(dataclasses.replace(state_with_edge(phase="plan", blocks="plan"), stale_spec=("x",)))
-    assert result.dispatch is None and result.blockers
+    assert result.dispatch is None and blocker_messages(result)
 
 
 def test_a_hold_beats_staleness() -> None:
@@ -762,3 +683,116 @@ def test_non_design_completions_never_request_a_stamp() -> None:
         _state(phase="execute", work_status="accepted", has_plan_doc=True),
     ):
         assert not route(state).on_complete.stamp_baseline
+
+
+def _custom(raw: list[dict]) -> PipelineDefinition:
+    return PipelineDefinition(STAGE_TABLE, parse_path_rules(raw, source="custom.yaml"), PACKAGED_DEFINITION.artifacts)
+
+
+def test_small_bug_at_plan_is_off_path_with_repair() -> None:
+    result = route(_state(type="Bug", effort="small", phase="plan"))
+    assert result.dispatch is None
+    assert [b.kind for b in result.blockers] == ["phase-off-path"]
+    assert result.blockers[0].message == (
+        "phase 'plan' is not on this item's path [design, execute, finish] "
+        "(rule 'small-bug-like-skips-plan'); repair moves it to 'execute'"
+    )
+    assert result.repair == Transition(phase="execute")
+    assert result.on_return is None
+
+
+def test_unsized_bug_at_plan_blocks_on_effort() -> None:
+    result = route(_state(type="Bug", phase="plan"))
+    assert [b.kind for b in result.blockers] == ["effort-required"]
+    assert blocker_messages(result) == (
+        "effort required: Bug routes to execute (xtra-small/small) or plan (medium/large/xtra-large); "
+        "size the item and advance with the effort",
+    )
+
+
+def test_unsized_testgap_entry_message_is_unchanged() -> None:
+    result = route(_state(type="TestGap"))
+    assert blocker_messages(result) == (
+        "effort required: TestGap routes to execute (xtra-small/small) or plan "
+        "(medium/large/xtra-large); size the item and advance with the effort",
+    )
+    assert result.blockers[0].kind == "effort-required"
+
+
+def test_unsized_bug_design_completion_carries_candidates() -> None:
+    result = route(_state(type="Bug", phase="design"))
+    assert result.dispatch == Dispatch("design")
+    assert result.on_complete == Transition(
+        phase=None, document_status="stable", requires=("effort",), stamp_source="design", stamp_baseline=True
+    )
+    assert {c.rule.name for c in result.path_candidates} == {"default", "small-bug-like-skips-plan"}
+
+
+def test_blast_radius_rule_yields_attribute_required() -> None:
+    definition = _custom(
+        [
+            {"name": "default", "match": {}, "stages": ["design", "plan", "execute", "finish"]},
+            {"name": "wide", "match": {"blast_radius": ["domain", "system"]}, "stages": ["plan", "execute", "finish"]},
+        ]
+    )
+    result = route(_state(type="Feature", effort="large"), definition=definition)
+    assert [b.kind for b in result.blockers] == ["attribute-required"]
+    assert result.blockers[0].message.startswith(
+        "blast_radius required: Feature routes to design (file/package) or plan (domain/system)"
+    )
+
+
+def test_custom_path_skips_plan_for_a_feature() -> None:
+    definition = _custom([{"name": "lean", "match": {}, "stages": ["design", "execute", "finish"]}])
+    result = route(_state(type="Feature", effort="large", phase="design"), definition=definition)
+    assert result.on_complete is not None and result.on_complete.phase == "execute"
+    assert route(_state(type="Feature", phase="plan"), definition=definition).blockers[0].kind == "phase-off-path"
+
+
+def test_decomposing_type_without_plan_is_path_invalid() -> None:
+    definition = _custom([{"name": "lean", "match": {}, "stages": ["design", "execute", "finish"]}])
+    result = route(_state(type="Epic"), definition=definition)
+    assert [b.kind for b in result.blockers] == ["path-invalid"]
+    assert "a path rule may not stop decomposition" in result.blockers[0].message
+
+
+def test_no_matching_path_rule_is_path_invalid() -> None:
+    definition = _custom([{"name": "bugs", "match": {"type": "Bug"}, "stages": ["design", "execute", "finish"]}])
+    result = route(_state(type="Feature"), definition=definition)
+    assert [b.kind for b in result.blockers] == ["path-invalid"]
+
+
+@pytest.mark.parametrize(
+    ("state", "kind"),
+    [
+        (dict(type="Story"), "invalid"),
+        (dict(phase="done"), "done"),
+        (dict(work_status="wontfix"), "terminal"),
+        (dict(work_status="mitigated"), "terminal"),
+        (dict(work_status="accepted"), "invalid-entry"),
+        (dict(type="Epic", phase="execute", work_status="accepted"), "no-children"),
+    ],
+)
+def test_blocker_kinds(state, kind) -> None:
+    assert route(_state(**state)).blockers[0].kind == kind
+
+
+def test_dispatch_has_one_field() -> None:
+    assert [f.name for f in dataclasses.fields(Dispatch)] == ["stage"]
+    assert not hasattr(workflow, "Variant") and not hasattr(workflow, "VARIANTS_BY_STAGE")
+    assert not hasattr(workflow, "PLAN_OR_EXECUTE")
+
+
+@pytest.mark.parametrize("phase", ["execute", "finish"])
+def test_dependencies_attached_to_a_skipped_stage_do_not_gate(phase):
+    definition = _custom([{"match": {}, "stages": ["design", "execute", "finish"]}])
+    state = state_with_edge(phase=phase, blocks="plan")
+    result = route(state, definition=definition)
+    assert result.blockers == ()
+    assert result.dispatch == Dispatch(phase)
+    # Dependencies on stages actually traversed remain active afterwards.
+    kept = route(
+        dataclasses.replace(state, dependency_edges=(DependencyEdge("dep", "execute", "resolved"),)),
+        definition=definition,
+    )
+    assert kept.blockers[0].kind == "dependencies"

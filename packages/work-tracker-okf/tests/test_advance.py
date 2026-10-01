@@ -8,8 +8,9 @@ from work_tracker_okf.advance import AdvancePlan, FieldChange, advance, apply
 from work_tracker_okf.decisions import HoldFact
 from work_tracker_okf.dependencies import DependencyEdge
 from work_tracker_okf.items import load_items
+from work_tracker_okf.pipeline import PACKAGED_DEFINITION, STAGE_TABLE, PipelineDefinition, parse_path_rules
 from work_tracker_okf.vocabulary import EFFORTS
-from work_tracker_okf.workflow import PLAN_OR_EXECUTE, RouteResult, Transition
+from work_tracker_okf.workflow import RouteResult, Transition
 
 TODAY = date(2026, 8, 10)
 
@@ -79,6 +80,49 @@ def _plan_for(items, path, **kwargs) -> AdvancePlan:
 
 def _keys(plan: AdvancePlan) -> list[str]:
     return [change.key for change in plan.changes]
+
+
+def test_design_completion_without_effort_is_refused_and_writes_nothing() -> None:
+    plan = _plan_for([make_item("bug", type="Bug", phase="design", work_status="open")], "bug")
+    assert plan.refusal == "effort-required"
+    assert plan.changes == ()
+    assert plan.route.on_complete is not None and plan.route.on_complete.phase is None
+
+
+@pytest.mark.parametrize(("effort", "phase"), [("small", "execute"), ("large", "plan")])
+def test_design_completion_with_effort_resolves_next_phase(effort: str, phase: str) -> None:
+    plan = _plan_for([make_item("bug", type="Bug", phase="design", work_status="open")], "bug", effort=effort)
+    assert plan.refusal is None
+    assert {change.key: change.after for change in plan.changes}["phase"] == phase
+
+
+def test_feature_with_open_children_cannot_finish_execute() -> None:
+    child_path = "work/feature-x/children/bug-y"
+    parent = make_item(
+        "work/feature-x",
+        type="Feature",
+        phase="execute",
+        work_status="in-progress",
+        owner="me",
+        child_paths=(child_path,),
+    )
+    child = make_item(
+        child_path,
+        type="Bug",
+        work_status="open",
+        parent_path=parent.path,
+        ancestor_paths=(parent.path,),
+    )
+    plan = _plan_for((parent, child), parent.path)
+    assert plan.refusal == "children-open"
+    assert plan.detail == f"waiting on descendants: {child_path}"
+
+
+def test_childless_feature_completes_execute() -> None:
+    item = make_item("work/feature-x", type="Feature", phase="execute", work_status="in-progress", owner="me")
+    plan = _plan_for((item,), item.path)
+    assert plan.refusal is None
+    assert {change.key: change.after for change in plan.changes}["phase"] == "finish"
 
 
 def test_release_finish_requires_released_at():
@@ -379,18 +423,35 @@ def test_invalid_effort_is_blocked_by_validation(source: str) -> None:
     assert plan.changes == ()
 
 
-def test_the_sentinel_phase_is_refused_by_its_own_guard(monkeypatch):
-    """Guard two of three: even if `requires` is accidentally stripped from a
-    row, the sentinel phase alone still refuses -- removing `requires`
-    without also removing the phase must not open the hole."""
+def test_a_phase_none_completion_is_refused_even_without_requires(monkeypatch):
+    """A derived fork cannot write a completion before effort resolves its path."""
     stripped = RouteResult(
         dispatch=None,
         reason="synthetic: requires stripped",
-        on_complete=Transition(phase=PLAN_OR_EXECUTE),  # no `requires`
+        on_complete=Transition(phase=None),
     )
-    monkeypatch.setattr("work_tracker_okf.advance.route", lambda state: stripped)
+    monkeypatch.setattr("work_tracker_okf.advance.route", lambda state, **_: stripped)
     plan = _plan_for([make_item("bug", type="Bug", phase="design")], "bug")
-    assert plan.refusal == "effort-required"
+    assert plan.refusal == "attribute-required"
+    assert plan.changes == ()
+
+
+def test_blast_radius_completion_fork_names_the_required_attribute() -> None:
+    definition = PipelineDefinition(
+        STAGE_TABLE,
+        parse_path_rules(
+            [
+                {"name": "default", "match": {}, "stages": ["design", "plan", "execute", "finish"]},
+                {"name": "wide", "match": {"blast_radius": "system"}, "stages": ["design", "execute", "finish"]},
+            ],
+            source="custom",
+        ),
+        PACKAGED_DEFINITION.artifacts,
+    )
+    item = make_item("work/feature-x", type="Feature", phase="design", effort="large")
+    plan = advance((item,), item.path, today=TODAY, definition=definition)
+    assert plan.refusal == "attribute-required"
+    assert "blast_radius" in plan.detail
     assert plan.changes == ()
 
 
@@ -399,7 +460,7 @@ def test_a_route_with_no_transition_at_all_refuses_nothing_to_advance(monkeypatc
     unreachable through the public route() table by construction; only a
     synthetic case reaches nothing-to-advance."""
     synthetic = RouteResult(dispatch=None, reason="synthetic")
-    monkeypatch.setattr("work_tracker_okf.advance.route", lambda state: synthetic)
+    monkeypatch.setattr("work_tracker_okf.advance.route", lambda state, **_: synthetic)
     plan = _plan_for([make_item("bug", type="Bug", phase="design")], "bug")
     assert plan.refusal == "nothing-to-advance"
     assert plan.changes == ()
@@ -791,3 +852,18 @@ def test_plan_reconcile_completes_in_place_and_requests_stamp():
 def test_design_completion_requests_stamp():
     item = make_item("a", type="Feature", phase="design", effort="medium")
     assert advance((item,), item.path, today=TODAY).stamp_baseline is True
+
+
+def test_off_path_advance_repairs_phase_without_completing_the_skipped_stage():
+    item = make_item("work/bug-x", type="Bug", phase="plan", effort="small")
+    plan = advance((item,), item.path, today=TODAY, expected_phase="plan")
+    assert plan.refusal is None
+    assert plan.trigger == "repair"
+    assert plan.transition == Transition(phase="execute")
+    assert not plan.stamp_source and not plan.sync_plan_table and not plan.stamp_baseline
+    assert {change.key for change in plan.changes} == {"phase", "updated"}
+    # A stale caller and a held item cannot use repair to bypass their guards.
+    assert advance((item,), item.path, today=TODAY, expected_phase="design").refusal == "phase-mismatch"
+    assert advance((item,), item.path, today=TODAY, return_=True).refusal == "blocked"
+    held = HoldFact(path=item.path, decision_id="D-001", shape="question", phase="plan")
+    assert advance((item,), item.path, today=TODAY, hold=held).refusal == "blocked"

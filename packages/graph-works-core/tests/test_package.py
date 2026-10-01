@@ -168,7 +168,7 @@ def test_the_two_new_prompt_modules_stay_submodules():
 
 def test_the_dispatch_seam_is_reachable_from_the_front_door():
     for name in (
-        "PipelineEntry",
+        "PackagedRule",
         "orchestrate_plan",
         "run_orchestrate",
         "run_stage_advance",

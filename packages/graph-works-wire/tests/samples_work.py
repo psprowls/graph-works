@@ -25,13 +25,14 @@ from graph_works_core.work.carried import CarriedContext, FilledSlot, SlotFill
 from graph_works_core.work.commands import DispatchExplanation, ItemRead, ItemSource
 from graph_works_core.work.obligations import ObligationRecord
 from graph_works_core.work.reconcile import CitedDecision, CommitRef, LandedSibling, ReconcileContext
-from graph_works_core.workspace.dispatch import packaged_rule, resolve_dispatch
+from graph_works_core.workspace.dispatch import packaged_rules_matching, resolve_dispatch
 from graph_works_wire import work
 from work_tracker_okf.obligations import Obligation, ObligationPlan
 from work_tracker_okf.placement import ReaderObservation, ReaderReceiptPlan
+from work_tracker_okf.workflow import Blocker
 
 BUNDLE = Path("/ws/okf")
-RESOLUTION = resolve_dispatch({"variant": "planned"}, rules=())
+RESOLUTION = resolve_dispatch({"stage": "execute", "has_plan": True}, rules=())
 TRANSITION = ns(
     phase="execute",
     work_status="in-progress",
@@ -64,6 +65,8 @@ def next_result(*, full: bool) -> object:
     kept = ns(path="work/a", ref=ns(source_id="design", resource="/work/a/references/01-design.md"))
     dropped = ns(path="work/b", ref=ns(source_id="design", resource="/work/b/references/01-design.md"))
     return ns(
+        path=None,
+        artifacts=(),
         requested_path="work/e",
         finish_targets=(),
         selected_path="work/a",
@@ -72,7 +75,8 @@ def next_result(*, full: bool) -> object:
             reason="r",
             on_dispatch=TRANSITION if full else None,
             on_complete=TRANSITION if full else None,
-            blockers=("b",),
+            path_candidates=(),
+            blockers=(Blocker("invalid", "b"),),
         ),
         dispatch_resolution=RESOLUTION,
         dispatch_preflight=None if full else "malformed skill",
@@ -164,7 +168,7 @@ def advance(*, applied: bool, bypass: bool = False) -> object:
             ns(key="phase", before="design", after="plan"),
         ),
         transition=TRANSITION if applied else None,
-        route=ns(blockers=() if applied else ("blocked",), on_complete=TRANSITION),
+        route=ns(blockers=() if applied else (Blocker("invalid", "blocked"),), on_complete=TRANSITION),
         refusal=None if applied else "bad",
         detail="why",
     )
@@ -601,9 +605,9 @@ WORK: dict[str, tuple[Callable[[], object], ...]] = {
         lambda: work.dispatch_explain_payload(
             DispatchExplanation(
                 path="work/a",
-                attributes=MappingProxyType({"variant": "planned", "has_plan": True}),
-                packaged_rule=packaged_rule("planned"),
-                rules=((packaged_rule("planned"), False),),
+                attributes=MappingProxyType({"stage": "execute", "has_plan": True}),
+                packaged_rules=packaged_rules_matching({"stage": "execute", "has_plan": True}),
+                rules=((packaged_rules_matching({"stage": "execute", "has_plan": True})[0], False),),
                 resolution=RESOLUTION,
                 next_result=ns(route=ns(blockers=()), descent=None, dispatch_preflight=None),
             )
@@ -612,10 +616,10 @@ WORK: dict[str, tuple[Callable[[], object], ...]] = {
             DispatchExplanation(
                 path="work/e",
                 attributes=None,
-                packaged_rule=None,
+                packaged_rules=None,
                 rules=(),
                 resolution=None,
-                next_result=ns(route=ns(blockers=("b",)), descent=None, dispatch_preflight=None),
+                next_result=ns(route=ns(blockers=(Blocker("invalid", "b"),)), descent=None, dispatch_preflight=None),
             )
         ),
     ),

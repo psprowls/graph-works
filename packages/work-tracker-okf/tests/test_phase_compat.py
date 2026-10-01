@@ -1,28 +1,16 @@
-"""The bond between `_rules.state._PHASE_COMPAT` and `workflow.route()`.
-
-Epic spec §2.1's third argument -- the one that decided the routing table stays
-at tier 3 -- is that *the lint rules encode the same state machine*. That
-argument is only worth anything if the two cannot drift, so this test does the
-work (C5-I). It is a bond, not a derivation: neither reads the other, and a
-change to either that makes them disagree fails here.
-
-**The precondition matters.** The property is not "no pair `route()` can produce
-is incoherent" -- an item hand-edited to `work_status: accepted` at
-`phase: design` is *already* incoherent, and `state.phase-status-incoherent`
-reports it before any transition applies. The claim is the useful one: the
-router never *introduces* incoherence into a state that was coherent going in.
-`test_the_enumeration_is_not_vacuous` is what stops that precondition from
-quietly filtering everything.
-"""
+"""State coherence derives from phase_compat; routing preserves coherent pairs."""
 
 from __future__ import annotations
 
+from datetime import date
 from itertools import product
+from pathlib import Path
 
-from work_tracker_okf._rules.state import _PHASE_COMPAT
+from work_helpers import lane_report, write_item
 from work_tracker_okf.hierarchy import ChildRollup
+from work_tracker_okf.pipeline import phase_compat
 from work_tracker_okf.vocabulary import EFFORTS, PHASES, TYPES, WORK_STATUSES
-from work_tracker_okf.workflow import PLAN_OR_EXECUTE, RouteState, Transition, route
+from work_tracker_okf.workflow import RouteState, Transition, route
 
 _TYPES = sorted(TYPES)
 _STATUSES = sorted(WORK_STATUSES)
@@ -41,9 +29,9 @@ _ROLLUPS: list[ChildRollup | None] = [
 
 
 def _coherent(status: str, phase: str | None) -> bool:
-    """`_PHASE_COMPAT`'s own question, asked directly. An absent phase and an
+    """`phase_compat()`'s own question, asked directly. An absent phase and an
     unconstrained status are both coherent, matching `state.coherence`."""
-    allowed = _PHASE_COMPAT.get(status)
+    allowed = phase_compat().get(status)
     return phase is None or allowed is None or phase in allowed
 
 
@@ -107,7 +95,7 @@ def test_the_enumeration_is_not_vacuous() -> None:
             if transition.phase is not None:
                 phases_emitted.add(transition.phase)
     assert transitions > 100
-    assert phases_emitted >= {"design", "plan", "execute", "finish", "done", PLAN_OR_EXECUTE}
+    assert phases_emitted >= {"design", "plan", "execute", "finish", "done"}
 
 
 def test_the_gate_that_only_a_satisfied_rollup_opens_is_reached() -> None:
@@ -127,12 +115,25 @@ def test_the_gate_that_only_a_satisfied_rollup_opens_is_reached() -> None:
 def test_the_compat_map_keys_and_values_are_drawn_from_the_vocabulary() -> None:
     """A typo'd status silently constrains nothing, which is the failure mode a
     2-D map has and a 1-D enum does not."""
-    assert set(_PHASE_COMPAT) <= WORK_STATUSES
-    for status, phases in _PHASE_COMPAT.items():
+    assert set(phase_compat()) <= WORK_STATUSES
+    for status, phases in phase_compat().items():
         assert phases <= PHASES, status
 
 
 def test_every_constrained_status_actually_constrains_something() -> None:
     """A key whose value is all of `PHASES` is a key that reports nothing."""
-    for status, phases in _PHASE_COMPAT.items():
+    for status, phases in phase_compat().items():
         assert phases < PHASES, status
+
+
+def test_the_rule_reports_exactly_the_pairs_phase_compat_rejects(tmp_path: Path) -> None:
+    """One item per (status, phase) pair; the findings name exactly the
+    incoherent ones. `Spike` has no path skips and no companions that matter here."""
+    pairs = list(product(_STATUSES, sorted(PHASES)))
+    for status, phase in pairs:
+        write_item(tmp_path, f"spike-{status}-{phase}", f"type: Spike\nwork_status: {status}\nphase: {phase}\n")
+    report = lane_report(tmp_path, today=date(2026, 8, 3))
+    flagged = {f.path for f in report.by_code("state.phase-status-incoherent")}
+    expected = {f"work/spike-{s}-{p}.md" for s, p in pairs if not _coherent(s, p)}
+    assert flagged == expected
+    assert expected  # non-vacuous: some pair is incoherent

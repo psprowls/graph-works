@@ -1,4 +1,4 @@
-"""The lane rule catalog: 37 codes, six topic modules, sixteen rule functions.
+"""The lane rule catalog: 45 codes across six topic modules.
 
 **The module name is the code prefix**, asserted mechanically in
 `test_lane_catalog.py` exactly as okf-io's `test_catalog.py` asserts its own

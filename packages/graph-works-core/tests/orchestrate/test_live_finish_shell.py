@@ -16,7 +16,7 @@ def _setup(tmp_path, monkeypatch, *, nested=False, foreign=False):
         "workflow:\n  auto_drive: {max_parallel: 4}\n",
     )
     (layout.root / "dispatch.yaml").write_text(
-        "pipeline:\n  rules:\n    - match: {variant: branch}\n"
+        "pipeline:\n  rules:\n    - match: {stage: finish}\n"
         '      prompt_tail: "Auto-drive context: merge target {merge_target}"\n',
         encoding="utf-8",
         newline="",
@@ -145,7 +145,7 @@ def test_real_git_shell_keeps_live_root_target_when_source_is_dirty(tmp_path):
         git(repo, "worktree", "add", "-b", f"feature/{name}", str(source))
     layout = _workspace(tmp_path / "workspace", f"version: 1\nrepositories:\n  code: {{path: {repo}}}\n")
     (layout.root / "dispatch.yaml").write_text(
-        "pipeline:\n  rules:\n    - match: {variant: branch}\n"
+        "pipeline:\n  rules:\n    - match: {stage: finish}\n"
         '      prompt_tail: "Auto-drive context: merge target {merge_target}"\n',
         encoding="utf-8",
         newline="",

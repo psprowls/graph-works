@@ -30,14 +30,16 @@ from work_tracker_okf.advance import ExpectedPhase as ExpectedPhase
 from work_tracker_okf.advance import FieldChange, RefusalReason
 from work_tracker_okf.advance import apply as apply_advance
 from work_tracker_okf.affects import affects_drift, code_affects, plan_files, touches_workspace
-from work_tracker_okf.compose import AdvanceOutcome, advance_and_stamp, ensure_plan_row
+from work_tracker_okf.compose import AdvanceOutcome, advance_and_stamp, ensure_plan_row, stage_artifact_ref
 from work_tracker_okf.decisions import HoldFact
 from work_tracker_okf.items import IGNORE, WorkItem, is_commit_oid, load_items
 from work_tracker_okf.mutation import DirectoryPrecondition, PlannedWrite, WorkMutationPlan
 from work_tracker_okf.obligations import KEY, apply_obligations, plan_derive
 from work_tracker_okf.paths import MANAGED_ARTIFACTS, artifact_ref, item_page
+from work_tracker_okf.pipeline import PipelineDefinition, results_phases
 from work_tracker_okf.results import render as render_results
 from work_tracker_okf.sources import upsert
+from work_tracker_okf.workflow import Blocker
 
 from graph_works_core.orchestrate import gate_git
 from graph_works_core.orchestrate.gate_receipts import GateMatch, find_satisfying
@@ -50,6 +52,8 @@ from graph_works_core.workspace.decision_owner import (
     hold_in,
     locked_decision_owner,
 )
+from graph_works_core.workspace.dispatch_artifacts import routing_items
+from graph_works_core.workspace.dispatch_config import load_dispatch_config
 from graph_works_core.workspace.errors import WorkspaceError
 from graph_works_core.workspace.finish import finish_read_guard, inspect_finish
 from graph_works_core.workspace.gate_config import repo_gate
@@ -65,9 +69,9 @@ from graph_works_core.workspace.repos import (
 from graph_works_core.workspace.transactions import MutationApplication, apply_mutation
 
 #: The phases whose *completion* produces a results stub. A design or plan
-#: stage leaves an artifact of its own; only the two that touch code leave a
-#: commit range worth summarizing.
-RESULTS_PHASES: frozenset[str] = frozenset({"execute", "finish"})
+#: stage leaves an artifact of its own; the stage table's `results` column
+#: identifies stages with a commit range worth summarizing.
+RESULTS_PHASES: frozenset[str] = results_phases()
 
 #: The prefix of the one gate note (a workspace-only pass), so a reader grepping
 #: the coordinator's output finds it with one string.
@@ -252,7 +256,12 @@ def run_stage_advance(
     without locking except for receipt-guarded finish verification. On win32,
     `okf_ext.locking` gives up after ten one-second
     retries and raises `OSError` naming the lock; the CLI reports it as `io`.
+
+    Raises:
+        WorkspaceError: dispatch rules are missing or malformed, or repository
+        selection is invalid. Dispatch failures occur before mutation.
     """
+    definition = load_dispatch_config(layout).definition
     bundle = load_bundle(layout.bundle_dir, ignore=IGNORE)
     items = load_items(bundle)
     receipt_finish = any(
@@ -267,6 +276,7 @@ def run_stage_advance(
             bundle,
             items,
             path,
+            definition=definition,
             hold=hold_for(items, bundle.root, path) if dry_run else None,
             dry_run=dry_run,
             today=today,
@@ -300,6 +310,7 @@ def run_stage_advance(
             context.bundle,
             context.items,
             path,
+            definition=definition,
             hold=hold_in(context, path),
             dry_run=dry_run,
             today=today,
@@ -328,7 +339,13 @@ _NO_CODE_BASELINE = "spec baseline: no code sha resolvable; landed-since will be
 
 
 def _baseline_stamp(
-    layout: WorkspaceLayout, item: WorkItem, repo: Path | None, cwd: Path | None, bundle_root: Path
+    layout: WorkspaceLayout,
+    item: WorkItem,
+    repo: Path | None,
+    cwd: Path | None,
+    bundle_root: Path,
+    *,
+    definition: PipelineDefinition,
 ) -> tuple[dict[str, str], tuple[str, ...]]:
     """Resolve spec anchors, then the matching cwd HEAD, without refusing an advance.
 
@@ -338,7 +355,7 @@ def _baseline_stamp(
     stamp: dict[str, str] = {}
     code: str | None = None
     if repo is not None:
-        spec_path = bundle_root / anchor.spec_ref(item)
+        spec_path = bundle_root / anchor.spec_ref(item, definition=definition)
         try:
             spec_text = spec_path.read_text(encoding="utf-8") if spec_path.is_file() else ""
         except (OSError, UnicodeError):
@@ -365,6 +382,7 @@ def _advance(
     items: Sequence[WorkItem],
     path: str,
     *,
+    definition: PipelineDefinition,
     hold: HoldFact | None,
     today: date,
     expected_phase: ExpectedPhase | None,
@@ -454,13 +472,31 @@ def _advance(
         return_=return_,
         hold=hold,
         stale_spec=stale,
+        definition=definition,
+        routing_items=routing_items(bundle.root, items, definition=definition),
         dry_run=True,
     )
+    if outcome.plan.trigger == "repair" and inferred:
+        # Moving off a removed stage does not claim the caller's checkout or
+        # discard the recorded baseline. Explicit placement remains authored.
+        outcome = replace(
+            outcome,
+            plan=replace(
+                outcome.plan,
+                changes=tuple(c for c in outcome.plan.changes if c.key not in {"worktree", "branch", "start_sha"}),
+            ),
+        )
+        stamped_worktree, stamped_branch = None, None
+        inferred = False
     if finish_blockers:
         refused = replace(
             outcome.plan,
             refusal="finish-incomplete",
-            route=replace(outcome.plan.route, blockers=outcome.plan.route.blockers + finish_blockers),
+            route=replace(
+                outcome.plan.route,
+                blockers=outcome.plan.route.blockers
+                + tuple(Blocker("finish-incomplete", message) for message in finish_blockers),
+            ),
             changes=(),
             stamp_source=None,
             stamp_baseline=False,
@@ -471,17 +507,17 @@ def _advance(
     drift_warnings: tuple[str, ...] = ()
     if (
         item is not None
-        and not return_
+        and outcome.plan.trigger == "complete"
         and old_phase == "plan"
         and outcome.plan.refusal is None
         and outcome.plan.transition is not None
         and outcome.plan.transition.phase == "execute"
     ):
-        drift_warnings = _affects_drift_warnings(bundle.root, item)
+        drift_warnings = _affects_drift_warnings(bundle.root, item, definition=definition)
     stamp: dict[str, str] = {}
     baseline_warnings: tuple[str, ...] = ()
     if outcome.plan.stamp_baseline and outcome.plan.refusal is None and item is not None:
-        stamp, baseline_warnings = _baseline_stamp(layout, item, resolved_repo, cwd, bundle.root)
+        stamp, baseline_warnings = _baseline_stamp(layout, item, resolved_repo, cwd, bundle.root, definition=definition)
     candidate = StageAdvance(
         outcome=outcome, repo_note=repo_note, warnings=inference_warnings + drift_warnings + baseline_warnings
     )
@@ -511,7 +547,10 @@ def _advance(
     warnings: tuple[str, ...] = ()
     bypass: GateBypass | None = None
     gate_receipt: GateMatch | None = None
-    gated = old_phase == "execute" and new_phase == "finish"
+    # D-014: the gate belongs to completing the stage that writes code; a path
+    # without execute reaches finish ungated.
+    completes_execute = old_phase == "execute" and outcome.plan.trigger == "complete" and new_phase != old_phase
+    gated = completes_execute
     if skip_gate is not None and not gated:
         return replace(
             candidate, outcome=_refuse(outcome, "gate-bypass-unused", "no execute -> finish gate runs on this advance")
@@ -611,9 +650,15 @@ def _advance(
     result_member: str | None = None
     result_bytes: bytes | None = None
     facts_root = _facts_root(item, stamped_worktree, resolved_repo)
-    if not return_ and facts_root is not None and old_phase in RESULTS_PHASES and new_phase != old_phase:
+    if (
+        outcome.plan.trigger == "complete"
+        and facts_root is not None
+        and old_phase in RESULTS_PHASES
+        and new_phase != old_phase
+    ):
         effective_start_sha = _effective_start_sha(
             start_sha,
+            definition=definition,
             phase=old_phase,
             facts_root=facts_root,
             bundle_root=bundle.root,
@@ -635,8 +680,8 @@ def _advance(
                 result_bytes = render_results(facts).encode("utf-8")
                 upsert(document, ref, title=f"{facts.phase.capitalize()} results")
 
-    if old_phase == "execute" and new_phase == "finish":
-        coverage_ref = artifact_ref(path, MANAGED_ARTIFACTS["execute-coverage"])
+    if completes_execute:
+        coverage_ref = stage_artifact_ref(path, definition.artifacts["execute"])
         coverage_path = coverage_ref.path(bundle.root)
         coverage_text: str | None = None
         coverage_readable = True
@@ -838,17 +883,24 @@ def _resolve_repo(
     return resolve_item_repo(layout, item, by_path, repo_name=repo_name, fallback=by_cwd), declared
 
 
-def _affects_drift_warnings(bundle_root: Path, item: WorkItem) -> tuple[str, ...]:
+def _affects_drift_warnings(bundle_root: Path, item: WorkItem, *, definition: PipelineDefinition) -> tuple[str, ...]:
     """Advisory plan-file drift, reading a registered source or managed plan artifact.
 
     The plan-to-execute advance usually registers the source, so its managed
     artifact is the normal fallback. The later commit gate checks actual changes.
     """
-    registered = next((source.resource for source in item.sources if source.id == "plan" and source.resource), None)
+    registered = next(
+        (
+            source.resource
+            for source in item.sources
+            if source.id == definition.artifacts["plan"].source and source.resource
+        ),
+        None,
+    )
     plan_path = (
         bundle_root / registered.removeprefix("/")
         if registered
-        else artifact_ref(item.path, MANAGED_ARTIFACTS["plan"]).path(bundle_root)
+        else stage_artifact_ref(item.path, definition.artifacts["plan"]).path(bundle_root)
     )
     try:
         text = plan_path.read_text(encoding="utf-8")
@@ -1035,6 +1087,7 @@ def _receipt_gate(layout: WorkspaceLayout, item: WorkItem, root: Path, repo_name
 def _effective_start_sha(
     explicit: str | None,
     *,
+    definition: PipelineDefinition,
     phase: str | None,
     facts_root: Path,
     bundle_root: Path,
@@ -1055,7 +1108,7 @@ def _effective_start_sha(
     _worktree, recorded = _gate_placement(item, repo_name)
     if recorded:
         return recorded
-    spec_path = bundle_root / anchor.spec_ref(item)
+    spec_path = bundle_root / anchor.spec_ref(item, definition=definition)
     spec_text = spec_path.read_text(encoding="utf-8") if spec_path.is_file() else ""
     return anchor.phase_start_sha(facts_root, spec_path, spec_text)
 

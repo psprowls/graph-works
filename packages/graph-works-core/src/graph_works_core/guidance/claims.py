@@ -23,20 +23,20 @@ from typing import Any, Literal
 
 from code_graph_io.tokens import count_tokens
 from okf_io import Bundle
-from work_tracker_okf.dependencies import PHASE_ORDER
+from work_tracker_okf.pipeline import STAGE_TABLE
 
 #: Bumped whenever a row's fields, the rows file or the manifest change shape.
-#: Also bump it when `PIPELINE_PHASES` (derived from `work_tracker_okf`'s
-#: `PHASE_ORDER`) or the tokenizer behind `count_tokens` changes: derived
-#: `phases` and `tokens` are baked into cached rows, and neither input is in
-#: the manifest, so nothing else would invalidate them.
+#: Also bump it when `PIPELINE_PHASES` (the stage table's row order) or the
+#: tokenizer behind `count_tokens` changes: derived `phases` and `tokens` are
+#: baked into cached rows, and neither input is in the manifest, so nothing
+#: else would invalidate them.
 CLAIMS_SCHEMA_VERSION = 1
 CLAIMS_SUBDIR = "claims"
 MANIFEST_NAME = "manifest.json"
 ROWS_NAME = "rows.json"
 
 #: Every stage that runs — `done` is a resting state, not a stage.
-PIPELINE_PHASES: tuple[str, ...] = tuple(phase for phase in PHASE_ORDER if phase != "done")
+PIPELINE_PHASES: tuple[str, ...] = tuple(row.stage for row in STAGE_TABLE)
 
 #: Frontmatter key -> row kind.
 _KEYS: tuple[tuple[str, Literal["decision", "claim"]], ...] = (("decisions", "decision"), ("claims", "claim"))

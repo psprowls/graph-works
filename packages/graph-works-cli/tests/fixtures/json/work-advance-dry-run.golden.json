@@ -3,6 +3,7 @@
   "phase": "design",
   "work_status": null,
   "blockers": [],
+  "blocker_kinds": [],
   "on_complete": {
     "phase": "execute",
     "work_status": null,

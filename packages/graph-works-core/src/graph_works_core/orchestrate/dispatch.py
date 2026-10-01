@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 from subagents_io.backend import BackendError
+from work_tracker_okf.pipeline import code_phases
 from work_tracker_okf.placement import ReaderObservation
 
 from graph_works_core.orchestrate import dispatch_record as dr
@@ -28,6 +29,8 @@ from graph_works_core.orchestrate.placement import PlacementRecord, run_record_p
 from graph_works_core.workspace.layout import WorkspaceLayout
 from graph_works_core.workspace.provenance import GitFailure, gate_git, probe_git, strict_commit, strict_git
 from graph_works_core.workspace.workspace_branch import WORKSPACE_REPO
+
+_CODE_PHASES: frozenset[str] = code_phases()
 
 FAILURE_REASONS: frozenset[str] = frozenset(
     {
@@ -869,7 +872,7 @@ def _record(c: _Dispatch) -> None:
     if c.item["worktree"]["action"] == READER_ACTION:
         _record_reader(c)
         return
-    if c.item["path"] != c.root and c.item["phase"] not in ("execute", "finish"):
+    if c.item["path"] != c.root and c.item["phase"] not in _CODE_PHASES:
         c.result = replace(c.result, recorded="skipped:read-only-descendant")
         c.mark("skipped", reason="read-only-descendant", result={"recorded": c.result.recorded})
         return
@@ -879,7 +882,7 @@ def _record(c: _Dispatch) -> None:
     path, branch = observed.path, observed.branch
     selected_repo = (c.item.get("repo") or {}).get("name")
 
-    code_phase = c.item["phase"] in ("execute", "finish") and selected_repo != WORKSPACE_REPO
+    code_phase = c.item["phase"] in _CODE_PHASES and selected_repo != WORKSPACE_REPO
 
     def apply(dry_run: bool, start_sha: str | None) -> PlacementRecord:
         return run_record_placement(

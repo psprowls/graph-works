@@ -333,6 +333,18 @@ assert_output \
     "present" "gw config sync" \
     "$out"
 
+# --- 3c. no stage-artifact filename in the injected context -----------------
+# Filenames are configured (pipeline.artifacts); the hook names the stage and
+# points at gw work next instead (epic ledger D-016). The owned directory is
+# still named, so bundle_dir routing stays observable.
+assert_output \
+    "namespaced brainstorming: context points at gw work next, names no artifact file" \
+    "nested" "required" \
+    "gw work next <work-path> --json --file${US}artifacts.design.path${US}artifacts.plan.path${US}artifact.path${US}$ws_default/okf/<work-path>/references/" \
+    "01-design.md${US}02-plan.md${US}03-execute-coverage.md" \
+    "present" "gw config sync" \
+    "$out"
+
 # --- 4. projection overrides bundle_dir -----------------------------------
 ws_custom="$(make_workspace ws_custom custom)"
 write_projection "$ws_custom" "$(sha256_of "$ws_custom/workspace.yaml")" custom

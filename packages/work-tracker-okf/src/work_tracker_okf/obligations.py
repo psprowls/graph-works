@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING, Final, Literal
 
 from okf_io import Document
 
+from work_tracker_okf.pipeline import DONE
 from work_tracker_okf.vocabulary import TERMINAL_STATUSES
 
 if TYPE_CHECKING:
@@ -122,7 +123,7 @@ def plan_add(items: Sequence[WorkItem], path: str, text: str, *, on: date) -> Ob
     cleaned = _single_line(text)
     if cleaned is None:
         return ObligationPlan(path, before, before, "empty-text", "--text must be one non-empty line")
-    if item.work_status in TERMINAL_STATUSES or item.phase == "done":
+    if item.work_status in TERMINAL_STATUSES or item.phase == DONE:
         return ObligationPlan(
             path, before, before, "terminal-item", f"{path} is {item.work_status} at phase {item.phase!r}"
         )

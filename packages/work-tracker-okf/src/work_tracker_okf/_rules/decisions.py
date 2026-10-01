@@ -32,6 +32,7 @@ from work_tracker_okf._rules._common import LaneConfig, active, items
 from work_tracker_okf.decisions import HOLD_PHASES, HOLD_SHAPES, VALID_STATUSES, Decision, LedgerParse, id_number, load
 from work_tracker_okf.items import WorkItem
 from work_tracker_okf.paths import MANAGED_ARTIFACTS, ArtifactRef, artifact_ref, checkpoint_ref, parse_item_path
+from work_tracker_okf.pipeline import FINISH, ledger_phases
 from work_tracker_okf.vocabulary import PARENT_TYPES, SPEC_SOURCE_ID
 
 CODES: tuple[str, ...] = (
@@ -46,9 +47,6 @@ CODES: tuple[str, ...] = (
 )
 
 _SPEC = "work_tracker_okf._rules.decisions"
-
-#: The phases by which a parent that has moved past design has a ledger.
-_LEDGER_PHASES = frozenset({"plan", "execute", "finish", "done"})
 
 #: A `D-nnn` citation anywhere in a design spec. Deliberately bare: a matcher
 #: restricted to fenced or bracketed ids would miss the prose citation this rule
@@ -248,12 +246,13 @@ def ledger(ctx: RuleContext) -> Iterable[Finding]:
     Parent-capable items and existing self-owned lone-item ledgers are checked.
     Only parents require a ledger; archived pages and their ledgers are frozen.
     """
+    ledger = ledger_phases()
     by_path = {entry.path: entry for entry in items(ctx)}
     for item in active(ctx):
         ref = _ledger_ref(item.path)
         if item.type not in PARENT_TYPES and not ctx.bundle.has_member(ref.rel):
             continue
-        if item.type in PARENT_TYPES and item.phase in _LEDGER_PHASES and not ctx.bundle.has_member(ref.rel):
+        if item.type in PARENT_TYPES and item.phase in ledger and not ctx.bundle.has_member(ref.rel):
             subject = "`type: Epic`" if item.type == "Epic" else f"`type: {item.type}`"
             yield _finding(
                 "decisions.ledger-missing",
@@ -264,7 +263,7 @@ def ledger(ctx: RuleContext) -> Iterable[Finding]:
         parsed = load(ref.path(ctx.bundle.root))
         yield from _entry_findings(item, parsed)
         open_ids = [entry.id for entry in parsed.entries if entry.status == "open"]
-        if item.phase == "finish" and open_ids:
+        if item.phase == FINISH and open_ids:
             yield _finding(
                 "decisions.open-at-finish",
                 "error",

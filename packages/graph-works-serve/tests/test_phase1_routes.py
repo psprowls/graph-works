@@ -229,8 +229,8 @@ def test_explain_matches_next_when_packaged_and_local_rules_both_win(
     assert [rule["matched"] for rule in body["rules"]] == [False, True]
     assert body["provenance"]["skill"]["rule"]["source"] == "packaged"
     assert body["provenance"]["model"]["rule"]["name"] == "planning"
-    assert body["packaged_rule"]["origin"]["source"] == "packaged"
-    assert body["packaged_rule"]["origin"]["name"] == "single"
+    assert body["packaged_rules"][0]["origin"]["source"] == "packaged"
+    assert [r["origin"]["name"] for r in body["packaged_rules"]] == ["plan"]
 
 
 def test_explain_matches_next_on_an_agent_change_reset(client: TestClient, workspace: WorkspaceLayout) -> None:
@@ -238,7 +238,7 @@ def test_explain_matches_next_on_an_agent_change_reset(client: TestClient, works
     _dispatch(
         workspace,
         shared="  - match: {}\n    model: opus\n    reasoning_effort: high\n",
-        local="  - match: {variant: single}\n    agent: codex\n",
+        local="  - match: {stage: plan}\n    agent: codex\n",
     )
 
     body = _explain_equals_next(client, path)
@@ -266,7 +266,7 @@ def test_explain_matches_next_for_a_blocked_epic(client: TestClient, workspace: 
 
     body = _explain_equals_next(client, "work/epic-e")
 
-    assert body["attributes"] is None and body["packaged_rule"] is None
+    assert body["attributes"] is None and body["packaged_rules"] is None
     assert all(rule["matched"] is False for rule in body["rules"])
     assert body["blockers"]
 
@@ -305,3 +305,23 @@ def test_a_broken_schema_file_is_a_workspace_refusal(client: TestClient, workspa
 
     assert error["reason"] == "workspace"
     assert "Bad.schema.json" in error["message"]
+
+
+def test_next_route_carries_path_and_artifacts(client: TestClient, workspace: WorkspaceLayout) -> None:
+    path = write_item(workspace, "feature-path")
+    response = client.get("/v1/work/next", params={"path": path})
+    assert response.status_code == 200
+    body = response.json()
+    assert set(body) >= {"path", "artifacts", "artifact"}
+    assert body["path"]["stages"] == ["design", "plan", "execute", "finish"]
+    assert set(body["artifacts"]) == {"design", "plan", "execute"}
+
+
+def test_queue_rows_do_not_gain_path_report_or_artifacts(client: TestClient, workspace: WorkspaceLayout) -> None:
+    path = write_item(workspace, "feature-path")
+    response = client.get("/v1/work/queue")
+    assert response.status_code == 200
+    rows = response.json()["items"]
+    assert len(rows) == 1
+    assert rows[0]["path"] == path
+    assert "artifacts" not in rows[0]

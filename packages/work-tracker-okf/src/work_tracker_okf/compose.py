@@ -52,7 +52,8 @@ from work_tracker_okf.filing import FilingPlan, FilingRefusal, FilingSeed, _mate
 from work_tracker_okf.filing import apply as apply_filing
 from work_tracker_okf.indexes import LaneIndexPlan, plan_indexes
 from work_tracker_okf.items import WorkItem, load_items, placement_directories
-from work_tracker_okf.paths import MANAGED_ARTIFACTS, ArtifactRef, artifact_ref, item_page, parse_item_path
+from work_tracker_okf.paths import ArtifactRef, item_page, parse_item_path, references_dir
+from work_tracker_okf.pipeline import PACKAGED_DEFINITION, ArtifactSpec, PipelineDefinition
 from work_tracker_okf.rules import PLAN_TABLE_SPEC, lane_rules
 from work_tracker_okf.sources import upsert
 from work_tracker_okf.vocabulary import PARENT_TYPES, PLAN_SOURCE_ID, SPEC_SOURCE_ID
@@ -63,7 +64,11 @@ from work_tracker_okf.vocabulary import PARENT_TYPES, PLAN_SOURCE_ID, SPEC_SOURC
 PLAN_HEADING = "Plan"
 
 #: The label each stamp falls back to when its artifact carries no H1.
-_STAMP_LABELS: dict[str, str] = {SPEC_SOURCE_ID: "Design spec", PLAN_SOURCE_ID: "Plan"}
+_STAMP_LABELS: dict[str, str] = {
+    SPEC_SOURCE_ID: "Design spec",
+    PLAN_SOURCE_ID: "Plan",
+    "execute-coverage": "Execute coverage",
+}
 
 #: The two fixed cells of the implementation row, carried from the reference
 #: `gw work advance` rather than re-invented.
@@ -81,6 +86,7 @@ def rule_set(
     vault_root: Path | None = None,
     declarations_dir: Path | None = None,
     repo_roots: tuple[Path, ...] = (),
+    definition: PipelineDefinition = PACKAGED_DEFINITION,
 ) -> tuple[Rule, ...]:
     """The one rule set `lint` and `advance` both validate against (C6-M).
 
@@ -170,7 +176,7 @@ def rule_set(
         section_rule(load_sections(declarations / "sections"), severity="error"),
         render_rule(),
         placement_rule(placement_directories(schema_set), severity="error"),
-        *lane_rules(repo_root=repo_root, vault_root=vault_root, repo_roots=repo_roots),
+        *lane_rules(repo_root=repo_root, vault_root=vault_root, repo_roots=repo_roots, definition=definition),
     ]
     tags_path = declarations / VOCABULARY_FILENAME
     if tags_path.is_file():
@@ -209,11 +215,32 @@ def _title_for(target: Path, fallback: str) -> str:
     return _first_h1(load(target).body) or fallback
 
 
-def stamp_for(root: Path, item: WorkItem, source_id: str) -> tuple[ArtifactRef, str]:
+def stage_artifact_for_source(definition: PipelineDefinition, source_id: str) -> ArtifactSpec:
+    """The configured stage artifact whose `sources[]` id is *source_id*.
+
+    Raises `KeyError` when no stage artifact carries it: a non-stage managed
+    artifact (decisions, transcripts, receipts) is not stamped through here.
+    """
+    for artifact in definition.artifacts.values():
+        if artifact.source == source_id:
+            return artifact
+    raise KeyError(source_id)
+
+
+def stage_artifact_ref(item_path: str, artifact: ArtifactSpec) -> ArtifactRef:
+    """Where *artifact* lives for *item_path*, with its configured source id.
+
+    Build directly: `paths.artifact_ref` derives its source id from an `NN-`
+    filename, but configured stage artifacts need not carry that ordinal.
+    """
+    return ArtifactRef(rel=f"{references_dir(item_path).rel}/{artifact.file}", source_id=artifact.source)
+
+
+def stamp_for(root: Path, item: WorkItem, source_id: str, *, definition: PipelineDefinition) -> tuple[ArtifactRef, str]:
     """The `ArtifactRef` *source_id* names for *item*, and the title to stamp.
 
-    Resolves `Transition.stamp_source` through the managed-artifact registry,
-    keeping artifact names and locations centralized.
+    Resolves `Transition.stamp_source` through *definition*'s stage artifacts,
+    so workspace-renamed files are stamped under their configured names.
 
     **The title is the artifact's own H1 when the file has one** (C6-F), and
     `"<label> — <item title>"` otherwise. The conformant fixture authors
@@ -222,13 +249,11 @@ def stamp_for(root: Path, item: WorkItem, source_id: str) -> tuple[ArtifactRef, 
     `Design spec — The filing writer` and the two would disagree cosmetically
     forever.
 
-    Raises `KeyError` for an id outside the two `Transition.stamp_source` can
-    carry. Caller error: nothing else is stamped by this path.
+    Raises `KeyError` for an id no configured stage artifact carries. Caller
+    error: nothing else is stamped by this path.
     """
-    if source_id not in {SPEC_SOURCE_ID, PLAN_SOURCE_ID}:
-        raise KeyError(source_id)
-    ref = artifact_ref(item.path, MANAGED_ARTIFACTS[source_id])
-    return ref, _title_for(ref.path(root), f"{_STAMP_LABELS[source_id]} — {item.title}")
+    ref = stage_artifact_ref(item.path, stage_artifact_for_source(definition, source_id))
+    return ref, _title_for(ref.path(root), f"{_STAMP_LABELS.get(source_id, 'Artifact')} — {item.title}")
 
 
 def apply_decision_and_register(
@@ -342,6 +367,8 @@ def advance_and_stamp(
     dry_run: bool = True,
     hold: HoldFact | None = None,
     stale_spec: tuple[str, ...] = (),
+    definition: PipelineDefinition = PACKAGED_DEFINITION,
+    routing_items: Sequence[WorkItem] | None = None,
 ) -> AdvanceOutcome:
     """Advance *path*, stamp its artifact, ensure its plan row -- in **one save**.
 
@@ -351,9 +378,14 @@ def advance_and_stamp(
     `sources.upsert` was built for exactly this: it mutates the in-memory
     `Document` and lets the caller save.
 
-    Completing design or plan requires its canonical artifact to be a regular
-    file before stamping or changing the page. Other transitions keep their
-    usual stamp behavior.
+    Completing a stage whose configured artifact is `required` requires that
+    file to be a regular file before stamping or changing the page. Other
+    transitions keep their usual stamp behavior.
+
+    `definition` is the pipeline to route with; workspace callers pass the one
+    loaded from `dispatch.yaml`. `routing_items` may supply a read-only
+    projection of this bundle with canonical artifact presence normalized by
+    the caller; otherwise the bundle's raw item projection is used.
 
     `sync_plan_table` is nested under the stamp because `workflow.py` sets it on
     exactly one transition -- plan-complete -> execute -- where `stamp_source`
@@ -368,7 +400,7 @@ def advance_and_stamp(
     blocker, and `advance` returns a `blocked` refusal -- the same invariant
     `test_advance.py` already pins for `apply`.
     """
-    items = load_items(bundle)
+    items = load_items(bundle) if routing_items is None else routing_items
     plan = advance(
         items,
         path,
@@ -384,6 +416,7 @@ def advance_and_stamp(
         unreadable=bundle.unreadable,
         hold=hold,
         stale_spec=stale_spec,
+        definition=definition,
     )
     if plan.refusal is not None:
         return AdvanceOutcome(plan=plan, stamped=None, stamp_title=None, plan_row=False, written=False)
@@ -396,29 +429,43 @@ def advance_and_stamp(
     stamped: ArtifactRef | None = None
     title: str | None = None
     row = False
+    # Reconciliation refreshes the baseline while staying in the same stage;
+    # its complete trigger does not complete that stage or require its artifact.
+    completed = (
+        next((artifact for stage, artifact in definition.artifacts.items() if stage == item.phase), None)
+        if plan.trigger == "complete"
+        and item.phase
+        and plan.transition is not None
+        and plan.transition.phase != item.phase
+        else None
+    )
+    if completed is not None and completed.required:
+        target = stage_artifact_ref(item.path, completed).path(bundle.root)
+        try:
+            regular = S_ISREG(target.stat().st_mode)
+        except (FileNotFoundError, NotADirectoryError):
+            regular = False
+        if not regular:
+            refused = replace(
+                plan,
+                changes=(),
+                stamp_source=None,
+                sync_plan_table=False,
+                stamp_baseline=False,
+                refusal="artifact-missing",
+                detail=f"completion requires a regular artifact file: {target}",
+                trigger=None,
+            )
+            return AdvanceOutcome(plan=refused, stamped=None, stamp_title=None, plan_row=False, written=False)
     if plan.stamp_source is not None:
-        ref = artifact_ref(item.path, MANAGED_ARTIFACTS[plan.stamp_source])
-        target = ref.path(bundle.root)
-        if plan.trigger == "complete" and plan.stamp_source in {SPEC_SOURCE_ID, PLAN_SOURCE_ID}:
-            try:
-                regular = S_ISREG(target.stat().st_mode)
-            except (FileNotFoundError, NotADirectoryError):
-                regular = False
-            if not regular:
-                refused = replace(
-                    plan,
-                    changes=(),
-                    stamp_source=None,
-                    sync_plan_table=False,
-                    stamp_baseline=False,
-                    refusal="artifact-missing",
-                    detail=f"completion requires a regular artifact file: {target}",
-                    trigger=None,
-                )
-                return AdvanceOutcome(plan=refused, stamped=None, stamp_title=None, plan_row=False, written=False)
-        stamped, title = stamp_for(bundle.root, item, plan.stamp_source)
-        if plan.sync_plan_table:
-            row = plan_row_splice(document, stamped).changed
+        artifact = stage_artifact_for_source(definition, plan.stamp_source)
+        # Optional means absent is valid, not that a missing file becomes a
+        # source. In particular, a phantom plan would select planned execution
+        # and insert a broken action link into the item's plan table.
+        if artifact.required or stage_artifact_ref(item.path, artifact).path(bundle.root).is_file():
+            stamped, title = stamp_for(bundle.root, item, plan.stamp_source, definition=definition)
+            if plan.sync_plan_table:
+                row = plan_row_splice(document, stamped).changed
 
     if dry_run:
         return AdvanceOutcome(plan=plan, stamped=stamped, stamp_title=title, plan_row=row, written=False)
@@ -683,5 +730,7 @@ __all__ = [
     "plan_file_and_reconcile",
     "plan_row_splice",
     "rule_set",
+    "stage_artifact_for_source",
+    "stage_artifact_ref",
     "stamp_for",
 ]

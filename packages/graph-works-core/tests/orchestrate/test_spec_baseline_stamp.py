@@ -161,4 +161,4 @@ def test_short_spec_anchor_restamps_full_oid_and_exits_reconciliation(tmp_path: 
     assert result.outcome.written
     assert _page(layout).fm_raw["spec_baseline"]["code"] == head
     next_result = run_next(layout, PATH)
-    assert next_result.route.dispatch.variant == "single"
+    assert next_result.route.dispatch.stage == "plan"

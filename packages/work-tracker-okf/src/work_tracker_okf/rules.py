@@ -29,10 +29,15 @@ from okf_io import Rule
 from work_tracker_okf._rules import CATALOG, CODES_BY_TOPIC, RULES_BY_TOPIC, TOPICS
 from work_tracker_okf._rules._common import LaneConfig
 from work_tracker_okf._rules.plan import PLAN_TABLE_SPEC
+from work_tracker_okf.pipeline import PACKAGED_DEFINITION, PipelineDefinition
 
 
 def lane_rules(
-    *, repo_root: Path | None = None, vault_root: Path | None = None, repo_roots: tuple[Path, ...] = ()
+    *,
+    repo_root: Path | None = None,
+    vault_root: Path | None = None,
+    repo_roots: tuple[Path, ...] = (),
+    definition: PipelineDefinition = PACKAGED_DEFINITION,
 ) -> tuple[Rule, ...]:
     """The lane's rule functions, in topic order.
 
@@ -53,7 +58,7 @@ def lane_rules(
     after collection -- but a catalog whose iteration order is a dict literal's
     is a catalog that reorders when someone reformats it.
     """
-    config = LaneConfig(repo_root=repo_root, vault_root=vault_root, repo_roots=repo_roots)
+    config = LaneConfig(repo_root=repo_root, vault_root=vault_root, repo_roots=repo_roots, definition=definition)
     return tuple(rule for topic in sorted(RULES_BY_TOPIC) for rule in RULES_BY_TOPIC[topic](config))
 
 

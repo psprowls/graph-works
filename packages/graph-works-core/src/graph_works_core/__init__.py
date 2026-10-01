@@ -243,7 +243,7 @@ _EXPORTS: dict[str, tuple[str, str]] = {
     "MANIFEST_VERSION": ("graph_works_core.workspace.manifest", "MANIFEST_VERSION"),
     "WORKSPACE_DIR_ENV": ("graph_works_core.workspace.manifest", "WORKSPACE_DIR_ENV"),
     "Manifest": ("graph_works_core.workspace.manifest", "Manifest"),
-    "PipelineEntry": ("graph_works_core.workspace.pipeline", "PipelineEntry"),
+    "PackagedRule": ("graph_works_core.workspace.pipeline", "PackagedRule"),
 }
 
 if TYPE_CHECKING:
@@ -350,7 +350,7 @@ if TYPE_CHECKING:
         layout_for,
     )
     from graph_works_core.workspace.manifest import CATALOG, MANIFEST_VERSION, WORKSPACE_DIR_ENV, Manifest
-    from graph_works_core.workspace.pipeline import PipelineEntry
+    from graph_works_core.workspace.pipeline import PackagedRule
 
 __all__ = [
     "CATALOG",
@@ -384,7 +384,7 @@ __all__ = [
     "Manifest",
     "OrchestratePlan",
     "OrchestrateResult",
-    "PipelineEntry",
+    "PackagedRule",
     "PlacementRecord",
     "PlannedAdvance",
     "PlannedWrite",

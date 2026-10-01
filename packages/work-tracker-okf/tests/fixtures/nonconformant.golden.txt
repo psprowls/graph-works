@@ -1,5 +1,6 @@
 error	graph.depends-on-cycle	work/bug-cycle-a.md	work_tracker_okf._rules.graph	`depends_on` participates in a cycle
 error	graph.depends-on-cycle	work/bug-cycle-b.md	work_tracker_okf._rules.graph	`depends_on` participates in a cycle
+warn	state.phase-off-path	work/bug-off-path.md	work_tracker_okf._rules.state	phase `plan` is not on this item's path [design, execute, finish] (rule `small-bug-like-skips-plan`)
 error	plan.action-target-missing	work/bug-superseded-orphan.md	work_tracker_okf._rules.plan	plan action names `packages/example/gone.py`, which does not exist under the repo root
 warn	plan.done-when-missing	work/bug-superseded-orphan.md	work_tracker_okf._rules.plan	`type: Feature` plan has rows with an empty `Done when` cell
 warn	state.archive-eligible	work/bug-superseded-orphan.md	work_tracker_okf._rules.state	`work_status: superseded` is terminal; the item is still under `work/`

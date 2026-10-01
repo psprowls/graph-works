@@ -51,10 +51,12 @@ from graph_works_core.work.commands import (
     WorkItem,
 )
 from graph_works_core.work.obligations import ObligationRecord
+from graph_works_core.work.path_report import PathReport, PathRuleRef, StageArtifactReport
 from graph_works_core.work.reconcile import ReconcileContext
 from graph_works_core.workspace.commits import CommitOutcome
 from graph_works_core.workspace.dispatch import DispatchResolution
 from graph_works_core.workspace.finish import FinishTarget
+from work_tracker_okf.workflow import RouteResult, blocker_messages
 
 from graph_works_wire._jsonable import jsonable
 from graph_works_wire.config import rule_payload
@@ -421,13 +423,35 @@ def next_blockers(result: NextResult) -> list[str]:
     same reason the descent refusal is -- a stop condition the routing table
     cannot see, surfaced through the channel the workflow skill already reads.
     """
-    blockers = list(result.route.blockers)
+    blockers = list(blocker_messages(result.route))
     descent = result.descent
     if descent is not None and descent.leaf is None and descent.reason:
         blockers.append(f"--descend: {descent.reason}")
     if result.dispatch_preflight is not None:
         blockers.append(result.dispatch_preflight)
     return blockers
+
+
+def next_blocker_kinds(result: NextResult) -> list[str]:
+    """Kinds parallel to the route, descent and preflight blocker messages."""
+    kinds: list[str] = [blocker.kind for blocker in result.route.blockers]
+    descent = result.descent
+    if descent is not None and descent.leaf is None and descent.reason:
+        kinds.append("descend")
+    if result.dispatch_preflight is not None:
+        kinds.append("dispatch-preflight")
+    return kinds
+
+
+def _path_candidates(route: RouteResult) -> list[dict[str, Any]]:
+    return [
+        {
+            "stages": list(candidate.stages),
+            "rule": {"source": candidate.rule.source, "index": candidate.rule.index, "name": candidate.rule.name},
+            "assignment": dict(candidate.assignment),
+        }
+        for candidate in route.path_candidates
+    ]
 
 
 def _usable_resolution(result: NextResult) -> DispatchResolution | None:
@@ -490,6 +514,36 @@ def _carried_context(frame: CarriedContext) -> dict[str, Any]:
     }
 
 
+def _path_rule(rule: PathRuleRef) -> dict[str, Any]:
+    return {"name": rule.name, "source": rule.source, "index": rule.index}
+
+
+def _path(report: PathReport | None) -> dict[str, Any] | None:
+    if report is None:
+        return None
+    return {
+        "stages": None if report.stages is None else list(report.stages),
+        "current": report.current,
+        "next": report.next,
+        "rule": None if report.rule is None else _path_rule(report.rule),
+        "candidates": [{"stages": list(c.stages), "rule": _path_rule(c.rule)} for c in report.candidates],
+    }
+
+
+def _artifacts(reports: Sequence[StageArtifactReport]) -> dict[str, Any]:
+    return {
+        a.stage: {
+            "file": a.file,
+            "source": a.source,
+            "required": a.required,
+            "on_path": a.on_path,
+            "path": str(a.path),
+            "exists": a.exists,
+        }
+        for a in reports
+    }
+
+
 def next_payload(result: NextResult, *, bundle_root: Path) -> dict[str, Any]:
     """The `gw work next` contract: phase, status, blockers, on_complete,
     action, normalized, child_rollup -- plus the donor-compatible additions
@@ -500,6 +554,7 @@ def next_payload(result: NextResult, *, bundle_root: Path) -> dict[str, Any]:
     either key must not be handed a name or a transition for a dispatch that
     can never happen.
 
+    `path` / `artifacts` are always present; `null` / `{}` when nothing will run.
     `guidance` / `guidance_warnings` / `guidance_file` are always present;
     empty/`null` unless the caller requested assembly (only the CLI does).
     `carried_context` is always present: `{"slots": {}, "warnings": []}` unless
@@ -516,9 +571,13 @@ def next_payload(result: NextResult, *, bundle_root: Path) -> dict[str, Any]:
         "effort": result.state.effort,
         "action": None if resolution is None else {"skill": resolution.profile.skill, "reason": result.route.reason},
         "artifact": None if result.artifact is None else {"path": str(result.artifact.path(bundle_root))},
+        "path": _path(result.path),
+        "artifacts": _artifacts(result.artifacts),
         "on_dispatch": _transition(_usable_on_dispatch(result)),
         "on_complete": _transition(result.route.on_complete),
+        "path_candidates": _path_candidates(result.route),
         "blockers": next_blockers(result),
+        "blocker_kinds": next_blocker_kinds(result),
         "dispatch": None if resolution is None else dispatch_payload(resolution),
         "child_rollup": _rollup(result.child_rollup),
         "descent": descent_payload(result),
@@ -540,7 +599,9 @@ def dispatch_explain_payload(explanation: DispatchExplanation) -> dict[str, Any]
     return {
         "path": explanation.path,
         "attributes": None if explanation.attributes is None else dict(explanation.attributes),
-        "packaged_rule": None if explanation.packaged_rule is None else rule_payload(explanation.packaged_rule),
+        "packaged_rules": None
+        if explanation.packaged_rules is None
+        else [rule_payload(r) for r in explanation.packaged_rules],
         "rules": [{**rule_payload(rule), "matched": matched} for rule, matched in explanation.rules],
         "profile": None if dispatch is None else dispatch["profile"],
         "provenance": None if dispatch is None else dispatch["provenance"],
@@ -572,6 +633,7 @@ def work_queue_payload(entries: Sequence[QueueEntry]) -> dict[str, Any]:
                 "mode": None if resolution is None else resolution.profile.mode,
                 "reason": None if resolution is None else result.route.reason,
                 "blockers": next_blockers(result),
+                "blocker_kinds": next_blocker_kinds(result),
                 "requires": [] if on_dispatch is None else list(on_dispatch.requires),
             }
         )
@@ -605,7 +667,8 @@ def advance_payload(result: StageAdvance, path: str) -> dict[str, Any]:
         "path": path,
         "phase": phase,
         "work_status": status,
-        "blockers": list(plan.route.blockers),
+        "blockers": list(blocker_messages(plan.route)),
+        "blocker_kinds": [b.kind for b in plan.route.blockers],
         "on_complete": _transition(plan.route.on_complete),
         "changes": applied,
         "stamped": stamped,

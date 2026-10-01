@@ -100,8 +100,10 @@ ASK_LINE = (
 #: execute-stage deferral bullet (`<work-path>` there, `{path}` here);
 #: unchecked coverage lines need no instruction -- the `execute -> finish`
 #: advance records them as `finish_obligations` itself (D-001).
+#: `{execute_artifact}` is the configured execute artifact filename, substituted
+#: by orchestrate's `_prompt`.
 EXECUTE_TAIL = (
-    "Before you advance, write {workspace}/okf/{path}/references/03-execute-coverage.md: "
+    "Before you advance, write {workspace}/okf/{path}/references/{execute_artifact}: "
     "one markdown task-list line per item in this stage's design spec `## Acceptance` section, "
     "each line `- [x]` when delivered or `- [ ]` when not, each with a one-line justification. "
     "Where the spec has no `## Acceptance` section, enumerate its `## Scope` / "
@@ -134,7 +136,7 @@ EXECUTE_TAIL = (
 #: authored one, so a workspace that already exists keeps whatever relay tail
 #: its `dispatch.yaml` was written with -- these appended obligations are
 #: inert for it. An operator upgrading an existing workspace must append
-#: `GRACE_PERIOD_TAIL` and `WORKSPACE_COMMIT_TAIL` to that file's `branch`-variant `prompt_tail`
+#: `GRACE_PERIOD_TAIL` and `WORKSPACE_COMMIT_TAIL` to that file's `{stage: finish}` rule's `prompt_tail`
 #: by hand and run `gw config sync`; nothing here does it for them. Building a
 #: rewriter is deliberately out of scope: the tail is a workspace-owned value,
 #: and core does not edit values a workspace owns.
@@ -146,27 +148,54 @@ RELAY_TAIL_SEED = (
 
 
 @dataclass(frozen=True, slots=True)
-class PipelineEntry:
-    """What one variant dispatches to."""
+class PackagedRule:
+    """One packaged, attribute-matched dispatch default. Later match wins (D-008)."""
 
+    name: str
+    match: Mapping[str, str | bool | tuple[str | bool, ...]]
     skill: str
     mode: str
     prompt_tail: str | None = None
 
 
-#: The packaged defaults read by the dispatch resolver; never mutated.
-PACKAGED_PIPELINE: Mapping[str, PipelineEntry] = MappingProxyType(
-    {
-        "exploration": PipelineEntry("superpowers:brainstorming", "attend", ATTEND_TAIL),
-        "diagnosis": PipelineEntry("superpowers:systematic-debugging", "attend", ATTEND_TAIL),
-        "reconcile": PipelineEntry("gw:reconciling-spec", "autonomous", WORKSPACE_COMMIT_TAIL),
-        "epic-design": PipelineEntry("gw:epic-design", "attend", ATTEND_TAIL),
-        "decompose": PipelineEntry("gw:planning-epics", "autonomous", WORKSPACE_COMMIT_TAIL),
-        "single": PipelineEntry("superpowers:writing-plans", "autonomous", WORKSPACE_COMMIT_TAIL),
-        "planned": PipelineEntry("superpowers:subagent-driven-development", "autonomous", EXECUTE_TAIL),
-        "unplanned": PipelineEntry("superpowers:test-driven-development", "autonomous", EXECUTE_TAIL),
-        "branch": PipelineEntry("superpowers:finishing-a-development-branch", "relay"),
-    }
+def _rule(
+    name: str, match: dict[str, str | bool | tuple[str | bool, ...]], skill: str, mode: str, tail: str | None
+) -> PackagedRule:
+    return PackagedRule(name, MappingProxyType(match), skill, mode, tail)
+
+
+_PARENTS = ("Epic", "Release")
+
+#: The packaged defaults read by the dispatch resolver, in precedence order; never mutated.
+PACKAGED_PIPELINE: tuple[PackagedRule, ...] = (
+    _rule("design", {"stage": "design"}, "superpowers:brainstorming", "attend", ATTEND_TAIL),
+    _rule("design-bug", {"stage": "design", "type": "Bug"}, "superpowers:systematic-debugging", "attend", ATTEND_TAIL),
+    _rule("design-parent", {"stage": "design", "type": _PARENTS}, "gw:epic-design", "attend", ATTEND_TAIL),
+    _rule(
+        "design-reconcile",
+        {"stage": "design", "has_spec": True},
+        "gw:reconciling-spec",
+        "autonomous",
+        WORKSPACE_COMMIT_TAIL,
+    ),
+    _rule("plan", {"stage": "plan"}, "superpowers:writing-plans", "autonomous", WORKSPACE_COMMIT_TAIL),
+    _rule("plan-parent", {"stage": "plan", "type": _PARENTS}, "gw:planning-epics", "autonomous", WORKSPACE_COMMIT_TAIL),
+    _rule(
+        "plan-reconcile",
+        {"stage": "plan", "spec_stale": True},
+        "gw:reconciling-spec",
+        "autonomous",
+        WORKSPACE_COMMIT_TAIL,
+    ),
+    _rule("execute", {"stage": "execute"}, "superpowers:test-driven-development", "autonomous", EXECUTE_TAIL),
+    _rule(
+        "execute-planned",
+        {"stage": "execute", "has_plan": True},
+        "superpowers:subagent-driven-development",
+        "autonomous",
+        EXECUTE_TAIL,
+    ),
+    _rule("finish", {"stage": "finish"}, "superpowers:finishing-a-development-branch", "relay", None),
 )
 
 
@@ -215,7 +244,7 @@ __all__ = [
     "PACKAGED_PIPELINE",
     "RELAY_TAIL_SEED",
     "WORKSPACE_COMMIT_TAIL",
-    "PipelineEntry",
+    "PackagedRule",
     "check_skill_name",
     "is_valid_skill_name",
 ]

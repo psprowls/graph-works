@@ -5,8 +5,46 @@ from pathlib import Path
 
 import pytest
 from work_helpers import lane_report, write_item
+from work_tracker_okf.pipeline import PACKAGED_DEFINITION, PipelineDefinition, parse_artifacts
 
 TODAY = date(2026, 8, 3)
+
+
+def _spec_md_definition() -> PipelineDefinition:
+    return PipelineDefinition(
+        stage_table=PACKAGED_DEFINITION.stage_table,
+        path_rules=PACKAGED_DEFINITION.path_rules,
+        artifacts=parse_artifacts({"design": {"file": "spec.md", "source": "design"}}, source="test"),
+    )
+
+
+def _item_citing(root: Path, filename: str, source_id: str) -> None:
+    path = "work/feature-x"
+    with_artifact(root, path, filename)
+    write_item(
+        root,
+        path,
+        "type: Feature\nwork_status: open\nphase: plan\n" + source_block(source_id, f"/{path}/references/{filename}"),
+    )
+
+
+@pytest.mark.parametrize(("source_id", "fires"), [("design", False), ("plan", True)])
+def test_a_configured_stage_artifact_maps_to_its_source_id(tmp_path: Path, source_id: str, fires: bool) -> None:
+    _item_citing(tmp_path, "spec.md", source_id)
+    found = lane_report(tmp_path, definition=_spec_md_definition()).by_code("targets.source-id-mismatch")
+    assert bool(found) is fires
+    if fires:
+        assert "'design'" in found[0].message
+
+
+def test_the_filename_grammar_is_unchanged_under_the_packaged_definition(tmp_path: Path) -> None:
+    _item_citing(tmp_path, "01-design.md", "plan")
+    assert lane_report(tmp_path).by_code("targets.source-id-mismatch") != ()
+
+
+def test_an_unrecognized_name_outside_the_map_is_silent(tmp_path: Path) -> None:
+    _item_citing(tmp_path, "spec.md", "plan")
+    assert lane_report(tmp_path).by_code("targets.source-id-mismatch") == ()
 
 
 def with_artifact(root: Path, path: str, filename: str) -> None:

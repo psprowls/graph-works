@@ -60,6 +60,8 @@ from graph_works_core.workspace.commits import (
     item_stem,
 )
 from graph_works_core.workspace.decision_owner import locked_decision_owner
+from graph_works_core.workspace.dispatch_artifacts import routing_items
+from graph_works_core.workspace.dispatch_config import load_dispatch_config
 from graph_works_core.workspace.errors import WorkspaceError
 from graph_works_core.workspace.layout import WorkspaceLayout
 from graph_works_core.workspace.repos import ItemRepo, declared_repositories, resolve_item_repo, resolve_repos
@@ -188,7 +190,15 @@ def run_record_reader(
                 raise WorkspaceError(f"{path}: repo {WORKSPACE_REPO} but {note}")
         elif observation.repo not in declared_repositories(layout):
             raise WorkspaceError(f"{path}: repo {observation.repo!r} names no declared repository")
-        plan = plan_reader_receipt(items, path, root=root, phase=phase, observation=observation)
+        definition = load_dispatch_config(layout).definition
+        plan = plan_reader_receipt(
+            routing_items(layout.bundle_dir, items, definition=definition),
+            path,
+            root=root,
+            phase=phase,
+            observation=observation,
+            definition=definition,
+        )
         receipt_path = None if plan.refusal == "unknown-path" else target
         if plan.refusal is not None:
             return ReaderRecord(plan, receipt_path, written=False, replayed=False)
@@ -269,8 +279,9 @@ def _prepare_placement(
                 )
         own = resolve_item_repo(layout, by_path[path], by_path, repo_name=repo_name)
         target = None if own.name == repo else repo
+    definition = load_dispatch_config(layout).definition
     plan = plan_placement(
-        items,
+        routing_items(layout.bundle_dir, items, definition=definition),
         path,
         root=root,
         phase=phase,
@@ -280,6 +291,7 @@ def _prepare_placement(
         repo=target,
         start_sha=start_sha,
         require_start_sha=require_start_sha,
+        definition=definition,
     )
     if plan.refusal is None and own is None:
         own = resolve_item_repo(layout, by_path.get(path), by_path, repo_name=repo_name)

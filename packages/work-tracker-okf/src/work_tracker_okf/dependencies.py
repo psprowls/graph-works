@@ -1,18 +1,19 @@
 """Structured, path-keyed dependency edges and their gate predicates."""
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Collection, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Protocol
 
 from work_tracker_okf.paths import parse_item_path
+from work_tracker_okf.pipeline import dispatch_phases, phase_order
 from work_tracker_okf.vocabulary import TERMINAL_STATUSES
 
-BLOCKS = frozenset({"design", "plan", "execute", "finish"})
-NEEDS = frozenset({"design", "plan", "execute", "finish", "resolved"})
+BLOCKS = dispatch_phases()
+NEEDS = BLOCKS | {"resolved"}
 EDGE_KEYS = frozenset({"path", "blocks", "needs"})
 DEFAULT_BLOCKS = "execute"
 DEFAULT_NEEDS = "resolved"
-PHASE_ORDER = ("design", "plan", "execute", "finish", "done")
+PHASE_ORDER = phase_order()
 PHASE_RANK = {phase: rank for rank, phase in enumerate(PHASE_ORDER)}
 
 
@@ -125,12 +126,6 @@ def gates(edge: DependencyEdge, phase: str) -> bool:
     return edge.blocks not in PHASE_RANK or phase not in PHASE_RANK or PHASE_RANK[phase] >= PHASE_RANK[edge.blocks]
 
 
-def entry_phase(type: str, effort: str | None) -> str | None:
-    if type != "TestGap":
-        return "design"
-    return None if effort is None else ("execute" if effort in {"xtra-small", "small"} else "plan")
-
-
 def validate_dependencies(
     edges: Sequence[DependencyEdge], *, parent_path: str | None, self_path: str
 ) -> tuple[DependencyIssue, ...]:
@@ -163,13 +158,18 @@ def resolve_facts(nodes: Sequence[DependencyNode], edges: Sequence[DependencyEdg
 
 
 def unmet(
-    edges: Sequence[DependencyEdge], facts: Sequence[DependencyFact], phase: str
+    edges: Sequence[DependencyEdge],
+    facts: Sequence[DependencyFact],
+    phase: str,
+    *,
+    stages: Collection[str] | None = None,
 ) -> tuple[tuple[DependencyEdge, DependencyFact], ...]:
     by_path = {fact.path: fact for fact in facts}
     return tuple(
         (edge, fact)
         for edge in edges
-        if gates(edge, phase)
+        if (stages is None or edge.blocks in stages)
+        and gates(edge, phase)
         and not satisfied(edge, fact := by_path.get(edge.path, DependencyFact(edge.path, False, False)))
     )
 
@@ -200,7 +200,6 @@ __all__ = [
     "DependencyIssue",
     "DependencyParse",
     "describe",
-    "entry_phase",
     "gates",
     "parse_dependencies",
     "resolve_facts",

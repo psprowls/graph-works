@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from itertools import product
 from pathlib import Path
 
 import pytest
@@ -7,6 +8,8 @@ from test_checkpoints import VALID as CHECKPOINT_DRAFT
 from work_helpers import lane_report, write_item
 from work_tracker_okf import checkpoints
 from work_tracker_okf.paths import MANAGED_ARTIFACTS, artifact_ref
+from work_tracker_okf.pipeline import ledger_phases
+from work_tracker_okf.vocabulary import PARENT_TYPES, PHASES
 
 _EPIC = "work/epic-ledger-owner"
 _CHILD = f"{_EPIC}/children/feature-ledger-child"
@@ -556,3 +559,13 @@ def test_unreadable_or_malformed_checkpoint_content_is_reported(tmp_path: Path, 
     )
     (tmp_path / _PARK_REF.removeprefix("/")).write_bytes(content)
     assert _codes(tmp_path, "decisions.checkpoint-invalid")
+
+
+def test_ledger_missing_fires_exactly_at_ledger_phases(tmp_path: Path) -> None:
+    """Derived from the stage table's `ledger_required` column plus `done`."""
+    pairs = list(product(sorted(PARENT_TYPES), sorted(PHASES)))
+    for type_, phase in pairs:
+        write_item(tmp_path, f"{type_.lower()}-{phase}", f"type: {type_}\nwork_status: open\nphase: {phase}\n")
+    report = lane_report(tmp_path)
+    flagged = {f.path for f in report.by_code("decisions.ledger-missing")}
+    assert flagged == {f"work/{t.lower()}-{p}.md" for t, p in pairs if p in ledger_phases()}

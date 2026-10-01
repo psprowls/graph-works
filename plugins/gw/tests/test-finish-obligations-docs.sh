@@ -20,16 +20,13 @@ assert_contains() {
 }
 
 RELAY="$PLUGIN_ROOT/skills/finishing-relay/SKILL.md"
-WF="$PLUGIN_ROOT/skills/workflow/SKILL.md"
 RIDER="$PLUGIN_ROOT/skills/workflow/references/brief-riders.md"
 AUTO="$PLUGIN_ROOT/skills/auto-drive/SKILL.md"
 PIPELINE="$REPO_ROOT/packages/graph-works-core/src/graph_works_core/workspace/pipeline.py"
 
-DEFER_WF='When the plan marks a step `Deferred to finish`, record it with `gw work obligation add <work-path> --text "<the step>" --apply` instead of doing it or leaving it in prose.'
 DEFER_TAIL='"When the plan marks a step `Deferred to finish`, record it with "'
 
 echo "--- execute deferral"
-assert_contains "$WF" "$DEFER_WF" "workflow execute bullet carries the deferral sentence"
 assert_contains "$PIPELINE" "$DEFER_TAIL" "EXECUTE_TAIL carries the same deferral sentence"
 
 echo "--- writing-plans rider"

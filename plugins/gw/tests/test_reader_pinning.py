@@ -104,6 +104,13 @@ class ReaderPinning(unittest.TestCase):
         result = subprocess.run(["git", "-C", str(path), "symbolic-ref", "-q", "HEAD"], capture_output=True)
         self.assertEqual(result.returncode, 1)
 
+    def test_a_reader_is_created_in_the_clone_that_owns_the_working_checkout(self):
+        checkout = self.root / "checkout"
+        self.git(self.repo, "worktree", "add", "-b", "track", str(checkout), "main")
+        self.dispatch["repo"]["path"] = str(checkout)
+        result = self.prepare()
+        self.detached(result["path"], self.sha)
+
     def test_reader_stays_at_its_commit_while_the_epic_advances(self):
         result = self.prepare()
         self.assertEqual(result["attempt_id"], "attempt-1")

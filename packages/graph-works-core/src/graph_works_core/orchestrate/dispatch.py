@@ -462,11 +462,31 @@ def _placement_file(c: _Dispatch) -> Path:
     return path
 
 
+def _owning_checkout(repo_path: str) -> str | None:
+    """The primary checkout that owns *repo_path*'s git directory, or None when git cannot say.
+
+    Git lists the main working tree first. For a managed repository the plan
+    names a linked working checkout, and the repository Orca knows is the
+    clone that owns it.
+    """
+    inventory = probe_git(Path(repo_path), "worktree", "list", "--porcelain", "-z")
+    if inventory.returncode != 0:
+        return None
+    first = next((field for field in inventory.stdout.split("\0") if field.startswith("worktree ")), None)
+    return os.path.realpath(first[len("worktree ") :]) if first else None
+
+
 def _orca_repo_id(c: _Dispatch, repo_path: str) -> str:
-    repos = [r for r in c.port.repo_list() if os.path.realpath(r["path"]) == os.path.realpath(repo_path)]
-    if len(repos) != 1:
-        raise _Stop("placement-refused", f"{len(repos)} Orca repositories match; exactly one required")
-    return repos[0]["id"]
+    """The one Orca repository for *repo_path*: registered at its owning checkout, else at the path itself."""
+    wanted = [path for path in dict.fromkeys((_owning_checkout(repo_path), os.path.realpath(repo_path))) if path]
+    registered = c.port.repo_list()
+    for path in wanted:
+        repos = [r for r in registered if os.path.realpath(r["path"]) == path]
+        if len(repos) == 1:
+            return repos[0]["id"]
+        if repos:
+            raise _Stop("placement-refused", f"{len(repos)} Orca repositories match {path}; exactly one required")
+    raise _Stop("placement-refused", f"0 Orca repositories match {' or '.join(wanted)}; exactly one required")
 
 
 def _reader_problem(repo: str, path: str, sha: str, *, detached: bool = True) -> str | None:

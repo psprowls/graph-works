@@ -401,6 +401,41 @@ def orca_top_json(orca: str, argv: list[str], *, label: str) -> dict[str, Any]:
     return payload["result"]
 
 
+def owning_checkout(repo: str) -> str | None:
+    """The primary checkout that owns *repo*'s git directory, or None when git cannot say.
+
+    Git lists the main working tree first. For a managed repository the plan
+    names a linked working checkout, and the repository Orca knows is the
+    clone that owns it. Mirrors `_owning_checkout` in graph-works-core's
+    orchestrate/dispatch.py; this helper cannot import core.
+    """
+    try:
+        listed = subprocess.run(["git", "-C", repo, "worktree", "list", "--porcelain", "-z"],
+                                check=False, capture_output=True, text=True)
+    except OSError:
+        return None
+    if listed.returncode != 0:
+        return None
+    first = next((field for field in listed.stdout.split("\0") if field.startswith("worktree ")), None)
+    return os.path.realpath(first[len("worktree "):]) if first else None
+
+
+def registered_repo(orca: str, repo: str, label: str) -> dict[str, Any]:
+    """The one Orca repository for *repo*: registered at its owning checkout, else at the path itself."""
+    repos = orca_top_json(orca, ["repo", "list"], label=label).get("repos")
+    if not isinstance(repos, list):
+        fail(f"{label}: orca repo list returned no repos array.")
+    wanted = [path for path in dict.fromkeys((owning_checkout(repo), os.path.realpath(repo))) if path]
+    for path in wanted:
+        matches = [row for row in repos if isinstance(row, dict) and isinstance(row.get("path"), str)
+                   and os.path.realpath(row["path"]) == path]
+        if len(matches) == 1:
+            return matches[0]
+        if matches:
+            fail(f"{label}: {len(matches)} Orca repositories match {path}; exactly one must be registered.")
+    fail(f"{label}: 0 Orca repositories match {' or '.join(wanted)}; exactly one must be registered.")
+
+
 def placement_dispatch(path: str, verb: str) -> tuple[str, str, dict[str, Any]]:
     """`(key, label, worktree)` from a saved `dispatches[]` entry."""
     dispatch = read_json(path)
@@ -462,18 +497,8 @@ def place(args: argparse.Namespace) -> None:
         base = text_field(worktree.get("base_branch"), label, "the worktree base_branch")
         if repo_path is None:
             fail(f"{label}: the plan names no code repository, and a new worktree is never placed by location.")
-        wanted = os.path.realpath(repo_path)
-        repos = orca_top_json(args.orca, ["repo", "list"], label=label).get("repos")
-        if not isinstance(repos, list):
-            fail(f"{label}: orca repo list returned no repos array.")
-        matches = [
-            row for row in repos
-            if isinstance(row, dict) and isinstance(row.get("path"), str)
-            and os.path.realpath(row["path"]) == wanted
-        ]
-        if len(matches) != 1:
-            fail(f"{label}: {len(matches)} Orca repositories match {wanted}; exactly one must be registered.")
-        repo_id = text_field(matches[0].get("id"), label, "the matched Orca repository id")
+        repo_id = text_field(registered_repo(args.orca, repo_path, label).get("id"), label,
+                             "the matched Orca repository id")
         parent_path = worktree.get("parent_path")
         if parent_path is not None:
             parent_path = text_field(parent_path, label, "parent_path")
@@ -673,12 +698,7 @@ def prepare(args: argparse.Namespace) -> None:
         branches = preparation_git(repo, "for-each-ref", "--format=%(refname:short)", "refs/heads").splitlines()
         if branch in branches:
             fail(f"{label}: branch exists without a provable checkout; repair")
-        repos = orca_top_json(args.orca, ["repo", "list"], label=label).get("repos", [])
-        registered = [row for row in repos if isinstance(row, dict) and isinstance(row.get("path"), str)
-                      and os.path.realpath(row["path"]) == os.path.realpath(repo)]
-        if len(registered) != 1:
-            fail(f"{label}: repository is not uniquely registered")
-        repo_id = text_field(registered[0].get("id"), label, "Orca repository id")
+        repo_id = text_field(registered_repo(args.orca, repo, label).get("id"), label, "Orca repository id")
         parent = selected["worktree"].get("parent_path")
         if parent:
             try:
@@ -838,12 +858,7 @@ def prepare_reader(args: argparse.Namespace) -> None:
         protected = {os.path.realpath(repo)}
         if parent is not None:
             protected.add(os.path.realpath(text_field(parent, label, "parent_path")))
-        repos = orca_top_json(args.orca, ["repo", "list"], label=label).get("repos", [])
-        registered = [row for row in repos if isinstance(row, dict) and isinstance(row.get("path"), str)
-                      and os.path.realpath(row["path"]) == os.path.realpath(repo)]
-        if len(registered) != 1:
-            fail(f"{label}: repository is not uniquely registered")
-        repo_id = text_field(registered[0].get("id"), label, "Orca repository id")
+        repo_id = text_field(registered_repo(args.orca, repo, label).get("id"), label, "Orca repository id")
         marker = reader_marker(key, sha, repo, attempt)
         marked = marked_rows(args.orca, repo_id, marker, label)
         if len(marked) > 1:

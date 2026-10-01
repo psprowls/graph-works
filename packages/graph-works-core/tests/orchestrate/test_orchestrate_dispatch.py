@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 from datetime import UTC, date, datetime
 
@@ -236,6 +237,61 @@ def test_placement_refused(env, case):
         env[2].worktrees["path:/parent"] = {**env[2].worktrees["id:wt1"], "repo_id": "other"}
     failure(run(env), "place", "placement-refused")
     assert "task_create" not in env[2].names()
+
+
+def managed(env, tmp_path):
+    """Make *env* the managed layout: the plan names a linked working checkout of the clone Orca knows."""
+    checkout = tmp_path / "checkout"
+    git(env[3], "worktree", "add", "-b", "track", str(checkout))
+    env[1]["dispatches"][0]["repo"]["path"] = str(checkout)
+    return checkout
+
+
+def placement_argv(env):
+    spec = next(k["spec"] for n, _, k in env[2].calls if n == "task_create")
+    return json.loads(spec.split("\n", 1)[0].removeprefix("GW_LAUNCH_V1 "))["placement_argv"]
+
+
+def test_a_creation_matches_the_clone_that_owns_the_working_checkout(env, tmp_path):
+    managed(env, tmp_path)
+    result = run(env)
+    assert result.ok, result.failure
+    assert placement_argv(env)[-2:] == ["--repo", "id:repo1"]
+
+
+def test_a_registration_at_the_working_checkout_does_not_displace_the_owning_clone(env, tmp_path):
+    checkout = managed(env, tmp_path)
+    env[2].repos.append({"id": "repo2", "path": str(checkout)})
+    result = run(env)
+    assert result.ok, result.failure
+    assert placement_argv(env)[-2:] == ["--repo", "id:repo1"]
+
+
+def test_a_working_checkout_registered_alone_is_matched_by_its_own_path(env, tmp_path):
+    checkout = managed(env, tmp_path)
+    env[2].repos = [{"id": "repo2", "path": str(checkout)}]
+    env[2].worktrees["id:wt1"]["repo_id"] = "repo2"
+    result = run(env)
+    assert result.ok, result.failure
+    assert placement_argv(env)[-2:] == ["--repo", "id:repo2"]
+
+
+def test_two_registrations_at_the_owning_clone_refuse(env, tmp_path):
+    managed(env, tmp_path)
+    env[2].repos *= 2
+    result = run(env)
+    failure(result, "place", "placement-refused")
+    assert result.failure.detail.startswith("2 Orca repositories match")
+    assert "task_create" not in env[2].names()
+
+
+def test_an_unmatched_repository_refusal_names_the_owner_and_the_plan_path(env, tmp_path):
+    checkout = managed(env, tmp_path)
+    env[2].repos = []
+    result = run(env)
+    failure(result, "place", "placement-refused")
+    assert os.path.realpath(env[3]) in result.failure.detail
+    assert os.path.realpath(checkout) in result.failure.detail
 
 
 @pytest.mark.parametrize(
@@ -1206,6 +1262,14 @@ def test_reader_never_shares_a_checkout_across_attempts(reader_env):
     port.create = lambda **kwargs: (_ for _ in ()).throw(BackendError("create refused: second attempt must allocate"))
     result = run(reader_env)
     assert result.failure.reason == "placement-refused" and "second attempt" in result.failure.detail
+
+
+def test_a_reader_is_created_in_the_clone_that_owns_the_working_checkout(reader_env, tmp_path):
+    managed(reader_env, tmp_path)
+    result = run(reader_env)
+    assert result.ok, result.failure
+    [(_name, _args, kwargs)] = [call for call in reader_env[2].calls if call[0] == "worktree_create"]
+    assert kwargs["repo_id"] == "repo1"
 
 
 @pytest.mark.parametrize(

@@ -28,6 +28,7 @@ HELPER = runpy.run_path(str(Path(__file__).resolve().parents[1] / "skills/auto-d
 CODE, WIKI = "/code/gw", "/code/gw-workspace"
 CODE_ID, WIKI_ID = "repo-code", "repo-wiki"
 EPIC, CHILD = "/wt/epic", "/wt/child"
+CHECKOUT = "/wt/main"
 EPIC_ID, CHILD_ID, MAIN_ID = f"{CODE_ID}::{EPIC}", f"{CODE_ID}::{CHILD}", f"{CODE_ID}::{CODE}"
 KEY = "gw-execute-bug-child-0123abcd"
 LOCATIONS = {"primary": CODE, "wiki": WIKI, "epic": EPIC}
@@ -113,8 +114,11 @@ def fork(parent_path=EPIC, action="fork-child"):
 
 
 class FakeOrca:
-    def __init__(self, *, repos=None, epic_repo=CODE_ID, child_repo=CODE_ID, child_parent=None, set_fails=False):
+    def __init__(self, *, repos=None, epic_repo=CODE_ID, child_repo=CODE_ID, child_parent=None, set_fails=False,
+                 owners=None):
         self.calls: list[list[str]] = []
+        #: Linked checkout path -> the primary checkout Git lists first for it.
+        self.owners = owners or {}
         self.set_fails = set_fails
         self.repos = repos if repos is not None else [{"id": CODE_ID, "path": CODE}, {"id": WIKI_ID, "path": WIKI}]
         self.worktrees = {
@@ -137,6 +141,10 @@ class FakeOrca:
 
     def __call__(self, argv, **kwargs):
         argv = list(argv)
+        if argv[0] == "git":
+            assert argv[3:] == ["worktree", "list", "--porcelain", "-z"], argv
+            listed = [self.owners.get(argv[2], argv[2]), argv[2]]
+            return subprocess.CompletedProcess(argv, 0, "".join(f"worktree {path}\0\0" for path in listed), "")
         self.calls.append(argv[1:])
         assert argv[-1] == "--json", argv
         body = argv[1:-1]
@@ -245,6 +253,28 @@ class PlacementTests(unittest.TestCase):
         placed = self.place(FakeOrca(), fork(parent_path=None, action="create-top-level"))
         self.assertEqual(placed["placement_argv"][-2:], ["--repo", f"id:{CODE_ID}"])
         self.assertIsNone(placed["parent_worktree_id"])
+
+    def test_a_creation_matches_the_clone_that_owns_the_working_checkout(self):
+        fake = FakeOrca(owners={CHECKOUT: CODE})
+        placed = self.place(fake, fork(parent_path=None, action="create-top-level"), repo_path=CHECKOUT)
+        self.assertEqual(placed["placement_argv"][-2:], ["--repo", f"id:{CODE_ID}"])
+
+    def test_a_registration_at_the_working_checkout_does_not_displace_the_owning_clone(self):
+        fake = FakeOrca(owners={CHECKOUT: CODE},
+                        repos=[{"id": CODE_ID, "path": CODE}, {"id": "repo-checkout", "path": CHECKOUT}])
+        placed = self.place(fake, fork(parent_path=None, action="create-top-level"), repo_path=CHECKOUT)
+        self.assertEqual(placed["placement_argv"][-2:], ["--repo", f"id:{CODE_ID}"])
+
+    def test_a_working_checkout_registered_alone_is_matched_by_its_own_path(self):
+        fake = FakeOrca(owners={CHECKOUT: CODE}, repos=[{"id": "repo-checkout", "path": CHECKOUT}])
+        placed = self.place(fake, fork(parent_path=None, action="create-top-level"), repo_path=CHECKOUT)
+        self.assertEqual(placed["placement_argv"][-2:], ["--repo", "id:repo-checkout"])
+
+    def test_an_unmatched_repository_refusal_names_the_owner_and_the_plan_path(self):
+        fake = FakeOrca(owners={CHECKOUT: CODE}, repos=[])
+        reason = self.refused("place", fake, fork(parent_path=None, action="create-top-level"), repo_path=CHECKOUT)
+        self.assertIn(CODE, reason)
+        self.assertIn(CHECKOUT, reason)
 
     def test_reuse_and_main_place_by_path_with_no_orca_call(self):
         for action in ("reuse", "main"):
@@ -507,6 +537,15 @@ class PreparationLifecycleTests(unittest.TestCase):
             self.assertEqual(argv[argv.index(flag) + 1], expected)
         self.assertEqual(self.git(self.root / "anchor", "branch", "--show-current"), "epic/integration")
         self.assertFalse(any("worker-start" in call or "task-create" in call for call in self.calls))
+
+    def test_an_anchor_is_created_in_the_clone_that_owns_the_working_checkout(self):
+        checkout = self.root / "checkout"
+        self.git(self.repo, "worktree", "add", "-b", "track", str(checkout), "main")
+        self.prep["repo"]["path"] = str(checkout)
+        result = self.prepare()
+        self.assertEqual(result["branch"], "epic/integration")
+        create = next(call for call in self.calls if call[1:3] == ["worktree", "create"])
+        self.assertEqual(create[create.index("--repo") + 1], "id:ui-id")
 
     def record_argv(self):
         return next(call for call in self.calls if "record" in call)

@@ -13,6 +13,7 @@
     "+ <tmp>/fresh/.gw/worktrees/",
     "+ .gw/.gitignore",
     "+ .gitignore",
+    "+ okf/.obsidian/app.json",
     "+ workspace.yaml",
     "+ dispatch.yaml",
     "+ AGENTS.md",
@@ -73,6 +74,18 @@
     "+ sections/Reference.yaml",
     "+ sections/Explanation.yaml",
     "+ sections/Source.yaml",
-    "+ sections/Adr.yaml"
+    "+ sections/Adr.yaml",
+    "+ index.md",
+    "+ log.md",
+    "+ tags.yaml",
+    "+ schema/_base-repository.schema.json",
+    "+ schema/ManagedRepository.schema.json",
+    "+ schema/ReferenceRepository.schema.json",
+    "+ schema/RepositorySnapshot.schema.json",
+    "+ schema/RepositoryChangelog.schema.json",
+    "+ sections/ManagedRepository.yaml",
+    "+ sections/ReferenceRepository.yaml",
+    "+ sections/RepositorySnapshot.yaml",
+    "+ sections/RepositoryChangelog.yaml"
   ]
 }

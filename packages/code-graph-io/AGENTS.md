@@ -55,6 +55,8 @@ in this package currently enforces that skip; treat `-m integration` /
 
 ## Architecture
 
+`checkpoint.graph_checkpoint(graph_dir)` snapshots SQLite (including committed WAL pages) for a larger caller-owned transaction. The yielded restore function restores existing readers too; callers must serialize the larger operation. An absent graph restores as an empty queryable cache.
+
 ### The pipeline: parse → project → upsert → resolve
 
 ```
@@ -71,6 +73,8 @@ node sets, resolve import edges, then (full builds only) delete any node
 under a tracked path that the pass didn't touch. Global steps — dependency
 reconciliation, `resolve.sweep()`, the strict-tree-invariant check, and
 workspace metadata — run once after every member has been processed.
+
+`run_workspace(..., member_names=)` accepts an optional index-aligned name override for a member's graph identity, leaving ordinary members on their git-derived names.
 
 Gotchas that span several files:
 

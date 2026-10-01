@@ -1,0 +1,62 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "required": ["type", "title", "description", "url"],
+  "properties": {
+    "type": { "type": "string", "minLength": 1 },
+    "title": { "type": "string", "minLength": 1 },
+    "description": { "type": "string", "minLength": 1 },
+    "url": { "type": "string", "minLength": 1 },
+    "track": { "type": "string", "minLength": 1 },
+    "status": { "enum": ["draft", "stable", "deprecated"] },
+    "updated": { "type": "string", "format": "date" },
+    "tags": { "type": "array", "items": { "type": "string" } },
+    "sources": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "type": "object",
+        "required": ["id", "resource"],
+        "additionalProperties": true,
+        "properties": {
+          "id": { "type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$" },
+          "resource": { "type": "string", "pattern": "^/", "minLength": 1 },
+          "title": { "type": "string" },
+          "last_modified": { "type": "string", "format": "date" }
+        }
+      }
+    },
+    "generated": {
+      "type": "object",
+      "required": ["by", "at"],
+      "additionalProperties": false,
+      "properties": {
+        "by": { "type": "string", "minLength": 1 },
+        "at": { "type": "string", "format": "date-time" }
+      }
+    },
+    "pin": {
+      "type": "object",
+      "required": ["commit", "fetched_at"],
+      "additionalProperties": false,
+      "properties": {
+        "commit": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+        "fetched_at": { "type": "string", "format": "date-time" },
+        "ref": { "type": "string", "minLength": 1 },
+        "describe": { "type": "string", "minLength": 1 },
+        "tree": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+        "commit_date": { "type": "string", "format": "date-time" },
+        "previous": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+        "generation": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "gw_version": { "type": "string", "minLength": 1 },
+            "scan_config_hash": { "type": "string", "minLength": 1 }
+          }
+        }
+      }
+    }
+  },
+  "x-okf-directory": "repositories/"
+}

@@ -737,9 +737,7 @@ def _base_branch_repo(tmp_path: Path) -> Path:
 
 
 def _item(layout, path: str):
-    return next(
-        i for i in stage.load_items(stage.load_bundle(layout.bundle_dir, ignore=stage.IGNORE)) if i.path == path
-    )
+    return next(i for i in stage.load_items(stage.load_workspace_bundle(layout, ignore=stage.IGNORE)) if i.path == path)
 
 
 def test_a_derived_start_sha_equal_to_head_still_writes_a_stub_carrying_the_empty_range_warning(
@@ -1017,7 +1015,7 @@ def test_a_foreign_stamp_without_a_baseline_falls_back_to_the_scalar_one(tmp_pat
         path,
         extra=f"start_sha: {fork}\nrepo_stamps:\n  code:\n    worktree: {repo}\n    branch: feature/a\n",
     )
-    item = stage.load_items(stage.load_bundle(layout.bundle_dir, ignore=stage.IGNORE))[0]
+    item = stage.load_items(stage.load_workspace_bundle(layout, ignore=stage.IGNORE))[0]
     assert stage._gate_placement(item, "code") == (str(repo), fork)
 
 
@@ -1040,7 +1038,7 @@ def test_a_foreign_stamp_supplies_its_own_baseline(tmp_path: Path) -> None:
         extra=f"repo_stamps:\n  code:\n    worktree: {repo}\n    branch: feature/a\n    start_sha: {fork}\n",
     )
     verdict = stage._commit_gate(
-        stage.load_items(stage.load_bundle(layout.bundle_dir, ignore=stage.IGNORE))[0],
+        stage.load_items(stage.load_workspace_bundle(layout, ignore=stage.IGNORE))[0],
         repo=repo,
         repo_note=None,
         repo_name="code",

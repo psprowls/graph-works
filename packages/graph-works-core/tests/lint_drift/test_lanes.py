@@ -167,7 +167,7 @@ def test_the_wiki_lane_carries_every_declared_capability(workspace):
     test. Here the weaker but still load-bearing claim: the composer built a
     rule for each capability whose declarations are present."""
     wiki, _work = _compose(workspace).lanes
-    assert len(wiki.rules) == 8  # health, render, schema, about, drain, section, vocabulary, placement — no reader
+    assert len(wiki.rules) == 9  # health, render, schema, about, drain, repos placement, section, tags, placement
 
 
 def test_the_wiki_lane_accepts_canonical_nested_code_wiki_placement(workspace):
@@ -249,7 +249,7 @@ def test_a_reader_adds_the_sync_rule(workspace, monkeypatch):
 
     monkeypatch.setattr(lanes_module, "snapshot_bundle", lambda *a, **k: _EmptySnapshot())
     wiki, _work = _compose(workspace, reader=_Reader()).lanes
-    assert len(wiki.rules) == 9
+    assert len(wiki.rules) == 10
 
 
 class _EmptySnapshot:

@@ -164,6 +164,18 @@ def test_main_passes_a_path_selector_exactly_like_reuse():
     assert "--repo" not in start
 
 
+def test_main_at_an_in_bundle_repositorys_checkout_launches_there():
+    # The in-bundle repository's main names its working checkout, not its clone.
+    sess, runner = session()
+    checkout = "/ws/.gw/worktrees/demo/main"
+    action = WorktreeAction(
+        action="main", path=checkout, branch="main", base_branch=None, exists=True, parent_path=None, start_sha=None
+    )
+    sess.launch(planned(worktree=action))
+    start = runner.calls_matching("worker-start")[0]
+    assert runner.argv_after("--worktree", start) == f"path:{checkout}"
+
+
 def test_main_without_a_path_is_refused():
     # The same guard `reuse` carries. A pathless "main" is a planner bug, and
     # launching it would silently start the worker in the coordinator's cwd.

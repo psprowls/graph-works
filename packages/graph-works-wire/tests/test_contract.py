@@ -14,18 +14,23 @@ from collections.abc import Callable
 from types import ModuleType
 
 import pytest
-from graph_works_wire import agent_config, code, config, events, util, wiki, work
+from graph_works_wire import agent_config, code, config, events, repo, util, wiki, work
 from samples_agent_config import AGENT_CONFIG
 from samples_code import CODE
 from samples_config import CONFIG
 from samples_events import EVENTS
+from samples_repo import REPO
 from samples_util import UTIL
 from samples_wiki import WIKI
 from samples_work import WORK
 
-MODULES: tuple[ModuleType, ...] = (work, wiki, config, util, agent_config, events, code)
+MODULES: tuple[ModuleType, ...] = (work, wiki, config, util, agent_config, events, code, repo)
 
 EXPECTED: set[str] = {
+    "repo.repo_adopt_payload",
+    "repo.repo_add_payload",
+    "repo.repo_restore_payload",
+    "repo.repo_advance_payload",
     "events.change_event_payload",
     "events.changes_payload",
     "agent_config.agent_config_payload",
@@ -114,6 +119,7 @@ SAMPLES: dict[str, tuple[Callable[[], object], ...]] = {
     **AGENT_CONFIG,
     **EVENTS,
     **CODE,
+    **REPO,
 }
 
 
@@ -200,3 +206,28 @@ def test_orchestration_projects_repository_identity_and_preparations() -> None:
     assert payload["dispatches"][0]["workspace"] == {"worktree": "/ws-wt/a", "branch": "feature/a"}
     assert WORK["work.orchestrate_payload"][1]()["preparations"] == []
     assert WORK["work.orchestrate_payload"][1]()["workspace_preparations"] == []
+
+
+def test_repo_adopt_payload_shape() -> None:
+    assert SAMPLES["repo.repo_adopt_payload"][0]() == {
+        "name": "demo",
+        "source": "../demo",
+        "clone": "okf/repositories/demo/references/git",
+        "checkout": ".gw/worktrees/demo/main",
+        "track": "main",
+        "commit": "0" * 40,
+        "checkout_created": True,
+        "repaired": ["/ws/.gw/worktrees/legacy/wt0"],
+        "paths": ["log.md", "repositories/demo.md", "repositories/index.md", "workspace.yaml"],
+        "dry_run": False,
+        "ok": True,
+        "refusal": None,
+        "workspace_commit": {
+            "status": "committed",
+            "sha": "1" * 40,
+            "subject": "workspace: adopt managed repository demo",
+            "paths": ["log.md"],
+            "reason": None,
+        },
+        "warnings": [],
+    }

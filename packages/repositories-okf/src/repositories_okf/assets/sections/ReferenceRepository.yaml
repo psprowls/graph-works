@@ -1,0 +1,6 @@
+sections:
+  - heading: Summary
+    required: true
+    placeholder: |
+      > TODO: what this repository is and why the workspace tracks it.
+additional_sections: true

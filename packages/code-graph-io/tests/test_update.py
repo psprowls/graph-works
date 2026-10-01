@@ -9,11 +9,29 @@ from pathlib import Path
 import pytest
 from _git_repo import init_repo, write_and_commit
 from code_graph_io import packages, update
+from code_graph_io.handle import open_reader
 from code_graph_io.paths import graph_dir
 
 
 def _open_ro(repo: Path) -> sqlite3.Connection:
     return sqlite3.connect(f"file:{graph_dir(repo) / 'code.db'}?mode=ro", uri=True)
+
+
+@pytest.mark.integration
+def test_run_workspace_uses_declared_member_name_for_graph_identity(tmp_path: Path) -> None:
+    repo = tmp_path / "git"
+    repo.mkdir()
+    init_repo(repo)
+    write_and_commit(repo, {"b.py": "b = 1\n"}, "init")
+
+    update.run_workspace([repo], graph_dir=graph_dir(tmp_path), member_names=["demo"], full=True)
+
+    reader = open_reader(graph_dir=graph_dir(tmp_path))
+    try:
+        assert [(node.name, node.attrs["uri"]) for node in reader.list_repositories()] == [("demo", "repo:local/demo")]
+        assert "file:local/demo/b.py" in reader.file_uris()
+    finally:
+        reader.close()
 
 
 @pytest.mark.integration

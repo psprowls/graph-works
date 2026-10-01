@@ -10,12 +10,12 @@ patch them, matching `LibrarianAdapter` and `SynthesizerAdapter`.
 from __future__ import annotations
 
 from code_graph_io import GraphReader
-from okf_io import load_bundle
 from subagents_io import LoopOutcome, RunContext
 
 from graph_works_core.graph.commands import graph_target
 from graph_works_core.query import commands as query_mod
 from graph_works_core.query.query_orchestrator import orchestrator_output_as_dict
+from graph_works_core.workspace.bundle import load_workspace_bundle
 from graph_works_core.workspace.discovery import resolve
 from graph_works_core.workspace.provenance import head_sha
 
@@ -40,7 +40,7 @@ class QueryOrchestratorLoopAdapter:
 
     async def run(self, ctx: RunContext[GraphReader], item: str) -> LoopOutcome:
         layout = resolve(workspace=ctx.workspace)
-        bundle = load_bundle(layout.bundle_dir)
+        bundle = load_workspace_bundle(layout)
         # `_prepare_query_retrieval` already raises `ValueError` outside
         # `[3, 10]`; the reference's own `top_k` bounds check is not repeated
         # here — one check is better than two that can disagree.

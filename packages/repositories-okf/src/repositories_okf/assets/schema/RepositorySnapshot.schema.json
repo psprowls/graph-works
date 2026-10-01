@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "required": ["type", "title", "description", "repository", "commit", "fetched_at", "rewritten", "range"],
+  "additionalProperties": false,
+  "properties": {
+    "type": { "const": "RepositorySnapshot" },
+    "title": { "type": "string", "minLength": 1 },
+    "description": { "type": "string", "minLength": 1 },
+    "repository": { "type": "string", "pattern": "^/repositories/[^/]+\\.md$" },
+    "commit": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+    "describe": { "type": "string", "minLength": 1 },
+    "commit_date": { "type": "string", "format": "date-time" },
+    "fetched_at": { "type": "string", "format": "date-time" },
+    "previous": { "type": ["string", "null"], "pattern": "^[0-9a-f]{40}$" },
+    "merge_base": { "type": ["string", "null"], "pattern": "^[0-9a-f]{40}$" },
+    "rewritten": { "type": "boolean" },
+    "range": {
+      "type": "object",
+      "required": ["commits", "files_changed"],
+      "additionalProperties": false,
+      "properties": {
+        "commits": { "type": "integer", "minimum": 0 },
+        "files_changed": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "status": { "enum": ["draft", "stable", "deprecated"] },
+    "updated": { "type": "string", "format": "date" },
+    "tags": { "type": "array", "items": { "type": "string" } }
+  },
+  "x-okf-directory": "repositories/"
+}

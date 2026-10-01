@@ -447,8 +447,14 @@ def apply_entities(
     *,
     today: date,
     declarations_dir: Path | None = None,
+    ignore: tuple[str, ...] = (),
+    prune: tuple[str, ...] = (),
 ) -> SyncSummary:
-    """Apply exactly *plan*'s members, without consulting the graph or config."""
+    """Apply exactly *plan*'s members, without consulting the graph or config.
+
+    *ignore* and *prune* are the caller's bundle filters, preserved on every reload.
+    graph-works supplies its clone patterns without coupling this package to that lane.
+    """
     _ = today
     members: dict[str, tuple[str, str]] = {}
     for write in plan.writes:
@@ -472,7 +478,7 @@ def apply_entities(
             )
         members[identity] = (write.member, write.context.resource)
 
-    bundle = load_bundle(bundle_root)
+    bundle = load_bundle(bundle_root, ignore=ignore, prune=prune)
     index = resource_index(bundle)
     for write in plan.writes:
         path_conflicts = index.filesystem_path_conflicts_for(write.member)
@@ -520,7 +526,7 @@ def apply_entities(
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(text, encoding="utf-8", newline="")
 
-    working_bundle = load_bundle(bundle_root)
+    working_bundle = load_bundle(bundle_root, ignore=ignore, prune=prune)
     planned_ids = {write.member.removesuffix(".md") for write in plan.writes}
     scaffold = plan_sections(working_bundle, section_set)
     scaffold_splices = tuple(splice for splice in scaffold.splices if splice.concept_id in planned_ids)

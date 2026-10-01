@@ -93,7 +93,7 @@ from okf_ext.bundle import SCHEMA_DIRNAME, SECTIONS_DIRNAME
 from okf_ext.proposals import apply as apply_plan
 from okf_ext.schemas import SchemaSet, load_schemas
 from okf_ext.shape import load_sections
-from okf_io import append_log_entry, load_bundle, update_index
+from okf_io import append_log_entry, update_index
 from okf_io import parse as parse_document
 
 from graph_works_core.agent_substrate.agent_tools import strip_code_fence
@@ -102,6 +102,7 @@ from graph_works_core.ingest.entity_match import entity_matcher
 from graph_works_core.ingest.prompts.ingestor import build_ingestor_system
 from graph_works_core.ingest.suggest_pages import apply_suggestions, merge_apply_status, plan_suggestions
 from graph_works_core.prompts import render_project_context
+from graph_works_core.workspace.bundle import load_workspace_bundle
 from graph_works_core.workspace.config import load_workspace_config
 from graph_works_core.workspace.layout import WorkspaceLayout
 
@@ -524,7 +525,7 @@ async def run_ingest_source(
     kinds = source_kinds(schema_set)
     section_set = load_sections(config.declarations_dir / SECTIONS_DIRNAME)
     lanes = lane_set(schema_set)
-    bundle = load_bundle(layout.bundle_dir, ignore=BUNDLE_IGNORE)
+    bundle = load_workspace_bundle(layout, ignore=BUNDLE_IGNORE)
 
     with _matcher_for(match_entity, config, schema_set) as matcher:
         brief = plan_document_brief(
@@ -702,7 +703,7 @@ async def run_ingest_source(
     status = merge_apply_status(status, apply_status)
     base = replace(base, proposals=tuple(proposal_reports), proposal_status=status)
 
-    reconciled = load_bundle(layout.bundle_dir, ignore=BUNDLE_IGNORE)
+    reconciled = load_workspace_bundle(layout, ignore=BUNDLE_IGNORE)
     #: The directories reconciled after every ingest: the one the source page
     #: landed in, and the bundle root whose own index lists it as a
     #: subdirectory. Derived from the page rather than named, so a replaced

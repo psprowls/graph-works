@@ -702,8 +702,16 @@ def test_wet_sync_refuses_entity_target_drift_between_plan_and_apply(
     real_plan_sync = run_module.plan_sync
     captured: dict[str, dict[str, bytes]] = {}
 
-    def plan_then_drift(bundle_root_arg: Path, *, config: Config, reader: object, at: str) -> run_module.SyncPlan:
-        plan = real_plan_sync(bundle_root_arg, config=config, reader=reader, at=at)  # type: ignore[arg-type]
+    def plan_then_drift(
+        bundle_root_arg: Path,
+        *,
+        config: Config,
+        reader: object,
+        at: str,
+        ignore: tuple[str, ...] = (),
+        prune: tuple[str, ...] = (),
+    ) -> run_module.SyncPlan:
+        plan = real_plan_sync(bundle_root_arg, config=config, reader=reader, at=at, ignore=ignore, prune=prune)  # type: ignore[arg-type]
         blocked = bundle_root / "code-graph" / "demo" / "entities" / "packages" / "widgets.md"
         blocked.parent.mkdir(parents=True, exist_ok=True)
         blocked.mkdir()
@@ -732,8 +740,16 @@ def test_wet_sync_refuses_a_case_equivalent_entity_target_drift_between_plan_and
     real_plan_sync = run_module.plan_sync
     captured: dict[str, dict[str, bytes]] = {}
 
-    def plan_then_drift(bundle_root_arg: Path, *, config: Config, reader: object, at: str) -> run_module.SyncPlan:
-        plan = real_plan_sync(bundle_root_arg, config=config, reader=reader, at=at)  # type: ignore[arg-type]
+    def plan_then_drift(
+        bundle_root_arg: Path,
+        *,
+        config: Config,
+        reader: object,
+        at: str,
+        ignore: tuple[str, ...] = (),
+        prune: tuple[str, ...] = (),
+    ) -> run_module.SyncPlan:
+        plan = real_plan_sync(bundle_root_arg, config=config, reader=reader, at=at, ignore=ignore, prune=prune)  # type: ignore[arg-type]
         occupant = bundle_root / "code-graph" / "demo" / "entities" / "packages" / "WIDGETS.md"
         occupant.parent.mkdir(parents=True, exist_ok=True)
         occupant.write_text("---\ntype: Package\n---\n", encoding="utf-8")
@@ -931,3 +947,72 @@ def test_seeded_subdirectories_reconciles_after_child_index_cleanup(tmp_path: Pa
     assert "dead/index.md" not in parent.read_text(encoding="utf-8")
     assert "kept/index.md" in parent.read_text(encoding="utf-8")
     assert preview.entities.catalog_updated == result.entities.catalog_updated
+
+
+_CLONE_GLOB = "repositories/*/references/git/*"
+
+
+def _plant_clone(bundle_root: Path) -> dict[str, bytes]:
+    clone = bundle_root / "repositories" / "demo" / "references" / "git"
+    clone.mkdir(parents=True)
+    (clone / "README.md").write_text("# upstream\n", encoding="utf-8", newline="")
+    (clone / "index.md").write_text("# upstream index\n\n- [readme](README.md)\n", encoding="utf-8", newline="")
+    return {p.relative_to(bundle_root).as_posix(): p.read_bytes() for p in clone.rglob("*") if p.is_file()}
+
+
+def test_a_wet_sync_with_the_clone_ignore_never_touches_the_clone(tmp_path: Path) -> None:
+    bundle_root, graph_dir, config = _workspace(tmp_path)
+    before = _plant_clone(bundle_root)
+
+    with open_reader(graph_dir=graph_dir) as reader:
+        result = sync_bundle(bundle_root, config=config, reader=reader, at=_AT, today=_TODAY, ignore=(_CLONE_GLOB,))
+
+    assert result.ok
+    after = {k: (bundle_root / k).read_bytes() for k in before}
+    assert after == before
+    assert not any("references/git" in member for member in (*result.entities.catalog, *result.entities.written))
+    assert not (bundle_root / "repositories" / "index.md").exists()
+
+
+def test_a_dry_sync_with_the_clone_ignore_plans_nothing_under_the_clone(tmp_path: Path) -> None:
+    bundle_root, graph_dir, config = _workspace(tmp_path)
+    _plant_clone(bundle_root)
+
+    with open_reader(graph_dir=graph_dir) as reader:
+        result = sync_bundle(
+            bundle_root, config=config, reader=reader, at=_AT, today=_TODAY, dry_run=True, ignore=(_CLONE_GLOB,)
+        )
+
+    assert not any("references/git" in member for member in (*result.entities.catalog, *result.entities.written))
+
+
+@pytest.mark.parametrize("dry_run", [False, True])
+def test_sync_prunes_foreign_trees_on_every_reload(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, dry_run: bool
+) -> None:
+    bundle_root, graph_dir, config = _workspace(tmp_path)
+    clone = bundle_root / "repositories/demo/references/git"
+    clone.mkdir(parents=True)
+    (clone / "foreign.md").write_bytes(b"upstream content")
+    original = Path.iterdir
+
+    def guarded(path: Path):
+        assert not path.is_relative_to(clone), f"walk entered foreign tree: {path}"
+        return original(path)
+
+    monkeypatch.setattr(Path, "iterdir", guarded)
+    with open_reader(graph_dir=graph_dir) as reader:
+        result = sync_bundle(
+            bundle_root,
+            config=config,
+            reader=reader,
+            at=_AT,
+            today=_TODAY,
+            dry_run=dry_run,
+            ignore=("repositories/*/references/git/**",),
+            prune=("repositories/*/references/git",),
+        )
+    assert not result.mirror.failed_repos
+    if not dry_run:
+        assert (bundle_root / "code-graph/demo.md").is_file()
+        assert (bundle_root / "code-graph/demo/file-system/src/widgets.py.md").is_file()

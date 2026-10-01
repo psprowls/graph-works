@@ -5,7 +5,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## What this repo is
 
 A `uv` workspace (`members = ["packages/*"]`) for OKF tooling. The root is a
-workspace root only — not distributable, `package = false`. It holds sixteen
+workspace root only — not distributable, `package = false`. It holds seventeen
 packages today, plus one plugin tree (not a workspace member, not Python):
 `plugins/gw`, the first-party Claude Code plugin this repo publishes and the
 one Claude Code loads (name `gw`).
@@ -46,6 +46,7 @@ spans packages.
 | `okf-ext`          | 2        | Beyond-spec capabilities over any OKF v0.2 bundle — extends `okf-io`, never modifies it.                                                                       |
 | `code-wiki-okf`    | 2        | Generates/updates a standalone OKF v0.2 bundle from the shared code graph.                                                                                     |
 | `doc-wiki-okf`     | 2        | The documentation-wiki lane: source reading, ingest briefs, proposals.                                                                                         |
+| `repositories-okf` | 2        | The repositories lane: ManagedRepository/ReferenceRepository declarations, the lane installer, the clone ignore glob, and the reference-repository git runner and page builders (pin, snapshot, changelog, flagging). |
 | `work-tracker-okf` | 2        | Work-item tracking as an OKF v0.2 lane.                                                                                                                        |
 | `graph-works-core` | 3        | What a workspace is: discovery, the layout object, the manifest, init.                                                                                         |
 | `graph-works-wire` | 4        | Every typed result projected to plain JSON data — the one copy the CLI and graph-works-serve emit. Pure: no interface framework, no I/O, no encoding. |
@@ -78,7 +79,7 @@ exists yet — enforcement is local, by design (ADR-0010).
 | `just line-endings`      | A tracked file that would check out CRLF under Git for Windows' default `core.autocrlf=true`                                                                                                                                                                                                                                                                                                                                                              |
 | `just platform-declared` | A package that imports a POSIX-only module, or reaches a POSIX-only process primitive, with no `## Platform` section declaring it — ADR-0021 rule 3a as a check                                                                                                                                                                                                                                                                                           |
 | `just lint`              | `uv run ruff check . && uv run ruff format --check .`                                                                                                                                                                                                                                                                                                                                                                                                     |
-| `just types`             | `uv run mypy --strict`, **twice per package** — once per `--platform` arm (`linux`, then `win32`), 26 invocations total — via `uv run --package <name> mypy --strict --platform <arm> packages/<name>/src` (okf-io and okf-ext share a bare `uv run` since they share the root `testpaths`); a POSIX host cannot otherwise see a Windows-only `mypy --strict` failure, or vice versa                                                                      |
+| `just types`             | `uv run mypy --strict`, **twice per package** — once per `--platform` arm (`linux`, then `win32`), 32 invocations total — via `uv run --package <name> mypy --strict --platform <arm> packages/<name>/src` (okf-io and okf-ext share a bare `uv run` since they share the root `testpaths`); a POSIX host cannot otherwise see a Windows-only `mypy --strict` failure, or vice versa                                                                      |
 | `just contracts`         | `uv run lint-imports` — the workspace's band/suffix boundaries plus okf-ext's internal capability boundaries                                                                                                                                                                                                                                                                                                                                              |
 | `just test`              | `uv run pytest`, plus one `uv run --package <name> pytest packages/<name>/tests` per non-okf-io/okf-ext package                                                                                                                                                                                                                                                                                                                                           |
 | `just cov`               | Branch coverage, gated per package (95% for most, 90% for `code-graph-io`) — see the justfile for exact invocations; a failure reports only a global percentage, so start with the lowest-covered module and read `term-missing`                                                                                                                                                                                                                          |
@@ -91,7 +92,7 @@ boundary the gate is `gw work gate run <work-path>` then `gw work gate wait
 <work-path>`: gw runs this repository's `gate.full` (`just check`) once per
 clean tree and records a receipt that advance and finish trust. Do not re-run
 the full gate by hand.**
-Re-running the full 15-package gate on every fix attempt is the single biggest
+Re-running the full 17-package gate on every fix attempt is the single biggest
 source of wasted time in this repo — mypy strict runs twice per package per
 platform arm, cov runs the full suite per package, and `test-plugin` alone chains
 ~15 suites including a `node --test` run. A transcript survey of
@@ -249,13 +250,15 @@ an implementation detail.
 - **okf-io is the pure core** (ADR-0005). Every other package depends on it
 (directly or via `okf-ext`), never the reverse. Schema validation, harvesters,
 servers, wiki generation — none of those belong here. The core instead
-exposes five extension points, all shipped and contract-tested before any
+exposes six extension points, all shipped and contract-tested before any
 consumer exists: `extra_rules=` on `validate()`, `Document.fm_data(dates="iso")`
 (plain-data projection, `json.dumps`-able with no encoder), `ignore=` on
 `load_bundle()` (an ignored member is "not a concept", not "not there"),
-`describe=` on `update_index()`, and `scope=` on `validate()` / `RuleContext`
+`describe=` on `update_index()`, `scope=` on `validate()` / `RuleContext`
 (a `frozenset[str] | None` of bundle-relative member paths that constrains
-per-document rule iteration). `validate(links=)` is a related optimisation
+per-document rule iteration), and `prune=` on `load_bundle()` (a matching
+directory is "present but not modelled": never listed, recorded in
+`Bundle.pruned`, still resolvable by `member_id` through a filesystem probe). `validate(links=)` is a related optimisation
 parameter, not an extension point — passing a pre-built `LinkGraph` skips
 recomputing it and changes no behaviour.
 - `okf_io.validate` **is the function, not the submodule.** Use

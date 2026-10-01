@@ -84,6 +84,8 @@ and still imports nothing from `graph_works_core`.
 layout, so do not pass one for the other. `source` is the name every
 `ConfigError` quotes.
 
+`repositories.<name>.checkout` is allowlisted here, while core owns its meaning.
+
 `Config.state_gate` (`StateGateConfig`) is parsed from `workspace.yaml` and
 `git_state.compute_state_gate()`/`StateGate` are fully implemented, but as of
 this writing **nothing in `cli.py` or `sync/run.py` calls
@@ -126,6 +128,7 @@ shape: it exports `CODE_GRAPH_LANE`, the directory helpers
 consumer calls those rather than retyping a path. The bundle-root and
 `code-graph` indexes list repositories only; the typed groups live in each
 repository's `entities/index.md`. There is no top-level lane for any entity.
+When `repositories/<name>.md` exists, a Repository page's `## Contents` opens with its lane-page link.
 
 ### Two independent write lanes, reconciled through one plan
 

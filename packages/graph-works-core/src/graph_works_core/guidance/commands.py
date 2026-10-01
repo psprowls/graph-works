@@ -20,7 +20,6 @@ from dataclasses import dataclass
 from typing import Literal
 
 from code_graph_io import GraphNotInitializedError, SchemaMismatchError, open_reader
-from okf_io import load_bundle
 from work_tracker_okf.affects import code_affects
 from work_tracker_okf.hierarchy import declared_repo
 from work_tracker_okf.items import IGNORE, WorkItem, item_index, load_items, unreadable_detail
@@ -35,6 +34,7 @@ from graph_works_core.guidance.claims import (
     refresh_claims,
 )
 from graph_works_core.guidance.closure import Closure, MatchedClaim, affects_closure, match_claims
+from graph_works_core.workspace.bundle import load_workspace_bundle
 from graph_works_core.workspace.layout import WorkspaceLayout
 from graph_works_core.workspace.repos import declared_repositories
 
@@ -63,12 +63,12 @@ class ClaimsClosureRun:
 
 
 def run_claims_refresh(layout: WorkspaceLayout, *, force: bool = False) -> ClaimsRefresh:
-    bundle = load_bundle(layout.bundle_dir, ignore=IGNORE)
+    bundle = load_workspace_bundle(layout, ignore=IGNORE)
     return (build_claims if force else refresh_claims)(bundle, layout.cache_dir)
 
 
 def run_claims_show(layout: WorkspaceLayout, uri: str, *, include_superseded: bool = False) -> ClaimsShow:
-    rows = read_claims(load_bundle(layout.bundle_dir, ignore=IGNORE), layout.cache_dir)
+    rows = read_claims(load_workspace_bundle(layout, ignore=IGNORE), layout.cache_dir)
     return ClaimsShow(uri, claims_about(rows, uri, include_superseded=include_superseded))
 
 
@@ -105,7 +105,7 @@ def _item_repo(layout: WorkspaceLayout, item: WorkItem, items: Mapping[str, Work
 
 
 def run_claims_closure(layout: WorkspaceLayout, path: str, *, include_superseded: bool = False) -> ClaimsClosureRun:
-    bundle = load_bundle(layout.bundle_dir, ignore=IGNORE)
+    bundle = load_workspace_bundle(layout, ignore=IGNORE)
     items = item_index(load_items(bundle))
     item = items.get(path)
     if item is None:

@@ -46,6 +46,7 @@ def test_the_catalog_carries_exactly_the_documented_keys():
         "layout.cache_dir",
         "layout.worktrees_dir",
         "repositories.*.path",
+        "repositories.*.checkout",
         "repositories.*.ignore",
         "repositories.*.finish.strategy",
         "repositories.*.gate.full",

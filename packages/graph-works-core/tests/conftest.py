@@ -34,6 +34,8 @@ from code_graph_io.testing import raw_conn
 # before any test module in the run, regardless of target, so inserting the
 # helper's directory here is the one place that is order-independent.
 sys.path.insert(0, str(Path(__file__).parent / "work"))
+# The lint integration suite shares the repository CLI fixtures with their own tests.
+sys.path.insert(0, str(Path(__file__).parent / "repositories"))
 
 _ORG = "acme"
 _REPO = "demo"

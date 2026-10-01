@@ -32,7 +32,6 @@ from pathlib import Path, PurePosixPath
 from types import MappingProxyType
 from typing import Literal, cast
 
-from okf_io import load_bundle
 from subagents_io.dispatch import PlannedDispatch, WorktreeAction
 from work_tracker_okf import decisions as _decisions
 from work_tracker_okf.affects import code_affects, touches_workspace
@@ -72,6 +71,7 @@ from graph_works_core.orchestrate.claims import (
     paths_overlap,
 )
 from graph_works_core.orchestrate.rank import dependent_counts
+from graph_works_core.workspace.bundle import load_workspace_bundle
 from graph_works_core.workspace.decision_owner import HoldReport, holds_by_path, open_holds
 from graph_works_core.workspace.dispatch import (
     DispatchProfileError,
@@ -2321,7 +2321,7 @@ def run_orchestrate(
     `provisions_worktrees` passes straight through to `plan()` -- see its
     docstring; this shell resolves no backend itself; that is a caller's job.
     """
-    bundle = load_bundle(layout.bundle_dir, ignore=IGNORE)
+    bundle = load_workspace_bundle(layout, ignore=IGNORE)
     config = load_dispatch_config(layout)
     items = routing_items(bundle.root, load_items(bundle), definition=config.definition)
     # Checked, not coerced. A silent `2` from a mistyped `max_parallel` is

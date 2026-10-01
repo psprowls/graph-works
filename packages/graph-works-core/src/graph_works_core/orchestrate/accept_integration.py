@@ -16,7 +16,7 @@ from pathlib import Path
 from types import MappingProxyType
 from typing import Literal
 
-from okf_io import Document, load_bundle, parse
+from okf_io import Document, parse
 from work_tracker_okf import decisions as _decisions
 from work_tracker_okf.items import IGNORE, WorkItem, load_items
 from work_tracker_okf.mutation import DirectoryPrecondition, PlannedWrite, WorkMutationPlan
@@ -24,6 +24,7 @@ from work_tracker_okf.paths import item_page
 from work_tracker_okf.sources import upsert
 
 from graph_works_core.orchestrate.finish_receipt import ReceiptDraft, draft_receipt, link_receipt
+from graph_works_core.workspace.bundle import load_workspace_bundle
 from graph_works_core.workspace.commits import WorkspaceCommit, commit_mode, item_stem
 from graph_works_core.workspace.decision_owner import DecisionContext, locked_decision_owner
 from graph_works_core.workspace.errors import WorkspaceError
@@ -211,7 +212,7 @@ def run_accept_integration(
         return result("missing-attribution", "--reason and --by are both required and must be nonempty")
     try:
         target, source, sha = _observe(
-            layout, tuple(load_items(load_bundle(layout.bundle_dir, ignore=IGNORE))), path, repo_name, evidence
+            layout, tuple(load_items(load_workspace_bundle(layout, ignore=IGNORE))), path, repo_name, evidence
         )
     except _Refused as refused:
         return result(refused.refusal, refused.detail)
@@ -261,7 +262,7 @@ def run_accept_integration(
         ledger_rel = ledger.relative_to(context.bundle.root).as_posix()
 
         def validate() -> None:
-            fresh = load_items(load_bundle(layout.bundle_dir, ignore=IGNORE))
+            fresh = load_items(load_workspace_bundle(layout, ignore=IGNORE))
             try:
                 current = _observe(layout, tuple(fresh), path, repo_name, sha)
             except _Refused as refused:

@@ -12,7 +12,7 @@ import stat
 import sys
 import unicodedata
 from collections.abc import Iterator, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from fnmatch import fnmatchcase
 from pathlib import Path, PurePosixPath
 from types import MappingProxyType
@@ -73,6 +73,16 @@ class Bundle:
     (ext4). See ``_rules/identity.py``, which turns a non-empty entry into a
     reported ``Finding`` rather than raising -- CI is deferred (ADR 2026-08-02-quality-gates-enforced), so
     this field exists for a hazard nothing here can currently reproduce.
+
+    ``pruned`` lists every directory the walk matched against ``prune=`` and
+    therefore never listed: raw bundle-relative directory ids, never ``""``.
+    A pruned directory is *present but not modelled* -- distinct both from an
+    ``ignored`` member (modelled as present, not a concept) and from a
+    missing directory. Nothing beneath it appears in any other field, not
+    even ``unreadable``: an unreadable directory beneath a pruned root was
+    never visited. :meth:`member_id` still resolves a real file beneath one
+    through a guarded filesystem probe. The field is keyword-only with an
+    empty default so a subclass may still add a required field of its own.
     """
 
     root: Path
@@ -84,6 +94,7 @@ class Bundle:
     unreadable: Mapping[str, str]
     _canonical: Mapping[str, str]
     canonical_collisions: Mapping[str, tuple[str, ...]]
+    pruned: frozenset[str] = field(default=frozenset(), kw_only=True)
 
     def concept(self, concept_id: str) -> Document | None:
         return self.concepts.get(concept_id)
@@ -155,18 +166,78 @@ class Bundle:
         -- is what a caller must use to reopen the file or key a mapping
         built from :attr:`concepts` / :attr:`assets` / :attr:`indexes` /
         :attr:`logs`.
+
+        When both in-memory matches miss and :attr:`pruned` is non-empty, a
+        query beneath a pruned root is answered by :meth:`_pruned_member`, a
+        filesystem probe. It resolves through :attr:`root` -- a path, even for
+        a ``Bundle`` loaded through a descriptor -- because it only asks
+        whether a file exists and reads no content. It is not cached: only
+        lookups beneath a pruned root pay its per-lookup ``lstat`` chain.
         """
         member = path.strip()
         if not member:
             return None
         if self._raw_member(member):
             return member
-        if member.isascii():
+        if not member.isascii():
+            canonical = self._canonical.get(canonical_id(member))
+            if canonical is not None:
+                return canonical
+        return self._pruned_member(member) if self.pruned else None
+
+    def _pruned_member(self, member: str) -> str | None:
+        """The raw id of a file beneath a pruned root that *member* names.
+
+        The root is matched component-wise, NFC-insensitively, so a query in
+        either normalization form finds it; the answer is the root's *raw*
+        id joined with the remainder exactly as queried -- the spelling the
+        filesystem just accepted.
+        """
+        parts = member.split("/")
+        for root in sorted(self.pruned):
+            root_parts = root.split("/")
+            if len(parts) <= len(root_parts):
+                continue
+            leading = parts[: len(root_parts)]
+            if all(canonical_id(q) == canonical_id(r) for q, r in zip(leading, root_parts, strict=True)):
+                return self._probe_pruned(root, parts[len(root_parts) :])
+        return None
+
+    def _probe_pruned(self, root: str, rest: list[str]) -> str | None:
+        """``lstat`` *rest* one component at a time beneath pruned *root*.
+
+        Mirrors the walk: an empty, ``.``, ``..`` or ``.git`` component is
+        refused, so the probe never leaves *root* nor enters a ``.git``; an
+        intermediate must be a real directory, never a symlink; the final
+        component must be a file, and a symlink to a file is followed as the
+        walk follows one. Any ``OSError`` is ``None`` -- nothing on the
+        content path raises.
+        """
+        if any(part in ("", ".", "..", GIT_DIR_NAME) for part in rest):
             return None
-        return self._canonical.get(canonical_id(member))
+        current = self.root.joinpath(*root.split("/"))
+        last = len(rest) - 1
+        for index, part in enumerate(rest):
+            current = current / part
+            try:
+                info = current.lstat()
+                if stat.S_ISLNK(info.st_mode):
+                    if index < last:
+                        return None
+                    info = current.stat()
+            except OSError:
+                return None
+            if stat.S_ISDIR(info.st_mode) != (index < last):
+                return None
+        return "/".join((root, *rest))
 
 
-def _files(root: Path, *, unreadable: dict[str, str]) -> Iterator[Path]:
+def _is_pruned(relative: str, prune: Sequence[str]) -> bool:
+    """Whether directory *relative* matches a ``prune=`` pattern (see :func:`load`)."""
+    return any(fnmatchcase(relative, pattern) for pattern in prune)
+
+
+def _files(root: Path, *, unreadable: dict[str, str], prune: Sequence[str], pruned: set[str]) -> Iterator[Path]:
     """Yield every file under *root*, depth-first, in sorted order.
 
     Three walk defaults, documented because they are choices rather than
@@ -204,6 +275,10 @@ def _files(root: Path, *, unreadable: dict[str, str]) -> Iterator[Path]:
     the opposite: it is content the bundle carries, so it is recorded in
     *unreadable* keyed by its bundle-relative posix path and the walk
     continues past it, exactly as an unreadable file does a few lines below.
+
+    A child directory matching a *prune* pattern is recorded in *pruned* and
+    never pushed, so nothing beneath it is listed. The exclusions above run
+    first and win: an excluded directory is never recorded as pruned.
     """
 
     pending: list[tuple[Literal["directory", "file"], Path, bool, int]] = [("directory", root, False, 0)]
@@ -229,6 +304,11 @@ def _files(root: Path, *, unreadable: dict[str, str]) -> Iterator[Path]:
             if entry.is_symlink() and entry.is_dir():
                 continue
             if entry.is_dir():
+                if prune:
+                    relative = entry.relative_to(root).as_posix()
+                    if _is_pruned(relative, prune):
+                        pruned.add(relative)
+                        continue
                 pending.append(("directory", entry, True, depth + 1))
             else:
                 pending.append(("file", entry, True, depth))
@@ -266,7 +346,7 @@ def _open_relative_directory(root_fd: int, relative: str) -> int:
     return descriptor
 
 
-def _files_at(root_fd: int, *, unreadable: dict[str, str]) -> Iterator[str]:
+def _files_at(root_fd: int, *, unreadable: dict[str, str], prune: Sequence[str], pruned: set[str]) -> Iterator[str]:
     """Descriptor-rooted equivalent of :func:`_files` with identical ordering."""
     pending: list[tuple[Literal["directory", "file"], str, bool, int]] = [("directory", "", False, 0)]
     while pending:
@@ -302,6 +382,9 @@ def _files_at(root_fd: int, *, unreadable: dict[str, str]) -> Iterator[str]:
                 else:
                     is_directory = stat.S_ISDIR(info.st_mode)
                 child = name if not relative else f"{relative}/{name}"
+                if is_directory and prune and _is_pruned(child, prune):
+                    pruned.add(child)
+                    continue
                 entries.append((child, is_directory))
         finally:
             os.close(directory_fd)
@@ -353,7 +436,7 @@ def _track_canonical(canonical: dict[str, str], collisions: dict[str, list[str]]
     canonical[cid] = relative
 
 
-def _load(root: Path, *, ignore: Sequence[str], root_fd: int | None) -> Bundle:
+def _load(root: Path, *, ignore: Sequence[str], prune: Sequence[str], root_fd: int | None) -> Bundle:
     """Walk *root* once and load every member.
 
     *ignore* patterns are ``fnmatch`` globs matched case-sensitively against
@@ -361,6 +444,11 @@ def _load(root: Path, *, ignore: Sequence[str], root_fd: int | None) -> Bundle:
     ``/``, so ``"schema/*"`` also excludes anything nested beneath it.
     ``fnmatchcase`` rather than ``fnmatch``: the latter folds case on macOS and
     Windows, so the same bundle would load differently on different machines.
+
+    *prune* patterns are globbed the same way but matched against a
+    **directory's** bundle-relative posix path. A matching directory is not
+    listed at all; its id lands in ``Bundle.pruned``. ``prune`` and
+    ``ignore`` are independent: neither consults nor implies the other.
 
     Spec §11 requires the walk to survive one bad file, and ``Document.parse``
     already guarantees it never raises for content. The remaining failure
@@ -379,11 +467,18 @@ def _load(root: Path, *, ignore: Sequence[str], root_fd: int | None) -> Bundle:
     unreadable: dict[str, str] = {}
     canonical: dict[str, str] = {}
     collisions: dict[str, list[str]] = {}
+    pruned: set[str] = set()
 
     members = (
-        ((path.relative_to(root).as_posix(), path) for path in _files(root, unreadable=unreadable))
+        (
+            (path.relative_to(root).as_posix(), path)
+            for path in _files(root, unreadable=unreadable, prune=prune, pruned=pruned)
+        )
         if root_fd is None
-        else ((relative, root / relative) for relative in _files_at(root_fd, unreadable=unreadable))
+        else (
+            (relative, root / relative)
+            for relative in _files_at(root_fd, unreadable=unreadable, prune=prune, pruned=pruned)
+        )
     )
     for relative, path in members:
         if any(fnmatchcase(relative, pattern) for pattern in ignore):
@@ -424,16 +519,22 @@ def _load(root: Path, *, ignore: Sequence[str], root_fd: int | None) -> Bundle:
         unreadable=MappingProxyType(dict(sorted(unreadable.items()))),
         _canonical=MappingProxyType(dict(sorted(canonical.items()))),
         canonical_collisions=MappingProxyType({cid: tuple(ids) for cid, ids in sorted(collisions.items())}),
+        pruned=frozenset(pruned),
     )
 
 
-def load(root: Path, *, ignore: Sequence[str] = ()) -> Bundle:
-    """Walk *root* once and load every member through its configured path."""
-    return _load(root, ignore=ignore, root_fd=None)
+def load(root: Path, *, ignore: Sequence[str] = (), prune: Sequence[str] = ()) -> Bundle:
+    """Walk *root* once and load every member through its configured path.
+
+    ``prune=`` is an opt-in extension point: directories matching it are
+    never listed (see :func:`_load`). The default ``()`` loads exactly what
+    the walk always has.
+    """
+    return _load(root, ignore=ignore, prune=prune, root_fd=None)
 
 
-def _load_at(root: Path, root_fd: int, *, ignore: Sequence[str] = ()) -> Bundle:
+def _load_at(root: Path, root_fd: int, *, ignore: Sequence[str] = (), prune: Sequence[str] = ()) -> Bundle:
     """Load *root* through caller-owned *root_fd* while retaining semantic paths."""
     if not stat.S_ISDIR(os.fstat(root_fd).st_mode):
         raise NotADirectoryError(f"bundle root descriptor is not a directory: {root_fd}")
-    return _load(root, ignore=ignore, root_fd=root_fd)
+    return _load(root, ignore=ignore, prune=prune, root_fd=root_fd)

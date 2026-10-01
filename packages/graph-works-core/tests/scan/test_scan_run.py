@@ -63,6 +63,20 @@ async def test_phase_one_calls_the_composite_sync_once(ready, monkeypatch):
     assert result.structural.mirror.results
 
 
+async def test_scan_passes_the_clone_ignore_to_the_composite_sync(ready, monkeypatch):
+    layout, config = ready
+    real_sync_bundle = scan.sync_bundle
+    seen: list[tuple[str, ...]] = []
+
+    def spy(*args, **kwargs):
+        seen.append(kwargs.get("ignore", ()))
+        return real_sync_bundle(*args, **kwargs)
+
+    monkeypatch.setattr(scan, "sync_bundle", spy)
+    await scan.run_scan(layout, config, today=TODAY, at=AT, narrate=False, dry_run=True)
+    assert seen == [("repositories/*/references/git/*",)]
+
+
 async def test_narrate_false_reports_structural_catalog_declines(ready, monkeypatch):
     """An early structural-only return must still be a failed scan result."""
     layout, config = ready

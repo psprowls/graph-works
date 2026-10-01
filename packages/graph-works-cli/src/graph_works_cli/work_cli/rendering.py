@@ -200,6 +200,8 @@ def render_next(result: NextResult, payload: dict[str, Any]) -> None:
         typer.echo("  guidance: none")
     for warning in payload["guidance_warnings"]:
         warn(warning)
+    for note in payload["repository_notes"]:
+        typer.echo(f"  note: {note}")
     carried = payload["carried_context"]
     with_content = [slot for slot in carried["slots"].values() if slot["lines"]]
     if with_content:

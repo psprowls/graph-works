@@ -5,7 +5,7 @@ The public access surface is the GraphReader / GraphStore handle pair and the
 open_reader / open_writer openers re-exported below.
 """
 
-__version__ = "0.3.1"
+__version__ = "0.3.2"
 
 from code_graph_io._ignore import IgnoreSpec, compile_ignore
 from code_graph_io.handle import GraphReader, GraphStore, open_reader, open_writer

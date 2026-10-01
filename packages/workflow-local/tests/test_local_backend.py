@@ -142,6 +142,21 @@ def test_the_child_sees_exactly_the_three_contract_variables(tmp_path):
     session.close()
 
 
+def test_main_runs_the_worker_in_the_checkout_it_names(tmp_path):
+    checkout = tmp_path / "ws" / ".gw" / "worktrees" / "demo" / "main"
+    checkout.mkdir(parents=True)
+    session = make_backend(tmp_path / "root").open_session("s")
+    planned = replace(
+        dispatch(tmp_path, "pwd", "done:succeeded"),
+        worktree=WorktreeAction("main", str(checkout), "main", None, True, None, None),
+    )
+    record = session.launch(planned)
+    drain(session, until=is_done)
+    stdout = (tmp_path / "root" / "s" / record.handle / "stdout.log").read_text(encoding="utf-8")
+    assert Path(stdout.strip()).resolve() == checkout.resolve()
+    session.close()
+
+
 def test_the_dispatch_key_reaches_the_child(tmp_path):
     session = make_backend(tmp_path / "root").open_session("s")
     session.launch(dispatch(tmp_path, "escalate:blocked"))

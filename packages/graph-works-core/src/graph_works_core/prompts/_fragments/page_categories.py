@@ -22,7 +22,7 @@ does not add a second row. `work_tracker_okf`'s own
 schemas (`Epic`, `Bug`, `Feature`, `Spike`, `TechDebt`, `TestGap`) do declare
 `x-okf-directory: "work/"` and are installed alongside the rest -- `work` is
 hardcoded rather than schema-derived because `_TYPE_GLOSSES` is keyed on only
-the twelve top-level page kinds. None of those six work-item types appear in
+the thirteen top-level page kinds. None of those six work-item types appear in
 it, and a single `work` row (from `work_tracker_okf.WORK_DIR`) stands in for
 all six.
 
@@ -31,13 +31,18 @@ explicitly: the schema annotation is not a claim that a top-level `file-system/`
 catalog exists. Repository and Dependency rows likewise name the additional
 resource identity that qualifies their canonical placement.
 
+`ManagedRepository` and `ReferenceRepository` both declare the one directory
+`repositories/`. Only `ManagedRepository` is keyed in `_TYPE_GLOSSES`, so a single
+`repository-resource` row stands for both types; keying both would emit two rows for
+one directory.
+
 Glosses cannot come off the schema either -- no schema property carries
 prose. Four (`tutorial`, `how-to`, `reference`, `explanation`) are reused
 verbatim from `lane_list.LANE_GLOSSES` rather than re-authored. The rest
 carry over from the retired `PAGE_CATEGORIES` constant's own prose
 unchanged (`app`, `package`, `dependency`, `source`, `adr`, `work`), or are
-new one-liners for the four directories the old table omitted
-(`test-suite`, `agent-plugin`, `repository`, `file`).
+new one-liners for the directories the old table omitted
+(`test-suite`, `agent-plugin`, `repository`, `repository-resource`, `file`).
 """
 
 from __future__ import annotations
@@ -68,6 +73,11 @@ _TYPE_GLOSSES: Mapping[str, tuple[str, str]] = {
     "Repository": (
         "repository",
         "One version-controlled repository, represented by `code-graph/<repo>.md`",
+    ),
+    # ManagedRepository and ReferenceRepository share `repositories/`; one row stands for both.
+    "ManagedRepository": (
+        "repository-resource",
+        "A repository the workspace embeds as a resource, managed or reference, at `repositories/<name>.md`",
     ),
     "File": ("file", "A repository-local source-file mirror under that repository's `file-system/` lane"),
     "Tutorial": ("tutorial", LANE_GLOSSES["tutorial"]),

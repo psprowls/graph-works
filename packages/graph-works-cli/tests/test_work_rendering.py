@@ -83,6 +83,7 @@ def test_render_next_uses_path_and_work_status(capsys: pytest.CaptureFixture[str
         "guidance": [],
         "guidance_warnings": [],
         "guidance_file": None,
+        "repository_notes": [],
         "blockers": [],
         "carried_context": {"slots": {}, "warnings": []},
     }
@@ -118,11 +119,37 @@ def test_render_next_guidance_line_when_assembled_but_not_written(capsys: pytest
         "guidance": [entry, entry],
         "guidance_warnings": [],
         "guidance_file": None,
+        "repository_notes": [],
         "blockers": [],
         "carried_context": {"slots": {}, "warnings": []},
     }
     rendering.render_next(SimpleNamespace(warnings=(), guidance=SimpleNamespace(tokens=12)), payload)
     assert "  guidance: 2 entries, 12 tokens → not written\n" in capsys.readouterr().out
+
+
+def test_render_next_prints_repository_notes_after_warnings(capsys: pytest.CaptureFixture[str]) -> None:
+    payload = {
+        "selected_path": "work/feature-a",
+        "kind": "Feature",
+        "work_status": "open",
+        "phase": "plan",
+        "normalized": [],
+        "commits": [],
+        "descent": None,
+        "dispatch": None,
+        "action": None,
+        "artifact": None,
+        "guidance": [],
+        "guidance_warnings": ["no graph"],
+        "guidance_file": None,
+        "repository_notes": ["repository demo: advance pin"],
+        "carried_context": {"slots": {}, "warnings": []},
+        "blockers": [],
+    }
+    rendering.render_next(SimpleNamespace(warnings=(), guidance=None), payload)
+    captured = capsys.readouterr()
+    assert "no graph" in captured.err
+    assert "  note: repository demo: advance pin\n" in captured.out
 
 
 def test_render_status_uses_path_keyed_resume(capsys: pytest.CaptureFixture[str]) -> None:
@@ -172,6 +199,7 @@ def test_dense_human_renderers_cover_every_optional_group(capsys: pytest.Capture
             "guidance": [{"path": "/adrs/x.md", "id": "D1", "kind": "claim", "why": "w", "tokens": 5}],
             "guidance_warnings": ["no graph"],
             "guidance_file": "/tmp/guidance-design.md",
+            "repository_notes": [],
             "carried_context": {"slots": {}, "warnings": []},
             "blockers": ["one\ntwo"],
         },
@@ -409,6 +437,7 @@ def _next_payload(carried: dict[str, object]) -> dict[str, object]:
         "guidance": [],
         "guidance_warnings": [],
         "guidance_file": None,
+        "repository_notes": [],
         "blockers": [],
         "carried_context": carried,
     }

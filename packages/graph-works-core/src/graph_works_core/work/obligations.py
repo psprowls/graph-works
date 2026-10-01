@@ -7,12 +7,13 @@ from dataclasses import dataclass
 from datetime import date
 from types import MappingProxyType
 
-from okf_io import Bundle, load_bundle, parse
+from okf_io import Bundle, parse
 from work_tracker_okf.items import IGNORE, load_items
 from work_tracker_okf.mutation import PlannedWrite, WorkMutationPlan
 from work_tracker_okf.obligations import ObligationPlan, apply_obligations, plan_add
 from work_tracker_okf.paths import item_page
 
+from graph_works_core.workspace.bundle import load_workspace_bundle
 from graph_works_core.workspace.commits import WorkspaceCommit, commit_mode, item_stem
 from graph_works_core.workspace.decision_owner import locked_decision_owner
 from graph_works_core.workspace.layout import WorkspaceLayout
@@ -34,7 +35,7 @@ def run_obligation_add(
     layout: WorkspaceLayout, path: str, *, text: str, on: date, dry_run: bool = True
 ) -> ObligationRecord:
     """Plan by default; re-plan under the decision owner lock before a write."""
-    items = load_items(load_bundle(layout.bundle_dir, ignore=IGNORE))
+    items = load_items(load_workspace_bundle(layout, ignore=IGNORE))
     if dry_run or not any(item.path == path for item in items):
         return ObligationRecord(plan_add(items, path, text, on=on))
     commit_mode(layout)

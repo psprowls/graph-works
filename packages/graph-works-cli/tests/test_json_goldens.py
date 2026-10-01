@@ -299,7 +299,9 @@ def proposals(ctx: Ctx) -> None:
         verified=({"by": "human", "at": "2026-09-01"},),
         malformed=None,
     )
-    ctx.mp.setattr(proposals_commands, "load_bundle", lambda root: SimpleNamespace(has_member=lambda _member: False))
+    ctx.mp.setattr(
+        proposals_commands, "load_workspace_bundle", lambda root: SimpleNamespace(has_member=lambda _member: False)
+    )
     ctx.mp.setattr(proposals_commands, "list_proposals", lambda bundle, **kwargs: (proposal,))
 
 

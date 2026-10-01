@@ -133,6 +133,16 @@ CATALOG: tuple[ConfigEntry, ...] = (
         description="Checkout path for one repository this workspace scans, relative to the workspace root.",
     ),
     ConfigEntry(
+        key="repositories.*.checkout",
+        type="str",
+        default=None,
+        description=(
+            "The working checkout of a repository whose path is an in-bundle clone "
+            "(okf/repositories/<name>/references/git). Every gw verb except scan works there. "
+            "Relative to the workspace root; usually overridden per machine in workspace.local.yaml."
+        ),
+    ),
+    ConfigEntry(
         key="repositories.*.ignore",
         type="list[str]",
         default=None,

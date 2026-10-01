@@ -1,5 +1,5 @@
 # Workspace task runner — okf-io, okf-ext, code-graph-io, code-wiki-okf,
-# work-tracker-okf, config-io, plugin-fork-io, models-io, subagents-io, doc-wiki-okf,
+# work-tracker-okf, config-io, plugin-fork-io, models-io, subagents-io, doc-wiki-okf, repositories-okf,
 # graph-works-core, workflow-local, workflow-orca, graph-works-wire, graph-works-cli, graph-works-serve.
 # Each recipe is exactly the command a future CI job will call.
 #
@@ -91,6 +91,7 @@ types: sync
     uv run --package models-io --extra bedrock --extra vercel mypy --strict --platform linux packages/models-io/src
     uv run --package subagents-io mypy --strict --platform linux packages/subagents-io/src
     uv run --package doc-wiki-okf mypy --strict --platform linux packages/doc-wiki-okf/src
+    uv run --package repositories-okf mypy --strict --platform linux packages/repositories-okf/src
     uv run --package graph-works-core mypy --strict --platform linux packages/graph-works-core/src
     uv run --package workflow-local mypy --strict --platform linux packages/workflow-local/src
     uv run --package workflow-orca mypy --strict --platform linux packages/workflow-orca/src
@@ -106,6 +107,7 @@ types: sync
     uv run --package models-io --extra bedrock --extra vercel mypy --strict --platform win32 packages/models-io/src
     uv run --package subagents-io mypy --strict --platform win32 packages/subagents-io/src
     uv run --package doc-wiki-okf mypy --strict --platform win32 packages/doc-wiki-okf/src
+    uv run --package repositories-okf mypy --strict --platform win32 packages/repositories-okf/src
     uv run --package graph-works-core mypy --strict --platform win32 packages/graph-works-core/src
     uv run --package workflow-local mypy --strict --platform win32 packages/workflow-local/src
     uv run --package workflow-orca mypy --strict --platform win32 packages/workflow-orca/src
@@ -143,7 +145,7 @@ test:
     ncpu=$(uv run python -c "import os; print(os.cpu_count() or 1)")
     workers=$(( ncpu / jobs )); [ "$workers" -ge 1 ] || workers=1
     export PYTEST_XDIST_AUTO_NUM_WORKERS="$workers"
-    pkgs=(_test-okf _test-code-graph-io _test-code-wiki-okf _test-work-tracker-okf _test-config-io _test-plugin-fork-io _test-models-io _test-subagents-io _test-doc-wiki-okf _test-graph-works-core _test-workflow-local _test-workflow-orca _test-graph-works-wire _test-graph-works-cli _test-graph-works-serve)
+    pkgs=(_test-okf _test-code-graph-io _test-code-wiki-okf _test-work-tracker-okf _test-config-io _test-plugin-fork-io _test-models-io _test-subagents-io _test-doc-wiki-okf _test-repositories-okf _test-graph-works-core _test-workflow-local _test-workflow-orca _test-graph-works-wire _test-graph-works-cli _test-graph-works-serve)
     printf '%s\n' "${pkgs[@]}" | xargs -P "$jobs" -I{} just {}
 
 _test-okf:
@@ -164,6 +166,8 @@ _test-subagents-io:
     uv run --package subagents-io pytest packages/subagents-io/tests -n auto
 _test-doc-wiki-okf:
     uv run --package doc-wiki-okf pytest packages/doc-wiki-okf/tests -n auto
+_test-repositories-okf:
+    uv run --package repositories-okf pytest packages/repositories-okf/tests -n auto
 _test-graph-works-core:
     uv run --package graph-works-core pytest packages/graph-works-core/tests -n auto
 _test-workflow-local:
@@ -207,7 +211,7 @@ cov:
     ncpu=$(uv run python -c "import os; print(os.cpu_count() or 1)")
     workers=$(( ncpu / jobs )); [ "$workers" -ge 1 ] || workers=1
     export PYTEST_XDIST_AUTO_NUM_WORKERS="$workers"
-    pkgs=(_cov-okf _cov-code-graph-io _cov-code-wiki-okf _cov-work-tracker-okf _cov-config-io _cov-plugin-fork-io _cov-models-io _cov-subagents-io _cov-doc-wiki-okf _cov-graph-works-core _cov-workflow-local _cov-workflow-orca _cov-graph-works-wire _cov-graph-works-cli _cov-graph-works-serve)
+    pkgs=(_cov-okf _cov-code-graph-io _cov-code-wiki-okf _cov-work-tracker-okf _cov-config-io _cov-plugin-fork-io _cov-models-io _cov-subagents-io _cov-doc-wiki-okf _cov-repositories-okf _cov-graph-works-core _cov-workflow-local _cov-workflow-orca _cov-graph-works-wire _cov-graph-works-cli _cov-graph-works-serve)
     printf '%s\n' "${pkgs[@]}" | xargs -P "$jobs" -I{} just {}
 
 _cov-okf:
@@ -228,6 +232,8 @@ _cov-subagents-io:
     COVERAGE_FILE=.coverage.subagents-io uv run --package subagents-io pytest packages/subagents-io/tests --cov=subagents_io --cov-branch --cov-report=term-missing --cov-fail-under=95 -n auto
 _cov-doc-wiki-okf:
     COVERAGE_FILE=.coverage.doc-wiki-okf uv run --package doc-wiki-okf pytest packages/doc-wiki-okf/tests --cov=doc_wiki_okf --cov-branch --cov-report=term-missing --cov-fail-under=95 -n auto
+_cov-repositories-okf:
+    COVERAGE_FILE=.coverage.repositories-okf uv run --package repositories-okf pytest packages/repositories-okf/tests --cov=repositories_okf --cov-branch --cov-report=term-missing --cov-fail-under=95 -n auto
 _cov-graph-works-core:
     COVERAGE_FILE=.coverage.graph-works-core uv run --package graph-works-core pytest packages/graph-works-core/tests --cov=graph_works_core --cov-branch --cov-report=term-missing --cov-fail-under=95 -n auto
 _cov-workflow-orca:
@@ -294,6 +300,9 @@ check-pkg PKG: preflight sync
       doc-wiki-okf)
         MODULES="--cov=doc_wiki_okf"; SRC="packages/doc-wiki-okf/src"
         TESTPATH="packages/doc-wiki-okf/tests"; PKGFLAG="--package doc-wiki-okf"; FLOOR=95; EXTRA="" ;;
+      repositories-okf)
+        MODULES="--cov=repositories_okf"; SRC="packages/repositories-okf/src"
+        TESTPATH="packages/repositories-okf/tests"; PKGFLAG="--package repositories-okf"; FLOOR=95; EXTRA="" ;;
       graph-works-core)
         MODULES="--cov=graph_works_core"; SRC="packages/graph-works-core/src"
         TESTPATH="packages/graph-works-core/tests"; PKGFLAG="--package graph-works-core"; FLOOR=95; EXTRA="" ;;

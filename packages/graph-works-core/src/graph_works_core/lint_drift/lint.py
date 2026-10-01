@@ -38,7 +38,7 @@ from doc_wiki_okf.sources import DrainStatus, drain_statuses
 from langchain_core.messages import HumanMessage, SystemMessage
 from models_io.pricing import cost_for_usage
 from okf_ext import proposals
-from okf_io import Bundle, Document, Finding, Report, build_link_graph, load_bundle, validate
+from okf_io import Bundle, Document, Finding, Report, build_link_graph, validate
 from okf_io.bundle import canonical_id
 from subagents_io import SubagentPool, TaskResult
 from subagents_io.roles import RoleBinding
@@ -51,6 +51,7 @@ from graph_works_core.lint_drift.linter import (
     build_linter_stale_claims_system,
 )
 from graph_works_core.prompts.project_context import render_project_context
+from graph_works_core.workspace.bundle import load_bundle_at
 from graph_works_core.workspace.layout import WorkspaceLayout
 
 
@@ -296,7 +297,7 @@ def _lane_reports(
     errors: list[str] = []
     for lane in lanes:
         try:
-            bundle = load_bundle(lane.root, ignore=lane.ignore)
+            bundle = load_bundle_at(lane.root, ignore=lane.ignore)
         except OSError as exc:
             errors.append(f"{lane.name} lane: {exc}")
             continue

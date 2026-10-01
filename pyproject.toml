@@ -25,6 +25,7 @@ code-graph-io = { workspace = true }
 code-wiki-okf = { workspace = true }
 work-tracker-okf = { workspace = true }
 doc-wiki-okf = { workspace = true }
+repositories-okf = { workspace = true }
 graph-works-core = { workspace = true }
 graph-works-wire = { workspace = true }
 workflow-local = { workspace = true }
@@ -83,6 +84,7 @@ select = ["E", "F", "I", "UP", "B", "SIM", "RUF", "ANN", "PTH"]
 "packages/models-io/tests/**" = ["ANN"]
 "packages/subagents-io/tests/**" = ["ANN"]
 "packages/doc-wiki-okf/tests/**" = ["ANN"]
+"packages/repositories-okf/tests/**" = ["ANN"]
 "packages/graph-works-core/tests/**" = ["ANN"]
 "packages/graph-works-wire/tests/**" = ["ANN"]
 "packages/workflow-local/tests/**" = ["ANN"]
@@ -161,7 +163,7 @@ precision = 2
 [tool.importlinter]
 root_packages = [
     "okf_io", "okf_ext", "code_graph_io", "config_io", "models_io", "subagents_io",
-    "code_wiki_okf", "work_tracker_okf", "doc_wiki_okf", "graph_works_core",
+    "code_wiki_okf", "work_tracker_okf", "doc_wiki_okf", "repositories_okf", "graph_works_core",
     "workflow_local", "workflow_orca", "graph_works_cli", "graph_works_serve", "graph_works_wire", "plugin_fork_io",
 ]
 # Lets a forbidden contract name an external package (typer, click).
@@ -214,7 +216,7 @@ type = "layers"
 containers = ["code_graph_io"]
 exhaustive = true
 layers = [
-    "_ignore : agent_plugins : builtins : classification : csharp_projects : dependencies : entry_points : exit_codes : graphml : handle : import_scan : packages : paths : queries : records : render : repo_context : requirements : resolve : schema : source_meta : store : structural_nodes : test_suites : testing : tokens : update : upsert : uri",
+    "_ignore : agent_plugins : builtins : checkpoint : classification : csharp_projects : dependencies : entry_points : exit_codes : graphml : handle : import_scan : packages : paths : queries : records : render : repo_context : requirements : resolve : schema : source_meta : store : structural_nodes : test_suites : testing : tokens : update : upsert : uri",
     "parser",
 ]
 
@@ -252,7 +254,7 @@ modules = ["okf_io", "code_graph_io", "config_io", "models_io", "subagents_io", 
 name = "Nothing below band 3 imports the application band"
 type = "forbidden"
 source_modules = [
-    "okf_io", "okf_ext", "code_wiki_okf", "work_tracker_okf", "doc_wiki_okf",
+    "okf_io", "okf_ext", "code_wiki_okf", "work_tracker_okf", "doc_wiki_okf", "repositories_okf",
     "config_io", "subagents_io", "models_io", "code_graph_io", "plugin_fork_io",
 ]
 forbidden_modules = ["graph_works_core", "graph_works_serve"]
@@ -263,7 +265,7 @@ type = "forbidden"
 source_modules = ["plugin_fork_io"]
 forbidden_modules = [
     "okf_io", "okf_ext", "code_graph_io", "config_io", "models_io",
-    "subagents_io", "code_wiki_okf", "work_tracker_okf", "doc_wiki_okf",
+    "subagents_io", "code_wiki_okf", "work_tracker_okf", "doc_wiki_okf", "repositories_okf",
     "graph_works_core", "graph_works_cli", "graph_works_serve", "graph_works_wire", "workflow_local", "workflow_orca",
 ]
 
@@ -336,7 +338,7 @@ name = "graph_works_core verticals sit above shared substrate"
 type = "layers"
 containers = ["graph_works_core"]
 layers = [
-    "ingest : scan : query : lint_drift : archive : orchestrate : wiki_stats : wiki_page : tag_policy : work : util : agent_config : events : proposals : code_read",
+    "ingest : scan : query : lint_drift : archive : orchestrate : wiki_stats : wiki_page : tag_policy : work : util : agent_config : events : proposals : code_read : repositories",
     "guidance",
     "agent_substrate : graph : prompts",
     "workspace",
@@ -361,4 +363,5 @@ modules = [
     "graph_works_core.events",
     "graph_works_core.proposals",
     "graph_works_core.code_read",
+    "graph_works_core.repositories",
 ]

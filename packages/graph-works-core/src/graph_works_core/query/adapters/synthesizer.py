@@ -5,12 +5,12 @@ from __future__ import annotations
 from pathlib import Path
 
 from code_graph_io import GraphReader
-from okf_io import load_bundle
 from subagents_io import Prepared, RunContext
 
 from graph_works_core.agent_substrate.agent_tools import read_bounded_page
 from graph_works_core.query import commands as query_mod
 from graph_works_core.query.prompts.synthesizer import SYNTHESIZER_SYSTEM
+from graph_works_core.workspace.bundle import load_workspace_bundle
 from graph_works_core.workspace.discovery import resolve
 
 _MAX_CHARS = 24_000
@@ -42,7 +42,7 @@ class SynthesizerAdapter:
             note = "retrieval skipped — excerpts loaded from disk"
         else:
             layout = resolve(workspace=ctx.workspace)
-            bundle = load_bundle(layout.bundle_dir)
+            bundle = load_workspace_bundle(layout)
             prepared = query_mod._prepare_query_retrieval(
                 item, layout, bundle, top_k=_TOP_K, embedder=query_mod.default_embedder()
             )

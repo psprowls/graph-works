@@ -61,9 +61,10 @@ from code_wiki_okf.config import Config
 from doc_wiki_okf.sources import SOURCE_TYPE, normalize_origin
 from okf_ext.bundle import SECTIONS_DIRNAME
 from okf_ext.shape import load_sections
-from okf_io import Bundle, load_bundle, parse
+from okf_io import Bundle, parse
 from okf_io import validate as okf_validate
 from okf_io.validate import Report
+from repositories_okf.repository import repository_rule
 from work_tracker_okf import decisions as _decisions
 from work_tracker_okf._selection import path_index
 from work_tracker_okf.compose import (
@@ -103,6 +104,7 @@ from graph_works_core.work import carried as _carried
 from graph_works_core.work.carried import CarriedContext, SlotInput
 from graph_works_core.work.path_report import PathReport, StageArtifactReport, artifact_reports, path_report
 from graph_works_core.workspace import provenance
+from graph_works_core.workspace.bundle import load_workspace_bundle
 from graph_works_core.workspace.commits import (
     COMMIT_FAILED_PREFIX,
     CommitOutcome,
@@ -131,8 +133,9 @@ from graph_works_core.workspace.dispatch_config import DispatchConfig, load_disp
 from graph_works_core.workspace.errors import WorkspaceError
 from graph_works_core.workspace.finish import FinishTarget, resolve_finish_targets
 from graph_works_core.workspace.landed import stale_spec_for
+from graph_works_core.workspace.lane_facts import gather_lane_facts, has_lane_pages, repository_notes, runner
 from graph_works_core.workspace.layout import WorkspaceLayout
-from graph_works_core.workspace.repos import declared_repositories, resolve_repos
+from graph_works_core.workspace.repos import declared_repositories, resolve_item_repo, resolve_repos
 from graph_works_core.workspace.transactions import MutationApplication, apply_mutation, only_stale_inventory
 
 
@@ -290,7 +293,7 @@ def run_file(
     sections = load_sections(config.declarations_dir / SECTIONS_DIRNAME)
 
     def attempt() -> FilingRun:
-        bundle = load_bundle(layout.bundle_dir, ignore=IGNORE)
+        bundle = load_workspace_bundle(layout, ignore=IGNORE)
         outcome = plan_file_and_reconcile(bundle, load_items(bundle), seed, sections)
         if dry_run or outcome.plan.refusal is not None:
             return FilingRun(plan=outcome.plan)
@@ -337,7 +340,7 @@ class StatusReport:
 
 def run_status(layout: WorkspaceLayout) -> StatusReport:
     """Count the active items and name the one worth resuming. Never writes."""
-    items = load_items(load_bundle(layout.bundle_dir, ignore=IGNORE))
+    items = load_items(load_workspace_bundle(layout, ignore=IGNORE))
     return StatusReport(rollup=rollup(items), resume=select_resume(items))
 
 
@@ -347,7 +350,7 @@ def run_work_list(layout: WorkspaceLayout) -> tuple[WorkItem, ...]:
     Archived items are left out, the same population `rollup` counts, so a
     board built from this agrees with `gw work status`.
     """
-    items = load_items(load_bundle(layout.bundle_dir, ignore=IGNORE))
+    items = load_items(load_workspace_bundle(layout, ignore=IGNORE))
     return tuple(sorted((item for item in items if not item.archived), key=lambda item: item.path))
 
 
@@ -391,7 +394,7 @@ def _owned_references(bundle_root: Path, path: str) -> tuple[str, ...]:
 
 def run_item_read(layout: WorkspaceLayout, path: str) -> ItemRead:
     """Read *path*'s work item and list its owned `references/`. Never writes."""
-    bundle = load_bundle(layout.bundle_dir, ignore=IGNORE)
+    bundle = load_workspace_bundle(layout, ignore=IGNORE)
     if path not in item_index(load_items(bundle)):
         detail = unreadable_detail(bundle, path)
         return _refused_item(path, "unreadable" if detail is not None else "unknown-item", detail)
@@ -439,7 +442,7 @@ def run_touch_active_work(layout: WorkspaceLayout, path: str, *, today: date) ->
     ran, not the phase its closing advance moved the item into. Idempotent.
     A failed write degrades to `pointer_path=None` (provenance never fails).
     """
-    bundle = load_bundle(layout.bundle_dir, ignore=IGNORE)
+    bundle = load_workspace_bundle(layout, ignore=IGNORE)
     item = item_index(load_items(bundle)).get(path)
     if item is None:
         detail = unreadable_detail(bundle, path)
@@ -521,7 +524,7 @@ def run_ingest_queue(layout: WorkspaceLayout) -> IngestQueueReport:
     Read-only for the same reason `run_next` is: a queue that mutates while you
     look at it cannot be polled safely.
     """
-    bundle = load_bundle(layout.bundle_dir, ignore=IGNORE)
+    bundle = load_workspace_bundle(layout, ignore=IGNORE)
     ingested = _ingested_origins(bundle)
     pending: list[PendingIngest] = []
     for item in load_items(bundle):
@@ -577,6 +580,7 @@ class NextResult:
     finish_targets: tuple[FinishTarget, ...] = ()
     guidance: Guidance | None = None
     guidance_file: Path | None = None
+    repository_notes: tuple[str, ...] = ()
     carried: CarriedContext = field(default_factory=CarriedContext)
     path: PathReport | None = None
     artifacts: tuple[StageArtifactReport, ...] = ()
@@ -755,7 +759,7 @@ def _plan_next(
     layout: WorkspaceLayout, path: str, *, descend: bool, definition: PipelineDefinition
 ) -> tuple[NextResult, Bundle, WorkItem]:
     """Load the bundle once and plan *path* over it (`_plan_route`)."""
-    bundle = load_bundle(layout.bundle_dir, ignore=IGNORE)
+    bundle = load_workspace_bundle(layout, ignore=IGNORE)
     items = tuple(load_items(bundle))
     preview, selected = _plan_route(layout, bundle, items, path, descend=descend, definition=definition)
     if preview.route.dispatch is not None and preview.route.dispatch.stage == "finish":
@@ -839,6 +843,19 @@ def _with_carried(
     return replace(result, carried=_carried.assemble_carried(inp, slots=_carried.SLOTS))
 
 
+def _with_repository_notes(layout: WorkspaceLayout, result: NextResult, items: Sequence[WorkItem]) -> NextResult:
+    """Advisory pin lag for the selected item's repository."""
+    by_path = {item.path: item for item in items}
+    selected = by_path.get(result.selected_path)
+    if selected is None:
+        return result
+    try:
+        repo = resolve_item_repo(layout, selected, by_path)
+    except WorkspaceError:
+        return result
+    return replace(result, repository_notes=repository_notes(layout, repo.name))
+
+
 def run_next(
     layout: WorkspaceLayout,
     path: str,
@@ -877,11 +894,11 @@ def run_next(
         )
         items = tuple(load_items(bundle))
         guided = _with_guidance(layout, resolved, bundle, items if guidance else (), guidance)
-        result = _with_carried(layout, guided, bundle, items)
+        result = _with_repository_notes(layout, _with_carried(layout, guided, bundle, items), items)
         return replace(result, path=None, artifacts=()) if isinstance(config, WorkspaceError) else result
 
     application, warnings = _apply_normalizations(layout, preview.normalizations, bundle=bundle)
-    persisted_bundle = load_bundle(layout.bundle_dir, ignore=IGNORE)
+    persisted_bundle = load_workspace_bundle(layout, ignore=IGNORE)
     persisted_items = load_items(persisted_bundle)
     persisted_state = state_for(
         persisted_items,
@@ -912,8 +929,9 @@ def run_next(
         application=application,
         warnings=warnings,
     )
-    guided = _with_guidance(layout, applied, persisted_bundle, tuple(persisted_items), guidance)
-    result = _with_carried(layout, guided, persisted_bundle, tuple(persisted_items))
+    items = tuple(persisted_items)
+    guided = _with_guidance(layout, applied, persisted_bundle, items, guidance)
+    result = _with_repository_notes(layout, _with_carried(layout, guided, persisted_bundle, items), items)
     return replace(result, path=None, artifacts=()) if isinstance(config, WorkspaceError) else result
 
 
@@ -991,7 +1009,7 @@ def run_work_queue(layout: WorkspaceLayout) -> tuple[QueueEntry, ...]:
     Epics waiting on their children are included with that blocker, so no
     active item is silently dropped.
     """
-    bundle = load_bundle(layout.bundle_dir, ignore=IGNORE)
+    bundle = load_workspace_bundle(layout, ignore=IGNORE)
     items = tuple(load_items(bundle))
     config = _load_config(layout)
     definition = _definition_of(config)
@@ -1038,7 +1056,7 @@ def run_lint(
     a conformant vault. A caller wiring this into an acceptance gate wants
     `strict=False`.
     """
-    bundle = load_bundle(layout.bundle_dir, ignore=_work_only_ignore(layout))
+    bundle = load_workspace_bundle(layout, ignore=_work_only_ignore(layout))
     rules = rule_set(
         layout.bundle_dir,
         repo_root=repo_root,
@@ -1047,6 +1065,12 @@ def run_lint(
         declarations_dir=config.declarations_dir,
         definition=load_dispatch_config(layout).definition,
     )
+    if path is None and has_lane_pages(layout):
+        git = runner(layout)
+        if not isinstance(git, str):
+            # The work bundle hides the repository pages, so read them from the lane.
+            behind = repository_rule(gather_lane_facts(layout, git), codes=frozenset({"repository.behind-track"}))
+            rules = (*rules, behind)
     if path is None:
         return okf_validate(bundle, today=today, extra_rules=rules, strict=strict)
     if path not in item_index(load_items(bundle)):
@@ -1195,7 +1219,7 @@ def _until_inventory_current[R](run: Callable[[], R], application_of: Callable[[
 
 def _regen_indexes_once(layout: WorkspaceLayout, *, dry_run: bool) -> RegenIndexesResult:
     """One load, plan and (unless `dry_run`) apply of `run_regen_indexes`."""
-    bundle = load_bundle(layout.bundle_dir, ignore=IGNORE)
+    bundle = load_workspace_bundle(layout, ignore=IGNORE)
     items = load_items(bundle)
     lane_preconditions = _absent_index_lane_preconditions(bundle.root, items)
     plans = plan_indexes(bundle.root, items)
@@ -1266,7 +1290,7 @@ def run_reparent(
 ) -> PathMutationResult:
     # Loaded with ignore=() (not IGNORE) -- do not pass this bundle as baseline_bundle,
     # it would silently validate a different corpus than the postcondition gate expects.
-    bundle = load_bundle(layout.bundle_dir, ignore=())
+    bundle = load_workspace_bundle(layout, ignore=())
     plan = plan_reparent(bundle, load_items(bundle), source_path, parent_path)
     return PathMutationResult(
         plan,
@@ -1290,7 +1314,7 @@ def run_release_adoption(
 ) -> PathMutationResult:
     # Loaded with ignore=() (not IGNORE) -- do not pass this bundle as baseline_bundle,
     # it would silently validate a different corpus than the postcondition gate expects.
-    bundle = load_bundle(layout.bundle_dir, ignore=())
+    bundle = load_workspace_bundle(layout, ignore=())
     plan = plan_release_adoption(bundle, load_items(bundle), source_path, release_path)
     return PathMutationResult(
         plan,
@@ -1667,7 +1691,7 @@ def run_open_decisions(layout: WorkspaceLayout) -> tuple[OpenDecision, ...]:
     own decision owner is this ledger's owner, in `affects` order: exactly the
     items `hold_for` would report this entry as holding.
     """
-    bundle = load_bundle(layout.bundle_dir, ignore=IGNORE)
+    bundle = load_workspace_bundle(layout, ignore=IGNORE)
     items = tuple(load_items(bundle))
     active = tuple(item for item in items if not item.archived)
     active_paths = {item.path for item in active}

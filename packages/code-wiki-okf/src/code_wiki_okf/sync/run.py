@@ -137,9 +137,15 @@ def _preflight_union(entities: EntityPlan, mirrors: tuple[MirrorPlan, ...]) -> N
             claim(target.member, target.resource)
 
 
-def _preflight_live_entity_filesystem_conflicts(bundle_root: Path, entities: EntityPlan) -> None:
-    """Refuse live entity target drift before either lane writes."""
-    index = resource_index(load_bundle(bundle_root))
+def _preflight_live_entity_filesystem_conflicts(
+    bundle_root: Path, entities: EntityPlan, *, ignore: tuple[str, ...] = (), prune: tuple[str, ...] = ()
+) -> None:
+    """Refuse live entity target drift before either lane writes.
+
+    *ignore* and *prune* are the caller's bundle filters, preserved on every reload.
+    graph-works supplies its clone patterns without coupling this package to that lane.
+    """
+    index = resource_index(load_bundle(bundle_root, ignore=ignore, prune=prune))
     for write in entities.writes:
         member = write.member
         resource = write.context.resource
@@ -180,10 +186,22 @@ def _existing_file_resources(index: ResourceIndex, repository: str) -> frozenset
     return frozenset(found)
 
 
-def plan_sync(bundle_root: Path, *, config: Config, reader: GraphReader, at: str) -> SyncPlan:
-    """Build and cross-check the complete immutable entity/File plan."""
+def plan_sync(
+    bundle_root: Path,
+    *,
+    config: Config,
+    reader: GraphReader,
+    at: str,
+    ignore: tuple[str, ...] = (),
+    prune: tuple[str, ...] = (),
+) -> SyncPlan:
+    """Build and cross-check the complete immutable entity/File plan.
+
+    *ignore* and *prune* are the caller's bundle filters, preserved on every reload.
+    graph-works supplies its clone patterns without coupling this package to that lane.
+    """
     generated_at = _at_datetime(at)
-    bundle = load_bundle(bundle_root)
+    bundle = load_bundle(bundle_root, ignore=ignore, prune=prune)
     index = resource_index(bundle)
     entities = plan_entities(bundle, reader, config, at=at, index=index)
 
@@ -387,10 +405,16 @@ def sync_bundle(
     at: str,
     today: date,
     dry_run: bool = False,
+    ignore: tuple[str, ...] = (),
+    prune: tuple[str, ...] = (),
 ) -> SyncResult:
-    """Apply only a completely planned sync, then prune against its resource set."""
-    plan = plan_sync(bundle_root, config=config, reader=reader, at=at)
-    bundle = load_bundle(bundle_root)
+    """Apply only a completely planned sync, then prune against its resource set.
+
+    *ignore* and *prune* are the caller's bundle filters, preserved on every reload.
+    graph-works supplies its clone patterns without coupling this package to that lane.
+    """
+    plan = plan_sync(bundle_root, config=config, reader=reader, at=at, ignore=ignore, prune=prune)
+    bundle = load_bundle(bundle_root, ignore=ignore, prune=prune)
     skipped_repos = tuple(repo.name for repo in config.repos if repo.name not in {item.repo for item in plan.mirrors})
     eligible_repos = tuple(repo for repo in config.repos if repo.name not in skipped_repos)
     # Preserve uncertain ownership before mirror reconciliation can prune an
@@ -406,7 +430,9 @@ def sync_bundle(
             declarations_dir=config.declarations_dir,
         )
         mirror_removed = _mirror_removed_concepts(plan.mirrors)
-        prune = replace(raw_prune, deleted=tuple(item for item in raw_prune.deleted if item not in mirror_removed))
+        projected_prune = replace(
+            raw_prune, deleted=tuple(item for item in raw_prune.deleted if item not in mirror_removed)
+        )
         catalog_bundle = _project_mirror_indexes(bundle, plan.mirrors)
         members = set(bundle_members(catalog_bundle))
         members.difference_update(f"{item}.md" for item in (*raw_prune.deleted, *mirror_removed))
@@ -435,8 +461,8 @@ def sync_bundle(
         return SyncResult(
             entities=replace(
                 entities,
-                deleted=prune.deleted,
-                declined=prune.declined,
+                deleted=projected_prune.deleted,
+                declined=projected_prune.declined,
                 catalog=tuple(dict.fromkeys((*catalog_plan.created, *catalog_plan.updated))),
                 catalog_created=catalog_plan.created,
                 catalog_updated=catalog_plan.updated,
@@ -449,10 +475,10 @@ def sync_bundle(
             indexes=index_prune.result,
         )
 
-    _preflight_live_entity_filesystem_conflicts(bundle_root, plan.entities)
+    _preflight_live_entity_filesystem_conflicts(bundle_root, plan.entities, ignore=ignore, prune=prune)
     for mirror_plan in plan.mirrors:
         if not mirror_plan.is_empty:
-            preflight_mirror_live(bundle_root, mirror_plan)
+            preflight_mirror_live(bundle_root, mirror_plan, ignore=ignore, prune=prune)
     results: list[MirrorResult] = []
     failed: list[tuple[str, str]] = []
     for item in plan.mirrors:
@@ -476,6 +502,8 @@ def sync_bundle(
                 protected_indexes=protected_indexes,
                 today=today,
                 declarations_dir=config.declarations_dir,
+                ignore=ignore,
+                prune=prune,
             )
             results.append(result)
             if result.failed:
@@ -495,24 +523,31 @@ def sync_bundle(
         plan.entities,
         today=today,
         declarations_dir=config.declarations_dir,
+        ignore=ignore,
+        prune=prune,
     )
     prune_result = prune_entities(
-        load_bundle(bundle_root),
+        load_bundle(bundle_root, ignore=ignore, prune=prune),
         plan.entities.current_resources,
         declarations_dir=config.declarations_dir,
     )
-    post_prune = load_bundle(bundle_root)
+    post_prune = load_bundle(bundle_root, ignore=ignore, prune=prune)
     index_plan = plan_index_prune(
         post_prune, repos=tuple(repo for repo in eligible_repos if repo.name not in dict(failed))
     )
     indexes = apply_index_prune(bundle_root, index_plan)
     protected_indexes = tuple(sorted(set(protected_indexes) | {member for member, _reason in indexes.declined}))
-    post_prune = load_bundle(bundle_root)
+    post_prune = load_bundle(bundle_root, ignore=ignore, prune=prune)
     catalog_plan = plan_catalogs(
         post_prune, declarations_dir=config.declarations_dir, protected_indexes=protected_indexes
     )
     catalogs = reconcile_catalogs(
-        post_prune, today=today, declarations_dir=config.declarations_dir, protected_indexes=protected_indexes
+        post_prune,
+        today=today,
+        declarations_dir=config.declarations_dir,
+        protected_indexes=protected_indexes,
+        ignore=ignore,
+        prune=prune,
     )
     return replace(
         combine_results(entities, mirror, prune_result, catalogs, catalog_plan, plan.warnings), indexes=indexes

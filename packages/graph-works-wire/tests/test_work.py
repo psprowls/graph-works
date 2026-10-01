@@ -22,6 +22,7 @@ from samples_work import (
     BUNDLE,
     advance,
     archive_run,
+    bare_next,
     baseline,
     decision,
     filing,
@@ -838,6 +839,12 @@ def test_next_payload_always_carries_the_empty_guidance_form() -> None:
     payload = work.next_payload(next_result(full=False), bundle_root=BUNDLE)
     assert (payload["guidance"], payload["guidance_warnings"], payload["guidance_file"]) == ([], [], None)
     json.dumps(payload)
+
+
+def test_next_payload_always_carries_repository_notes() -> None:
+    result = next_result(full=True)
+    assert work.next_payload(result, bundle_root=BUNDLE)["repository_notes"] == ["repository demo: advance pin"]
+    assert work.next_payload(bare_next(), bundle_root=BUNDLE)["repository_notes"] == []
 
 
 def test_filing_applied_requires_successful_nonempty_writes():

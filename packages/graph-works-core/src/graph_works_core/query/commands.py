@@ -46,7 +46,7 @@ from models_io.pricing import cost_for_usage
 from okf_ext import search as ext_search
 from okf_ext.bundle import SCHEMA_DIRNAME
 from okf_ext.schemas import load_schemas
-from okf_io import Bundle, load_bundle
+from okf_io import Bundle
 from subagents_io import FanOutResult, SubagentPool, TaskResult, write_trace_record
 
 from graph_works_core.agent_substrate.agent_loop import run_tool_loop
@@ -57,6 +57,7 @@ from graph_works_core.graph.commands import GraphTarget, graph_target
 from graph_works_core.query.prompts.code_reader import CODE_READER_SYSTEM
 from graph_works_core.query.prompts.librarian import build_librarian_system
 from graph_works_core.query.prompts.synthesizer import SYNTHESIZER_SYSTEM
+from graph_works_core.workspace.bundle import load_workspace_bundle
 from graph_works_core.workspace.config import load_workspace_config
 from graph_works_core.workspace.errors import QueryError
 from graph_works_core.workspace.layout import WorkspaceLayout
@@ -604,7 +605,7 @@ def plan_query_brief(
     `gw graph`) and composes the answer.
     """
     if bundle is None:
-        bundle = load_bundle(layout.bundle_dir)
+        bundle = load_workspace_bundle(layout)
     prepared = _prepare_query_retrieval(query, layout, bundle, top_k=top_k, embedder=embedder)
     pages = tuple(
         QueryPageBrief(
@@ -1288,7 +1289,7 @@ async def run_query(
     """
     query_id = uuid.uuid4().hex[:12]
     started_at = datetime.now(tz=UTC).isoformat()
-    loaded_bundle = load_bundle(layout.bundle_dir) if bundle is None else bundle
+    loaded_bundle = load_workspace_bundle(layout) if bundle is None else bundle
     prepared = _prepare_query_retrieval(query, layout, loaded_bundle, top_k=top_k, embedder=embedder)
 
     reader, graph_tools = _load_query_graph_tools(graph_target(layout))

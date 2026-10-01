@@ -18,12 +18,13 @@ from pathlib import Path
 from types import MappingProxyType
 from typing import Literal, cast
 
-from okf_io import load_bundle, parse
+from okf_io import parse
 from work_tracker_okf.items import IGNORE, load_items
 from work_tracker_okf.mutation import DirectoryPrecondition, PlannedWrite, WorkMutationPlan
 from work_tracker_okf.paths import MANAGED_ARTIFACTS, artifact_ref, item_page
 from work_tracker_okf.sources import upsert
 
+from graph_works_core.workspace.bundle import load_workspace_bundle
 from graph_works_core.workspace.commits import WorkspaceCommit, commit_mode, item_stem
 from graph_works_core.workspace.decision_owner import locked_decision_owner
 from graph_works_core.workspace.layout import WorkspaceLayout
@@ -209,7 +210,7 @@ def record_gate_run(layout: WorkspaceLayout, owner: str, run: GateRun, *, today:
     Any non-terminal phase may record: a receipt is a fact about a tree, not a
     phase. Idempotent on `run_id`.
     """
-    if not any(i.path == owner for i in load_items(load_bundle(layout.bundle_dir, ignore=IGNORE))):
+    if not any(i.path == owner for i in load_items(load_workspace_bundle(layout, ignore=IGNORE))):
         return GateRecord("unknown-item", None, False, f"{owner}: no such work item")
     commit_mode(layout)
     with locked_decision_owner(layout, owner) as context:

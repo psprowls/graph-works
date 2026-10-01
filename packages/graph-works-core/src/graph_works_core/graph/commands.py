@@ -34,9 +34,10 @@ from code_graph_io import (
     render,
     update,
 )
+from repositories_okf.lifecycle import clone_path
 
 from graph_works_core.graph.graph_tools import ROW_CAP, _describe
-from graph_works_core.workspace.config import load_workspace_config
+from graph_works_core.workspace.config import declared_checkouts, load_workspace_config
 from graph_works_core.workspace.layout import WorkspaceLayout
 
 
@@ -51,12 +52,16 @@ class GraphTarget:
     `config_from_mapping`, via `workspace.config.load_workspace_config`). All three are empty when there is
     nothing to build, and a caller that only reads (a test, C5's tool
     factory) can supply none of them.
+
+    `member_identity_names` overrides the graph identity only for managed
+    in-bundle clones; ordinary repositories keep their git-derived names.
     """
 
     graph_dir: Path
     members: tuple[Path, ...] = ()
     member_names: tuple[str, ...] = ()
     member_ignore: tuple[tuple[str, ...], ...] = ()
+    member_identity_names: tuple[str | None, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -105,11 +110,18 @@ def graph_target(layout: WorkspaceLayout) -> GraphTarget:
             member_ignore=((),),
         )
     config = load_workspace_config(layout)
+    checkouts = declared_checkouts(layout)
     return GraphTarget(
         graph_dir=config.graph_dir,
         members=tuple(repo.path for repo in config.repos),
         member_names=tuple(repo.name for repo in config.repos),
         member_ignore=tuple(repo.ignore for repo in config.repos),
+        member_identity_names=tuple(
+            repo.name
+            if repo.name in checkouts and repo.path.resolve() == (layout.bundle_dir / clone_path(repo.name)).resolve()
+            else None
+            for repo in config.repos
+        ),
     )
 
 
@@ -147,6 +159,7 @@ def build(target: GraphTarget, *, full: bool = False, only: str | None = None) -
     # read-only tool factory) may supply fewer member_ignore entries than
     # members, or none — those members simply get no ignore patterns.
     member_ignore = list(target.member_ignore) + [()] * (len(members) - len(target.member_ignore))
+    identity_names = list(target.member_identity_names) if len(target.member_identity_names) == len(members) else None
     if only is not None:
         declared = dict(zip(target.member_names, target.members, strict=False))
         if only not in declared:
@@ -155,6 +168,7 @@ def build(target: GraphTarget, *, full: bool = False, only: str | None = None) -
         idx = target.member_names.index(only)
         members = [declared[only]]
         member_ignore = [member_ignore[idx]]
+        identity_names = [identity_names[idx]] if identity_names is not None else None
     if not members:
         return GraphResult(
             exit_codes.NOT_IN_GIT_REPO,
@@ -162,7 +176,9 @@ def build(target: GraphTarget, *, full: bool = False, only: str | None = None) -
             "error: no repositories to build; declare one under `repositories` in workspace.yaml",
         )
     try:
-        update.run_workspace(members, graph_dir=target.graph_dir, full=full, member_ignore=member_ignore)
+        update.run_workspace(
+            members, graph_dir=target.graph_dir, full=full, member_ignore=member_ignore, member_names=identity_names
+        )
     except update.NotInGitRepoError as exc:
         return GraphResult(exit_codes.NOT_IN_GIT_REPO, "", f"error: {exc}")
     except update.UpdateInProgressError as exc:

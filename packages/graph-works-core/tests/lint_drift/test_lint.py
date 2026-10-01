@@ -159,8 +159,8 @@ def test_an_unwalkable_lane_root_is_an_error_and_not_a_raise(workspace, monkeypa
             raise OSError("disk went away")
         return _real_load(root, ignore=ignore)
 
-    _real_load = lint_module.load_bundle
-    monkeypatch.setattr(lint_module, "load_bundle", _boom)
+    _real_load = lint_module.load_bundle_at
+    monkeypatch.setattr(lint_module, "load_bundle_at", _boom)
     report = _run(workspace)
     assert len(report.errors) == 1
     assert "disk went away" in report.errors[0]
@@ -283,7 +283,7 @@ def test_a_wiki_lane_that_never_loaded_reports_an_empty_backlog(workspace, monke
     def _boom(root, *, ignore=()):
         raise OSError("disk went away")
 
-    monkeypatch.setattr(lint_module, "load_bundle", _boom)
+    monkeypatch.setattr(lint_module, "load_bundle_at", _boom)
     assert _run(workspace).open_proposals == ProposalBacklog()
 
 
@@ -502,7 +502,7 @@ async def test_a_wiki_lane_that_never_loaded_says_the_semantic_pass_did_not_run(
     def _boom(root, *, ignore=()):
         raise OSError("disk went away")
 
-    monkeypatch.setattr(lint_module, "load_bundle", _boom)
+    monkeypatch.setattr(lint_module, "load_bundle_at", _boom)
     report = await _lint(workspace)
     assert report.semantic == ()
     assert any("disk went away" in line for line in report.errors)

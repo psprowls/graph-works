@@ -192,9 +192,15 @@ def _preflight_live(bundle_root: Path, bundle: Bundle, plan: MirrorPlan) -> None
             )
 
 
-def preflight_mirror_live(bundle_root: Path, plan: MirrorPlan) -> None:
-    """Refuse all live mirror mutations that would diverge from *plan*."""
-    _preflight_live(bundle_root, load_bundle(bundle_root), plan)
+def preflight_mirror_live(
+    bundle_root: Path, plan: MirrorPlan, *, ignore: tuple[str, ...] = (), prune: tuple[str, ...] = ()
+) -> None:
+    """Refuse all live mirror mutations that would diverge from *plan*.
+
+    *ignore* and *prune* are the caller's bundle filters, preserved on every reload.
+    graph-works supplies its clone patterns without coupling this package to that lane.
+    """
+    _preflight_live(bundle_root, load_bundle(bundle_root, ignore=ignore, prune=prune), plan)
 
 
 def apply_mirror(
@@ -204,8 +210,14 @@ def apply_mirror(
     today: date,
     declarations_dir: Path | None = None,
     protected_indexes: Collection[str] = (),
+    ignore: tuple[str, ...] = (),
+    prune: tuple[str, ...] = (),
 ) -> MirrorResult:
-    """Apply exactly *plan*'s canonical members against *bundle_root*."""
+    """Apply exactly *plan*'s canonical members against *bundle_root*.
+
+    *ignore* and *prune* are the caller's bundle filters, preserved on every reload.
+    graph-works supplies its clone patterns without coupling this package to that lane.
+    """
     _ = today
     contexts = tuple(_target_context(target) for target in plan.targets)
     members: dict[str, tuple[str, str]] = {}
@@ -259,7 +271,7 @@ def apply_mirror(
                 reason=f"planned move {move.source} -> {move.dest} leaves canonical mirror targets",
             )
 
-    bundle: Bundle = load_bundle(bundle_root)
+    bundle: Bundle = load_bundle(bundle_root, ignore=ignore, prune=prune)
     _preflight_live(bundle_root, bundle, plan)
     declarations_root = bundle_root if declarations_dir is None else declarations_dir
     section_set = load_sections(declarations_root / SECTIONS_DIRNAME)
@@ -285,7 +297,7 @@ def apply_mirror(
 
     # Reload: moves and creates both changed the member set the regeneration
     # pass and the index reconciliation below both need to see.
-    reloaded = load_bundle(bundle_root)
+    reloaded = load_bundle(bundle_root, ignore=ignore, prune=prune)
 
     renders = {concept_id: _materialize_render(render) for concept_id, render in plan.updates.items()}
     for rel_path, (_frontmatter, render) in plan.creates.items():
@@ -321,7 +333,7 @@ def apply_mirror(
     # still read as a member -- `update_index()` would then neither prune its
     # entry nor notice the file backing it is gone. Only that case pays for
     # the extra reload.
-    final_bundle = load_bundle(bundle_root) if plan.deletions else reloaded
+    final_bundle = load_bundle(bundle_root, ignore=ignore, prune=prune) if plan.deletions else reloaded
     directories = tuple(
         dict.fromkeys(
             directory

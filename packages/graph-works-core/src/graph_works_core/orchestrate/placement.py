@@ -32,7 +32,7 @@ from datetime import date
 from pathlib import Path
 from types import MappingProxyType
 
-from okf_io import Bundle, load_bundle, parse
+from okf_io import Bundle, parse
 from work_tracker_okf.items import IGNORE, WorkItem, load_items
 from work_tracker_okf.mutation import PlannedWrite, WorkMutationPlan
 from work_tracker_okf.paths import item_page
@@ -52,6 +52,7 @@ from work_tracker_okf.placement import (
 )
 
 from graph_works_core.workspace import provenance
+from graph_works_core.workspace.bundle import load_workspace_bundle
 from graph_works_core.workspace.commits import (
     COMMIT_FAILED_PREFIX,
     CommitOutcome,
@@ -212,7 +213,7 @@ def run_record_reader(
             conflict="attempt-mismatch" if existing is not None and existing != body else None,
         )
 
-    items = load_items(load_bundle(layout.bundle_dir, ignore=IGNORE))
+    items = load_items(load_workspace_bundle(layout, ignore=IGNORE))
     if dry_run or not any(item.path == path for item in items):
         return decide(items)
     with locked_decision_owner(layout, path) as context:
@@ -349,7 +350,7 @@ def run_record_placement(
     *require_start_sha* refuses a code placement that would end up with no
     baseline.
     """
-    bundle = load_bundle(layout.bundle_dir, ignore=IGNORE)
+    bundle = load_workspace_bundle(layout, ignore=IGNORE)
     items = load_items(bundle)
     known = any(item.path == path for item in items)
     if dry_run or not known:
@@ -424,7 +425,7 @@ def preparation_guard(layout: WorkspaceLayout, path: str, *, bundle: Bundle | No
     Supply the planning bundle to bind the token to the same read as the decision.
     """
     return _preparation_guard(
-        layout, bundle if bundle is not None else load_bundle(layout.bundle_dir, ignore=IGNORE), path
+        layout, bundle if bundle is not None else load_workspace_bundle(layout, ignore=IGNORE), path
     )
 
 
@@ -507,7 +508,7 @@ def run_record_baseline(
             descends = answer
         return plan_baseline(items, path, observed_head=head, head_descends_from_recorded=descends, today=today), own
 
-    items = load_items(load_bundle(layout.bundle_dir, ignore=IGNORE))
+    items = load_items(load_workspace_bundle(layout, ignore=IGNORE))
     if dry_run or not any(item.path == path for item in items):
         plan, own = decide(items)
         return BaselineRecord(plan, repo_note=own.note if own else None)

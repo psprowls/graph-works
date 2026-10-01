@@ -34,7 +34,7 @@ def test_stats_uses_the_default_top_and_the_seven_key_json_contract(
         2, 1, 1, (HubEntry("concepts/a", 1),), (HubEntry("concepts/b", 1),), ("concepts/a",), ("concepts/b",)
     )
 
-    monkeypatch.setattr(maintenance, "load_bundle", lambda root: bundle)
+    monkeypatch.setattr(maintenance, "load_workspace_bundle", lambda root: bundle)
 
     def fake_compute_stats(actual_bundle: object, *, top: int) -> WikiStats:
         calls.append((actual_bundle, top))
@@ -64,7 +64,7 @@ def test_index_reconciles_every_directory_and_reports_changed_indexes(
     bundle = object()
     calls: list[tuple[object, object, bool, bool]] = []
 
-    monkeypatch.setattr(maintenance, "load_bundle", lambda root: bundle)
+    monkeypatch.setattr(maintenance, "load_workspace_bundle", lambda root: bundle)
 
     def fake_update_index(
         actual_bundle: object, *, directories: object, create_missing: bool, dry_run: bool
@@ -88,7 +88,7 @@ def test_index_reports_a_noop_without_an_empty_human_response(
     monkeypatch: pytest.MonkeyPatch, initialized_workspace: Path
 ) -> None:
     """A successful no-op needs an explicit human-readable result."""
-    monkeypatch.setattr(maintenance, "load_bundle", lambda root: object())
+    monkeypatch.setattr(maintenance, "load_workspace_bundle", lambda root: object())
     monkeypatch.setattr(maintenance, "update_index", lambda *_args, **_kwargs: ())
 
     result = runner.invoke(app, ["wiki", "index", "--workspace", str(initialized_workspace)])
@@ -235,7 +235,7 @@ def test_stats_renders_a_human_summary_when_json_is_not_requested(
     stats = WikiStats(
         2, 1, 1, (HubEntry("concepts/a", 3),), (HubEntry("concepts/b", 2),), ("concepts/c",), ("concepts/d",)
     )
-    monkeypatch.setattr(maintenance, "load_bundle", lambda root: object())
+    monkeypatch.setattr(maintenance, "load_workspace_bundle", lambda root: object())
     monkeypatch.setattr(maintenance, "compute_stats", lambda _bundle, *, top: stats)
 
     result = runner.invoke(app, ["wiki", "stats", "--workspace", str(initialized_workspace)])
@@ -256,7 +256,7 @@ def test_stats_names_every_empty_section_rather_than_trailing_a_bare_label(
     monkeypatch: pytest.MonkeyPatch, initialized_workspace: Path
 ) -> None:
     """A healthy wiki has no orphans; empty labels would read as a truncated report."""
-    monkeypatch.setattr(maintenance, "load_bundle", lambda root: object())
+    monkeypatch.setattr(maintenance, "load_workspace_bundle", lambda root: object())
     monkeypatch.setattr(maintenance, "compute_stats", lambda _bundle, *, top: WikiStats(1, 0, 1, (), (), (), ()))
 
     result = runner.invoke(app, ["wiki", "stats", "--workspace", str(initialized_workspace)])
@@ -276,7 +276,7 @@ def test_stats_reports_an_unreadable_bundle_instead_of_a_traceback(
     def fail(*_args: object, **_kwargs: object) -> object:
         raise failure
 
-    monkeypatch.setattr(maintenance, "load_bundle", fail)
+    monkeypatch.setattr(maintenance, "load_workspace_bundle", fail)
 
     result = runner.invoke(app, ["wiki", "stats", "--workspace", str(initialized_workspace)])
 
@@ -293,7 +293,7 @@ def test_index_reports_a_failed_reconcile_instead_of_a_traceback(
     def fail(*_args: object, **_kwargs: object) -> object:
         raise OSError("index.md is read-only")
 
-    monkeypatch.setattr(maintenance, "load_bundle", lambda root: object())
+    monkeypatch.setattr(maintenance, "load_workspace_bundle", lambda root: object())
     monkeypatch.setattr(maintenance, "update_index", fail)
 
     result = runner.invoke(app, ["wiki", "index", "--workspace", str(initialized_workspace)])

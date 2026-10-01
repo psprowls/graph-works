@@ -23,7 +23,7 @@ from datetime import date
 from pathlib import Path
 from types import MappingProxyType
 
-from okf_io import Bundle, load_bundle
+from okf_io import Bundle
 from work_tracker_okf import decisions as _decisions
 from work_tracker_okf.advance import COMMIT_GATE_REFUSALS as COMMIT_GATE_REFUSALS
 from work_tracker_okf.advance import ExpectedPhase as ExpectedPhase
@@ -44,6 +44,7 @@ from work_tracker_okf.workflow import Blocker
 from graph_works_core.orchestrate import gate_git
 from graph_works_core.orchestrate.gate_receipts import GateMatch, find_satisfying
 from graph_works_core.workspace import anchor, provenance
+from graph_works_core.workspace.bundle import load_workspace_bundle
 from graph_works_core.workspace.commits import WorkspaceCommit, commit_mode, item_stem
 from graph_works_core.workspace.decision_owner import (
     DecisionOwner,
@@ -262,7 +263,7 @@ def run_stage_advance(
         selection is invalid. Dispatch failures occur before mutation.
     """
     definition = load_dispatch_config(layout).definition
-    bundle = load_bundle(layout.bundle_dir, ignore=IGNORE)
+    bundle = load_workspace_bundle(layout, ignore=IGNORE)
     items = load_items(bundle)
     receipt_finish = any(
         item.path == path
@@ -637,7 +638,7 @@ def _advance(
     if dry_run:
         return replace(candidate, warnings=candidate.warnings + warnings, gate_bypass=bypass, gate_receipt=gate_receipt)
 
-    document = load_bundle(layout.bundle_dir, ignore=IGNORE).concepts[path]
+    document = load_workspace_bundle(layout, ignore=IGNORE).concepts[path]
     apply_advance(document, outcome.plan)
     if stamp:
         document.set("spec_baseline", stamp)
@@ -753,7 +754,7 @@ def _advance(
         else:
             owner_member = item_page(owner_ctx.owner_path).rel
             owner_before = (bundle.root / owner_member).read_bytes()
-            owner_document = load_bundle(layout.bundle_dir, ignore=IGNORE).concepts[owner_ctx.owner_path]
+            owner_document = load_workspace_bundle(layout, ignore=IGNORE).concepts[owner_ctx.owner_path]
             upsert(owner_document, _decisions.ledger_ref(owner_ctx.owner_path), title="Decisions")
             writes.append(
                 PlannedWrite(

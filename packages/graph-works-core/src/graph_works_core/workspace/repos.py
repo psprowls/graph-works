@@ -16,21 +16,72 @@ catalog" but "which repo does *this item* live in". `resolve_item_repo`
 answers it, walking the item's `repo:` chain (names only, resolved via
 `declared_repo` in `work_tracker_okf.hierarchy`) before falling back to a
 caller-supplied name, a caller fallback, or `resolve_repo`'s own strict rule.
+
+An in-bundle clone (`okf/repositories/<name>/references/git`) answers every
+question here with its declared `checkout` rather than its `path` (D-001 /
+epic decision 016). Scan and the lane lifecycle want the pinned tree and ask
+for it directly (`config.repos`, `declared_clone`).
 """
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Literal
 
+from code_wiki_okf.config import RepoConfig
+from repositories_okf.lane import LANE_DIR
 from work_tracker_okf.hierarchy import declared_repo
 from work_tracker_okf.items import WorkItem
 
-from graph_works_core.workspace.config import load_workspace_config
+from graph_works_core.workspace.config import declared_checkouts, load_workspace_config
 from graph_works_core.workspace.errors import WorkspaceError
 from graph_works_core.workspace.layout import WorkspaceLayout
+
+
+def in_bundle_clone(layout: WorkspaceLayout, path: Path) -> bool:
+    """Whether *path* is exactly an in-bundle clone: `<bundle_dir>/repositories/<name>/references/git`."""
+    try:
+        parts = path.resolve().relative_to(layout.bundle_dir.resolve()).parts
+    except ValueError:
+        return False
+    return len(parts) == 4 and parts[0] == LANE_DIR and parts[2:] == ("references", "git")
+
+
+def working_checkout(layout: WorkspaceLayout, entry: RepoConfig, checkouts: Mapping[str, Path]) -> Path:
+    """Where gw works on *entry* (D-001 / epic decision 016).
+
+    An in-bundle clone is scanned, never worked in: its declared `checkout` is
+    the answer, and its absence is a refusal rather than a silent fall-back to
+    the pinned tree. Any other entry is its own checkout.
+    """
+    if not in_bundle_clone(layout, entry.path):
+        return entry.path
+    checkout = checkouts.get(entry.name)
+    if checkout is None:
+        raise WorkspaceError(
+            f"{layout.manifest_path}: repositories.{entry.name} is an in-bundle clone and declares no checkout; "
+            f"add checkout: (e.g. .gw/worktrees/{entry.name}/<track>)"
+        )
+    return checkout
+
+
+def _working(layout: WorkspaceLayout, entries: Sequence[RepoConfig]) -> dict[str, Path]:
+    checkouts = declared_checkouts(layout) if any(in_bundle_clone(layout, entry.path) for entry in entries) else {}
+    return {entry.name: working_checkout(layout, entry, checkouts) for entry in entries}
+
+
+def declared_clone(layout: WorkspaceLayout, name: str) -> Path | None:
+    """The declared `path` for *name*: for an in-bundle repository, the pinned clone.
+
+    Only the lane lifecycle and lint ask for it; scan reads `config.repos` directly.
+    """
+    try:
+        config = load_workspace_config(layout)
+    except OSError:
+        return None
+    return next((entry.path for entry in config.repos if entry.name == name), None)
 
 
 def resolve_repo(layout: WorkspaceLayout, *, repo_name: str | None = None) -> tuple[Path | None, str | None]:
@@ -62,14 +113,14 @@ def resolve_repo(layout: WorkspaceLayout, *, repo_name: str | None = None) -> tu
     except OSError:
         return None, f"{path}: absent, so this workspace declares no code repository"
 
-    by_name = {entry.name: entry.path for entry in config.repos}
+    by_name = _working(layout, config.repos)
     if repo_name is not None:
         match = next((entry for entry in config.repos if entry.name == repo_name), None)
         if match is None:
             raise WorkspaceError(
                 f"{path}: repo_name {repo_name!r} names no declared repository; declared: {_declared_listing(by_name)}"
             )
-        return match.path, None
+        return by_name[repo_name], None
     if not config.repos:
         return None, f"{path}: declares no repositories, so no code repo was resolved"
     if len(config.repos) > 1:
@@ -77,7 +128,7 @@ def resolve_repo(layout: WorkspaceLayout, *, repo_name: str | None = None) -> tu
             f"{path}: {len(config.repos)} repositories declared ({_declared_listing(by_name)}); "
             "pass repo_name= to choose one"
         )
-    return config.repos[0].path, None
+    return by_name[config.repos[0].name], None
 
 
 def resolve_repos(layout: WorkspaceLayout) -> tuple[Path, ...]:
@@ -95,7 +146,7 @@ def resolve_repos(layout: WorkspaceLayout) -> tuple[Path, ...]:
         config = load_workspace_config(layout)
     except OSError:
         return ()
-    return tuple(entry.path for entry in config.repos)
+    return tuple(_working(layout, config.repos).values())
 
 
 RepoSource = Literal["frontmatter", "flag", "cwd", "sole", "fallback", "workspace"]
@@ -133,7 +184,7 @@ def declared_repositories(layout: WorkspaceLayout) -> dict[str, Path]:
         config = load_workspace_config(layout)
     except OSError:
         return {}
-    return {entry.name: entry.path for entry in config.repos}
+    return _working(layout, config.repos)
 
 
 def _join(*notes: str | None) -> str | None:
@@ -222,8 +273,11 @@ __all__ = [
     "ItemRepo",
     "RepoFallback",
     "RepoSource",
+    "declared_clone",
     "declared_repositories",
+    "in_bundle_clone",
     "resolve_item_repo",
     "resolve_repo",
     "resolve_repos",
+    "working_checkout",
 ]

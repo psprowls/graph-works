@@ -79,7 +79,7 @@ workspace/    layer 0 — errors, layout, manifest, discovery, init, provenance,
 agent_config/  layer 1 — conventions resolves injected paths; git_state probes repository identity/state through provenance; local resolves Claude local-file placement/permission gates; trust reads decisions; merge models policy; read exposes project/workspace reports
 agent_substrate/ : graph/ : prompts/                                   layer 1, shared
 guidance/                                                              layer 1.5 — claims index + affects closure, between the verticals and the shared substrate
-ingest/ : scan/ : query/ : lint_drift/ : archive/ : orchestrate/ : proposals/ : wiki_stats/ : wiki_page/ : work/ : events/ : code_read/    layer 2, independent verticals
+ingest/ : scan/ : query/ : lint_drift/ : archive/ : orchestrate/ : proposals/ : wiki_stats/ : wiki_page/ : work/ : events/ : code_read/ : repositories/    layer 2, independent verticals
 ```
 
 `guidance/` — deterministic guidance inputs, its own layer so any vertical
@@ -115,6 +115,13 @@ satisfying receipt. See "The dispatch seam" in the README.
 `wiki_page/` — `run_page_read`: one page with outlinks, backlinks and broken links; `run_wiki_citations` (`citations.py`): the page's `path:N` inline-code citations with body-relative lines, resolved against `workspace.repo_files`; no cache.
 
 `code_read/` — `run_code_excerpt`: a context window of one declared repository's tracked file; refusals are results. `workspace/repo_files.py` is the file set both share (tracked files minus ignore globs) and the confinement check.
+
+`repositories/` — `run_repo_add`, `run_repo_restore`, `run_repo_advance`. Resolves git through `provenance.gate_git`, hands it to `repositories_okf.git`, runs clone and fetch outside the bundle lock, writes pages under `held_bundle_lock` through `writes.WriteLog` (rollback-able), and commits the written paths with `commit_pending`. `restore` writes no page and makes no commit. The incoming clone is staged under `<cache_dir>/repo-incoming/`. Per-repository operation locks under `<cache_dir>/repository-operations/` serialize clone HEAD changes through apply and rollback, including restore. Operation ownership always precedes the bundle lock; network calls hold no bundle lock.
+
+`workspace/repos.py` returns an in-bundle clone's declared `checkout` (D-001), and `declared_clone` is the pinned path; `workspace/lane_facts.py` is the one gatherer of lane git facts.
+`repositories/scan_guard.py` rolls back a failed advance's wiki writes through git; managed advance also restores a SQLite checkpoint of the code graph, and reports incomplete rollback explicitly; `WorkspaceCommit.root_paths` commits workspace-root files such as the manifest.
+
+`repositories/adopt.py` is `gw repo adopt`: it renames an existing primary checkout declared in `repositories:` to the lane's clone location, links its working checkout, repairs every linked worktree to relative links and records page, manifest and log in one commit. The manifest edit is a text splice (`workspace/manifest_edit.py`), not `set_value`, so authored comments survive. Every refusal is preflight; every failure after the first git step rolls back to the old layout, and rollback never deletes the tree — it is the user's only clone.
 
 `proposals/` — plan-by-default proposal file/decide (`run_proposal_file`, `run_proposal_decide`); no clock.
 

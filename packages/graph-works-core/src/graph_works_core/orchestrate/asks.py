@@ -19,10 +19,10 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
-from okf_io import load_bundle
 from work_tracker_okf import asks as _asks
 from work_tracker_okf.items import IGNORE, WorkItem, load_items
 
+from graph_works_core.workspace.bundle import load_workspace_bundle
 from graph_works_core.workspace.decision_owner import locked_decision_owner
 from graph_works_core.workspace.layout import WorkspaceLayout
 
@@ -115,7 +115,7 @@ def run_ask(
         existing = sorted(entry.name for entry in directory.iterdir()) if directory.is_dir() else []
         return directory / _asks.next_ask_name(existing, phase=payload.phase, kind=payload.kind)
 
-    items = {item.path: item for item in load_items(load_bundle(layout.bundle_dir, ignore=IGNORE))}
+    items = {item.path: item for item in load_items(load_workspace_bundle(layout, ignore=IGNORE))}
     item = items.get(path)
     if item is None:
         return _refused("unknown-item")
@@ -224,7 +224,7 @@ def run_ask_answer(
     loaded = _load(target)
     if loaded is None or loaded.item != item_path:
         return AskAnswerResult(("payload-invalid",), target, resource, None, False, False)
-    if item_path not in {item.path for item in load_items(load_bundle(layout.bundle_dir, ignore=IGNORE))}:
+    if item_path not in {item.path for item in load_items(load_workspace_bundle(layout, ignore=IGNORE))}:
         return AskAnswerResult(("unknown-item",), target, resource, None, False, False)
     outcome, updated = _decide(target, resource, loaded, choice=choice, effort=effort, notes=notes, at=at, by=by)
     if dry_run or updated is None:

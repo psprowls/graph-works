@@ -1,0 +1,26 @@
+sections:
+  - heading: Range
+    required: true
+    placeholder: |
+      > TODO: the commit range this snapshot covers.
+  - heading: Tags crossed
+    required: false
+    placeholder: |
+      > TODO: tags reachable from the new pin and not from the old one.
+  - heading: Merges
+    required: false
+    placeholder: |
+      > TODO: first-parent merge subjects in the range.
+  - heading: Changed files
+    required: false
+    placeholder: |
+      > TODO: files changed in the range, grouped by top-level directory.
+  - heading: Flagged pages
+    required: false
+    placeholder: |
+      > TODO: bundle pages that link into a changed file.
+  - heading: Doc impact
+    required: false
+    placeholder: |
+      > TODO: what this change means for the bundle's pages. Written by a human; gw never rewrites it.
+additional_sections: true

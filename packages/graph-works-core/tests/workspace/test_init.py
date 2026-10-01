@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import json
 import re
 from datetime import date
 
 import code_wiki_okf.init
 import doc_wiki_okf.init
 import pytest
+import repositories_okf.init
 import work_tracker_okf.init
 from graph_works_core.workspace.errors import InitError
 from graph_works_core.workspace.init import INSTALLERS, apply_init, plan_init
@@ -22,25 +24,60 @@ def _init(root, **kwargs):
 # --- the installer roster ---------------------------------------------------
 
 
-def test_the_shipped_installers_are_the_three_packages_that_have_one():
+def test_the_shipped_installers_are_the_four_packages_that_have_one():
     assert (
         code_wiki_okf.init.install_bundle,
         work_tracker_okf.init.install_bundle,
         doc_wiki_okf.init.install_bundle,
+        repositories_okf.init.install_bundle,
     ) == INSTALLERS
 
 
-def test_all_three_installers_land_without_a_foreign_content_refusal(tmp_path):
-    """The pairing the item's own plan table calls for: a fresh init over all
-    three installers reports `ok` and both packages' fragments resolve."""
+def test_all_four_installers_land_without_a_foreign_content_refusal(tmp_path):
     from okf_ext.shape.loader import load_sections
 
     result = _init(tmp_path / "works")
     assert result.ok
-
-    sections = load_sections(result.layout.config_dir / "sections")
+    assert not [f for install in result.installs for f in install.install.failed]
+    config = result.layout.config_dir
+    assert (config / "schema" / "_base-repository.schema.json").is_file()
+    assert (config / "schema" / "ReferenceRepository.schema.json").is_file()
+    sections = load_sections(config / "sections")
     assert sections.fragments["see_also"]
     assert sections.fragments["plan_table"]
+
+
+def _gw_files(root):
+    return {
+        p.relative_to(root).as_posix(): p.read_bytes()
+        for p in (root / ".gw").rglob("*")
+        if p.is_file() and "cache" not in p.parts
+    }
+
+
+def test_re_bootstrap_of_a_pre_lane_workspace_installs_only_the_lane(tmp_path):
+    """The live-workspace path: an existing workspace gains the nine lane files and two tags; nothing else changes."""
+    root = tmp_path / "works"
+    apply_init(plan_init(root, today=TODAY, installers=INSTALLERS[:3]))
+    before = _gw_files(root)
+    result = _init(root)
+    assert result.ok
+    lane = next(install for install in result.installs if "_base-repository" in " ".join(install.install.written))
+    assert set(lane.install.written) == {
+        "schema/_base-repository.schema.json",
+        "schema/ManagedRepository.schema.json",
+        "schema/ReferenceRepository.schema.json",
+        "schema/RepositorySnapshot.schema.json",
+        "schema/RepositoryChangelog.schema.json",
+        "sections/ManagedRepository.yaml",
+        "sections/ReferenceRepository.yaml",
+        "sections/RepositorySnapshot.yaml",
+        "sections/RepositoryChangelog.yaml",
+    }
+    after = _gw_files(root)
+    changed = {k for k in before if before[k] != after.get(k)}
+    assert changed <= {".gw/tags.yaml"}
+    assert plan_init(root, today=TODAY).is_empty
 
 
 # --- planning writes nothing ------------------------------------------------
@@ -186,7 +223,12 @@ def test_a_hand_written_root_gitignore_gains_only_the_missing_line(tmp_path):
     # Pins the actual line set, not just substring presence: a separator-less
     # append ("*.tmpworkspace.local.yaml") would still satisfy weaker
     # `in`/`count` checks but corrupts the pre-existing line.
-    assert text.splitlines() == ["*.tmp", "workspace.local.yaml", "/dispatch.local.yaml"]
+    assert text.splitlines() == [
+        "*.tmp",
+        "workspace.local.yaml",
+        "/dispatch.local.yaml",
+        "/okf/repositories/*/references/git/",
+    ]
 
 
 def test_a_root_gitignore_that_already_has_the_line_is_not_rewritten(tmp_path):
@@ -927,3 +969,172 @@ def test_init_preserves_flow_mapping_with_aliased_last_value(tmp_path, separator
     insertion = (" " if separator else ", ") + "dispatch_rules: dispatch.yaml"
     assert manifest.read_bytes().decode().replace(insertion, "") == authored
     assert plan_init(root, today=TODAY).is_empty
+
+
+_LANE = "/okf/repositories/*/references/git/"
+
+
+def test_a_fresh_init_ignores_the_clone_directory_in_the_root_gitignore(tmp_path):
+    result = _init(tmp_path / "works")
+    lines = (result.layout.root / ".gitignore").read_text(encoding="utf-8").splitlines()
+    assert lines.count(_LANE) == 1
+
+
+def test_the_lane_line_is_added_once_across_reinits(tmp_path):
+    root = tmp_path / "works"
+    _init(root)
+    _init(root)
+    assert (root / ".gitignore").read_text(encoding="utf-8").splitlines().count(_LANE) == 1
+    assert plan_init(root, today=TODAY).is_empty
+
+
+def test_a_pre_lane_root_gitignore_gains_only_the_lane_line(tmp_path):
+    root = tmp_path / "works"
+    root.mkdir()
+    (root / ".gitignore").write_text("workspace.local.yaml\n/dispatch.local.yaml\n", encoding="utf-8", newline="")
+    plan = plan_init(root, today=TODAY)
+    write = next(w for w in plan.writes if w.label == ".gitignore")
+    assert write.mode == "append"
+    assert write.content == _LANE + "\n"
+
+
+def test_the_lane_line_follows_an_overridden_bundle_dir(tmp_path):
+    root = tmp_path / "works"
+    root.mkdir()
+    (root / "workspace.yaml").write_text(
+        "version: 1\ninitialized_at: '2026-08-13'\nlayout:\n  bundle_dir: content\n", encoding="utf-8", newline=""
+    )
+    _init(root)
+    lines = (root / ".gitignore").read_text(encoding="utf-8").splitlines()
+    assert "/content/repositories/*/references/git/" in lines
+    assert _LANE not in lines
+
+
+def test_a_bundle_dir_at_the_root_gets_an_unprefixed_line(tmp_path):
+    root = tmp_path / "works"
+    root.mkdir()
+    (root / "workspace.yaml").write_text(
+        "version: 1\ninitialized_at: '2026-08-13'\nlayout:\n  bundle_dir: .\n", encoding="utf-8", newline=""
+    )
+    _init(root)
+    lines = (root / ".gitignore").read_text(encoding="utf-8").splitlines()
+    assert "/repositories/*/references/git/" in lines
+    assert not any(line.startswith("/./") for line in lines)
+
+
+def test_a_bundle_dir_outside_the_root_plans_no_line_and_says_so(tmp_path):
+    root = tmp_path / "works"
+    root.mkdir()
+    outside = tmp_path / "elsewhere"
+    (root / "workspace.yaml").write_text(
+        f"version: 1\ninitialized_at: '2026-08-13'\nlayout:\n  bundle_dir: \"{outside}\"\n",
+        encoding="utf-8",
+        newline="",
+    )
+    plan = plan_init(root, today=TODAY)
+    assert plan.ok
+    assert any("repositories/*/references/git/" in notice and ".gitignore" in notice for notice in plan.notices)
+    result = apply_init(plan)
+    lines = (root / ".gitignore").read_text(encoding="utf-8").splitlines()
+    assert not any("references/git" in line for line in lines)
+    assert any("repositories/*/references/git/" in notice for notice in result.notices)
+
+
+_FILTER = "repositories/*/references/git/"
+
+
+def _app_json(root):
+    return root / "okf" / ".obsidian" / "app.json"
+
+
+def test_a_fresh_init_creates_the_obsidian_filter(tmp_path):
+    root = tmp_path / "works"
+    plan = plan_init(root, today=TODAY)
+    assert "+ okf/.obsidian/app.json" in plan.diff().splitlines()
+    apply_init(plan)
+    text = _app_json(root).read_text(encoding="utf-8")
+    assert json.loads(text) == {"userIgnoreFilters": [_FILTER]}
+    assert text.endswith("\n")
+
+
+def test_other_app_json_keys_are_preserved_in_order(tmp_path):
+    root = tmp_path / "works"
+    _app_json(root).parent.mkdir(parents=True)
+    _app_json(root).write_text(
+        '{"vimMode": true, "userIgnoreFilters": ["private/"], "theme": "dark"}', encoding="utf-8", newline=""
+    )
+    _init(root)
+    data = json.loads(_app_json(root).read_text(encoding="utf-8"))
+    assert list(data) == ["vimMode", "userIgnoreFilters", "theme"]
+    assert data["userIgnoreFilters"] == ["private/", _FILTER]
+    assert data["vimMode"] is True and data["theme"] == "dark"
+
+
+def test_non_ascii_values_in_other_keys_stay_literal(tmp_path):
+    root = tmp_path / "works"
+    _app_json(root).parent.mkdir(parents=True)
+    _app_json(root).write_text('{"vaultName": "café"}', encoding="utf-8", newline="")
+    _init(root)
+    text = _app_json(root).read_text(encoding="utf-8")
+    assert "café" in text and "\\u00e9" not in text
+
+
+def test_a_missing_filters_key_is_added(tmp_path):
+    root = tmp_path / "works"
+    _app_json(root).parent.mkdir(parents=True)
+    _app_json(root).write_text('{"vimMode": true}\n', encoding="utf-8", newline="")
+    _init(root)
+    expected = {"vimMode": True, "userIgnoreFilters": [_FILTER]}
+    assert json.loads(_app_json(root).read_text(encoding="utf-8")) == expected
+
+
+def test_an_existing_entry_plans_nothing(tmp_path):
+    root = tmp_path / "works"
+    _init(root)
+    before = _app_json(root).read_bytes()
+    assert not any(w.label.endswith("app.json") for w in plan_init(root, today=TODAY).writes)
+    _init(root)
+    assert _app_json(root).read_bytes() == before
+
+
+@pytest.mark.parametrize(
+    ("raw", "reason"),
+    [
+        (b"{not json", "not valid JSON"),
+        (b"[1, 2]", "not a JSON object"),
+        (b'{"userIgnoreFilters": null}', "userIgnoreFilters is not a list"),
+        (b'{"userIgnoreFilters": "x/"}', "userIgnoreFilters is not a list"),
+        (b"\xff\xfe{}", "not valid JSON"),
+    ],
+)
+def test_an_unusable_app_json_is_a_notice_not_a_failure(tmp_path, raw, reason):
+    root = tmp_path / "works"
+    _app_json(root).parent.mkdir(parents=True)
+    _app_json(root).write_bytes(raw)
+    plan = plan_init(root, today=TODAY)
+    assert plan.ok
+    assert not any(w.label.endswith("app.json") for w in plan.writes)
+    notice = next(n for n in plan.notices if "app.json" in n)
+    assert notice.startswith("! ") and reason in notice and f'add "{_FILTER}" to userIgnoreFilters by hand' in notice
+    result = apply_init(plan)
+    assert _app_json(root).read_bytes() == raw
+    assert notice in result.notices
+
+
+def test_the_obsidian_file_follows_an_overridden_bundle_dir(tmp_path):
+    root = tmp_path / "works"
+    root.mkdir()
+    (root / "workspace.yaml").write_text(
+        "version: 1\ninitialized_at: '2026-08-13'\nlayout:\n  bundle_dir: content\n", encoding="utf-8", newline=""
+    )
+    _init(root)
+    assert (root / "content" / ".obsidian" / "app.json").is_file()
+    assert not (root / ".obsidian").exists()
+
+
+def test_the_root_level_obsidian_vault_is_never_touched(tmp_path):
+    root = tmp_path / "works"
+    (root / ".obsidian").mkdir(parents=True)
+    (root / ".obsidian" / "app.json").write_text("{}\n", encoding="utf-8", newline="")
+    _init(root)
+    assert (root / ".obsidian" / "app.json").read_text(encoding="utf-8") == "{}\n"

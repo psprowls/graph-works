@@ -61,7 +61,29 @@ def test_graph_target_reads_the_bundle_config(tmp_path):
     target = graph_target(layout)
     assert target.graph_dir == layout.cache_dir
     assert target.member_names == ("alpha", "beta")
+    assert target.member_identity_names == (None, None)
     assert target.members == ((tmp_path / "repo-a").resolve(), (tmp_path / "repo-b").resolve())
+
+
+def test_graph_target_overrides_identity_only_for_a_declared_managed_clone(tmp_path):
+    root = tmp_path / "workspace"
+    root.mkdir()
+    layout = _layout_with_config(
+        root,
+        """
+        repositories:
+          demo:
+            path: okf/repositories/demo/references/git
+            checkout: .gw/worktrees/demo/main
+          ordinary:
+            path: ../ordinary
+            checkout: ../ordinary-checkout
+        """,
+    )
+
+    target = graph_target(layout)
+
+    assert target.member_identity_names == ("demo", None)
 
 
 def test_graph_target_falls_back_when_there_is_no_config(tmp_path):
@@ -99,9 +121,15 @@ def calls(monkeypatch):
     machine-dependent."""
     recorded: list[dict] = []
 
-    def _fake(members, *, graph_dir, full=False, lock_timeout_ms=None, member_ignore=None):
+    def _fake(members, *, graph_dir, full=False, lock_timeout_ms=None, member_ignore=None, member_names=None):
         recorded.append(
-            {"members": list(members), "graph_dir": graph_dir, "full": full, "member_ignore": member_ignore}
+            {
+                "members": list(members),
+                "graph_dir": graph_dir,
+                "full": full,
+                "member_ignore": member_ignore,
+                "member_names": member_names,
+            }
         )
 
     monkeypatch.setattr(graph_cmd.update, "run_workspace", _fake)
@@ -127,6 +155,7 @@ def test_build_drives_run_workspace_with_every_member(tmp_path, calls):
             "graph_dir": target.graph_dir,
             "full": False,
             "member_ignore": [(), ()],
+            "member_names": None,
         }
     ]
 
@@ -142,15 +171,17 @@ def test_build_threads_member_ignore_through(tmp_path, calls):
     assert calls[0]["member_ignore"] == [("**/fixtures/**",), ("*.generated.py",)]
 
 
-def test_only_scopes_member_ignore_to_the_selected_member(tmp_path, calls):
+def test_only_scopes_member_ignore_and_identity_to_the_selected_member(tmp_path, calls):
     target = GraphTarget(
         graph_dir=tmp_path / "graph",
         members=(tmp_path / "repo-a", tmp_path / "repo-b"),
         member_names=("alpha", "beta"),
         member_ignore=(("alpha-ignore/**",), ("beta-ignore/**",)),
+        member_identity_names=(None, "beta"),
     )
     graph_cmd.build(target, only="beta")
     assert calls[0]["member_ignore"] == [("beta-ignore/**",)]
+    assert calls[0]["member_names"] == ["beta"]
 
 
 def test_graph_target_reads_repo_ignore_into_member_ignore(tmp_path):
@@ -261,7 +292,7 @@ def test_a_target_with_no_members_is_not_in_git_repo(tmp_path, calls):
     ],
 )
 def test_build_maps_every_documented_failure_onto_its_exit_code(tmp_path, monkeypatch, raised, expected):
-    def _boom(members, *, graph_dir, full=False, lock_timeout_ms=None, member_ignore=None):
+    def _boom(members, *, graph_dir, full=False, lock_timeout_ms=None, member_ignore=None, member_names=None):
         raise raised()
 
     monkeypatch.setattr(graph_cmd.update, "run_workspace", _boom)

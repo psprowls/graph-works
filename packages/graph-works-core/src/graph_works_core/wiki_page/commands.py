@@ -13,11 +13,12 @@ from typing import Literal
 
 from okf_ext.bundle import SECTIONS_DIRNAME
 from okf_ext.shape import SectionError, load_sections
-from okf_io import Bundle, build_link_graph, load_bundle
+from okf_io import Bundle, build_link_graph
 from okf_io.bundle import INDEX_NAME
 from okf_io.index import IndexEntry, IndexHeading, outline
 from okf_io.links import Link, parse_destination, resolve_path
 
+from graph_works_core.workspace.bundle import load_workspace_bundle
 from graph_works_core.workspace.errors import WorkspaceError
 from graph_works_core.workspace.layout import WorkspaceLayout
 
@@ -53,7 +54,7 @@ def _link(link: Link) -> PageLink:
 
 def run_page_read(layout: WorkspaceLayout, page_id: str) -> PageRead:
     """Read an extensionless, bundle-relative page id without writing state."""
-    bundle = load_bundle(layout.bundle_dir)
+    bundle = load_workspace_bundle(layout)
     document = bundle.concept(page_id)
     if document is None:
         return PageRead(page_id, MappingProxyType({}), "", (), (), (), None, "unknown-page")
@@ -143,7 +144,7 @@ def run_wiki_tree(layout: WorkspaceLayout) -> WikiTree:
     flag unless it is declared itself. The bundle is loaded without
     `ignore=`, so every id is one `/v1/wiki/page` accepts.
     """
-    bundle = load_bundle(layout.bundle_dir)
+    bundle = load_workspace_bundle(layout)
     index = bundle.indexes.get("")
     if index is None:
         return WikiTree(())

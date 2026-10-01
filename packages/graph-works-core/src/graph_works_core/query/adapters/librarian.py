@@ -5,12 +5,12 @@ from __future__ import annotations
 from code_graph_io import GraphReader
 from okf_ext.bundle import SCHEMA_DIRNAME
 from okf_ext.schemas import load_schemas
-from okf_io import load_bundle
 from subagents_io import Prepared, RunContext
 
 from graph_works_core.agent_substrate.agent_tools import read_bounded_page
 from graph_works_core.query import commands as query_mod
 from graph_works_core.query.prompts.librarian import build_librarian_system
+from graph_works_core.workspace.bundle import load_workspace_bundle
 from graph_works_core.workspace.config import load_workspace_config
 from graph_works_core.workspace.discovery import resolve
 
@@ -33,7 +33,7 @@ class LibrarianAdapter:
 
     async def prepare(self, ctx: RunContext[GraphReader], item: str) -> Prepared:
         layout = resolve(workspace=ctx.workspace)
-        bundle = load_bundle(layout.bundle_dir)
+        bundle = load_workspace_bundle(layout)
         config = load_workspace_config(layout)
         schema_set = load_schemas(config.declarations_dir / SCHEMA_DIRNAME)
         prepared = query_mod._prepare_query_retrieval(

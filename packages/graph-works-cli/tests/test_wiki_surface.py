@@ -55,6 +55,7 @@ def test_help_json_freezes_the_existing_root_and_complete_c4_wiki_surface() -> N
         "graph",
         "wiki",
         "work",
+        "repo",
         "util",
     ]
     assert _option_names(root) == {"--verbose", "-v", "--install-completion", "--show-completion"}

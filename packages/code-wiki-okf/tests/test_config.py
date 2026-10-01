@@ -131,6 +131,23 @@ def test_load_config_repo_unknown_key_raises(tmp_path: Path) -> None:
         load_config(tmp_path, graph_dir="../graphs/code")
 
 
+def test_load_config_accepts_a_checkout_key(tmp_path: Path) -> None:
+    _write(
+        tmp_path,
+        "repositories:\n  demo:\n    path: okf/repositories/demo/references/git\n"
+        "    checkout: .gw/worktrees/demo/main\n",
+    )
+    config = load_config(tmp_path, graph_dir=tmp_path / ".graph")
+    assert [repo.name for repo in config.repos] == ["demo"]
+
+
+@pytest.mark.parametrize("value", ['""', "   ", "3", "[]"])
+def test_load_config_rejects_a_blank_or_non_string_checkout(tmp_path: Path, value: str) -> None:
+    _write(tmp_path, f"repositories:\n  demo:\n    path: x\n    checkout: {value}\n")
+    with pytest.raises(ConfigError, match=r"repositories\.demo\.checkout"):
+        load_config(tmp_path, graph_dir=tmp_path / ".graph")
+
+
 def test_load_config_state_gate_unknown_key_raises(tmp_path: Path) -> None:
     _write(tmp_path, "version: 1\nstate_gate:\n  bogus: 1\n")
     with pytest.raises(ConfigError, match="bogus"):

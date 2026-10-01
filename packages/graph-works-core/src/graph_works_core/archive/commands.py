@@ -42,13 +42,14 @@ from doc_wiki_okf.sources import entry_keys_from
 from okf_ext.bundle import SCHEMA_DIRNAME
 from okf_ext.moves import MovePlan, stranded_warning
 from okf_ext.schemas import SchemaSet, load_schemas
-from okf_io import append_log_entry, load, load_bundle
+from okf_io import append_log_entry, load
 from okf_io import parse as parse_document
 from work_tracker_okf.archive import plan_archive
 from work_tracker_okf.items import ARCHIVE_IGNORE, load_items
 from work_tracker_okf.mutation import PlannedWrite, WorkMutationPlan
 
 from graph_works_core.workspace import provenance
+from graph_works_core.workspace.bundle import load_workspace_bundle
 from graph_works_core.workspace.commits import COMMIT_FAILED_PREFIX, CommitOutcome, WorkspaceCommit, item_stem
 from graph_works_core.workspace.layout import WorkspaceLayout
 from graph_works_core.workspace.repos import resolve_repos
@@ -200,7 +201,7 @@ def run_archive(
     No clock. `today=` is required, the way every writer in this workspace
     takes it.
     """
-    bundle = load_bundle(layout.bundle_dir, ignore=(*ARCHIVE_IGNORE, *WIKI_ARCHIVE_IGNORE))
+    bundle = load_workspace_bundle(layout, ignore=(*ARCHIVE_IGNORE, *WIKI_ARCHIVE_IGNORE))
     plan = plan_archive(bundle, load_items(bundle), paths)
     schema_set = _wiki_schema_set(layout)
     wiki_plan = plan_wiki_archive(

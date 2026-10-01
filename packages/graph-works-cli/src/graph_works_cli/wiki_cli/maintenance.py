@@ -7,9 +7,10 @@ from datetime import UTC, datetime
 import typer
 from graph_works_core.archive.commands import run_archive, stranded_warnings
 from graph_works_core.wiki_stats.commands import compute_stats
+from graph_works_core.workspace.bundle import load_workspace_bundle
 from graph_works_wire.wiki import stats_payload
 from graph_works_wire.work import archive_payload
-from okf_io import load_bundle, update_index
+from okf_io import update_index
 
 from graph_works_cli.errors import fail
 from graph_works_cli.json_output import encode
@@ -45,7 +46,7 @@ def stats(
     """Compute deterministic wiki link-graph statistics."""
     layout = resolve_workspace(workspace)
     try:
-        result = compute_stats(load_bundle(layout.bundle_dir), top=top)
+        result = compute_stats(load_workspace_bundle(layout), top=top)
     except (OSError, ValueError) as exc:
         exit_error(str(exc), cause=exc)
 
@@ -60,7 +61,7 @@ def index(workspace: str = typer.Option("", "--workspace")) -> None:
     """Reconcile every represented index and create missing index files."""
     layout = resolve_workspace(workspace)
     try:
-        updates = update_index(load_bundle(layout.bundle_dir), directories=None, create_missing=True, dry_run=False)
+        updates = update_index(load_workspace_bundle(layout), directories=None, create_missing=True, dry_run=False)
     except (OSError, ValueError) as exc:
         exit_error(str(exc), cause=exc)
 

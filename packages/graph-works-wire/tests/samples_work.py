@@ -124,6 +124,7 @@ def next_result(*, full: bool) -> object:
             else CarriedContext()
         ),
         guidance_file=Path("/ws/okf/work/a/references/guidance-design.md") if full else None,
+        repository_notes=("repository demo: advance pin",) if full else (),
     )
 
 
@@ -132,6 +133,7 @@ def bare_next() -> object:
     result = next_result(full=True)
     result.dispatch_resolution = None  # type: ignore[attr-defined]
     result.descent = None  # type: ignore[attr-defined]
+    result.repository_notes = ()  # type: ignore[attr-defined]
     return result
 
 

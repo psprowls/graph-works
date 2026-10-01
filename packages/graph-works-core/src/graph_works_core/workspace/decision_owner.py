@@ -15,13 +15,14 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from okf_ext.locking import locked as _locked_file
-from okf_io import Bundle, load_bundle
+from okf_io import Bundle
 from work_tracker_okf import decisions as _decisions
 from work_tracker_okf._selection import path_index
 from work_tracker_okf.decisions import HoldFact
 from work_tracker_okf.hierarchy import decision_owner
 from work_tracker_okf.items import IGNORE, WorkItem, load_items
 
+from graph_works_core.workspace.bundle import load_workspace_bundle
 from graph_works_core.workspace.layout import WorkspaceLayout
 
 #: A real reparent settles within one retry; a third consecutive owner change
@@ -63,7 +64,7 @@ def decision_lock_path(layout: WorkspaceLayout, owner_path: str) -> Path:
 
 
 def decision_context(layout: WorkspaceLayout, path: str) -> DecisionContext:
-    bundle = load_bundle(layout.bundle_dir, ignore=IGNORE)
+    bundle = load_workspace_bundle(layout, ignore=IGNORE)
     items = tuple(load_items(bundle))
     selected = path_index(items)
     if path not in selected:

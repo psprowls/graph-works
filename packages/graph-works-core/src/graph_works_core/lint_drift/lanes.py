@@ -36,6 +36,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Literal
 
+import repositories_okf
 import work_tracker_okf
 from code_graph_io import GraphReader
 from code_wiki_okf.about import about_rule
@@ -47,16 +48,21 @@ from config_io import PROJECTION_FILENAME
 from doc_wiki_okf.sources import drain_rule, entry_keys_from
 from okf_ext.bundle import SCHEMA_DIRNAME, SECTIONS_DIRNAME
 from okf_ext.health import health_rule
+from okf_ext.placement import placement_rule
 from okf_ext.render import render_rule
 from okf_ext.schemas import SchemaError, SchemaSet, declared_about, load_schemas, schema_rule
 from okf_ext.sections import section_rule
 from okf_ext.shape import SectionError, load_sections
 from okf_ext.tags import VOCABULARY_FILENAME, VocabularyError, load_vocabulary, vocabulary_rule
 from okf_io import Finding, Rule, RuleContext
+from repositories_okf.git import Git
+from repositories_okf.lifecycle import lane_pages
+from repositories_okf.repository import repository_rule
 from work_tracker_okf.compose import rule_set
 
 from graph_works_core.workspace.dispatch_config import load_dispatch_config
 from graph_works_core.workspace.errors import WorkspaceError
+from graph_works_core.workspace.lane_facts import gather_lane_facts, has_lane_pages, runner
 from graph_works_core.workspace.layout import WorkspaceLayout
 
 #: The two lane names a default workspace composes, in report order.
@@ -128,6 +134,15 @@ def _deferred_sync_rule(config: Config, reader: GraphReader, *, at: datetime) ->
     return rule
 
 
+def _deferred_repository_rule(layout: WorkspaceLayout, git: Git) -> Rule:
+    """Gather repository facts from the bundle being validated."""
+
+    def rule(ctx: RuleContext) -> Iterable[Finding]:
+        return repository_rule(gather_lane_facts(layout, git, lane_pages(ctx.bundle)))(ctx)
+
+    return rule
+
+
 def _wiki_schema_set(config: Config) -> SchemaSet | None:
     """This workspace's declared schema set, or None when `schema/` is absent.
 
@@ -161,10 +176,16 @@ def wiki_entry_keys(config: Config) -> dict[str, str] | None:
 
 
 def _wiki_rules(
-    config: Config, reader: GraphReader | None, *, at: datetime, repo_roots: tuple[Path, ...] = ()
+    layout: WorkspaceLayout,
+    config: Config,
+    reader: GraphReader | None,
+    *,
+    at: datetime,
+    repo_roots: tuple[Path, ...] = (),
+    repository_git: Git | None = None,
 ) -> tuple[Rule, ...]:
-    """The wiki lane's rule set: three unconditional, five declaration-gated,
-    one reader-gated.
+    """The wiki lane's rule set: three unconditional, six declaration-gated,
+    one reader-gated, one lane-gated.
 
     `health` and `render` read only the bundle, so they are always on. The
     code-wiki placement rule reads resource identity and type ownership, not
@@ -174,7 +195,13 @@ def _wiki_rules(
     declaring none composes a rule that finds nothing. *repo_roots* is where
     its `constrains` paths resolve. The drain rule rides the same gate for the
     same reason: its entry keys come from `x-okf-about` too, so no schemas
-    means no ledger vocabulary to check refs against.
+    means no ledger vocabulary to check refs against. The repositories lane's
+    placement rides the schema gate: its directories come from
+    `x-okf-directory`, allow-listed to the lane's two types so code-wiki's own
+    placement stays the only authority over its types.
+    The `repository.*` rules are lane-gated: composed only when `repositories/`
+    holds a page, with git resolved up front so a missing executable is one
+    lane error rather than a finding per page.
     """
     rules: list[Rule] = [health_rule(), render_rule(), code_wiki_placement_rule(severity="error")]
 
@@ -183,6 +210,13 @@ def _wiki_rules(
         rules.append(schema_rule(schema_set))
         rules.append(about_rule(declared_about(schema_set), repo_roots=repo_roots, severity=CONTRACT_SEVERITY))
         rules.append(drain_rule(_entry_keys(schema_set)))
+        rules.append(
+            placement_rule(
+                repositories_okf.placement_directories(schema_set),
+                depth={type_name: "exact" for type_name in repositories_okf.TYPES},
+                severity="error",
+            )
+        )
 
     sections_dir = config.declarations_dir / SECTIONS_DIRNAME
     if sections_dir.is_dir():
@@ -194,6 +228,8 @@ def _wiki_rules(
 
     if reader is not None:
         rules.append(_deferred_sync_rule(config, reader, at=at))
+    if repository_git is not None:
+        rules.append(_deferred_repository_rule(layout, repository_git))
     return tuple(rules)
 
 
@@ -258,12 +294,13 @@ def _compose_wiki(
     *,
     at: datetime,
     repo_roots: tuple[Path, ...] = (),
+    repository_git: Git | None = None,
 ) -> Lane:
     return Lane(
         name=WIKI_LANE,
         root=layout.bundle_dir,
         ignore=_wiki_ignore(),
-        rules=_wiki_rules(config, reader, at=at, repo_roots=repo_roots),
+        rules=_wiki_rules(layout, config, reader, at=at, repo_roots=repo_roots, repository_git=repository_git),
     )
 
 
@@ -333,9 +370,21 @@ def compose_lanes(
     """
     lanes: list[Lane] = []
     errors: list[str] = []
+    repository_git: Git | None = None
+    if has_lane_pages(layout):
+        resolved = runner(layout)
+        if isinstance(resolved, str):
+            errors.append(f"{WIKI_LANE} lane: repository.* rules skipped — {resolved}; set toolchain.git")
+        else:
+            repository_git = resolved
     contract_roots = tuple(dict.fromkeys((*repo_roots, *((repo_root,) if repo_root is not None else ()))))
     builders: tuple[tuple[str, Callable[[], Lane]], ...] = (
-        (WIKI_LANE, lambda: _compose_wiki(layout, config, reader, at=at, repo_roots=contract_roots)),
+        (
+            WIKI_LANE,
+            lambda: _compose_wiki(
+                layout, config, reader, at=at, repo_roots=contract_roots, repository_git=repository_git
+            ),
+        ),
         (WORK_LANE, lambda: _compose_work(layout, config, repo_root=repo_root, repo_roots=repo_roots)),
     )
     for name, build in builders:

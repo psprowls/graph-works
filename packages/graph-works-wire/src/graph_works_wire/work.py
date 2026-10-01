@@ -557,6 +557,8 @@ def next_payload(result: NextResult, *, bundle_root: Path) -> dict[str, Any]:
     `path` / `artifacts` are always present; `null` / `{}` when nothing will run.
     `guidance` / `guidance_warnings` / `guidance_file` are always present;
     empty/`null` unless the caller requested assembly (only the CLI does).
+    `repository_notes` is always present; empty unless the selected item's
+    managed repository is behind its track.
     `carried_context` is always present: `{"slots": {}, "warnings": []}` unless
     a usable dispatch's stage has applicable slots (ledger D-002/D-004).
     """
@@ -586,6 +588,7 @@ def next_payload(result: NextResult, *, bundle_root: Path) -> dict[str, Any]:
         "guidance": _guidance_entries(result.guidance),
         "guidance_warnings": [] if result.guidance is None else list(result.guidance.warnings),
         "guidance_file": None if result.guidance_file is None else str(result.guidance_file),
+        "repository_notes": list(result.repository_notes),
         "carried_context": _carried_context(result.carried),
     }
 

@@ -94,7 +94,7 @@ def test_proposals_uses_the_open_filter_and_renders_target_status_and_malformed_
     )
     called: list[object] = []
     monkeypatch.setattr(
-        proposals_commands, "load_bundle", lambda _root: SimpleNamespace(has_member=lambda _member: False)
+        proposals_commands, "load_workspace_bundle", lambda _root: SimpleNamespace(has_member=lambda _member: False)
     )
     monkeypatch.setattr(
         proposals_commands,
@@ -116,7 +116,7 @@ def test_proposals_reports_an_unreadable_bundle_instead_of_a_traceback(
     def unreadable(_root: object) -> object:
         raise OSError("proposals/ is unreadable")
 
-    monkeypatch.setattr(proposals_commands, "load_bundle", unreadable)
+    monkeypatch.setattr(proposals_commands, "load_workspace_bundle", unreadable)
     result = runner.invoke(app, ["wiki", "proposals", "--workspace", str(initialized_workspace)])
     assert result.exit_code == exit_codes.GENERIC
     assert result.stdout == "" and result.stderr == "Error: proposals/ is unreadable\n"
@@ -126,7 +126,7 @@ def test_proposals_says_so_when_no_proposal_is_open(
     monkeypatch: pytest.MonkeyPatch, initialized_workspace: Path
 ) -> None:
     monkeypatch.setattr(
-        proposals_commands, "load_bundle", lambda _root: SimpleNamespace(has_member=lambda _member: False)
+        proposals_commands, "load_workspace_bundle", lambda _root: SimpleNamespace(has_member=lambda _member: False)
     )
     monkeypatch.setattr(proposals_commands, "list_proposals", lambda *_args, **_kwargs: ())
     result = runner.invoke(app, ["wiki", "proposals", "--workspace", str(initialized_workspace)])

@@ -147,6 +147,7 @@
     "no code graph: run `gw scan` to build one; the closure is empty"
   ],
   "guidance_file": null,
+  "repository_notes": [],
   "carried_context": {
     "slots": {},
     "warnings": []

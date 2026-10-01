@@ -235,18 +235,25 @@ def test_descriptor_rooted_load_matches_path_load_and_leaves_caller_fd_open(tmp_
     write(tmp_path, "nested/.kept.md", CONCEPT)
     write(tmp_path, "ignored/skip.md", CONCEPT)
     write(tmp_path, ".root-hidden.md", CONCEPT)
+    write(tmp_path, "pruned/inside.md", CONCEPT)
+    write(tmp_path, "deep/repo/git/object.bin", "blob")
+    write(tmp_path, "deep/repo/kept.md", CONCEPT)
     (tmp_path / "invalid.md").write_bytes(b"\xff\xfe")
     (tmp_path / "linked.md").symlink_to("concept.md")
     (tmp_path / "directory-link").symlink_to("nested", target_is_directory=True)
     descriptor = os.open(tmp_path, os.O_RDONLY | os.O_DIRECTORY)
     try:
-        expected = bundle.load(tmp_path, ignore=("ignored/*",))
-        actual = bundle._load_at(tmp_path, descriptor, ignore=("ignored/*",))
+        prune = ("pruned", "deep/*/git", "directory-link", "nested/.kept.md")
+        expected = bundle.load(tmp_path, ignore=("ignored/*",), prune=prune)
+        actual = bundle._load_at(tmp_path, descriptor, ignore=("ignored/*",), prune=prune)
         os.fstat(descriptor)
     finally:
         os.close(descriptor)
 
     assert actual.root == expected.root
+    assert expected.pruned == frozenset({"pruned", "deep/repo/git"})
+    assert actual.pruned == expected.pruned
+    assert dict(actual._canonical) == dict(expected._canonical)
     assert actual.assets == expected.assets
     assert actual.ignored == expected.ignored
     assert actual.unreadable == expected.unreadable
@@ -514,7 +521,7 @@ def _stand_up_canonical_collision(root: Path, monkeypatch: pytest.MonkeyPatch) -
         # and both spellings open it. Two real siblings cannot be created, so
         # stand two `Path`s in for the walk -- both opens succeed by the same
         # folding property, and `_load` runs its real collision tracking.
-        def fake_files(root: Path, *, unreadable: dict[str, str]):
+        def fake_files(root: Path, *, unreadable: dict[str, str], **_walk: object):
             yield root / "concepts" / f"{_NFD}.md"
             yield root / "concepts" / f"{_NFC}.md"
 

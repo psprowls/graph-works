@@ -134,7 +134,7 @@ from __future__ import annotations
 import importlib
 from typing import TYPE_CHECKING, Any
 
-__version__ = "0.6.4"
+__version__ = "0.6.8"
 
 _EXPORTS: dict[str, tuple[str, str]] = {
     "ToolLoopResult": ("graph_works_core.agent_substrate.agent_loop", "ToolLoopResult"),

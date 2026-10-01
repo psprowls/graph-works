@@ -48,6 +48,10 @@ from code_wiki_okf.placement import (
 #: What this module writes for an empty list.
 _NONE_PLACEHOLDER = "_(none)_"
 
+#: The repositories lane directory. This is a path convention, not a sibling
+#: package import; the rendered link is a root-absolute page path.
+REPOSITORIES_LANE = "repositories"
+
 #: `## Contents` H3 groups, in fixed render order, and the `type` each holds.
 #:
 #: `File` and `Repository` are absent: a mirrored file already has its own
@@ -112,8 +116,21 @@ def _bullets(entries: Sequence[CatalogEntry]) -> str:
     return "\n".join(_bullet(entry) for entry in ordered) + "\n"
 
 
-def render_contents(groups: Mapping[str, Sequence[CatalogEntry]]) -> str:
+def lane_page_names(bundle: Bundle) -> frozenset[str]:
+    """Names with a direct `repositories/<name>.md` concept in *bundle*."""
+    prefix = f"{REPOSITORIES_LANE}/"
+    return frozenset(
+        concept_id[len(prefix) :]
+        for concept_id in bundle.concepts
+        if concept_id.startswith(prefix) and "/" not in concept_id[len(prefix) :]
+    )
+
+
+def render_contents(groups: Mapping[str, Sequence[CatalogEntry]], *, lane_page: str | None = None) -> str:
     """A Repository page's `## Contents` body: five H3 groups, empties omitted.
+
+    With *lane_page*, open with a link to that repository's lane page. Its
+    Summary links back to the code-graph page.
 
     Deliberately flat rather than nested per-package sub-lists: frontmatter
     already owns `depends_on`, `test_suites` and `entry_points`, and each
@@ -122,9 +139,10 @@ def render_contents(groups: Mapping[str, Sequence[CatalogEntry]]) -> str:
     disagree.
     """
     blocks = [f"### {group}\n\n{_bullets(groups[group])}" for group, _type_name in CONTENT_GROUPS if groups.get(group)]
-    if not blocks:
-        return _NONE_PLACEHOLDER
-    return "\n".join(blocks)
+    body = "\n".join(blocks) if blocks else _NONE_PLACEHOLDER
+    if lane_page is None:
+        return body
+    return f"Lane page: [{lane_page}](/{REPOSITORIES_LANE}/{lane_page}.md)\n\n{body}"
 
 
 @dataclass(frozen=True, slots=True)
@@ -208,6 +226,8 @@ def _entries_of(items: Sequence[CatalogPage], type_name: str) -> tuple[CatalogEn
 def _required_catalogs(
     classified: Sequence[CatalogPage],
     retained_directories: Sequence[str] = (),
+    *,
+    lane_pages: frozenset[str] = frozenset(),
 ) -> tuple[dict[str, tuple[str, ...]], dict[str, Render], dict[str, Render]]:
     """Return declarations, index renders, and Repository-page renders.
 
@@ -303,7 +323,12 @@ def _required_catalogs(
         if repository_page is not None:
             concept_renders[repository_page.entry.concept_id] = Render(
                 frontmatter=repository_page.owned_frontmatter,
-                sections={"Contents": render_contents(contents_groups_from_entries(items))},
+                sections={
+                    "Contents": render_contents(
+                        contents_groups_from_entries(items),
+                        lane_page=repository if repository in lane_pages else None,
+                    )
+                },
             )
 
     return headings, index_renders, concept_renders
@@ -431,7 +456,9 @@ def plan_catalogs(
 ) -> CatalogPlan:
     """Preview catalog creates and regenerations without touching disk."""
     projected_pages = catalog_pages(bundle) if pages is None else tuple(pages)
-    headings, index_renders, concept_renders = _required_catalogs(projected_pages, tuple(bundle.indexes))
+    headings, index_renders, concept_renders = _required_catalogs(
+        projected_pages, tuple(bundle.indexes), lane_pages=lane_page_names(bundle)
+    )
     index_renders = {key: render for key, render in index_renders.items() if f"{key}/index.md" not in protected_indexes}
     declarations_root = bundle.root if declarations_dir is None else declarations_dir
     section_set = _catalog_section_set(load_sections(declarations_root / SECTIONS_DIRNAME), headings)
@@ -456,11 +483,19 @@ def reconcile_catalogs(
     today: date,
     declarations_dir: Path | None = None,
     protected_indexes: Collection[str] = (),
+    ignore: tuple[str, ...] = (),
+    prune: tuple[str, ...] = (),
 ) -> ApplyResult:
-    """Reconcile every catalog from canonical pages retained on actual disk."""
+    """Reconcile every catalog from canonical pages retained on actual disk.
+
+    *ignore* and *prune* are the caller's bundle filters, preserved on every reload.
+    graph-works supplies its clone patterns without coupling this package to that lane.
+    """
     _ = today
     classified = catalog_pages(bundle)
-    headings, index_renders, concept_renders = _required_catalogs(classified, tuple(bundle.indexes))
+    headings, index_renders, concept_renders = _required_catalogs(
+        classified, tuple(bundle.indexes), lane_pages=lane_page_names(bundle)
+    )
     index_renders = {key: render for key, render in index_renders.items() if f"{key}/index.md" not in protected_indexes}
     declarations_root = bundle.root if declarations_dir is None else declarations_dir
     section_set = _catalog_section_set(load_sections(declarations_root / SECTIONS_DIRNAME), headings)
@@ -480,7 +515,7 @@ def reconcile_catalogs(
     if created.failed:
         return created
 
-    current = load_bundle(bundle.root) if created.written else bundle
+    current = load_bundle(bundle.root, ignore=ignore, prune=prune) if created.written else bundle
     plan = _catalog_regeneration(current, section_set, concept_renders, index_renders, classified)
     regenerated = apply_regenerations(current, plan)
     return ApplyResult(
@@ -492,10 +527,12 @@ def reconcile_catalogs(
 
 __all__ = [
     "CONTENT_GROUPS",
+    "REPOSITORIES_LANE",
     "CatalogEntry",
     "CatalogPage",
     "CatalogPlan",
     "catalog_pages",
+    "lane_page_names",
     "plan_catalogs",
     "reconcile_catalogs",
     "render_contents",

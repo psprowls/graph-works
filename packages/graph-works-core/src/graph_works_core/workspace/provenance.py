@@ -60,7 +60,9 @@ class GitOutcome:
     stderr: str = ""
 
 
-def probe_git(cwd: Path, *args: str, executable: str = "git", timeout: float = _GIT_TIMEOUT_SECONDS) -> GitOutcome:
+def probe_git(
+    cwd: Path, *args: str, executable: str = "git", timeout: float = _GIT_TIMEOUT_SECONDS, input_text: str | None = None
+) -> GitOutcome:
     """Run `git <args>` in *cwd*, retaining its exit status for state probes.
 
     *timeout* defaults to the advance-path cap; `workspace.commits` passes a
@@ -71,6 +73,7 @@ def probe_git(cwd: Path, *args: str, executable: str = "git", timeout: float = _
             [executable, *args],
             cwd=cwd,
             capture_output=True,
+            input=input_text,
             text=True,
             check=False,
             timeout=timeout,

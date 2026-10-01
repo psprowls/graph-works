@@ -17,6 +17,7 @@ import pytest
 SRC = Path(__file__).resolve().parents[1] / "src" / "graph_works_wire"
 MODULE_NAMES = {
     "events.py",
+    "repo.py",
     "__init__.py",
     "_jsonable.py",
     "code.py",

@@ -15,6 +15,8 @@ from __future__ import annotations
 
 import errno
 import os
+from collections.abc import Mapping
+from pathlib import Path
 
 from code_wiki_okf.config import Config, ConfigError, config_from_mapping
 from config_io import StoreValidationError
@@ -66,4 +68,29 @@ def load_workspace_config(layout: WorkspaceLayout) -> WorkspaceConfig:
     return config
 
 
-__all__ = ["WorkspaceConfig", "load_workspace_config"]
+def declared_checkouts(layout: WorkspaceLayout) -> dict[str, Path]:
+    """Read declared working checkouts from the layered workspace manifest.
+
+    Local configuration overrides the shared manifest. Relative checkouts
+    resolve against the manifest directory, as repository paths do.
+    """
+    path = layout.manifest_path
+    if not path.exists():
+        return {}
+    try:
+        content = workspace_store(layout).read_explicit()
+    except StoreValidationError as exc:
+        raise WorkspaceConfigError(str(exc)) from exc
+    repositories = content.get("repositories")
+    if not isinstance(repositories, Mapping):
+        return {}
+    found: dict[str, Path] = {}
+    for name, entry in repositories.items():
+        raw = entry.get("checkout") if isinstance(entry, Mapping) else None
+        if isinstance(raw, str) and raw.strip():
+            expanded = Path(raw).expanduser()
+            found[str(name)] = expanded if expanded.is_absolute() else (path.parent / expanded).resolve()
+    return found
+
+
+__all__ = ["WorkspaceConfig", "declared_checkouts", "load_workspace_config"]

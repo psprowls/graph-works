@@ -19,10 +19,10 @@ from graph_works_core.tag_policy.commands import (
     undeclared,
 )
 from graph_works_core.tag_policy.disposition import load, render
+from graph_works_core.workspace.bundle import load_workspace_bundle
 from graph_works_wire.wiki import tag_inventory_payload, tags_undeclared_payload
 from okf_ext.tags import VOCABULARY_FILENAME
 from okf_ext.tags import inventory as tag_inventory
-from okf_io import load_bundle
 
 from graph_works_cli import exit_codes
 from graph_works_cli.json_output import encode
@@ -40,7 +40,7 @@ def inventory_command(
     """Report every tag the vault carries, with its page count."""
     layout = resolve_workspace(workspace)
     try:
-        result = tag_inventory(load_bundle(layout.bundle_dir))
+        result = tag_inventory(load_workspace_bundle(layout))
     except (OSError, ValueError) as exc:
         exit_error(str(exc), cause=exc)
 
@@ -72,7 +72,7 @@ def draft_command(
         exit_error(f"--as-of must be YYYY-MM-DD: {exc}", cause=exc)
     try:
         disposition = draft_disposition(
-            load_bundle(layout.bundle_dir), generated=generated, floor=floor, ceiling=ceiling
+            load_workspace_bundle(layout), generated=generated, floor=floor, ceiling=ceiling
         )
         out_path.parent.mkdir(parents=True, exist_ok=True)
         out_path.write_text(render(disposition), encoding="utf-8", newline="")
@@ -110,7 +110,7 @@ def apply_command(
         phases = (only,)
 
     try:
-        bundle = load_bundle(layout.bundle_dir)
+        bundle = load_workspace_bundle(layout)
         loaded_disposition = load(Path(disposition))
     except (OSError, ValueError) as exc:
         exit_error(str(exc), cause=exc)
@@ -144,7 +144,7 @@ def gate_command(
     """Exit non-zero if the vault carries a tag the vocabulary does not know."""
     layout = resolve_workspace(workspace)
     try:
-        missing = undeclared(load_bundle(layout.bundle_dir), layout.config_dir / VOCABULARY_FILENAME)
+        missing = undeclared(load_workspace_bundle(layout), layout.config_dir / VOCABULARY_FILENAME)
     except (OSError, ValueError) as exc:
         exit_error(str(exc), cause=exc)
 

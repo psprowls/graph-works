@@ -25,7 +25,7 @@ from code_graph_io import (
 )
 from code_graph_io.parser.parse import parse_bytes
 from code_graph_io.parser.projections.graph import to_graph_records
-from code_graph_io.uri import repo_uri
+from code_graph_io.uri import RepoContext, repo_uri
 
 
 class NotInGitRepoError(Exception):
@@ -225,6 +225,7 @@ def _update_one_repo(
     manifests: tuple[packages.ManifestPackage, ...],
     ignore: _ignore.IgnoreSpec,
     ignore_patterns: tuple[str, ...],
+    ctx: RepoContext,
 ) -> None:
     """Run the single-repo pipeline for one member, then stamp its nodes.
 
@@ -245,11 +246,6 @@ def _update_one_repo(
     stranded. A first-ever build (no stored fingerprint) is not a change.
     """
     head = _head(repo_root)
-    from code_graph_io.repo_context import (
-        repo_context,
-    )
-
-    ctx = repo_context(repo_root)
     repo_uri_val = repo_uri(ctx)
     skip_dirs = _ignore.DEFAULT_SKIP_DIRS
 
@@ -381,6 +377,7 @@ def run_workspace(
     full: bool = False,
     lock_timeout_ms: int | None = None,
     member_ignore: list[tuple[str, ...]] | None = None,
+    member_names: list[str | None] | None = None,
 ) -> None:
     """Update the code graph for one or more member repos into one DB.
 
@@ -400,10 +397,16 @@ def run_workspace(
     `update.run`'s single-repo convenience wrapper (which has no config to
     read `ignore:` from) and any existing direct caller keep today's
     `DEFAULT_SKIP_DIRS`-only behavior unchanged.
+
+    `member_names` is an optional, index-aligned identity override. Each
+    non-None name replaces the repository component of the discovered
+    context while retaining its owner; None keeps the git-derived identity.
     """
     members = [Path(m).resolve() for m in members]
     if member_ignore is None:
         member_ignore = [()] * len(members)
+    if member_names is not None and len(member_names) != len(members):
+        raise ValueError("member_names must have one name per member")
     graph_dir = Path(graph_dir).resolve()
     db_path = graph_dir / "code.db"
     if db_path.exists():
@@ -437,14 +440,19 @@ def run_workspace(
             specs = [_ignore.compile_ignore(patterns) for patterns in member_ignore]
             from code_graph_io.repo_context import repo_context
 
+            contexts = [repo_context(member) for member in members]
+            if member_names is not None:
+                contexts = [
+                    RepoContext(ctx.org, name) if name is not None else ctx
+                    for ctx, name in zip(contexts, member_names, strict=True)
+                ]
             manifests_by_repo = {
                 repo_uri(ctx): packages.discover_manifest_packages(member, ctx=ctx, ignore=spec)
-                for member, spec in zip(members, specs, strict=True)
-                for ctx in [repo_context(member)]
+                for member, spec, ctx in zip(members, specs, contexts, strict=True)
             }
             with store.transaction(conn):
-                for repo_root, spec, patterns in zip(members, specs, member_ignore, strict=True):
-                    member_uri = repo_uri(repo_context(repo_root))
+                for repo_root, spec, patterns, ctx in zip(members, specs, member_ignore, contexts, strict=True):
+                    member_uri = repo_uri(ctx)
                     _update_one_repo(
                         conn,
                         repo_root,
@@ -453,6 +461,7 @@ def run_workspace(
                         manifests=manifests_by_repo[member_uri],
                         ignore=spec,
                         ignore_patterns=patterns,
+                        ctx=ctx,
                     )
                 all_manifests = tuple(manifest for manifests in manifests_by_repo.values() for manifest in manifests)
                 virtual_repository_dependencies = {
@@ -462,7 +471,7 @@ def run_workspace(
                         if not manifest.distributable
                         for dependency in manifest.dependencies
                     )
-                    for ctx in (repo_context(member) for member in members)
+                    for ctx in contexts
                 }
                 dependencies.reconcile_dependencies(
                     conn,
@@ -476,9 +485,7 @@ def run_workspace(
                 # downstream tooling (and the existing test suite) reads. Multi-
                 # repo workspaces have no single HEAD, so the key is left unset.
                 if len(members) == 1:
-                    from code_graph_io.repo_context import repo_context
-
-                    only_uri = repo_uri(repo_context(members[0]))
+                    only_uri = repo_uri(contexts[0])
                     only_commit = _get_metadata(conn, f"last_indexed_commit:{only_uri}")
                     if only_commit is not None:
                         _set_metadata(conn, "last_indexed_commit", only_commit)

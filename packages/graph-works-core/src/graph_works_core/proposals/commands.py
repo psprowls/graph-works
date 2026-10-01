@@ -32,8 +32,9 @@ from okf_ext.proposals import (
 )
 from okf_ext.proposals import mode as target_mode
 from okf_ext.schemas import load_schemas
-from okf_io import Bundle, load_bundle
+from okf_io import Bundle
 
+from graph_works_core.workspace.bundle import load_workspace_bundle
 from graph_works_core.workspace.config import load_workspace_config
 from graph_works_core.workspace.layout import WorkspaceLayout
 
@@ -144,7 +145,7 @@ def run_proposal_decide(
     """
     _require_aware(at)
     normalized = normalize_target(target)
-    bundle = load_bundle(layout.bundle_dir)
+    bundle = load_workspace_bundle(layout)
     proposal = find_proposal(bundle, target)
     if proposal is None:
         named = normalized or target
@@ -188,7 +189,7 @@ def run_proposal_file(
 ) -> ProposalFileRun:
     """Plan -- and unless ``dry_run``, apply -- filing one source's proposal."""
     _require_aware(at)
-    bundle = load_bundle(layout.bundle_dir)
+    bundle = load_workspace_bundle(layout)
     config = load_workspace_config(layout)
     lanes = lane_set(load_schemas(config.declarations_dir / SCHEMA_DIRNAME))
     plan = plan_file(bundle, lanes, lane=lane, title=title, description=description, source=source, by=by, at=at)
@@ -230,7 +231,7 @@ def run_proposals_read(layout: WorkspaceLayout, page_status: str = "proposed") -
     """
     if page_status not in PAGE_STATUSES:
         raise ValueError(f"page_status {page_status!r} not in {'|'.join(PAGE_STATUSES)}")
-    bundle = load_bundle(layout.bundle_dir)
+    bundle = load_workspace_bundle(layout)
     return tuple(
         ProposalListing(proposal=proposal, mode=target_mode(bundle, proposal))
         for proposal in list_proposals(bundle, page_status=page_status)

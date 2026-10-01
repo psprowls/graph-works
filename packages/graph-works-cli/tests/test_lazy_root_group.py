@@ -17,7 +17,7 @@ from typer.testing import CliRunner
 runner = CliRunner()
 EXPECTED_ORDER = [
     "help", "version", "bootstrap", "scan", "ingest", "query", "archive",
-    "next", "config", "agent-config", "graph", "wiki", "work", "util",
+    "next", "config", "agent-config", "graph", "wiki", "work", "repo", "util",
 ]  # fmt: skip
 
 

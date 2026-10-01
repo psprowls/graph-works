@@ -21,8 +21,8 @@ from typing import Literal
 from markdown_it import MarkdownIt
 from markdown_it.rules_inline import StateInline
 from markdown_it.rules_inline.backticks import backtick
-from okf_io import load_bundle
 
+from graph_works_core.workspace.bundle import load_workspace_bundle
 from graph_works_core.workspace.layout import WorkspaceLayout
 from graph_works_core.workspace.repo_files import RepoFiles, repo_file_sets
 
@@ -122,7 +122,7 @@ def _resolve(
 
 def run_wiki_citations(layout: WorkspaceLayout, page_id: str) -> WikiCitations:
     """Extract and resolve a page's citations. Never writes."""
-    document = load_bundle(layout.bundle_dir).concept(page_id)
+    document = load_workspace_bundle(layout).concept(page_id)
     if document is None:
         return WikiCitations(page_id, (), "unknown-page")
     spans = extract_citations(document.body)

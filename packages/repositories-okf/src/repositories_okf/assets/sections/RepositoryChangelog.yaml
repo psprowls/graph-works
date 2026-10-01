@@ -1,0 +1,6 @@
+sections:
+  - heading: Entries
+    required: true
+    placeholder: |
+      > TODO: one line per snapshot, newest first.
+additional_sections: true

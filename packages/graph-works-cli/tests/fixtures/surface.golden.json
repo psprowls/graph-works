@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "cli": "graph-works-cli",
-  "version": "0.3.6",
+  "version": "0.3.10",
   "commands": [
     {
       "name": "gw agent-config",
@@ -1052,6 +1052,327 @@
       "commands": [],
       "path": [
         "query"
+      ]
+    },
+    {
+      "name": "gw repo",
+      "help": "Repository clones pinned in the repositories/ lane, with optional managed working checkouts.",
+      "short_help": "Repository clones pinned in the repositories/ lane, with optional managed working checkouts.",
+      "usage": [
+        "[OPTIONS]",
+        "COMMAND [ARGS]..."
+      ],
+      "arguments": [],
+      "options": [],
+      "commands": [
+        "add",
+        "adopt",
+        "advance",
+        "restore"
+      ],
+      "path": [
+        "repo"
+      ]
+    },
+    {
+      "name": "gw repo add",
+      "help": "Clone a repository at a pin, record its lane page, and optionally create a managed checkout.",
+      "short_help": "Clone a repository at a pin, record its lane page, and optionally create a managed checkout.",
+      "usage": [
+        "[OPTIONS]",
+        "{url}"
+      ],
+      "arguments": [
+        {
+          "name": "url",
+          "required": true,
+          "nargs": 1
+        }
+      ],
+      "options": [
+        {
+          "name": "name",
+          "opts": [
+            "--name"
+          ],
+          "secondary_opts": [],
+          "help": "Lane name. Defaults to the URL's last segment without .git.",
+          "required": false,
+          "default": "",
+          "is_flag": false
+        },
+        {
+          "name": "track",
+          "opts": [
+            "--track"
+          ],
+          "secondary_opts": [],
+          "help": "Branch to follow. Defaults to the remote's default branch.",
+          "required": false,
+          "default": "",
+          "is_flag": false
+        },
+        {
+          "name": "ref",
+          "opts": [
+            "--ref"
+          ],
+          "secondary_opts": [],
+          "help": "For a reference repository: branch, tag or SHA to pin.",
+          "required": false,
+          "default": "",
+          "is_flag": false
+        },
+        {
+          "name": "managed",
+          "opts": [
+            "--managed"
+          ],
+          "secondary_opts": [],
+          "help": "Develop this repository in a working checkout and declare it in workspace.yaml.",
+          "required": false,
+          "default": false,
+          "is_flag": true
+        },
+        {
+          "name": "checkout",
+          "opts": [
+            "--checkout"
+          ],
+          "secondary_opts": [],
+          "help": "With --managed: working checkout path. Defaults to .gw/worktrees/<name>/<track>.",
+          "required": false,
+          "default": "",
+          "is_flag": false
+        },
+        {
+          "name": "dry_run",
+          "opts": [
+            "--dry-run"
+          ],
+          "secondary_opts": [],
+          "help": "Resolve the commit and report planned writes; create no clone or checkout.",
+          "required": false,
+          "default": false,
+          "is_flag": true
+        },
+        {
+          "name": "json_output",
+          "opts": [
+            "--json"
+          ],
+          "secondary_opts": [],
+          "help": "Emit JSON instead of human text.",
+          "required": false,
+          "default": false,
+          "is_flag": true
+        },
+        {
+          "name": "workspace",
+          "opts": [
+            "--workspace"
+          ],
+          "secondary_opts": [],
+          "help": "Workspace root.",
+          "required": false,
+          "default": "",
+          "is_flag": false
+        }
+      ],
+      "commands": [],
+      "path": [
+        "repo",
+        "add"
+      ]
+    },
+    {
+      "name": "gw repo adopt",
+      "help": "Move a declared checkout into okf/repositories/<name>/references/git as a managed repository.",
+      "short_help": "Move a declared checkout into okf/repositories/<name>/references/git as a managed repository.",
+      "usage": [
+        "[OPTIONS]",
+        "{name}"
+      ],
+      "arguments": [
+        {
+          "name": "name",
+          "required": true,
+          "nargs": 1
+        }
+      ],
+      "options": [
+        {
+          "name": "track",
+          "opts": [
+            "--track"
+          ],
+          "secondary_opts": [],
+          "help": "Branch for the working checkout; defaults to the checked-out branch.",
+          "required": false,
+          "default": null,
+          "is_flag": false
+        },
+        {
+          "name": "dry_run",
+          "opts": [
+            "--dry-run"
+          ],
+          "secondary_opts": [],
+          "help": "Report planned adoption; change nothing.",
+          "required": false,
+          "default": false,
+          "is_flag": true
+        },
+        {
+          "name": "json_output",
+          "opts": [
+            "--json"
+          ],
+          "secondary_opts": [],
+          "help": "Emit JSON instead of human text.",
+          "required": false,
+          "default": false,
+          "is_flag": true
+        },
+        {
+          "name": "workspace",
+          "opts": [
+            "--workspace"
+          ],
+          "secondary_opts": [],
+          "help": "Workspace root.",
+          "required": false,
+          "default": "",
+          "is_flag": false
+        }
+      ],
+      "commands": [],
+      "path": [
+        "repo",
+        "adopt"
+      ]
+    },
+    {
+      "name": "gw repo advance",
+      "help": "Move a repository's pin forward: a reference repository records a snapshot, a changelog entry and\nproposals; a managed repository detaches at its track's tip and rescans.",
+      "short_help": "Move a repository's pin forward: a reference repository records a snapshot, a changelog entry and proposals; a managed repository detaches at its track's tip and rescans.",
+      "usage": [
+        "[OPTIONS]",
+        "{name}"
+      ],
+      "arguments": [
+        {
+          "name": "name",
+          "required": true,
+          "nargs": 1
+        }
+      ],
+      "options": [
+        {
+          "name": "to",
+          "opts": [
+            "--to"
+          ],
+          "secondary_opts": [],
+          "help": "For a reference repository: branch, tag or SHA to advance to.",
+          "required": false,
+          "default": "",
+          "is_flag": false
+        },
+        {
+          "name": "dry_run",
+          "opts": [
+            "--dry-run"
+          ],
+          "secondary_opts": [],
+          "help": "Report the target commit, plus range and flagged pages for a reference; move nothing.",
+          "required": false,
+          "default": false,
+          "is_flag": true
+        },
+        {
+          "name": "json_output",
+          "opts": [
+            "--json"
+          ],
+          "secondary_opts": [],
+          "help": "Emit JSON instead of human text.",
+          "required": false,
+          "default": false,
+          "is_flag": true
+        },
+        {
+          "name": "workspace",
+          "opts": [
+            "--workspace"
+          ],
+          "secondary_opts": [],
+          "help": "Workspace root.",
+          "required": false,
+          "default": "",
+          "is_flag": false
+        }
+      ],
+      "commands": [],
+      "path": [
+        "repo",
+        "advance"
+      ]
+    },
+    {
+      "name": "gw repo restore",
+      "help": "Restore pinned clones and any managed working checkouts. Writes no page.",
+      "short_help": "Restore pinned clones and any managed working checkouts.",
+      "usage": [
+        "[OPTIONS]",
+        "[names]..."
+      ],
+      "arguments": [
+        {
+          "name": "names",
+          "required": false,
+          "nargs": -1
+        }
+      ],
+      "options": [
+        {
+          "name": "dry_run",
+          "opts": [
+            "--dry-run"
+          ],
+          "secondary_opts": [],
+          "help": "Report clone and checkout outcomes; change nothing.",
+          "required": false,
+          "default": false,
+          "is_flag": true
+        },
+        {
+          "name": "json_output",
+          "opts": [
+            "--json"
+          ],
+          "secondary_opts": [],
+          "help": "Emit JSON instead of human text.",
+          "required": false,
+          "default": false,
+          "is_flag": true
+        },
+        {
+          "name": "workspace",
+          "opts": [
+            "--workspace"
+          ],
+          "secondary_opts": [],
+          "help": "Workspace root.",
+          "required": false,
+          "default": "",
+          "is_flag": false
+        }
+      ],
+      "commands": [],
+      "path": [
+        "repo",
+        "restore"
       ]
     },
     {

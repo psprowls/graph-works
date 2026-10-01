@@ -27,12 +27,17 @@ DISPATCH_MODES: frozenset[str] = frozenset({"autonomous", "attend", "relay"})
 class WorktreeAction:
     """Where a dispatched worker runs, and on which branch.
 
-    `"main"` is the repository's own shared checkout rather than a linked
-    worktree. It carries a concrete `path` like `"reuse"` does, but a worker
-    running there cannot infer its own provenance: git reports no worktree for
-    the main checkout, so `--git-dir` and `--git-common-dir` agree and every
-    detector answers "not a worktree". A planner that emits `"main"` therefore
-    owes the worker its path and branch explicitly.
+    `"main"` is the repository's working checkout rather than a feature
+    worktree. For an ordinary repository that is its declared path; for an
+    in-bundle clone (`okf/repositories/<name>/references/git`) it is the
+    declared `checkout` (by default `.gw/worktrees/<name>/<track>`), never the
+    clone, which is scanned but not worked in. It carries a concrete `path`
+    like `"reuse"` does. A worker in an ordinary repository's main checkout
+    cannot infer worktree provenance from git: `--git-dir` and
+    `--git-common-dir` agree there, so worktree detectors answer "not a
+    worktree". An in-bundle checkout is itself a linked worktree of its clone.
+    A planner that emits `"main"` owes the worker its path and branch
+    explicitly in either case.
 
     `parent_path` names the existing worktree a *created* worktree
     (`fork-child`) is to be linked beneath, as data. It is `None` for every

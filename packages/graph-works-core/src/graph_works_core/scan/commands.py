@@ -59,7 +59,7 @@ from okf_ext.shape import SectionSet, SectionSpec, load_sections
 from okf_ext.splice import assemble, bare_lines, dominant_newline, has_trailing_newline
 from okf_ext.splice import replace as splice_replace
 from okf_ext.writing import PendingWrite, write_all
-from okf_io import Bundle, Document, append_log_entry, load_bundle, update_index
+from okf_io import Bundle, Document, append_log_entry, update_index
 from okf_io import parse as parse_document
 from subagents_io.pool import SubagentPool
 
@@ -80,6 +80,7 @@ from graph_works_core.scan.scan_contract import (
     worklist_from_payload,
     worklist_payload,
 )
+from graph_works_core.workspace.bundle import CLONE_IGNORE, CLONE_PRUNE, load_bundle_at, load_workspace_bundle
 from graph_works_core.workspace.errors import ScanError
 from graph_works_core.workspace.layout import WorkspaceLayout
 
@@ -599,13 +600,15 @@ async def build_scan_worklist(
             at=at.isoformat(),
             today=today,
             dry_run=dry_run,
+            ignore=CLONE_IGNORE,
+            prune=CLONE_PRUNE,
         )
         summary = StructuralSummary.from_sync_result(synced)
         # The composite committed its writes; reload so the classifier reads the
         # pages they just created and re-stamped rather than the pre-sync
         # snapshot. Under `dry_run` neither wrote anything, so this is the same
         # snapshot.
-        bundle = load_bundle(layout.bundle_dir)
+        bundle = load_workspace_bundle(layout)
         section_set = load_sections(config.declarations_dir / SECTIONS_DIRNAME)
         refs = entity_refs(reader, config)
         phase1 = _classify_pages(bundle, section_set, refs, reader, layout.bundle_dir)
@@ -766,7 +769,7 @@ def apply_scan_results(
     stops a caller reading them as what did.
     """
     section_set = load_sections(config.declarations_dir / SECTIONS_DIRNAME)
-    bundle = load_bundle(bundle_root)
+    bundle = load_bundle_at(bundle_root)
     by_uri = {task.uri: task for task in worklist.prose_tasks}
 
     pending: list[PendingWrite] = []
@@ -869,7 +872,7 @@ def apply_scan_results(
     if not landed:
         return applied
 
-    reconciled = load_bundle(bundle_root)
+    reconciled = load_bundle_at(bundle_root)
     update_index(
         reconciled,
         directories=sorted({item.index_directory for item in landed}),

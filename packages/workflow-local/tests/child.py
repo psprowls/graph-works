@@ -7,6 +7,7 @@ Each argv item after the script path is one instruction:
     escalate:<subject>  append an escalation
     done:<outcome>      append a worker_done with that outcome, then exit 0
     say:<text>          print to stdout (which the backend captures)
+    pwd                 print the working directory to stdout
     garbage             append a line that is not JSON
     blank               append an empty line
     array               append a JSON value that is not a JSON object
@@ -82,6 +83,8 @@ def main(program: list[str]) -> int:
             return 0
         elif verb == "say":
             print(arg, flush=True)
+        elif verb == "pwd":
+            print(Path.cwd(), flush=True)
         elif verb == "garbage":
             append("{this is not json")
         elif verb == "blank":

@@ -14,6 +14,7 @@ The interface band's shared projection layer. Band: interface (above
 | `config` | `resolved_payload`, `resolved_list_payload`, `hooks_payload`, `projection_payload`. |
 | `errors` | `REASONS` and `error_envelope()` — the refusal envelope both interfaces emit. |
 | `util` | `log_payload`, `log_read_payload`, `platform_payload`, `tokens_payload`, `line_endings_payload`. |
+| `repo` | `repo_add_payload`, `repo_restore_payload`, `repo_advance_payload`. |
 | `events` | Identity-only change-event and sequenced batch projections for SSE. |
 | `_jsonable` | `jsonable()`, the `default=str` rule applied before encoding. |
 

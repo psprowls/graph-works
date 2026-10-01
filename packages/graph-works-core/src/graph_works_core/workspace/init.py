@@ -12,9 +12,12 @@ manifest alone" is a plan you edit, not a flag you pass.
 1. Directories — `root`, `.gw/` (the config dir), `.gw/cache/`, `okf/`,
    `.gw/worktrees/`.
 2. `<config_dir>/.gitignore` — the gitignored members — and `<root>/.gitignore`,
-   which ignores `workspace.local.yaml` and `/dispatch.local.yaml`, the local
-   configuration layers that must never be committed. Both are self-contained inside the workspace; the repo's
+   which ignores `workspace.local.yaml`, `/dispatch.local.yaml` and the repositories
+   lane's clone directories (`/<bundle_dir>/repositories/*/references/git/`), the
+   local layers that must never be committed. Both are self-contained inside the workspace; the repo's
    own root `.gitignore` is never edited.
+   `<bundle_dir>/.obsidian/app.json` — the repositories lane's clone filter merged into
+   `userIgnoreFilters`; an unusable file is a notice, never a refusal.
 3. `<root>/workspace.yaml` — created when absent; only a missing dispatch reference
    is inserted in authored manifests. `<root>/dispatch.yaml` seeds the branch
    relay tail when absent. Existing dispatch documents are validated and preserved. Carries
@@ -44,6 +47,7 @@ clock.
 
 from __future__ import annotations
 
+import json
 import os
 import textwrap
 from collections.abc import Mapping, Sequence
@@ -54,6 +58,8 @@ from typing import Literal, Protocol
 
 import code_wiki_okf.init
 import doc_wiki_okf.init
+import repositories_okf
+import repositories_okf.init
 import work_tracker_okf.init
 from config_io import PROJECTION_FILENAME, Fingerprint, dotted
 from okf_ext.bundle import ApplyResult, ScaffoldPlan, apply, plan_scaffold
@@ -83,6 +89,10 @@ from graph_works_core.workspace.pipeline import RELAY_TAIL_SEED
 GITIGNORE_FILENAME = ".gitignore"
 AGENTS_FILENAME = "AGENTS.md"
 CLAUDE_FILENAME = "CLAUDE.md"
+
+OBSIDIAN_DIRNAME = ".obsidian"
+OBSIDIAN_APP_FILENAME = "app.json"
+_OBSIDIAN_FILTERS_KEY = "userIgnoreFilters"
 
 _GITIGNORE_HEADER = "# Written by graph-works-core at workspace init.\n"
 
@@ -168,6 +178,7 @@ INSTALLERS: tuple[Installer, ...] = (
     code_wiki_okf.init.install_bundle,
     work_tracker_okf.init.install_bundle,
     doc_wiki_okf.init.install_bundle,
+    repositories_okf.init.install_bundle,
 )
 
 
@@ -225,8 +236,8 @@ class WorkspacePlan:
 
         `index.md`, `log.md` and `tags.yaml` still over-report: every installer previews
         the bundle scaffold against the filesystem as it stands, so a first init
-        lists each of those once per installer — four times each, as of the
-        three shipped installers plus act 5's own scaffold plan. This is
+        lists each of those once per installer — five times each, as of the
+        four shipped installers plus act 5's own scaffold plan. This is
         staleness, counted honestly: each of those previews is an act the plan
         really does hold, and a renderer that hid it would disagree with the
         plan it renders.
@@ -308,10 +319,32 @@ def _gitignore_write(layout: WorkspaceLayout) -> PlannedWrite | None:
     return PlannedWrite(label=label, path=path, content=missing, mode="append")
 
 
-def _root_gitignore_write(layout: WorkspaceLayout) -> PlannedWrite | None:
-    """Append only missing local-file ignores inside this workspace."""
+def _lane_gitignore_entry(layout: WorkspaceLayout) -> tuple[str | None, tuple[str, ...]]:
+    """The root `.gitignore` line keeping the repositories lane's clones out of git, or a notice.
+
+    Built from `layout.bundle_dir`, so an overridden bundle directory gets the right line. A bundle directory
+    outside `layout.root` cannot be reached by a root-anchored line: nothing is planned and the notice says what
+    to add by hand.
+    """
+    try:
+        relative = layout.bundle_dir.relative_to(layout.root).as_posix()
+    except ValueError:
+        pattern = f"{layout.bundle_dir.as_posix()}/{repositories_okf.GITIGNORE_PATTERN}"
+        return None, (
+            f"! {layout.bundle_dir}: outside the workspace root; "
+            f"add {pattern} to that repository's .gitignore (not edited).",
+        )
+    prefix = "" if relative == "." else f"{relative}/"
+    return f"/{prefix}{repositories_okf.GITIGNORE_PATTERN}", ()
+
+
+def _root_gitignore_write(layout: WorkspaceLayout, extra: tuple[str, ...] = ()) -> PlannedWrite | None:
+    """Append only missing local-file ignores, plus *extra* (the lane clone line), inside this workspace.
+
+    One write for the file: two `create` writes to one absent path would have the second overwrite the first.
+    """
     path = layout.root / GITIGNORE_FILENAME
-    entries = (LOCAL_MANIFEST_FILENAME, "/dispatch.local.yaml")
+    entries = (LOCAL_MANIFEST_FILENAME, "/dispatch.local.yaml", *extra)
     existing = path.read_bytes().decode("utf-8") if path.exists() else None
     present = set(existing.splitlines()) if existing is not None else set()
     missing = "".join(f"{entry}\n" for entry in entries if entry not in present)
@@ -323,6 +356,40 @@ def _root_gitignore_write(layout: WorkspaceLayout) -> PlannedWrite | None:
         (_GITIGNORE_HEADER if existing is None else "") + missing,
         "create" if existing is None else "append",
     )
+
+
+def _obsidian_exclusion_write(layout: WorkspaceLayout) -> tuple[PlannedWrite | None, tuple[str, ...]]:
+    """Merge the repositories lane's clone filter into `<bundle_dir>/.obsidian/app.json`.
+
+    The bundle directory is the documented Obsidian vault root. Absent: create the file with the one filter.
+    Present: add the key or append the entry, re-dumping with key order preserved, a 2-space indent and a
+    trailing newline. Already present: nothing. Unparseable, not an object, or a non-list filter value: no
+    write, only a notice, never a refusal. Obsidian's exclusion hides files from search, graph and the
+    switcher but still indexes them. `<root>/.obsidian/` is not touched.
+    """
+    path = layout.bundle_dir / OBSIDIAN_DIRNAME / OBSIDIAN_APP_FILENAME
+    label = Path(os.path.relpath(path, layout.root)).as_posix()
+    entry = repositories_okf.OBSIDIAN_FILTER
+    if not path.exists():
+        body = json.dumps({_OBSIDIAN_FILTERS_KEY: [entry]}, indent=2, ensure_ascii=False)
+        return PlannedWrite(label, path, body + "\n", "create"), ()
+
+    def notice(reason: str) -> tuple[None, tuple[str, ...]]:
+        return None, (f'! {label}: {reason}; add "{entry}" to {_OBSIDIAN_FILTERS_KEY} by hand',)
+
+    try:
+        data = json.loads(path.read_bytes().decode("utf-8"))
+    except (OSError, ValueError):
+        return notice("not valid JSON")
+    if not isinstance(data, dict):
+        return notice("not a JSON object")
+    filters = data.get(_OBSIDIAN_FILTERS_KEY, [])
+    if not isinstance(filters, list):
+        return notice(f"{_OBSIDIAN_FILTERS_KEY} is not a list")
+    if entry in filters:
+        return None, ()
+    data[_OBSIDIAN_FILTERS_KEY] = [*filters, entry]
+    return PlannedWrite(label, path, json.dumps(data, indent=2, ensure_ascii=False) + "\n", "create"), ()
 
 
 def _insert_dispatch_reference(text: str) -> str:
@@ -517,9 +584,13 @@ def plan_init(
     gitignore = _gitignore_write(layout)
     if gitignore is not None:
         writes.append(gitignore)
-    root_gitignore = _root_gitignore_write(layout)
+    lane_entry, lane_notices = _lane_gitignore_entry(layout)
+    root_gitignore = _root_gitignore_write(layout, () if lane_entry is None else (lane_entry,))
     if root_gitignore is not None:
         writes.append(root_gitignore)
+    obsidian_write, obsidian_notices = _obsidian_exclusion_write(layout)
+    if obsidian_write is not None:
+        writes.append(obsidian_write)
     manifest_text = None
     if not layout.manifest_path.exists():
         repositories: dict[str, str] = {}
@@ -528,7 +599,8 @@ def plan_init(
         manifest_text = render_initial(
             today=today, topic=topic, repositories=repositories, ignore=layout.scanner_excludes
         )
-    dispatch_writes, dispatch_inputs, notices = _dispatch_init_writes(layout, manifest_text)
+    dispatch_writes, dispatch_inputs, dispatch_notices = _dispatch_init_writes(layout, manifest_text)
+    notices = (*lane_notices, *obsidian_notices, *dispatch_notices)
     writes.extend(dispatch_writes)
     writes.extend(
         _context_writes(

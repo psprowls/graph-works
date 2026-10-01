@@ -19,7 +19,7 @@ git runs through `provenance.probe_git`, the package's one subprocess helper.
 from __future__ import annotations
 
 import time
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
@@ -47,11 +47,16 @@ _sleep = time.sleep
 
 @dataclass(frozen=True, slots=True)
 class WorkspaceCommit:
-    """What a verb asks `apply_mutation` to commit after a successful apply."""
+    """What a verb asks `apply_mutation` to commit after a successful apply.
+
+    `root_paths` are workspace-root-relative (the manifest); every other path
+    is bundle-relative.
+    """
 
     subject: str
     items: tuple[str, ...] = ()
     extra_paths: tuple[str, ...] = ()
+    root_paths: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         if "\n" in self.subject or "\r" in self.subject:
@@ -172,8 +177,13 @@ def commit_workspace(
     plan_paths: Sequence[str],
     *,
     mode: CommitMode | None = None,
+    on_committed: Callable[[], None] | None = None,
 ) -> CommitOutcome:
-    """Stage and commit exactly *plan_paths* + `commit.extra_paths` + each item's `references/`."""
+    """Stage and commit plan paths, extra paths, item references, and root paths.
+
+    Notify `on_committed` immediately after Git reports publication, before the
+    optional HEAD read. Transaction owners can stop rollback at that boundary.
+    """
     toplevel, skip = commit_target(layout, mode)
     if toplevel is None:
         status: Literal["skipped", "failed"] = "skipped" if skip in {"disabled", *NOTE_REASONS} else "failed"
@@ -186,7 +196,21 @@ def commit_workspace(
         relative = Path(member)
         if not member or member == "." or relative.is_absolute() or ".." in relative.parts:
             return CommitOutcome("failed", None, commit.subject, (), f"path is outside bundle: {member!r}")
-    candidates = sorted({(bundle / member).relative_to(toplevel).as_posix() for member in members})
+    root = layout.root.resolve()
+    for member in commit.root_paths:
+        relative = Path(member)
+        if (
+            not member
+            or member == "."
+            or relative.is_absolute()
+            or ".." in relative.parts
+            or not (root / member).resolve().is_relative_to(toplevel)
+        ):
+            return CommitOutcome("failed", None, commit.subject, (), f"path is outside the workspace: {member!r}")
+    candidates = sorted(
+        {(bundle / member).relative_to(toplevel).as_posix() for member in members}
+        | {(root / member).resolve().relative_to(toplevel).as_posix() for member in commit.root_paths}
+    )
     pathspec, add_paths, discovery_error = _pathspec(toplevel, candidates) if candidates else ((), (), None)
     if discovery_error is not None:
         return CommitOutcome("failed", None, commit.subject, (), discovery_error)
@@ -204,6 +228,8 @@ def commit_workspace(
     committed = _git(toplevel, "commit", "--only", "-m", commit.subject, "--", *pathspec)
     if committed.returncode != 0:
         return CommitOutcome("failed", None, commit.subject, pathspec, _reason(committed))
+    if on_committed is not None:
+        on_committed()
     head = probe_git(toplevel, "rev-parse", "HEAD")
     sha = head.stdout.strip() if head.returncode == 0 and head.stdout.strip() else None
     reason = None if sha is not None else f"{_reason(head)} reading HEAD"

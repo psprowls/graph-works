@@ -41,7 +41,7 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from models_io.pricing import cost_for_usage
 from okf_ext.body import find_section
 from okf_ext.proposals import PROPOSAL_TYPE, ProposalPlan, apply, list_proposals, plan_propose
-from okf_io import Bundle, Document, LinkGraph, build_link_graph, load_bundle
+from okf_io import Bundle, Document, LinkGraph, build_link_graph
 from subagents_io import SubagentPool, TaskResult
 from subagents_io.roles import RoleBinding
 
@@ -51,6 +51,7 @@ from graph_works_core.lint_drift.drift_propagator import (
     build_drift_propagator_prompt,
     parse_drift_propagator_verdict,
 )
+from graph_works_core.workspace.bundle import load_workspace_bundle
 from graph_works_core.workspace.layout import WorkspaceLayout
 
 #: The section an entity page's human-or-LLM-authored ground truth lives in.
@@ -599,7 +600,7 @@ async def run_propagate_drift(
     workspace: the plans come back for inspection either way, and only a
     deliberate `dry_run=False` writes.
     """
-    bundle = load_bundle(layout.bundle_dir)
+    bundle = load_workspace_bundle(layout)
     anchors = read_anchors(layout.cache_dir)
     candidates = propagation_candidates(bundle, reader, anchors, config=config, repo_root=repo_root)
     targets = drift_targets(candidates, bundle, build_link_graph(bundle))
@@ -658,7 +659,7 @@ async def run_propagate_drift(
             plan = write_propagation_findings(bundle, group, at=at)[0]
             if plan.ok and not plan.is_empty:
                 apply(bundle, plan)
-                bundle = load_bundle(layout.bundle_dir)
+                bundle = load_workspace_bundle(layout)
             applied.append(plan)
         plans = tuple(applied)
         if not page_scoped:
@@ -699,7 +700,7 @@ def plan_drift_brief(
     candidates, judges staleness itself, and files any proposal via
     `gw wiki proposal file`.
     """
-    bundle = load_bundle(layout.bundle_dir)
+    bundle = load_workspace_bundle(layout)
     anchors = read_anchors(layout.cache_dir)
     candidates = propagation_candidates(bundle, reader, anchors, config=config, repo_root=repo_root)
     targets = drift_targets(candidates, bundle, build_link_graph(bundle))

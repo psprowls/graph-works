@@ -430,6 +430,7 @@ def test_the_rendered_categories_match_the_schemas_declarations_exactly(tmp_path
         "agent-plugin",
         "test-suite",
         "repository",
+        "repository-resource",
         "tutorial",
         "how-to",
         "reference",

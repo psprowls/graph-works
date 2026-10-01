@@ -23,8 +23,9 @@ from typing import Literal
 from code_graph_io.tokens import count_tokens
 from code_wiki_okf.provenance import tokens_value
 from okf_ext.logs import append_entry
-from okf_io import Document, load, load_bundle, parse_log
+from okf_io import Document, load, parse_log
 
+from graph_works_core.workspace.bundle import load_workspace_bundle
 from graph_works_core.workspace.layout import WorkspaceLayout
 
 #: The legacy op vocabulary, carried forward unchanged. A verb outside it is a
@@ -304,7 +305,7 @@ def run_tokens_update(layout: WorkspaceLayout, *, dry_run: bool = True) -> Token
 
     `dry_run` defaults to `True`, matching every other writer in this stack.
     """
-    bundle = load_bundle(layout.bundle_dir)
+    bundle = load_workspace_bundle(layout)
     updated: list[TokenStamp] = []
     unchanged: list[TokenStamp] = []
     skipped: list[SkippedPage] = [SkippedPage(page=member, reason="unreadable") for member in bundle.unreadable]

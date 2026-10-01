@@ -100,6 +100,13 @@ ROOT_REGISTRY: tuple[RootEntry, ...] = (
     RootEntry("wiki", "group", "Wiki scan/ingest/query/lint.", "graph_works_cli.wiki_cli.main", "wiki_app"),
     RootEntry("work", "group", "Work-item pipeline verbs.", "graph_works_cli.work_cli.main", "work_app"),
     RootEntry(
+        "repo",
+        "group",
+        "Repository clones pinned in the repositories/ lane, with optional managed working checkouts.",
+        "graph_works_cli.repo_cli.main",
+        "repo_app",
+    ),
+    RootEntry(
         "util",
         "group",
         "Diagnostics: platform/log/line-endings/tokens/trace and the surface freeze.",

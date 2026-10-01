@@ -152,6 +152,8 @@ artifact of the scope rather than the bundle. `validate(links=)` is a related
 but separate parameter — passing a pre-built `LinkGraph` is an optimisation
 that skips recomputing it, not a change in behaviour.
 
+`prune=` on `load_bundle()` / `bundle._load_at()` is another of okf-io's extension points: `fnmatchcase` globs matched against a *directory's* bundle-relative path (`*` crosses `/`). A matching directory is never listed — both walks check it at the moment the child would be pushed — and its id lands in `Bundle.pruned`; nothing beneath it appears in any other field, not even `unreadable`. The `.git`, root-dot and directory-symlink exclusions win, and the bundle root is never pruned. `prune` is independent of `ignore=`: `ignored` must stay a complete file enumeration because work-tracker's reparent/adopt/archive and the index writers depend on it, which is why pruning is opt-in rather than inferred from ignore patterns (epic ledger entry 015). `member_id` / `has_member` still answer for a real file beneath a pruned root through an uncached, path-rooted `lstat` probe that refuses empty, `.`, `..` and `.git` components and intermediate symlinks, so a link into a present file resolves and one into an absent file is an ordinary `links.broken` warn. `Bundle.pruned` is keyword-only with an empty default so a `Bundle` subclass can still add a required field.
+
 `_common.py` is underscore-prefixed precisely to keep it out of the registry —
 adding a non-rule helper module means prefixing it too.
 

@@ -7,12 +7,13 @@ from dataclasses import dataclass
 from datetime import date
 from types import MappingProxyType
 
-from okf_io import Document, load_bundle, parse
+from okf_io import Document, parse
 from work_tracker_okf.items import IGNORE, load_items
 from work_tracker_okf.mutation import DirectoryPrecondition, PlannedWrite, WorkMutationPlan
 from work_tracker_okf.paths import MANAGED_ARTIFACTS, ArtifactRef, artifact_ref, item_page
 from work_tracker_okf.sources import upsert
 
+from graph_works_core.workspace.bundle import load_workspace_bundle
 from graph_works_core.workspace.commits import CommitOutcome, WorkspaceCommit, commit_mode, item_stem
 from graph_works_core.workspace.decision_owner import DecisionContext, locked_decision_owner
 from graph_works_core.workspace.errors import WorkspaceError
@@ -109,7 +110,7 @@ def receipt_problem(layout: WorkspaceLayout, path: str, plan: FinishPlan) -> str
 @finish_toolchain
 def run_record_finish(layout: WorkspaceLayout, path: str, *, repo_name: str, today: date) -> FinishReceiptResult:
     """Callers name a target, never supply completion claims or commit identities."""
-    if not any(i.path == path for i in load_items(load_bundle(layout.bundle_dir, ignore=IGNORE))):
+    if not any(i.path == path for i in load_items(load_workspace_bundle(layout, ignore=IGNORE))):
         return FinishReceiptResult("unknown finish owner", False, None)
     commit_mode(layout)
     with locked_decision_owner(layout, path) as context:
@@ -199,7 +200,7 @@ def record_finish_in(
     )
 
     def validate() -> None:
-        fresh_items = load_items(load_bundle(layout.bundle_dir, ignore=IGNORE))
+        fresh_items = load_items(load_workspace_bundle(layout, ignore=IGNORE))
         fresh_plan = resolve_finish_targets(layout, fresh_items, path)
         if (
             finish_read_guard(layout, path) != guard

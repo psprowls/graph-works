@@ -47,7 +47,6 @@ from typing import IO, Literal, Protocol
 from okf_ext.moves import Move
 from okf_ext.writing import body_digest
 from okf_io import Bundle, Rule, parse, validate
-from okf_io import load_bundle as _load_bundle
 from okf_io.bundle import LOG_NAME
 from okf_io.bundle import _load_at as _load_bundle_at
 from work_tracker_okf.compose import rule_set
@@ -60,6 +59,7 @@ from work_tracker_okf.pipeline import PACKAGED_DEFINITION
 
 from graph_works_core.workspace import anchors
 from graph_works_core.workspace.anchors import Anchor, open_absolute_anchor, open_anchor
+from graph_works_core.workspace.bundle import CLONE_PRUNE, load_bundle_at, with_clone_ignore
 from graph_works_core.workspace.commits import (
     COMMIT_FAILED_PREFIX,
     CommitOutcome,
@@ -434,8 +434,8 @@ def _load_bundle_through(root: Anchor, path: Path, *, ignore: Sequence[str]) -> 
     This is the last consumer of `_raw_descriptor`.
     """
     if isinstance(root, anchors._PosixAnchor):
-        return _load_bundle_at(path, _raw_descriptor(root), ignore=ignore)
-    return _load_bundle(path, ignore=ignore)
+        return _load_bundle_at(path, _raw_descriptor(root), ignore=with_clone_ignore(ignore), prune=CLONE_PRUNE)
+    return load_bundle_at(path, ignore=ignore)
 
 
 @contextmanager
@@ -3243,7 +3243,11 @@ def apply_mutation(
 
 
 def commit_pending(
-    layout: WorkspaceLayout, commit: WorkspaceCommit, *, lock_timeout: float | None = None
+    layout: WorkspaceLayout,
+    commit: WorkspaceCommit,
+    *,
+    lock_timeout: float | None = None,
+    on_committed: Callable[[], None] | None = None,
 ) -> CommitOutcome:
     """Commit *commit*'s items' `references/` and `extra_paths` under the bundle lock, with no plan.
 
@@ -3260,6 +3264,8 @@ def commit_pending(
                 if str(layout.bundle_dir.resolve()) in _HELD_BUNDLE_LOCKS.get()
                 else _bundle_root_lock(root, timeout=lock_timeout)
             ):
+                if on_committed is not None:
+                    return commit_workspace(layout, commit, (), mode=mode, on_committed=on_committed)
                 return commit_workspace(layout, commit, (), mode=mode)
         except anchors.LockTimeout:
             return CommitOutcome("failed", None, commit.subject, (), LOCK_TIMEOUT_FAILURE)

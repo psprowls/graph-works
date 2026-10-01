@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "required": ["type", "title", "description", "repository"],
+  "additionalProperties": false,
+  "properties": {
+    "type": { "const": "RepositoryChangelog" },
+    "title": { "type": "string", "minLength": 1 },
+    "description": { "type": "string", "minLength": 1 },
+    "repository": { "type": "string", "pattern": "^/repositories/[^/]+\\.md$" },
+    "status": { "enum": ["draft", "stable", "deprecated"] },
+    "updated": { "type": "string", "format": "date" },
+    "tags": { "type": "array", "items": { "type": "string" } }
+  },
+  "x-okf-directory": "repositories/"
+}

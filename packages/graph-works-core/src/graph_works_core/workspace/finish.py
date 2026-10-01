@@ -14,11 +14,12 @@ from types import MappingProxyType
 from typing import Concatenate, Literal, cast
 
 from config_io import StoreValidationError
-from okf_io import Bundle, Document, load_bundle, parse
+from okf_io import Bundle, Document, parse
 from work_tracker_okf.items import IGNORE, WorkItem, load_items
 from work_tracker_okf.paths import MANAGED_ARTIFACTS, artifact_ref
 from work_tracker_okf.vocabulary import TERMINAL_STATUSES
 
+from graph_works_core.workspace.bundle import load_workspace_bundle
 from graph_works_core.workspace.errors import WorkspaceConfigError, WorkspaceError
 from graph_works_core.workspace.layout import WorkspaceLayout
 from graph_works_core.workspace.manifest import workspace_store
@@ -607,7 +608,7 @@ def discover_integration(target: FinishTarget) -> VerifiedIntegration | str:
 @finish_toolchain
 def inspect_finish(layout: WorkspaceLayout, path: str) -> FinishVerification:
     """Reverify every recorded integration against live repository-local refs."""
-    bundle = load_bundle(layout.bundle_dir, ignore=IGNORE)
+    bundle = load_workspace_bundle(layout, ignore=IGNORE)
     items = load_items(bundle)
     by_path = {item.path: item for item in items}
     if path not in by_path:
@@ -704,7 +705,7 @@ def _worktree_list(repo: Path) -> tuple[tuple[str, str], ...] | None:
 @finish_toolchain
 def plan_finish_cleanup(layout: WorkspaceLayout, path: str, *, runner_cwd: Path | None) -> CleanupPlan:
     """Plan removal of resolved, receipted stamps from read-only Git observations."""
-    items = load_items(load_bundle(layout.bundle_dir, ignore=IGNORE))
+    items = load_items(load_workspace_bundle(layout, ignore=IGNORE))
     by_path = {item.path: item for item in items}
     item = by_path.get(path)
     if item is None:
@@ -856,7 +857,7 @@ def plan_finish_cleanup(layout: WorkspaceLayout, path: str, *, runner_cwd: Path 
 
 def finish_read_guard(layout: WorkspaceLayout, path: str, *, bundle: Bundle | None = None) -> str:
     """Bind owner, ancestors, repo configuration and receipt to their raw preimages."""
-    bundle = bundle if bundle is not None else load_bundle(layout.bundle_dir, ignore=IGNORE)
+    bundle = bundle if bundle is not None else load_workspace_bundle(layout, ignore=IGNORE)
     item = next((i for i in load_items(bundle) if i.path == path), None)
     digest = hashlib.sha256()
     members = (path, *item.ancestor_paths) if item is not None else (path,)

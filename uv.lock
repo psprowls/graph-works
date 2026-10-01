@@ -464,7 +464,7 @@ requires-dist = [
     { name = "okf-ext", extras = ["schemas"], editable = "packages/okf-ext" },
     { name = "okf-io", editable = "packages/okf-io" },
     { name = "subagents-io", editable = "packages/subagents-io" },
-    { name = "typer", specifier = ">=0.12" },
+    { name = "typer", specifier = ">=0.27" },
     { name = "workflow-orca", editable = "packages/workflow-orca" },
 ]
 

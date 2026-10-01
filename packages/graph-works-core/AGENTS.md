@@ -380,6 +380,9 @@ hand. `today` is always injected; nothing in this package reads the clock.
   (`scan.commands.*`, `query.commands.*`) stay qualified. `graph_target` and
   `resolve` are hoisted because they *are* the call, the same reason
   `apply_init`/`plan_init` are.
+  The front door is lazy: adding a hoisted name means adding it to
+  `_EXPORTS`, the `TYPE_CHECKING` block and `__all__` (`tests/test_lazy_front_door.py`
+  fails otherwise). Core submodules still must not import the top-level package.
 
 - **Context files are whole-body regenerated.** Anything a human writes in
   `<root>/AGENTS.md` above `## Local Conventions` is lost on the next

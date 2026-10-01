@@ -11,22 +11,17 @@ from typing import Any, cast
 import click
 import typer
 
-from graph_works_cli.agent_config_cli.main import agent_config_app
-from graph_works_cli.config_cli.main import config_app
 from graph_works_cli.errors import exit_error
-from graph_works_cli.graph_cli.main import graph_app
 from graph_works_cli.introspection import TyperCommand, command_to_help_entry, json_safe_default
+from graph_works_cli.lazy_group import LazyRootGroup
 from graph_works_cli.logging_config import configure_verbose_logging
-from graph_works_cli.util_cli.main import register_util_root_commands, util_app
-from graph_works_cli.wiki_cli.main import register_root_commands, wiki_app
 from graph_works_cli.work_cli import rendering as work_rendering
-from graph_works_cli.work_cli.main import work_app
 
 # test_cli.py imports these by their old private names and must not be edited; keep as aliases.
 _command_to_help_entry = command_to_help_entry
 _json_safe_default = json_safe_default
 
-app = typer.Typer(name="gw", help="gw: graph-works CLI.", no_args_is_help=True)
+app = typer.Typer(name="gw", cls=LazyRootGroup, help="gw: graph-works CLI.", no_args_is_help=True)
 
 
 @app.callback()
@@ -115,16 +110,6 @@ def version() -> None:
     """Print version and exit."""
     v = importlib.metadata.version("graph-works-cli")
     typer.echo(f"gw {v}")
-
-
-app.add_typer(config_app, name="config")
-app.add_typer(agent_config_app, name="agent-config")
-app.add_typer(graph_app, name="graph")
-register_root_commands(app)
-register_util_root_commands(app)
-app.add_typer(wiki_app, name="wiki")
-app.add_typer(work_app, name="work")
-app.add_typer(util_app, name="util")
 
 
 def force_lf_newlines(*streams: object) -> None:

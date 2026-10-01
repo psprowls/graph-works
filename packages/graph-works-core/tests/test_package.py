@@ -158,11 +158,12 @@ def test_lint_all_retired_rather_than_ported():
 
 
 def test_the_two_new_prompt_modules_stay_submodules():
+    from graph_works_core import prompts
     from graph_works_core.lint_drift import drift_propagator, linter
 
     assert linter.build_linter_page_quality_system()
     assert drift_propagator.DRIFT_PROPAGATOR_SYSTEM
-    assert "build_linter_page_quality_system" not in graph_works_core.prompts.__all__
+    assert "build_linter_page_quality_system" not in prompts.__all__
 
 
 def test_the_dispatch_seam_is_reachable_from_the_front_door():

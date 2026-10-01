@@ -1,4 +1,4 @@
-"""`gw util` sub-app and the root-level util command registration."""
+"""`gw util` sub-app and `gw next`'s callback."""
 
 from __future__ import annotations
 
@@ -9,7 +9,6 @@ import typer
 from typer.main import get_command_name
 from typer.models import CommandInfo
 
-from graph_works_cli.util_cli.archive import archive
 from graph_works_cli.util_cli.describe import describe_surface
 from graph_works_cli.util_cli.line_endings import line_endings
 from graph_works_cli.util_cli.log import log
@@ -51,13 +50,3 @@ def work_next_callback() -> Callable[..., Any]:
             assert command.callback is not None
             return command.callback
     raise RuntimeError("gw work next is not registered — `gw next` has nothing to alias")
-
-
-def register_util_root_commands(app: typer.Typer) -> None:
-    """Install the util sub-app's root-level verbs at the ``gw`` root.
-
-    Named distinctly from `wiki_cli.main.register_root_commands` so `cli.py` can import
-    both without collision.
-    """
-    app.command(name="archive")(archive)
-    app.command(name="next")(work_next_callback())

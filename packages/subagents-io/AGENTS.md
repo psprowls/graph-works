@@ -302,6 +302,8 @@ per module, with **zero exemptions**:
    under `src/subagents_io` — adding a module without listing it there fails
    loudly.
 
+The front door is lazy: `subagents_io/__init__.py` resolves public names on first access through PEP 562 `__getattr__` over `_EXPORTS`, so `import subagents_io` does not import `langchain_core`. The three views of the surface (`_EXPORTS`, the `TYPE_CHECKING` block, `__all__`) are held equal by `tests/test_lazy_front_door.py`, and a new public name needs an entry in all three.
+
 The root `[tool.importlinter]` config runs the workspace half of the same
 rule (an `independence` contract over all five band-1 packages) — it catches
 an edge introduced from the *other* side (a sibling importing

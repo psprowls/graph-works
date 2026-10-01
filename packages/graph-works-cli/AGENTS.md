@@ -38,16 +38,20 @@ change that moved it, never as an incidental side effect.
 ### Command surface
 
 `cli.py` builds the root Typer app (`gw`), wires the `-v/-vv` verbose callback, `version`, `help
-[--json]`, and mounts six sub-apps via `add_typer()` / root-command registration:
+[--json]`. The root is a `LazyRootGroup` (`lazy_group.py`): every other root entry is a `RootEntry` in
+`ROOT_REGISTRY` (name, kind, first-paragraph help, module, attribute) whose module is imported only when that
+command runs. Adding a root command or group means adding a `RootEntry` and nothing in `cli.py`. `gw --help`
+renders from registry stubs, so `tests/test_lazy_root_group.py` is what keeps the help text honest; `.commands`
+loads everything (the walkers need that). The entries are:
 
 - `graph_cli` — `gw graph build|describe|find|export`, code-graph queries.
 - `wiki_cli` — `gw wiki lint|drift|stats|index|archive|proposals|proposal|claims ...`; archive and
   proposal mutation commands route through core's vertical calls, while index and proposal listing
-  retain their lower-layer calls. Root-level aliases `gw bootstrap|scan|ingest|query` are registered
-  by `wiki_cli.main.register_root_commands()`.
+  retain their lower-layer calls. Root-level aliases `gw bootstrap|scan|ingest|query` are `ROOT_REGISTRY`
+  entries.
 - `work_cli` — `gw work ...` (the work-item pipeline verbs, `decision` sub-app,
-  `gate` sub-app (`run|wait|check`), `reconcile-context`), plus root-level aliases `gw next` and `gw archive` registered by
-  `util_cli.main.register_util_root_commands()`. `gw next` is a genuine alias — it reuses `gw work
+  `gate` sub-app (`run|wait|check`), `reconcile-context`), plus root-level aliases `gw next` and `gw archive` listed in
+  `ROOT_REGISTRY`. `gw next` is a genuine alias — it reuses `gw work
   next`'s own callback object rather than a copy (see `util_cli/main.py`'s `work_next_callback()`),
   so the two can never drift.
 

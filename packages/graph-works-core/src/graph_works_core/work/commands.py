@@ -760,7 +760,7 @@ def _plan_next(
 ) -> tuple[NextResult, Bundle, WorkItem]:
     """Load the bundle once and plan *path* over it (`_plan_route`)."""
     bundle = load_workspace_bundle(layout, ignore=IGNORE)
-    items = tuple(load_items(bundle))
+    items = load_items(bundle)
     preview, selected = _plan_route(layout, bundle, items, path, descend=descend, definition=definition)
     if preview.route.dispatch is not None and preview.route.dispatch.stage == "finish":
         finish = resolve_finish_targets(layout, items, preview.selected_path)
@@ -892,7 +892,7 @@ def run_next(
         resolved = replace(
             preview, dispatch_resolution=resolution, dispatch_preflight=preview.dispatch_preflight or preflight
         )
-        items = tuple(load_items(bundle))
+        items: Sequence[WorkItem] = load_items(bundle)
         guided = _with_guidance(layout, resolved, bundle, items if guidance else (), guidance)
         result = _with_repository_notes(layout, _with_carried(layout, guided, bundle, items), items)
         return replace(result, path=None, artifacts=()) if isinstance(config, WorkspaceError) else result
@@ -1010,7 +1010,7 @@ def run_work_queue(layout: WorkspaceLayout) -> tuple[QueueEntry, ...]:
     active item is silently dropped.
     """
     bundle = load_workspace_bundle(layout, ignore=IGNORE)
-    items = tuple(load_items(bundle))
+    items = load_items(bundle)
     config = _load_config(layout)
     definition = _definition_of(config)
     entries: list[QueueEntry] = []
@@ -1695,7 +1695,7 @@ def run_open_decisions(layout: WorkspaceLayout) -> tuple[OpenDecision, ...]:
     items `hold_for` would report this entry as holding.
     """
     bundle = load_workspace_bundle(layout, ignore=IGNORE)
-    items = tuple(load_items(bundle))
+    items = load_items(bundle)
     active = tuple(item for item in items if not item.archived)
     active_paths = {item.path for item in active}
     owners = sorted({owner for item in active if (owner := decision_owner(items, item.path)) is not None})

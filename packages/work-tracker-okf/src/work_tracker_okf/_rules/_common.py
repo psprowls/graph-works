@@ -19,6 +19,7 @@ from okf_io import Document, RuleContext
 
 from work_tracker_okf.items import WorkItem, load_items
 from work_tracker_okf.pipeline import PACKAGED_DEFINITION, PipelineDefinition
+from work_tracker_okf.snapshot import WorkSnapshot
 
 
 @dataclass(frozen=True, slots=True)
@@ -57,13 +58,14 @@ class LaneConfig:
         return tuple(dict.fromkeys((*head, *self.repo_roots)))
 
 
-def items(ctx: RuleContext) -> tuple[WorkItem, ...]:
+def items(ctx: RuleContext) -> WorkSnapshot:
     """Every item in the bundle, archived included.
 
     Called once per rule function rather than memoized (C5-K): measured at 93 us
     for 7 items, so about 30 ms across the rule bundle on a 100-item vault.
     Independent passes, no shared state, and no cache whose invalidation
     nobody can see.
+    The returned snapshot memoizes within this one rule pass only.
     """
     return load_items(ctx.bundle)
 

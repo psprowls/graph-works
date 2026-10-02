@@ -144,17 +144,24 @@ def validate_dependencies(
 
 
 def resolve_facts(nodes: Sequence[DependencyNode], edges: Sequence[DependencyEdge]) -> tuple[DependencyFact, ...]:
+    """One fact per distinct edge path; snapshot facts are memoized per load."""
+    from work_tracker_okf.snapshot import WorkSnapshot
+
+    if isinstance(nodes, WorkSnapshot):
+        snapshot = nodes
+
+        def fact_for(path: str) -> DependencyFact:
+            return snapshot.memo("dependency_fact", path, lambda: _fact(path, snapshot.by_path.get(path)))
+
+        return tuple(fact_for(path) for path in dict.fromkeys(edge.path for edge in edges))
     by_path = {node.path: node for node in nodes}
-    facts: list[DependencyFact] = []
-    for path in dict.fromkeys(edge.path for edge in edges):
-        node = by_path.get(path)
-        if node is None:
-            facts.append(DependencyFact(path, False, False))
-        else:
-            facts.append(
-                DependencyFact(path, True, node.work_status in TERMINAL_STATUSES, node.phase, node.work_status)
-            )
-    return tuple(facts)
+    return tuple(_fact(path, by_path.get(path)) for path in dict.fromkeys(edge.path for edge in edges))
+
+
+def _fact(path: str, node: DependencyNode | None) -> DependencyFact:
+    if node is None:
+        return DependencyFact(path, False, False)
+    return DependencyFact(path, True, node.work_status in TERMINAL_STATUSES, node.phase, node.work_status)
 
 
 def unmet(

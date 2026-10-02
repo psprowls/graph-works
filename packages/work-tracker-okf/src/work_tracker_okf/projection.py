@@ -12,6 +12,7 @@ from work_tracker_okf.hierarchy import ChildRollup, child_rollup
 from work_tracker_okf.items import WorkItem
 from work_tracker_okf.paths import item_page
 from work_tracker_okf.pipeline import DECOMPOSING_TYPES
+from work_tracker_okf.snapshot import as_snapshot
 from work_tracker_okf.vocabulary import PARENT_TYPES, TERMINAL_STATUSES
 
 NON_ACTIONABLE_STATUSES: frozenset[str] = TERMINAL_STATUSES | {"mitigated"}
@@ -45,12 +46,13 @@ def _counts(values: Iterable[str]) -> Mapping[str, int]:
 
 
 def rollup(items: Sequence[WorkItem]) -> Rollup:
-    active = tuple(item for item in items if not item.archived)
+    snapshot = as_snapshot(items)
+    active = tuple(item for item in snapshot if not item.archived)
     children: dict[str, ChildRollup] = {}
     for item in active:
         if item.type not in PARENT_TYPES:
             continue
-        rolled = child_rollup(items, item.path)
+        rolled = child_rollup(snapshot, item.path)
         if item.type not in DECOMPOSING_TYPES and rolled.total == 0:
             continue
         children[item.path] = rolled

@@ -5,7 +5,6 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 
-from work_tracker_okf._selection import path_index
 from work_tracker_okf.dependencies import DependencyEdge, resolve_facts, unmet
 from work_tracker_okf.items import WorkItem
 from work_tracker_okf.pipeline import (
@@ -16,6 +15,7 @@ from work_tracker_okf.pipeline import (
     resolve_path,
 )
 from work_tracker_okf.pipeline import child_gated as _row_child_gated
+from work_tracker_okf.snapshot import WorkSnapshot, as_snapshot
 from work_tracker_okf.vocabulary import TERMINAL_STATUSES
 
 PICK_ORDER: dict[str, int] = {"in-progress": 0, "accepted": 1, "open": 2}
@@ -37,59 +37,70 @@ class DescendResult:
 
 
 def _direct_children(items: Sequence[WorkItem], parent_path: str) -> tuple[WorkItem, ...]:
-    index = path_index(items)
-    parent = index.get(parent_path)
-    if parent is None:
-        return ()
-    return tuple(index[path] for path in parent.child_paths if path in index)
+    return as_snapshot(items).child_items(parent_path)
 
 
 def child_rollup(items: Sequence[WorkItem], parent_path: str) -> ChildRollup:
-    children = _direct_children(items, parent_path)
-    terminal = sum(item.work_status in TERMINAL_STATUSES for item in children)
-    open_paths = tuple(sorted(item.path for item in children if item.work_status not in TERMINAL_STATUSES))
-    return ChildRollup(len(children), terminal, open_paths)
+    snapshot = as_snapshot(items)
+
+    def compute() -> ChildRollup:
+        children = snapshot.child_items(parent_path)
+        terminal = sum(item.work_status in TERMINAL_STATUSES for item in children)
+        open_paths = tuple(sorted(item.path for item in children if item.work_status not in TERMINAL_STATUSES))
+        return ChildRollup(len(children), terminal, open_paths)
+
+    return snapshot.memo("child_rollup", parent_path, compute)
 
 
 def active_nonterminal_descendants(items: Sequence[WorkItem], parent_path: str) -> tuple[str, ...]:
     """Every active nonterminal descendant of *parent_path*, at any depth."""
-    index = path_index(items)
-    parent = index.get(parent_path)
-    if parent is None:
-        return ()
-    found: list[str] = []
-    pending = list(reversed(parent.child_paths))
-    seen = {parent_path}
-    while pending:
-        path = pending.pop()
-        if path in seen:
-            continue
-        seen.add(path)
-        item = index.get(path)
-        if item is None or item.archived:
-            continue
-        if item.work_status not in TERMINAL_STATUSES:
-            found.append(item.path)
-        pending.extend(reversed(item.child_paths))
-    return tuple(sorted(found))
+    snapshot = as_snapshot(items)
+
+    def compute() -> tuple[str, ...]:
+        index = snapshot.by_path
+        parent = index.get(parent_path)
+        if parent is None:
+            return ()
+        found: list[str] = []
+        pending = list(reversed(parent.child_paths))
+        seen = {parent_path}
+        while pending:
+            path = pending.pop()
+            if path in seen:
+                continue
+            seen.add(path)
+            item = index.get(path)
+            if item is None or item.archived:
+                continue
+            if item.work_status not in TERMINAL_STATUSES:
+                found.append(item.path)
+            pending.extend(reversed(item.child_paths))
+        return tuple(sorted(found))
+
+    return snapshot.memo("active_nonterminal_descendants", parent_path, compute)
 
 
 def nearest_parent(items: Sequence[WorkItem], path: str) -> str | None:
     """Nearest Release, Epic, or Feature containing (or equal to) *path*."""
     from work_tracker_okf.vocabulary import PARENT_TYPES
 
-    index = path_index(items)
-    seen: set[str] = set()
-    current: str | None = path
-    while current is not None and current not in seen:
-        item = index.get(current)
-        if item is None:
-            return None
-        if item.type in PARENT_TYPES:
-            return item.path
-        seen.add(current)
-        current = item.parent_path
-    return None
+    snapshot = as_snapshot(items)
+
+    def compute() -> str | None:
+        index = snapshot.by_path
+        seen: set[str] = set()
+        current: str | None = path
+        while current is not None and current not in seen:
+            item = index.get(current)
+            if item is None:
+                return None
+            if item.type in PARENT_TYPES:
+                return item.path
+            seen.add(current)
+            current = item.parent_path
+        return None
+
+    return snapshot.memo("nearest_parent", path, compute)
 
 
 def decision_owner(items: Sequence[WorkItem], path: str) -> str | None:
@@ -97,10 +108,11 @@ def decision_owner(items: Sequence[WorkItem], path: str) -> str | None:
     Feature containing it, or -- when there is none -- the item itself, so a
     lone Bug, TechDebt, TestGap or Spike can record decisions and holds.
     `None` only for an unknown path."""
-    owner = nearest_parent(items, path)
+    snapshot = as_snapshot(items)
+    owner = nearest_parent(snapshot, path)
     if owner is not None:
         return owner
-    return path if path in path_index(items) else None
+    return path if path in snapshot.by_path else None
 
 
 def sweep_eligible(items: Sequence[WorkItem], item: WorkItem) -> bool:
@@ -115,14 +127,24 @@ def sweep_eligible(items: Sequence[WorkItem], item: WorkItem) -> bool:
     Written once and shared by `archive._default_targets` and
     `_rules.state.terminal`, so the lint cannot disagree with the planner
     about what the sweep will move.
+
+    Memoized per snapshot only when *item* is the snapshot's own item at its
+    path; a caller-supplied variant is answered fresh, never from the memo.
     """
+    snapshot = as_snapshot(items)
+    if snapshot.by_path.get(item.path) is item:
+        return snapshot.memo("sweep_eligible", item.path, lambda: _sweep_eligible(snapshot, item))
+    return _sweep_eligible(snapshot, item)
+
+
+def _sweep_eligible(snapshot: WorkSnapshot, item: WorkItem) -> bool:
     from work_tracker_okf.vocabulary import TERMINAL_STATUSES
 
     if item.ancestor_paths or item.parent_path is not None or item.archived:
         return False
     if item.work_status not in TERMINAL_STATUSES:
         return False
-    index = path_index(items)
+    index = snapshot.by_path
     pending = list(item.child_paths)
     seen = {item.path}
     while pending:
@@ -156,7 +178,7 @@ def declared_repo(item: WorkItem, items_by_path: Mapping[str, WorkItem]) -> tupl
 
 
 def unknown_depends_on(items: Sequence[WorkItem], edges: Sequence[DependencyEdge]) -> dict[str, None]:
-    known = path_index(items)
+    known = as_snapshot(items).by_path
     return {edge.path: None for edge in edges if edge.path not in known}
 
 
@@ -168,18 +190,23 @@ def child_gated(items: Sequence[WorkItem], item: WorkItem) -> bool:
 
 
 def nearest_epic(items: Sequence[WorkItem], path: str) -> str | None:
-    index = path_index(items)
-    seen: set[str] = set()
-    current: str | None = path
-    while current is not None and current not in seen:
-        item = index.get(current)
-        if item is None:
-            return None
-        if item.type == "Epic":
-            return item.path
-        seen.add(current)
-        current = item.parent_path
-    return None
+    snapshot = as_snapshot(items)
+
+    def compute() -> str | None:
+        index = snapshot.by_path
+        seen: set[str] = set()
+        current: str | None = path
+        while current is not None and current not in seen:
+            item = index.get(current)
+            if item is None:
+                return None
+            if item.type == "Epic":
+                return item.path
+            seen.add(current)
+            current = item.parent_path
+        return None
+
+    return snapshot.memo("nearest_epic", path, compute)
 
 
 def _dependency_blocked(items: Sequence[WorkItem], child: WorkItem, definition: PipelineDefinition) -> bool:
@@ -201,24 +228,25 @@ def _dependency_blocked(items: Sequence[WorkItem], child: WorkItem, definition: 
 def descend(
     items: Sequence[WorkItem], path: str, *, definition: PipelineDefinition = PACKAGED_DEFINITION
 ) -> DescendResult:
-    index = path_index(items)
+    snapshot = as_snapshot(items)
+    index = snapshot.by_path
     node = index.get(path)
     if node is None:
         return DescendResult((path,), None, path, f"unknown path {path!r}")
     walked = [path]
     visited = {path}
     while True:
-        children = _direct_children(items, node.path)
-        if not child_gated(items, node):
+        children = _direct_children(snapshot, node.path)
+        if not child_gated(snapshot, node):
             return DescendResult(tuple(walked), node.path)
         candidates = [
             child
             for child in children
             if not child.archived
-            and not _dependency_blocked(items, child, definition)
+            and not _dependency_blocked(snapshot, child, definition)
             and (
                 child.work_status in PICK_ORDER
-                or (child.work_status in TERMINAL_STATUSES and active_nonterminal_descendants(items, child.path))
+                or (child.work_status in TERMINAL_STATUSES and active_nonterminal_descendants(snapshot, child.path))
             )
         ]
         if not candidates:

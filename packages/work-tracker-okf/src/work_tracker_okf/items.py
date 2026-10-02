@@ -3,19 +3,23 @@
 from __future__ import annotations
 
 import re
-from collections.abc import Mapping
-from dataclasses import dataclass, replace
+from collections.abc import Iterable, Mapping
+from dataclasses import dataclass
 from types import MappingProxyType
+from typing import TYPE_CHECKING, Any
 
 from okf_ext.schemas import DEFAULT_IGNORE as _SCHEMA_IGNORE
 from okf_ext.schemas import SchemaSet, declared_directories
 from okf_ext.shape import DEFAULT_IGNORE as _SECTIONS_IGNORE
-from okf_io import Bundle, Document, Source
+from okf_io import Bundle, Source
 
 from work_tracker_okf.dependencies import DependencyEdge, DependencyIssue, parse_dependencies
 from work_tracker_okf.obligations import Obligation, parse_obligations
-from work_tracker_okf.paths import ItemLocation, parse_item_path
+from work_tracker_okf.paths import ItemLocation
 from work_tracker_okf.vocabulary import PLAN_SOURCE_ID, SPEC_SOURCE_ID, TYPES
+
+if TYPE_CHECKING:
+    from work_tracker_okf.snapshot import WorkSnapshot
 
 WORK_DIR = "work"
 ARCHIVE_DIR = "work/_archive"
@@ -195,10 +199,26 @@ def _repo_stamps(value: object) -> tuple[Mapping[str, Stamp], bool]:
     return MappingProxyType(stamps), malformed
 
 
-def _project(location: ItemLocation, document: Document) -> WorkItem:
-    data = document.fm_data(dates="iso")
-    fm = document.fm
-    source_ids = {source.id for source in fm.sources if source.id is not None}
+def _project(
+    location: ItemLocation,
+    data: Mapping[str, Any],
+    *,
+    tags: tuple[str, ...],
+    sources: tuple[Source, ...],
+) -> WorkItem:
+    """Project one item from its plain `fm_data(dates="iso")` mapping (D-008).
+
+    *tags* and *sources* come from the typed frontmatter: the bundle path
+    passes `document.fm`'s (which carries the v0.1 body-citation fallback),
+    the row path passes `build_frontmatter(data)`'s (which cannot).
+    Row reconstruction also sees native YAML dates as ISO strings in tags,
+    Source scalar fields and Source.extra. Plain-data conversion recursively
+    stringifies mapping keys in Source.extra and collapses collisions with
+    the last entry winning, while bundle extras retain nested native keys.
+    `WorkSnapshot.from_rows` documents these accepted differences from the
+    document's typed values; row reconstruction cannot recover lost entries.
+    """
+    source_ids = {source.id for source in sources if source.id is not None}
     dependencies = parse_dependencies(data.get("depends_on"))
     repo_stamps, stamps_malformed = _repo_stamps(data.get("repo_stamps"))
     spec_baseline, baseline_malformed = spec_baseline_of(data.get("spec_baseline"))
@@ -232,8 +252,8 @@ def _project(location: ItemLocation, document: Document) -> WorkItem:
         worktree=_optional_text(data.get("worktree")),
         branch=_optional_text(data.get("branch")),
         superseded_by=_optional_text(data.get("superseded_by")),
-        tags=fm.tags,
-        sources=fm.sources,
+        tags=tags,
+        sources=sources,
         has_design_artifact=SPEC_SOURCE_ID in source_ids,
         has_plan_artifact=PLAN_SOURCE_ID in source_ids,
         version=_optional_text(data.get("version")),
@@ -258,27 +278,20 @@ def _project(location: ItemLocation, document: Document) -> WorkItem:
     )
 
 
-def item_index(items: tuple[WorkItem, ...] | list[WorkItem]) -> dict[str, WorkItem]:
-    """Index a projection by permanent extensionless bundle path."""
+def item_index(items: Iterable[WorkItem]) -> dict[str, WorkItem]:
+    """Index a projection by permanent extensionless bundle path. Always a fresh dict."""
+    from work_tracker_okf.snapshot import WorkSnapshot
+
+    if isinstance(items, WorkSnapshot):
+        return dict(items.by_path)
     return {item.path: item for item in items}
 
 
-def load_items(bundle: Bundle) -> tuple[WorkItem, ...]:
+def load_items(bundle: Bundle) -> WorkSnapshot:
     """Project every concept whose extensionless id passes ``parse_item_path``."""
-    projected: list[WorkItem] = []
-    for concept_id, document in bundle.concepts.items():
-        location = parse_item_path(concept_id)
-        if location is not None:
-            projected.append(_project(location, document))
+    from work_tracker_okf.snapshot import WorkSnapshot
 
-    children: dict[str, list[str]] = {}
-    for item in projected:
-        if item.parent_path is not None:
-            children.setdefault(item.parent_path, []).append(item.path)
-    return tuple(
-        replace(item, child_paths=tuple(sorted(children.get(item.path, ()))))
-        for item in sorted(projected, key=lambda item: item.path)
-    )
+    return WorkSnapshot.from_bundle(bundle)
 
 
 def unreadable_detail(bundle: Bundle, path: str) -> str | None:

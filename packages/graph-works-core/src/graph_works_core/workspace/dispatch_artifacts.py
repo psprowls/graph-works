@@ -8,6 +8,7 @@ from work_tracker_okf.compose import stamp_for
 from work_tracker_okf.items import WorkItem
 from work_tracker_okf.paths import ArtifactRef
 from work_tracker_okf.pipeline import PipelineDefinition
+from work_tracker_okf.snapshot import WorkSnapshot
 from work_tracker_okf.vocabulary import SPEC_SOURCE_ID
 
 
@@ -23,13 +24,14 @@ def missing_design_source(
     return ref, title
 
 
-def routing_items(
-    bundle_root: Path, items: Sequence[WorkItem], *, definition: PipelineDefinition
-) -> tuple[WorkItem, ...]:
+def routing_items(bundle_root: Path, items: Sequence[WorkItem], *, definition: PipelineDefinition) -> WorkSnapshot:
     """Recognize unstamped canonical designs for routing without repairing pages."""
-    return tuple(
+    routed = tuple(
         replace(item, has_design_artifact=True)
         if missing_design_source(bundle_root, item, definition=definition) is not None
         else item
         for item in items
     )
+    if isinstance(items, WorkSnapshot) and all(new is old for new, old in zip(routed, items, strict=True)):
+        return items
+    return WorkSnapshot(routed)

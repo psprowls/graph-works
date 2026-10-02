@@ -4,6 +4,7 @@ from graph_works_core.read_session.bundle_backend import BundleSession
 from graph_works_core.read_session.index_backend import IndexSession
 from graph_works_core.read_session.location import SESSION_FORMAT, database_path, fingerprint
 from graph_works_core.read_session.model import Backend, FallbackReason, ReadSession
+from graph_works_core.read_session.open import open_read_session
 
 __all__ = [
     "SESSION_FORMAT",
@@ -14,4 +15,5 @@ __all__ = [
     "ReadSession",
     "database_path",
     "fingerprint",
+    "open_read_session",
 ]

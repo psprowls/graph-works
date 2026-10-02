@@ -184,6 +184,24 @@
     "shadowed": null
   },
   {
+    "key": "read_index.enabled",
+    "value": true,
+    "origin": "default",
+    "entry": {
+      "key": "read_index.enabled",
+      "type": "bool",
+      "default": true,
+      "description": "Whether display reads use the persisted read index; false forces the full bundle load (a cache switch, settable per machine with --local).",
+      "kind": "manifest",
+      "env_var": null,
+      "allowed": [],
+      "secret": false,
+      "write_policy": "writable",
+      "write_hint": null
+    },
+    "shadowed": null
+  },
+  {
     "key": "workflow.dispatch_rules",
     "value": "dispatch.yaml",
     "origin": "manifest",

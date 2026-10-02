@@ -60,6 +60,7 @@ from repositories_okf.lifecycle import lane_pages
 from repositories_okf.repository import repository_rule
 from work_tracker_okf.compose import rule_set
 
+from graph_works_core.workspace.bundle import work_scope
 from graph_works_core.workspace.dispatch_config import load_dispatch_config
 from graph_works_core.workspace.errors import WorkspaceError
 from graph_works_core.workspace.lane_facts import gather_lane_facts, has_lane_pages, runner
@@ -115,6 +116,7 @@ class Lane:
     root: Path
     ignore: tuple[str, ...]
     rules: tuple[Rule, ...]
+    prune: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -248,45 +250,6 @@ def _wiki_ignore() -> tuple[str, ...]:
     return (f"{work_tracker_okf.WORK_DIR}/*", *work_tracker_okf.IGNORE)
 
 
-def _work_ignore(layout: WorkspaceLayout) -> tuple[str, ...]:
-    """The work lane's `ignore=`: every top-level bundle member except `work/`,
-    plus the lane's own recipe.
-
-    Symmetric with `_wiki_ignore`, and that symmetry is the point — the wiki
-    lane names the work lane's directory, the work lane names the wiki lane's,
-    and neither hardcodes the other's contents. Without it both lanes walk the
-    same tree: no wrong finding fires, because the work-lane rules self-scope
-    through `load_items`, but `validate()` always runs okf-io's built-in
-    catalog and it ran on both walks.
-
-    Derived from the directory rather than written as a literal list because
-    okf-io's `ignore=` has no negation, and "everything except `work/`" spelled
-    out is unmaintainable — a new curated directory would silently rejoin the
-    work lane. A directory contributes `f"{name}/*"`; a root-level file
-    contributes its own name, which `fnmatchcase` matches exactly against the
-    bundle-relative path.
-
-    Ignoring the root-level files is intended, not incidental: `index.md` and
-    `log.md` are the wiki lane's members, and the core catalog's index and log
-    rules should fire once, there. `work-index.json` goes with them and costs
-    nothing — every lane rule reads the projection `load_items` builds from
-    `bundle.concepts`, never the sidecar. `work/_archive/` is unaffected: it
-    sits under `work/`, and `work_tracker_okf.IGNORE` already says what to drop
-    beneath it.
-
-    This reads the filesystem, which is stated rather than hidden: this is
-    already a band-3 module whose whole job is knowing what this workspace
-    looks like on disk. A bundle directory that is not there raises `OSError`,
-    which `compose_lanes` reports as one work-lane error like any other.
-    """
-    siblings = tuple(
-        f"{entry.name}/*" if entry.is_dir() else entry.name
-        for entry in sorted(layout.bundle_dir.iterdir(), key=lambda path: path.name)
-        if entry.name != work_tracker_okf.WORK_DIR
-    )
-    return (*siblings, *work_tracker_okf.IGNORE)
-
-
 def _compose_wiki(
     layout: WorkspaceLayout,
     config: Config,
@@ -327,15 +290,22 @@ def _compose_work(
     directory at all. `compose_lanes` still catches that as one lane error,
     same as a malformed declaration.
 
-    Its `ignore=` partitions the bundle against the wiki lane's — see
-    `_work_ignore`. The root does **not** move: re-rooting at `<bundle>/work`
-    would strip the `work/` prefix every `work_tracker_okf` rule selects on,
-    and break every root-absolute link inside a work item.
+    Its scope comes from `graph_works_core.workspace.bundle.work_scope`, the
+    one definition `run_lint` shares. Both use `BundleScope.as_ignore` to
+    ignore the other directories and root files, symmetric with `_wiki_ignore`
+    naming `work/`. Lint retains ignored-member identity until the separate
+    okf-io pruned resolver issue is fixed; clone-only pruning remains in the
+    shared loader.
+    A missing bundle directory raises `OSError`, which `compose_lanes` reports
+    as one work-lane error. The root does **not** move: re-rooting at
+    `<bundle>/work` would strip the `work/` prefix every `work_tracker_okf`
+    rule selects on, and break every root-absolute link inside a work item.
     """
+    scope = work_scope(layout)
     return Lane(
         name=WORK_LANE,
         root=layout.bundle_dir,
-        ignore=_work_ignore(layout),
+        ignore=scope.as_ignore(),
         rules=rule_set(
             layout.bundle_dir,
             repo_root=repo_root,

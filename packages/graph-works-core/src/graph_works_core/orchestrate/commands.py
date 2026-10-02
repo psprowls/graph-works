@@ -38,7 +38,7 @@ from work_tracker_okf.affects import code_affects, touches_workspace
 from work_tracker_okf.asks import plan_checkpoints
 from work_tracker_okf.decisions import HoldFact
 from work_tracker_okf.hierarchy import PICK_ORDER, active_nonterminal_descendants, child_gated, decision_owner
-from work_tracker_okf.items import IGNORE, WorkItem, load_items
+from work_tracker_okf.items import WorkItem, load_items
 from work_tracker_okf.pipeline import PACKAGED_DEFINITION, PipelineDefinition, dispatch_phases, read_only_phases
 from work_tracker_okf.placement import CODE_PHASES
 from work_tracker_okf.snapshot import as_snapshot
@@ -72,7 +72,7 @@ from graph_works_core.orchestrate.claims import (
     paths_overlap,
 )
 from graph_works_core.orchestrate.rank import dependent_counts
-from graph_works_core.workspace.bundle import load_workspace_bundle
+from graph_works_core.workspace.bundle import load_work_bundle
 from graph_works_core.workspace.decision_owner import HoldReport, holds_by_path, open_holds
 from graph_works_core.workspace.dispatch import (
     DispatchProfileError,
@@ -2315,7 +2315,7 @@ def run_orchestrate(
     `provisions_worktrees` passes straight through to `plan()` -- see its
     docstring; this shell resolves no backend itself; that is a caller's job.
     """
-    bundle = load_workspace_bundle(layout, ignore=IGNORE)
+    bundle = load_work_bundle(layout)
     config = load_dispatch_config(layout)
     items = routing_items(bundle.root, load_items(bundle), definition=config.definition)
     # Checked, not coerced. A silent `2` from a mistyped `max_parallel` is

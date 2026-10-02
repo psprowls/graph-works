@@ -36,12 +36,12 @@ from work_tracker_okf import decisions as _decisions
 from work_tracker_okf.affects import code_affects
 from work_tracker_okf.decisions import ledger_ref
 from work_tracker_okf.hierarchy import decision_owner
-from work_tracker_okf.items import IGNORE, load_items
+from work_tracker_okf.items import load_items
 from work_tracker_okf.paths import item_page
 
 from graph_works_core.workspace import provenance
 from graph_works_core.workspace.anchor import resolve_anchor, spec_ref
-from graph_works_core.workspace.bundle import load_workspace_bundle
+from graph_works_core.workspace.bundle import load_work_bundle
 from graph_works_core.workspace.dispatch_config import load_dispatch_config
 from graph_works_core.workspace.landed import LandedSibling, landed_siblings
 from graph_works_core.workspace.layout import WorkspaceLayout
@@ -126,7 +126,7 @@ def run_reconcile_context(
             `commands.py:run_next` and `commands.py:_decision_context` already
             open.
     """
-    bundle = load_workspace_bundle(layout, ignore=IGNORE)
+    bundle = load_work_bundle(layout)
     definition = load_dispatch_config(layout).definition
     items = load_items(bundle)
     item = next((candidate for candidate in items if candidate.path == path), None)

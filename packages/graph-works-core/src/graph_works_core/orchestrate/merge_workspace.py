@@ -12,10 +12,10 @@ from dataclasses import dataclass
 from datetime import date
 from typing import Literal
 
-from work_tracker_okf.items import IGNORE, WorkItem, load_items
+from work_tracker_okf.items import WorkItem, load_items
 
 from graph_works_core.orchestrate.finish_receipt import record_finish_in
-from graph_works_core.workspace.bundle import load_workspace_bundle
+from graph_works_core.workspace.bundle import load_work_bundle
 from graph_works_core.workspace.decision_owner import decision_context, locked_decision_owner
 from graph_works_core.workspace.finish import FinishTarget, resolve_finish_targets
 from graph_works_core.workspace.layout import WorkspaceLayout
@@ -90,7 +90,7 @@ def run_merge_workspace(
     if workspace is None:
         return MergeWorkspaceResult(path, None, None, "disabled", note or "", None, None, False)
     assert workspace.path is not None
-    target, refusal, detail = _target(layout, load_items(load_workspace_bundle(layout, ignore=IGNORE)), path)
+    target, refusal, detail = _target(layout, load_items(load_work_bundle(layout)), path)
 
     def result(
         refusal: MergeWorkspaceRefusal | None,

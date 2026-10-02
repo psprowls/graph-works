@@ -2394,6 +2394,18 @@ def _scoped_baseline_conditions(plan: WorkMutationPlan, root: Anchor) -> Counter
     return conditions
 
 
+def _refuse_scoped_baseline(bundle: Bundle) -> None:
+    """Raise when *bundle* was pruned beyond the clone directories.
+
+    The mutation gate validates the whole bundle (ADR 2026-08-25); a bundle
+    from `load_work_bundle` has never seen the wiki lane, and reusing it as a
+    baseline would validate a different corpus. A caller error, not content.
+    """
+    extra = sorted(root for root in bundle.pruned if not any(fnmatchcase(root, glob) for glob in CLONE_PRUNE))
+    if extra:
+        raise ValueError(f"baseline bundle is pruned beyond the clone glob: {', '.join(extra)}")
+
+
 def _capture_validation_state(
     layout: WorkspaceLayout,
     plan: WorkMutationPlan,
@@ -2423,13 +2435,16 @@ def _capture_validation_state(
     *bundle* lets the caller hand over a bundle it already loaded with the same
     `ignore=IGNORE` set, so this function performs no full load. Without one it
     performs exactly one, for findings. **Never pass a bundle loaded with a
-    different `ignore` set** -- that would validate a different corpus.
+    different `ignore` set or a work-scoped `prune` set (refused)** -- that
+    would validate a different corpus.
     """
     validation_root = layout.bundle_dir
     _assert_root_identity(validation_root, root)
     if bundle is None:
         bundle = _load_bundle_through(root, validation_root, ignore=IGNORE)
         _assert_root_identity(validation_root, root)
+    else:
+        _refuse_scoped_baseline(bundle)
     # `links=` deliberately left unwired: this function builds no `LinkGraph`
     # of its own before this call, and the postcondition pass in
     # `_validate_postconditions` validates a different bundle state (the
@@ -3156,6 +3171,8 @@ def apply_mutation(
 
     *baseline_bundle* is an optimisation with a hard precondition: it MUST have
     been loaded from `layout.bundle_dir` with `ignore=work_tracker_okf.items.IGNORE`.
+    A bundle pruned beyond the clone directories (`load_work_bundle`) is
+    refused with `ValueError`.
     Supplying it saves the baseline's only full bundle load; conditions read
     scoped pre-image pages fresh under the lock regardless.
     Callers in `work/commands.py` that load with `ignore=()` or a lane-narrowed
@@ -3204,6 +3221,8 @@ def apply_mutation(
     including why the lock/cache-open survives the short-circuit while the
     per-mutation transaction directory does not.
     """
+    if baseline_bundle is not None:
+        _refuse_scoped_baseline(baseline_bundle)
     mode = commit_mode(layout) if commit is not None else None
     root = _open_root(layout.bundle_dir)
     try:

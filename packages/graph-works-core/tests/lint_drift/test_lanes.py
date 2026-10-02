@@ -69,7 +69,7 @@ def test_the_work_lane_reads_the_workspace_pipeline_path(workspace):
         newline="\n",
     )
     _wiki, work = _compose(workspace).lanes
-    report = validate(load_bundle(work.root, ignore=work.ignore), today=TODAY, extra_rules=work.rules)
+    report = validate(load_bundle(work.root, ignore=work.ignore, prune=work.prune), today=TODAY, extra_rules=work.rules)
     assert report.by_code("state.phase-off-path") == ()
 
     shared = load_dispatch_config(workspace.layout).shared_path
@@ -82,7 +82,7 @@ def test_the_work_lane_reads_the_workspace_pipeline_path(workspace):
     with shared.open("w", encoding="utf-8", newline="\n") as handle:
         yaml.dump(data, handle)
     _wiki, work = _compose(workspace).lanes
-    report = validate(load_bundle(work.root, ignore=work.ignore), today=TODAY, extra_rules=work.rules)
+    report = validate(load_bundle(work.root, ignore=work.ignore, prune=work.prune), today=TODAY, extra_rules=work.rules)
     [finding] = report.by_code("state.phase-off-path")
     assert finding.path == "work/feature-x.md"
     assert "feature-skips-plan" in finding.message
@@ -124,7 +124,9 @@ def test_each_lane_names_its_own_members_and_no_others(workspace):
     curated page is walked twice and its core-catalog findings reported twice."""
     _seed_both_lanes(workspace)
     wiki, work = _compose(workspace).lanes
-    members = {lane.name: set(load_bundle(lane.root, ignore=lane.ignore).concepts) for lane in (wiki, work)}
+    members = {
+        lane.name: set(load_bundle(lane.root, ignore=lane.ignore, prune=lane.prune).concepts) for lane in (wiki, work)
+    }
     assert members["wiki"] & members["work"] == set()
     assert "concepts/byte-fidelity" in members["wiki"]
     assert "work/bug-example" in members["work"]
@@ -134,6 +136,8 @@ def test_each_lane_names_the_other_lane_rather_than_its_own_contents(workspace):
     wiki, work = _compose(workspace).lanes
     assert f"{work_tracker_okf.WORK_DIR}/*" in wiki.ignore
     assert set(work_tracker_okf.IGNORE) <= set(work.ignore)
+    assert work.prune == ()
+    assert wiki.prune == ()
 
 
 def test_a_work_item_linking_a_curated_page_reports_no_broken_link(workspace):
@@ -141,7 +145,7 @@ def test_a_work_item_linking_a_curated_page_reports_no_broken_link(workspace):
     `has_member` counts ignored members, so the cross-lane link resolves."""
     _seed_both_lanes(workspace)
     _wiki, work = _compose(workspace).lanes
-    bundle = load_bundle(work.root, ignore=work.ignore)
+    bundle = load_bundle(work.root, ignore=work.ignore, prune=work.prune)
     report = validate(bundle, today=TODAY, extra_rules=work.rules)
     assert not any(finding.code == "links.broken" for finding in report.findings)
 
@@ -158,7 +162,7 @@ def test_a_curated_directory_added_later_needs_no_lanes_edit(workspace):
     )
     _wiki, work = _compose(workspace).lanes
     assert "docs/*" in work.ignore
-    assert "docs/tutorials/getting-started" not in load_bundle(work.root, ignore=work.ignore).concepts
+    assert "docs/tutorials/getting-started" not in load_bundle(work.root, ignore=work.ignore, prune=work.prune).concepts
 
 
 def test_the_wiki_lane_carries_every_declared_capability(workspace):
@@ -279,7 +283,7 @@ def test_the_work_lane_now_validates_schema_and_section_conformance(workspace):
         "---\ntype: NotAType\ntitle: Bad\nstatus: accepted\n---\n\nBody.\n", encoding="utf-8"
     )
     _wiki, work = _compose(workspace).lanes
-    bundle = load_bundle(work.root, ignore=work.ignore)
+    bundle = load_bundle(work.root, ignore=work.ignore, prune=work.prune)
     report = validate(bundle, today=TODAY, extra_rules=work.rules)
     assert any(finding.code.startswith("schemas.") for finding in report.findings)
 
@@ -302,12 +306,12 @@ def test_the_work_lane_resolves_a_root_absolute_plan_action_at_the_bundle_root(w
         encoding="utf-8",
     )
     _wiki, work = _compose(workspace).lanes
-    bundle = load_bundle(work.root, ignore=work.ignore)
+    bundle = load_bundle(work.root, ignore=work.ignore, prune=work.prune)
     report = validate(bundle, today=TODAY, extra_rules=work.rules)
     assert report.by_code("plan.action-target-missing") == ()
 
     (plan_dir / "02-plan.md").unlink()
-    bundle = load_bundle(work.root, ignore=work.ignore)
+    bundle = load_bundle(work.root, ignore=work.ignore, prune=work.prune)
     report = validate(bundle, today=TODAY, extra_rules=work.rules)
     finding = report.by_code("plan.action-target-missing")[0]
     assert "/work/feature-x/references/02-plan.md" in finding.message
@@ -384,7 +388,7 @@ def test_no_repo_root_still_composes_the_work_lane(workspace):
 
 def test_every_lane_loads_as_a_bundle(workspace):
     for lane in _compose(workspace).lanes:
-        bundle = load_bundle(lane.root, ignore=lane.ignore)
+        bundle = load_bundle(lane.root, ignore=lane.ignore, prune=lane.prune)
         assert bundle.root == lane.root
         assert _topics(bundle, lane) <= {
             "health",
@@ -510,3 +514,44 @@ def test_wiki_entry_keys_is_none_without_a_schema_directory(workspace):
         child.unlink()
     schema_dir.rmdir()
     assert wiki_entry_keys(_config(workspace)) is None
+
+
+def _legacy_work_ignore(bundle_dir):
+    """`_work_ignore` as it stood at c96c8eb, frozen as the equivalence oracle."""
+    siblings = tuple(
+        f"{entry.name}/*" if entry.is_dir() else entry.name
+        for entry in sorted(bundle_dir.iterdir(), key=lambda path: path.name)
+        if entry.name != work_tracker_okf.WORK_DIR
+    )
+    return (*siblings, *work_tracker_okf.IGNORE)
+
+
+def test_the_work_lane_report_matches_the_legacy_recipe(workspace):
+    bundle_dir = _seed_both_lanes(workspace)
+    (bundle_dir / "work" / "bug-broken.md").write_text(
+        "---\ntype: Bug\ntitle: Broken\nstatus: accepted\n---\n\nSee [gone](/concepts/missing.md).\n",
+        encoding="utf-8",
+        newline="",
+    )
+    _wiki, work = _compose(workspace).lanes
+    scoped = validate(load_bundle(work.root, ignore=work.ignore, prune=work.prune), today=TODAY, extra_rules=work.rules)
+    legacy = validate(
+        load_bundle(work.root, ignore=_legacy_work_ignore(bundle_dir)), today=TODAY, extra_rules=work.rules
+    )
+    assert scoped.findings == legacy.findings
+    assert [f.path for f in scoped.findings if f.code == "links.broken"] == ["work/bug-broken.md"]
+
+
+def test_lane_reports_retains_ignored_members_and_prunes_only_clones(workspace):
+    from graph_works_core.lint_drift.lint import _lane_reports
+
+    _seed_both_lanes(workspace)
+    clone = workspace.layout.bundle_dir / "repositories/demo/references/git"
+    clone.mkdir(parents=True)
+    (clone / "README.md").write_text("# Upstream\n", encoding="utf-8", newline="")
+    _reports, bundles, errors = _lane_reports(_compose(workspace).lanes, today=TODAY, strict=False)
+    assert errors == ()
+    assert bundles["work"].pruned == frozenset({"repositories/demo/references/git"})
+    assert "concepts/byte-fidelity.md" in bundles["work"].ignored
+    assert bundles["work"].member_id("concepts/byte-fidelity.md") == "concepts/byte-fidelity.md"
+    assert "work/bug-example" in bundles["work"].concepts

@@ -297,7 +297,7 @@ def _lane_reports(
     errors: list[str] = []
     for lane in lanes:
         try:
-            bundle = load_bundle_at(lane.root, ignore=lane.ignore)
+            bundle = load_bundle_at(lane.root, ignore=lane.ignore, prune=lane.prune)
         except OSError as exc:
             errors.append(f"{lane.name} lane: {exc}")
             continue

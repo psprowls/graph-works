@@ -104,7 +104,7 @@ from graph_works_core.work import carried as _carried
 from graph_works_core.work.carried import CarriedContext, SlotInput
 from graph_works_core.work.path_report import PathReport, StageArtifactReport, artifact_reports, path_report
 from graph_works_core.workspace import provenance
-from graph_works_core.workspace.bundle import load_workspace_bundle
+from graph_works_core.workspace.bundle import load_work_bundle, load_workspace_bundle, work_scope
 from graph_works_core.workspace.commits import (
     COMMIT_FAILED_PREFIX,
     CommitOutcome,
@@ -340,7 +340,7 @@ class StatusReport:
 
 def run_status(layout: WorkspaceLayout) -> StatusReport:
     """Count the active items and name the one worth resuming. Never writes."""
-    items = load_items(load_workspace_bundle(layout, ignore=IGNORE))
+    items = load_items(load_work_bundle(layout))
     return StatusReport(rollup=rollup(items), resume=select_resume(items))
 
 
@@ -350,7 +350,7 @@ def run_work_list(layout: WorkspaceLayout) -> tuple[WorkItem, ...]:
     Archived items are left out, the same population `rollup` counts, so a
     board built from this agrees with `gw work status`.
     """
-    items = load_items(load_workspace_bundle(layout, ignore=IGNORE))
+    items = load_items(load_work_bundle(layout))
     return tuple(sorted((item for item in items if not item.archived), key=lambda item: item.path))
 
 
@@ -394,7 +394,7 @@ def _owned_references(bundle_root: Path, path: str) -> tuple[str, ...]:
 
 def run_item_read(layout: WorkspaceLayout, path: str) -> ItemRead:
     """Read *path*'s work item and list its owned `references/`. Never writes."""
-    bundle = load_workspace_bundle(layout, ignore=IGNORE)
+    bundle = load_work_bundle(layout)
     if path not in item_index(load_items(bundle)):
         detail = unreadable_detail(bundle, path)
         return _refused_item(path, "unreadable" if detail is not None else "unknown-item", detail)
@@ -442,7 +442,7 @@ def run_touch_active_work(layout: WorkspaceLayout, path: str, *, today: date) ->
     ran, not the phase its closing advance moved the item into. Idempotent.
     A failed write degrades to `pointer_path=None` (provenance never fails).
     """
-    bundle = load_workspace_bundle(layout, ignore=IGNORE)
+    bundle = load_work_bundle(layout)
     item = item_index(load_items(bundle)).get(path)
     if item is None:
         detail = unreadable_detail(bundle, path)
@@ -1009,7 +1009,7 @@ def run_work_queue(layout: WorkspaceLayout) -> tuple[QueueEntry, ...]:
     Epics waiting on their children are included with that blocker, so no
     active item is silently dropped.
     """
-    bundle = load_workspace_bundle(layout, ignore=IGNORE)
+    bundle = load_work_bundle(layout)
     items = load_items(bundle)
     config = _load_config(layout)
     definition = _definition_of(config)
@@ -1056,7 +1056,10 @@ def run_lint(
     a conformant vault. A caller wiring this into an acceptance gate wants
     `strict=False`.
     """
-    bundle = load_workspace_bundle(layout, ignore=_work_only_ignore(layout))
+    # Lint retains ignored-member identity pending the separate pruned-resolver
+    # fix; projection readers keep using load_work_bundle's pruning.
+    partition = work_scope(layout)
+    bundle = load_workspace_bundle(layout, ignore=partition.as_ignore())
     rules = rule_set(
         layout.bundle_dir,
         repo_root=repo_root,
@@ -1083,28 +1086,6 @@ def run_lint(
     )
 
 
-def _work_only_ignore(layout: WorkspaceLayout) -> tuple[str, ...]:
-    """Every top-level bundle member except `work/`, plus the lane's own
-    recipe — the same partition `graph_works_core.lint_drift.lanes` computes
-    for the combined workspace lint's work lane, duplicated rather than
-    shared. The package's import contract keeps verticals independent, so the
-    two copies stay small rather than reach across that forbidden edge.
-
-    Without this, `load_bundle` walks the whole bundle — wiki content
-    included — and `okf_io.validate`'s built-in catalog (links, lifecycle,
-    frontmatter) reports on pages this function was never asked about,
-    contradicting `run_lint`'s own "does the work lane conform" contract:
-    a broken link in an unrelated concept page must not fail a work-item
-    check.
-    """
-    siblings = tuple(
-        f"{entry.name}/*" if entry.is_dir() else entry.name
-        for entry in sorted(layout.bundle_dir.iterdir(), key=lambda path: path.name)
-        if entry.name != WORK_DIR
-    )
-    return (*siblings, *IGNORE)
-
-
 @dataclass(frozen=True, slots=True)
 class RegenIndexesResult:
     """Every required lane index plan plus an optional journaled application.
@@ -1126,9 +1107,9 @@ def _absent_index_lane_preconditions(root: Path, items: Sequence[WorkItem]) -> M
 
     The lane set must equal `work_tracker_okf.indexes._required_lanes`' -- a
     precondition on a lane the planner never plans is a claim on a directory
-    nothing creates. It is duplicated rather than imported for the same reason
-    `_work_only_ignore` duplicates the lane partition: the vertical stays
-    independent, and the copy stays small.
+    nothing creates. It is duplicated rather than imported so the vertical
+    stays independent of `work_tracker_okf.indexes`' private helper, and the
+    copy stays small.
     """
     lanes = {"work", "work/_archive"}
     for item in items:
@@ -1694,7 +1675,7 @@ def run_open_decisions(layout: WorkspaceLayout) -> tuple[OpenDecision, ...]:
     own decision owner is this ledger's owner, in `affects` order: exactly the
     items `hold_for` would report this entry as holding.
     """
-    bundle = load_workspace_bundle(layout, ignore=IGNORE)
+    bundle = load_work_bundle(layout)
     items = load_items(bundle)
     active = tuple(item for item in items if not item.archived)
     active_paths = {item.path for item in active}

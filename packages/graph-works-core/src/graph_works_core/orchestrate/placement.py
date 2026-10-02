@@ -52,7 +52,7 @@ from work_tracker_okf.placement import (
 )
 
 from graph_works_core.workspace import provenance
-from graph_works_core.workspace.bundle import load_workspace_bundle
+from graph_works_core.workspace.bundle import load_work_bundle, load_workspace_bundle
 from graph_works_core.workspace.commits import (
     COMMIT_FAILED_PREFIX,
     CommitOutcome,
@@ -213,7 +213,7 @@ def run_record_reader(
             conflict="attempt-mismatch" if existing is not None and existing != body else None,
         )
 
-    items = load_items(load_workspace_bundle(layout, ignore=IGNORE))
+    items = load_items(load_work_bundle(layout))
     if dry_run or not any(item.path == path for item in items):
         return decide(items)
     with locked_decision_owner(layout, path) as context:
@@ -508,7 +508,7 @@ def run_record_baseline(
             descends = answer
         return plan_baseline(items, path, observed_head=head, head_descends_from_recorded=descends, today=today), own
 
-    items = load_items(load_workspace_bundle(layout, ignore=IGNORE))
+    items = load_items(load_work_bundle(layout))
     if dry_run or not any(item.path == path for item in items):
         plan, own = decide(items)
         return BaselineRecord(plan, repo_note=own.note if own else None)

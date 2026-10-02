@@ -83,7 +83,7 @@ def test_the_bundle_and_the_dispatch_config_are_each_loaded_once(tmp_path: Path,
     layout = _layout(tmp_path)
     _fixture(layout)
     calls = {"bundle": 0, "config": 0}
-    load_bundle, load_config = work.load_workspace_bundle, work.load_dispatch_config
+    load_bundle, load_config = work.load_work_bundle, work.load_dispatch_config
 
     def counting_bundle(*args, **kwargs):
         calls["bundle"] += 1
@@ -93,7 +93,7 @@ def test_the_bundle_and_the_dispatch_config_are_each_loaded_once(tmp_path: Path,
         calls["config"] += 1
         return load_config(*args, **kwargs)
 
-    monkeypatch.setattr(work, "load_workspace_bundle", counting_bundle)
+    monkeypatch.setattr(work, "load_work_bundle", counting_bundle)
     monkeypatch.setattr(work, "load_dispatch_config", counting_config)
 
     work.run_work_queue(layout)

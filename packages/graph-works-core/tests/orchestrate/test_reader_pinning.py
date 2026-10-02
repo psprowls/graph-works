@@ -308,7 +308,7 @@ def test_readers_do_not_add_accepted_code_claims_and_prompt_cites_baseline():
     )
     assert {d.slug for d in result.dispatches} == {A, B, C}
     for dispatch in result.dispatches[:2]:
-        assert dispatch.prompt.splitlines()[-2] == (
+        assert dispatch.prompt.splitlines()[-3] == (
             f"Reader baseline: this stage reads a detached checkout of epic/r at {TIP_EPIC}; "
             "cite that commit in the stage artifact and do not commit in this checkout."
         )

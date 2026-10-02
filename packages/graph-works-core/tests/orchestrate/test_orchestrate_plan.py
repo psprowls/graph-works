@@ -1642,8 +1642,35 @@ def test_prompt_substitutes_tail() -> None:
     assert "work/feature-a work/feature-a#execute execute /ws main {literal}" in prompt
     assert orchestrate.WORKER_PLACEMENT_LINE in prompt
     assert prompt.endswith(
-        "work/feature-a work/feature-a#execute execute /ws main {literal}\n" + orchestrate.WORKER_PLACEMENT_LINE
+        "work/feature-a work/feature-a#execute execute /ws main {literal}\n"
+        + orchestrate.NO_SUB_DISPATCH_LINE
+        + "\n"
+        + orchestrate.WORKER_PLACEMENT_LINE
     )
+
+
+@pytest.mark.parametrize("phase", ["design", "plan", "execute", "finish"])
+@pytest.mark.parametrize("mode", ["attend", "autonomous", "relay"])
+def test_every_supervised_prompt_forbids_orca_sub_dispatch_just_before_placement(phase: str, mode: str) -> None:
+    prompt = orchestrate._prompt(
+        path="work/feature-a",
+        key=f"work/feature-a#{phase}",
+        phase=phase,
+        workspace="/ws",
+        merge_target="main",
+        tail="authored tail",
+        execute_artifact="coverage.md",
+        mode=mode,
+    )
+    assert prompt.splitlines()[-2:] == [orchestrate.NO_SUB_DISPATCH_LINE, orchestrate.WORKER_PLACEMENT_LINE]
+
+
+def test_the_sub_dispatch_rule_names_orca_run_create_and_native_subagents() -> None:
+    line = orchestrate.NO_SUB_DISPATCH_LINE
+    for verb in ("run-create", "run-use", "task-create", "worker-start"):
+        assert f"`{verb}`" in line
+    assert "native in-process subagents" in line
+    assert "spawn_agent" in line
 
 
 def test_an_execute_dispatch_prompt_carries_the_coverage_obligation() -> None:

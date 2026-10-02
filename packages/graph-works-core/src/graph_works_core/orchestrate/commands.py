@@ -1025,6 +1025,20 @@ WORKER_PLACEMENT_LINE = (
 )
 
 
+#: Every supervised worker's sub-dispatch rule (D-001 of
+#: `bug-codex-execute-fenced-by-child-run`). Orca's worker preamble offers a
+#: SUB-DISPATCH recipe; following it binds the worker's terminal to a child Run,
+#: after which Orca fences the worker's parent-Run checks and refuses the
+#: coordinator's follow-ups. A stage fans out in-process instead. Appended to
+#: every dispatch, every stage, just before `WORKER_PLACEMENT_LINE`.
+NO_SUB_DISPATCH_LINE = (
+    "Do not use Orca's SUB-DISPATCH: never run `orca orchestration` `run-create`, `run-use`, "
+    "`task-create` or `worker-start` from this stage. When a skill asks for subagents, use your "
+    "agent's native in-process subagents (Claude's Agent tool; Codex's `spawn_agent` with "
+    '`fork_turns: "none"` and an explicit `model` and `reasoning_effort`), or do the work inline.'
+)
+
+
 #: Content instructions precede the mandatory worker placement instruction.
 WORKSPACE_CONTENT_LINE = (
     "Workspace content root: {worktree} (branch {branch}). Write workspace content there -- run "
@@ -1046,7 +1060,7 @@ def _prompt(
     reader: tuple[str, str] | None = None,
     content_root: WorkspacePlacement | None = None,
 ) -> str:
-    """Five vendor-neutral lines, the ask line off attend, the tail, reader baseline, then placement.
+    """Five vendor-neutral lines, the ask line off attend, the tail, reader baseline, sub-dispatch, then placement.
 
     The tail is substituted with `str.replace` over a fixed placeholder set
     (`path`, `key`, `phase`, `workspace`, `merge_target`, `execute_artifact`)
@@ -1092,6 +1106,7 @@ def _prompt(
             .replace("{branch}", content_root.branch)
             .replace("{workspace}", workspace)
         )
+    lines.append(NO_SUB_DISPATCH_LINE)
     lines.append(WORKER_PLACEMENT_LINE)
     return "\n".join(lines)
 
@@ -2536,6 +2551,7 @@ __all__ = [
     "BLOCKER_KIND_TO_BLOCKED",
     "DISPATCH_COMMAND",
     "DISPATCH_PHASES",
+    "NO_SUB_DISPATCH_LINE",
     "READER_ACTION",
     "WORKER_PLACEMENT_LINE",
     "WORKSPACE_VAR",

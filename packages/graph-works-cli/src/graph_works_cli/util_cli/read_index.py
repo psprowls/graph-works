@@ -21,9 +21,12 @@ def _human(report: ReadIndexReport) -> str:
     reconciled = "none"
     if report.last_reconcile_ns is not None:
         seconds, nanoseconds = divmod(report.last_reconcile_ns, 1_000_000_000)
-        reconciled = (
-            datetime(1970, 1, 1, tzinfo=UTC) + timedelta(seconds=seconds, microseconds=nanoseconds // 1000)
-        ).isoformat()
+        try:
+            reconciled = (
+                datetime(1970, 1, 1, tzinfo=UTC) + timedelta(seconds=seconds, microseconds=nanoseconds // 1000)
+            ).isoformat()
+        except OverflowError:
+            reconciled = f"{report.last_reconcile_ns} ns (out of datetime range)"
     lines = [
         f"database: {report.db_path}{missing}",
         f"enabled: {str(report.enabled).lower()}",

@@ -58,6 +58,37 @@ def test_rebuild_then_inspect(initialized_workspace: Path) -> None:
     assert payload["tables"]["members"] > 0
 
 
+@pytest.mark.parametrize("timestamp_ns", [10**30, 253_402_300_800_000_000_000])
+def test_out_of_range_real_cache_timestamp_is_reported_without_writes(
+    initialized_workspace: Path, timestamp_ns: int
+) -> None:
+    result = invoke(initialized_workspace, "--rebuild", "--json")
+    assert result.exit_code == 0, result.output
+    database = Path(json.loads(result.stdout)["db_path"])
+    connection = sqlite3.connect(database)
+    try:
+        connection.execute("UPDATE meta SET value = ? WHERE key = 'last_reconcile_ns'", (str(timestamp_ns),))
+        connection.commit()
+        connection.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+        connection.execute("PRAGMA journal_mode=DELETE")
+    finally:
+        connection.close()
+
+    database_bytes = database.read_bytes()
+    file_set = set(initialized_workspace.rglob("*"))
+    human = invoke(initialized_workspace)
+    assert human.exit_code == 0, human.output
+    assert f"last reconcile: {timestamp_ns} ns (out of datetime range)" in human.stdout
+    assert "generation: 1" in human.stdout
+    assert "table members:" in human.stdout
+
+    json_result = invoke(initialized_workspace, "--json")
+    assert json_result.exit_code == 0, json_result.output
+    assert json.loads(json_result.stdout)["last_reconcile_ns"] == timestamp_ns
+    assert database.read_bytes() == database_bytes
+    assert set(initialized_workspace.rglob("*")) == file_set
+
+
 @pytest.mark.parametrize("json_mode", [False, True])
 def test_verify_drift_exits_stale(
     initialized_workspace: Path, monkeypatch: pytest.MonkeyPatch, json_mode: bool

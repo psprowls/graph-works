@@ -69,7 +69,11 @@ watchfiles batches are unordered. The disk at flush decides the net change:
 | Absent | Anything | deleted |
 
 The debounce uses 300 ms quiet / 800 ms maximum windows. Bundle watching is
-recursive with dot-prefixed path segments excluded. Config watching covers the
+recursive with dot-prefixed path segments excluded. The event filter also excludes
+`repositories/<name>/references/git` itself and every descendant, including
+deleted paths, before coalescing and publication. Adjacent repository references
+still emit. This filter does not prune native watch registration, polling traversal,
+or raw backend event collection. Config watching covers the
 exact manifest, local manifest, projection, dispatch, and local dispatch paths
 through their parent directories, non-recursively: watching the directory
 survives atomic replacement of `config.json`. `.gw/worktrees` and

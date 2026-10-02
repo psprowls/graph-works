@@ -340,3 +340,76 @@ async def test_real_backoff_stops_promptly(workspace: WorkspaceLayout) -> None:
     assert await asyncio.wait_for(sub.get(), 2) == Resync(1, "watcher-error")
     stop.set()
     await asyncio.wait_for(task, 0.5)
+
+
+@pytest.mark.parametrize("change", list(watchfiles.Change))
+@pytest.mark.parametrize("repository", ["example", "other-repo"])
+@pytest.mark.parametrize("suffix", ["", "/README.md", "/src/code.py", "/nested/docs/page.md"])
+def test_bundle_filter_rejects_clone_roots_and_descendants(
+    tmp_path: Path, change: watchfiles.Change, repository: str, suffix: str
+) -> None:
+    bundle = tmp_path / ".hidden-parent" / "relocated-bundle"
+    # No files exist: deletion filtering must be lexical too.
+    path = str(bundle / f"repositories/{repository}/references/git") + suffix
+    assert not watch.bundle_filter(bundle)(change, path)
+
+
+@pytest.mark.parametrize(
+    "relative",
+    [
+        "repositories/example.md",
+        "repositories/index.md",
+        "repositories/example/references/notes.md",
+        "repositories/example/references/github/README.md",
+        "repositories/example/references/git-notes/page.md",
+        "repositories/example/references/Git/page.md",
+        "docs/references/git/page.md",
+        "docs/repositories/example/references/git/page.md",
+        "repositories/example/nested/references/git/page.md",
+    ],
+)
+def test_bundle_filter_preserves_adjacent_and_unrelated_content(tmp_path: Path, relative: str) -> None:
+    bundle = tmp_path / ".hidden-parent" / "relocated-bundle"
+    assert watch.bundle_filter(bundle)(watchfiles.Change.modified, str(bundle / relative))
+
+
+async def test_loop_filters_clone_changes_before_publishing(workspace: WorkspaceLayout) -> None:
+    from collections.abc import Callable
+
+    clone = str(workspace.bundle_dir / "repositories/example/references/git/README.md")
+    reference = str(workspace.bundle_dir / "repositories/example/references/notes.md")
+
+    async def filtering_awatch(*paths: Path, **kwargs: object) -> AsyncIterator[watch.RawBatch]:
+        keep = cast(Callable[[watchfiles.Change, str], bool], kwargs["watch_filter"])
+        stop_event = cast(asyncio.Event, kwargs["stop_event"])
+        if kwargs["recursive"]:
+            for raw in [
+                {(watchfiles.Change.modified, clone)},
+                {(watchfiles.Change.deleted, clone), (watchfiles.Change.added, reference)},
+            ]:
+                filtered = {(change, path) for change, path in raw if keep(change, path)}
+                if filtered:
+                    yield filtered
+        await stop_event.wait()
+
+    hub = Hub()
+    sub = hub.subscribe()
+    stop = asyncio.Event()
+    task = asyncio.create_task(watch.watch_workspace(workspace.root, hub, stop, awatch_fn=filtering_awatch))
+    try:
+        message = await asyncio.wait_for(sub.get(), 2)
+        assert message == Changes(
+            1,
+            (
+                ChangeEvent(
+                    EventKind.PAGE,
+                    "repositories/example/references/notes.md",
+                    "repositories/example/references/notes.md",
+                    Change.DELETED,
+                ),
+            ),
+        )
+        assert hub.seq == 1 and sub.queue_size == 0
+    finally:
+        stop.set()
+        await asyncio.wait_for(task, 2)

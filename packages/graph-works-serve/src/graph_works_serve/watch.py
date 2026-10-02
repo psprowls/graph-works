@@ -76,6 +76,8 @@ def bundle_filter(bundle_dir: Path) -> Callable[[watchfiles.Change, str], bool]:
             parts = PurePath(path).relative_to(bundle_dir).parts
         except ValueError:
             return False
+        if len(parts) >= 4 and parts[0] == "repositories" and parts[2:4] == ("references", "git"):
+            return False
         return not any(part.startswith(".") for part in parts)
 
     return keep

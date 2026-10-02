@@ -77,10 +77,16 @@ shell-syntax command string here.
 ```
 workspace/    layer 0 — errors, layout, manifest, discovery, init, provenance, anchor, pipeline, dispatch, dispatch_config, dispatch_projection, repos, config, context_seed, transactions, decision_owner, repo_files, gate_config
 agent_config/  layer 1 — conventions resolves injected paths; git_state probes repository identity/state through provenance; local resolves Claude local-file placement/permission gates; trust reads decisions; merge models policy; read exposes project/workspace reports
-agent_substrate/ : graph/ : prompts/                                   layer 1, shared
+agent_substrate/ : graph/ : prompts/ : read_session/                   layer 1, shared
 guidance/                                                              layer 1.5 — claims index + affects closure, between the verticals and the shared substrate
 ingest/ : scan/ : query/ : lint_drift/ : archive/ : orchestrate/ : proposals/ : wiki_stats/ : wiki_page/ : work/ : events/ : code_read/ : repositories/    layer 2, independent verticals
 ```
+
+`read_session/` — One entry point for display reads: `open_read_session(layout)`
+yields a `ReadSession` backed by the persisted read index (reconciled on open)
+or the full load; display reads only, never mutation, lint or guidance paths.
+The protocol and location helpers are defined here; concrete backends and the
+opener follow in subsequent tasks.
 
 `guidance/` — deterministic guidance inputs, its own layer so any vertical
 (the `work` vertical's guidance assembly first) may import it while it imports

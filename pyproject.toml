@@ -341,7 +341,7 @@ containers = ["graph_works_core"]
 layers = [
     "ingest : scan : query : lint_drift : archive : orchestrate : wiki_stats : wiki_page : tag_policy : work : util : agent_config : events : proposals : code_read : repositories",
     "guidance",
-    "agent_substrate : graph : prompts",
+    "agent_substrate : graph : prompts : read_session",
     "workspace",
 ]
 
@@ -366,3 +366,11 @@ modules = [
     "graph_works_core.code_read",
     "graph_works_core.repositories",
 ]
+
+# Display interfaces reach the read index through core's read-session seam.
+[[tool.importlinter.contracts]]
+name = "Only core reads the read index"
+type = "forbidden"
+source_modules = ["graph_works_cli", "graph_works_serve", "graph_works_wire"]
+forbidden_modules = ["okf_ext.readindex"]
+allow_indirect_imports = true

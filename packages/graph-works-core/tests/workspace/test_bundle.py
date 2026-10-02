@@ -6,11 +6,13 @@ from types import SimpleNamespace
 from graph_works_core.workspace.bundle import (
     CLONE_IGNORE,
     CLONE_PRUNE,
+    ignored_by,
     load_bundle_at,
     load_workspace_bundle,
     with_clone_ignore,
 )
 from repositories_okf import CLONE_GLOB, PRUNE_GLOB
+from work_tracker_okf.items import IGNORE
 
 _PAGE = (
     "---\ntype: ReferenceRepository\ntitle: Demo\ndescription: Demo.\n"
@@ -77,3 +79,20 @@ def test_transaction_reader_prunes_clone_contents(tmp_path: Path) -> None:
     assert bundle.pruned == frozenset({"repositories/demo/references/git"})
     assert not any("references/git/" in path for path in bundle.ignored)
     assert bundle.has_member("repositories/demo/references/git/README.md")
+
+
+def test_ignored_by_matches_okf_io_classification(tmp_path: Path) -> None:
+    root = tmp_path / "b"
+    for rel in ("work/a.md", "work/a/references/01-design.md", "x/.DS_Store", "docs/p.md"):
+        (root / rel).parent.mkdir(parents=True, exist_ok=True)
+        (root / rel).write_text("---\ntitle: x\n---\n", encoding="utf-8", newline="\n")
+    narrow = load_bundle_at(root, ignore=IGNORE)
+    wide = load_bundle_at(root)
+    members = {f"{c}.md" for c in wide.concepts} | set(wide.assets) | set(wide.ignored)
+    assert {m for m in members if ignored_by(m, IGNORE)} == set(narrow.ignored) - set(wide.ignored)
+
+
+def test_ignored_by_is_case_sensitive_and_matches_nested_paths() -> None:
+    assert ignored_by("work/a/references/design.md", ("work/*/references/*",))
+    assert not ignored_by("Work/a/references/design.md", ("work/*/references/*",))
+    assert not ignored_by("docs/p.md", ())

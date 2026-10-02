@@ -9,6 +9,7 @@ graph-works-serve imports `okf_io.load_bundle` instead of calling these.
 from __future__ import annotations
 
 from collections.abc import Sequence
+from fnmatch import fnmatchcase
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -28,6 +29,11 @@ def with_clone_ignore(ignore: Sequence[str] = ()) -> tuple[str, ...]:
     return patterns if repositories_okf.CLONE_GLOB in patterns else (*patterns, repositories_okf.CLONE_GLOB)
 
 
+def ignored_by(member_id: str, ignore: Sequence[str]) -> bool:
+    """Match a bundle-relative member with the loader's case-sensitive glob policy."""
+    return any(fnmatchcase(member_id, p) for p in ignore)
+
+
 def load_bundle_at(root: Path, *, ignore: Sequence[str] = ()) -> Bundle:
     """Load the bundle at *root* -- a lane root or a staged validation root -- hiding clones."""
     return load_bundle(root, ignore=with_clone_ignore(ignore), prune=CLONE_PRUNE)
@@ -38,4 +44,4 @@ def load_workspace_bundle(layout: WorkspaceLayout, *, ignore: Sequence[str] = ()
     return load_bundle_at(layout.bundle_dir, ignore=ignore)
 
 
-__all__ = ["CLONE_IGNORE", "CLONE_PRUNE", "load_bundle_at", "load_workspace_bundle", "with_clone_ignore"]
+__all__ = ["CLONE_IGNORE", "CLONE_PRUNE", "ignored_by", "load_bundle_at", "load_workspace_bundle", "with_clone_ignore"]

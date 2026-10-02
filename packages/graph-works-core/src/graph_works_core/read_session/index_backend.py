@@ -1,9 +1,11 @@
 """Display reads over one pinned index generation and query-time membership.
 
 Ignored unreadable files become members before alias and link resolution. Overlay
-collisions follow the loader's deterministic, component-sorted depth-first walk.
-Inexact work frontmatter selects a full load before any result escapes; indexed
-queries never reread document bodies. SQLite errors may select a full load only
+collisions follow the loader's component-sorted depth-first walk on POSIX.
+Windows canonical collisions select a full load: native comparison ties lose
+enumeration order in the pinned rows. Inexact work frontmatter also selects a
+full load before any result escapes; indexed queries never reread document
+bodies. SQLite errors may select a full load only
 before the first public result (including an empty result) has been returned.
 """
 
@@ -13,6 +15,7 @@ import sqlite3
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from pathlib import Path, PurePosixPath
+from sys import platform
 from types import MappingProxyType
 
 from okf_ext.readindex import Diagnostics, MemberRow, ReadIndex, member_row
@@ -52,7 +55,7 @@ class IndexSession:
             inexact = self._index.connection.execute(
                 "SELECT id FROM members WHERE kind='concept' AND unreadable IS NULL AND fm_exact=0"
             )
-            if any(parse_item_path(mid[:-3]) is not None for (mid,) in inexact):
+            if any(parse_item_path(mid[:-3]) is not None for (mid,) in inexact) or self._ambiguous_collision_order():
                 self._switch("unavailable")
                 # Freeze the ordinary display and work loads at selection time,
                 # before a subsequent file edit can change the fidelity fallback.
@@ -65,6 +68,21 @@ class IndexSession:
     def _switch(self, reason: FallbackReason, exc: BaseException | None = None) -> None:
         self._bundle = BundleSession(self._root, fallback=reason)
         warn_fallback(reason, self._db_path, exc)
+
+    def _ambiguous_collision_order(self) -> bool:
+        if platform != "win32":
+            return False
+        # Include unreadable files: an arbitrary later ignore policy can admit
+        # them. Detect the risk before any result, even an unrelated empty one.
+        # The stored collision table omits those files and cannot prove safety.
+        # Native Path ties preserve scandir enumeration order, which these rows
+        # do not retain; a Windows sort key alone cannot reconstruct the winner.
+        return (
+            self._index.connection.execute(
+                "SELECT 1 FROM members GROUP BY canonical HAVING COUNT(*) > 1 LIMIT 1"
+            ).fetchone()
+            is not None
+        )
 
     @property
     def backend(self) -> Backend:

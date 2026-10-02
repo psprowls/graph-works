@@ -163,6 +163,122 @@ def test_inexact_nonwork_remains_indexed(workspace, tmp_path) -> None:
             assert tuple(session.work_snapshot()) == tuple(BundleSession(root, fallback=None).work_snapshot())
 
 
+@pytest.mark.parametrize("directory", [False, True], ids=["files", "directories"])
+@pytest.mark.parametrize("reverse", [False, True], ids=["enumeration", "reverse-enumeration"])
+@pytest.mark.parametrize("unreadable_index", [None, 0, 1], ids=["readable", "first-unreadable", "second-unreadable"])
+@pytest.mark.parametrize("overlay", [False, True], ids=["no-ignore", "ignore"])
+def test_windows_comparison_ties_use_authoritative_bundle(
+    workspace, tmp_path, monkeypatch, caplog, directory, reverse, unreadable_index, overlay
+) -> None:
+    # APFS cannot preserve these distinct names. Model native Windows sorting
+    # and stack popping at the walk boundary; keep real loaders and SQLite.
+    from fnmatch import fnmatchcase
+    from pathlib import PureWindowsPath
+    from urllib.parse import quote
+
+    import graph_works_core.read_session.index_backend as backend_module
+    import okf_io.bundle as bundle_module
+    from okf_ext.readindex import sync
+    from okf_io import Document
+    from okf_io.bundle import Member, MemberStat, Unreadable, Walk, canonical_id
+
+    suffix = "/target.md" if directory else ".md"
+    names = ["Å" + suffix, "Å" + suffix]
+    alias = "A\u030a" + suffix
+    assert PureWindowsPath(names[0]) == PureWindowsPath(names[1])
+    assert canonical_id(names[0]) == canonical_id(names[1]) == canonical_id(alias)
+    enumeration = list(reversed(names)) if reverse else names
+    # Stable reverse sort preserves comparison ties; the loader then pops
+    # its stack, reversing their original enumeration order.
+    traversal = list(reversed(sorted(enumeration, key=PureWindowsPath, reverse=True)))
+    assert traversal == list(reversed(enumeration))
+    unreadable = names[unreadable_index] if unreadable_index is not None else None
+    ignored = unreadable if unreadable is not None else names[0]
+    ignore = (ignored,) if overlay else ()
+    data = {
+        "source.md": (
+            f"[exact]({quote(names[0])}) [alias]({quote(alias)}) ![image]({quote(alias)}) [missing](no.md)\n"
+        ).encode(),
+        **{name: b"---\ntitle: Target\n---\n# Target\n[back](/source.md)\n" for name in names},
+    }
+    if unreadable is not None:
+        data[unreadable] = b"\xff"
+
+    def walk(root, *, ignore=(), prune=()):
+        return Walk(
+            tuple(
+                Member(
+                    name,
+                    "ignored" if any(fnmatchcase(name, pattern) for pattern in ignore) else "concept",
+                    MemberStat(len(data[name]), 1, 1, 1),
+                )
+                for name in ["source.md", *traversal]
+            ),
+            {"locked": "denied"},
+            frozenset(),
+        )
+
+    def read_document(root, name):
+        if name == unreadable:
+            return Unreadable("invalid UTF-8")
+        return Document.parse(data[name].decode("utf-8"), path=root / name)
+
+    monkeypatch.setattr(bundle_module, "walk", walk)
+    monkeypatch.setattr(sync, "walk", walk)
+    monkeypatch.setattr(bundle_module, "read_member", read_document)
+    monkeypatch.setattr(sync, "read_member", read_document)
+    monkeypatch.setattr(sync, "_read_bytes", lambda root, name: data[name])
+    monkeypatch.setattr(sync, "_stable", lambda root, member: True)
+    # Patch only the backend's platform value, never global sys/os/pathlib.
+    monkeypatch.setattr(backend_module, "platform", "win32", raising=False)
+    root = workspace.bundle_dir
+    db = tmp_path / "i.db"
+    with open_index(db, root, ignore=CLONE_IGNORE, prune=CLONE_PRUNE) as index:
+        reconcile(index)
+        with read(index) as view:
+            session = make_session(index, view, root, db)
+            selection = (session.backend, session.fallback, session.generation)
+            oracle = BundleSession(root, fallback=None)
+            # Even an unrelated empty first result must not permit a later
+            # transition from a pinned generation to a collision fallback.
+            assert session.members(prefix="absent/") == ()
+            for path in (*names, alias):
+                assert session.member(path, ignore=ignore) == oracle.member(path, ignore=ignore)
+            assert session.members(ignore=ignore) == oracle.members(ignore=ignore)
+            assert session.diagnostics(ignore=ignore) == oracle.diagnostics(ignore=ignore)
+            expected = {canonical_id(alias): tuple(traversal)} if unreadable is None or overlay else {}
+            assert dict(session.diagnostics(ignore=ignore).collisions) == expected
+            for cid in ("source", *(name[:-3] for name in names)):
+                assert session.outlinks(cid, ignore=ignore) == oracle.outlinks(cid, ignore=ignore)
+                assert session.backlinks(cid, ignore=ignore) == oracle.backlinks(cid, ignore=ignore)
+                assert session.broken(cid, ignore=ignore) == oracle.broken(cid, ignore=ignore)
+            assert session.broken(ignore=ignore) == oracle.broken(ignore=ignore)
+            assert selection == ("bundle", "unavailable", None)
+            assert len(caplog.records) == 1 and "unavailable" in caplog.text
+            # Already loaded policies and graph queries must not reread files.
+            monkeypatch.setattr(bundle_module, "read_member", fail)
+            assert session.member(alias, ignore=ignore) == oracle.member(alias, ignore=ignore)
+            assert session.broken(ignore=ignore) == oracle.broken(ignore=ignore)
+
+
+def test_windows_without_canonical_collisions_stays_pinned(workspace, tmp_path, monkeypatch, caplog) -> None:
+    import graph_works_core.read_session.index_backend as backend_module
+
+    monkeypatch.setattr(backend_module, "platform", "win32", raising=False)
+    root = workspace.bundle_dir
+    db = tmp_path / "i.db"
+    with open_index(db, root, ignore=CLONE_IGNORE, prune=CLONE_PRUNE) as index:
+        reconcile(index)
+        with read(index) as view:
+            session = make_session(index, view, root, db)
+            generation = view.generation
+            assert (session.backend, session.fallback, session.generation) == ("index", None, generation)
+            (root / "work/epic-a.md").write_text("---\ntitle: Changed\n---\n", encoding="utf-8", newline="\n")
+            assert session.member("work/epic-a.md").title == "A"
+            assert session.work_snapshot().by_path["work/epic-a"].title == "A"
+            assert not caplog.records
+
+
 def fail(*args, **kwargs):
     raise sqlite3.OperationalError("injected failure")
 

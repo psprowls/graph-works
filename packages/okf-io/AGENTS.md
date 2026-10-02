@@ -46,6 +46,10 @@ index, log the two index/log writers
 migrate    the v0.1 -> v0.2 rewriter (third writer)
 ```
 
+`bundle.walk` / `read_member` / `resolve_member` and `links.document_links` /
+`document_headings` are the incremental entry points `load()` and `build()` run
+on; okf-ext's `readindex` persists their output.
+
 **Two documented inversions**, not one:
 
 - `validate._registry()` imports `_rules` lazily inside the function, because

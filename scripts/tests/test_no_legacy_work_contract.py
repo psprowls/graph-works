@@ -156,7 +156,7 @@ def test_private_descriptor_loader_is_versioned_as_a_synchronized_dependency() -
         for name in ("okf-io", "work-tracker-okf", "graph-works-core", "graph-works-cli")
     }
     with manifests["okf-io"].open("rb") as handle:
-        assert tomllib.load(handle)["project"]["version"] == "0.2.5"
+        assert tomllib.load(handle)["project"]["version"] == "0.2.6"
 
     for name in ("work-tracker-okf", "graph-works-core", "graph-works-cli"):
         with manifests[name].open("rb") as handle:

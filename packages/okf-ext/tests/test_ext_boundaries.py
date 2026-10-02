@@ -308,6 +308,7 @@ BUILT_IN_TOPICS = frozenset(
         "bundle",
         "placement",
         "logs",
+        "readindex",
     ]
 )
 def capability(request):
@@ -332,6 +333,7 @@ def test_every_capability_on_disk_is_covered_by_these_tests(modules: list[Path])
         "bundle",
         "placement",
         "logs",
+        "readindex",
     }
 
 
@@ -766,3 +768,12 @@ def test_plan_regenerate_accepts_index_renders() -> None:
     parameters = inspect.signature(generators.plan_regenerate).parameters
     assert "index_renders" in parameters
     assert parameters["index_renders"].default == {}
+
+
+def test_readindex_is_a_primitive() -> None:
+    from okf_ext import readindex
+
+    assert not hasattr(readindex, "TOPIC")
+    assert not hasattr(readindex, "CODES")
+    for name in ("open_index", "reconcile", "read", "verify", "IndexBusy", "IndexUnavailable"):
+        assert callable(getattr(readindex, name))

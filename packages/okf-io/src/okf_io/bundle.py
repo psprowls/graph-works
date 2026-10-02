@@ -11,7 +11,7 @@ import os
 import stat
 import sys
 import unicodedata
-from collections.abc import Iterator, Mapping, Sequence
+from collections.abc import Callable, Collection, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
 from fnmatch import fnmatchcase
 from pathlib import Path, PurePosixPath
@@ -27,6 +27,85 @@ LOG_NAME = "log.md"
 
 #: Never a member, at any depth.
 GIT_DIR_NAME = ".git"
+
+
+MemberKind = Literal["concept", "index", "log", "asset", "ignored"]
+
+
+@dataclass(frozen=True, slots=True)
+class MemberStat:
+    """File identity and change metadata captured during the walk."""
+
+    size: int
+    mtime_ns: int
+    ino: int
+    ctime_ns: int
+
+    @classmethod
+    def of(cls, info: os.stat_result) -> MemberStat:
+        return cls(info.st_size, info.st_mtime_ns, info.st_ino, info.st_ctime_ns)
+
+    def same(self, other: MemberStat | None) -> bool:
+        """Equal size/mtime_ns/ctime_ns, and ino equal unless either is 0."""
+        return (
+            other is not None
+            and self.size == other.size
+            and self.mtime_ns == other.mtime_ns
+            and self.ctime_ns == other.ctime_ns
+            and (self.ino == 0 or other.ino == 0 or self.ino == other.ino)
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class Member:
+    """A raw bundle-relative file path, its kind, and optional walk stat."""
+
+    id: str
+    kind: MemberKind
+    stat: MemberStat | None
+
+
+@dataclass(frozen=True, slots=True)
+class Walk:
+    """Members in walk order and directories that were unreadable or pruned."""
+
+    members: tuple[Member, ...]
+    unreadable_dirs: Mapping[str, str]
+    pruned: frozenset[str]
+
+
+def _classify(relative: str, *, ignore: Sequence[str]) -> MemberKind:
+    if any(fnmatchcase(relative, pattern) for pattern in ignore):
+        return "ignored"
+    path = PurePosixPath(relative)
+    if path.suffix != ".md":
+        return "asset"
+    if path.name == INDEX_NAME:
+        return "index"
+    if path.name == LOG_NAME:
+        return "log"
+    return "concept"
+
+
+@dataclass(frozen=True, slots=True)
+class Unreadable:
+    """A member read failure, with the same reason the bundle loader records."""
+
+    reason: str
+
+
+def _unreadable(exc: UnicodeDecodeError | OSError) -> Unreadable:
+    if isinstance(exc, UnicodeDecodeError):
+        return Unreadable(f"not valid UTF-8: {exc}")
+    return Unreadable(f"could not be read: {exc}")
+
+
+def read_member(root: Path, member_id: str) -> Document | Unreadable:
+    """Read and parse one raw member id, recording content and OS failures."""
+    try:
+        return Document.load(root.joinpath(*member_id.split("/")))
+    except (UnicodeDecodeError, OSError) as exc:
+        return _unreadable(exc)
 
 
 def canonical_id(value: str) -> str:
@@ -168,68 +247,84 @@ class Bundle:
         :attr:`logs`.
 
         When both in-memory matches miss and :attr:`pruned` is non-empty, a
-        query beneath a pruned root is answered by :meth:`_pruned_member`, a
+        query beneath a pruned root is answered by :func:`_pruned_member`, a
         filesystem probe. It resolves through :attr:`root` -- a path, even for
         a ``Bundle`` loaded through a descriptor -- because it only asks
         whether a file exists and reads no content. It is not cached: only
         lookups beneath a pruned root pay its per-lookup ``lstat`` chain.
         """
-        member = path.strip()
-        if not member:
-            return None
-        if self._raw_member(member):
-            return member
-        if not member.isascii():
-            canonical = self._canonical.get(canonical_id(member))
-            if canonical is not None:
-                return canonical
-        return self._pruned_member(member) if self.pruned else None
+        return resolve_member(
+            path, root=self.root, has_raw=self._raw_member, canonical=self._canonical.get, pruned=self.pruned
+        )
 
-    def _pruned_member(self, member: str) -> str | None:
-        """The raw id of a file beneath a pruned root that *member* names.
 
-        The root is matched component-wise, NFC-insensitively, so a query in
-        either normalization form finds it; the answer is the root's *raw*
-        id joined with the remainder exactly as queried -- the spelling the
-        filesystem just accepted.
-        """
-        parts = member.split("/")
-        for root in sorted(self.pruned):
-            root_parts = root.split("/")
-            if len(parts) <= len(root_parts):
-                continue
-            leading = parts[: len(root_parts)]
-            if all(canonical_id(q) == canonical_id(r) for q, r in zip(leading, root_parts, strict=True)):
-                return self._probe_pruned(root, parts[len(root_parts) :])
+def resolve_member(
+    path: str,
+    *,
+    root: Path,
+    has_raw: Callable[[str], bool],
+    canonical: Callable[[str], str | None],
+    pruned: Collection[str],
+) -> str | None:
+    """Resolve a query to its raw member id by exact, NFC, then pruned lookup."""
+    member = path.strip()
+    if not member:
         return None
+    if has_raw(member):
+        return member
+    if not member.isascii():
+        raw = canonical(canonical_id(member))
+        if raw is not None:
+            return raw
+    return _pruned_member(member, root=root, pruned=pruned) if pruned else None
 
-    def _probe_pruned(self, root: str, rest: list[str]) -> str | None:
-        """``lstat`` *rest* one component at a time beneath pruned *root*.
 
-        Mirrors the walk: an empty, ``.``, ``..`` or ``.git`` component is
-        refused, so the probe never leaves *root* nor enters a ``.git``; an
-        intermediate must be a real directory, never a symlink; the final
-        component must be a file, and a symlink to a file is followed as the
-        walk follows one. Any ``OSError`` is ``None`` -- nothing on the
-        content path raises.
-        """
-        if any(part in ("", ".", "..", GIT_DIR_NAME) for part in rest):
+def _pruned_member(member: str, *, root: Path, pruned: Collection[str]) -> str | None:
+    """The raw id of a file beneath a pruned root that *member* names.
+
+    The root is matched component-wise, NFC-insensitively, so a query in
+    either normalization form finds it; the answer is the root's *raw*
+    id joined with the remainder exactly as queried -- the spelling the
+    filesystem just accepted.
+    """
+    parts = member.split("/")
+    for pruned_root in sorted(pruned):
+        root_parts = pruned_root.split("/")
+        if len(parts) <= len(root_parts):
+            continue
+        leading = parts[: len(root_parts)]
+        if all(canonical_id(q) == canonical_id(r) for q, r in zip(leading, root_parts, strict=True)):
+            return _probe_pruned(root, pruned_root, parts[len(root_parts) :])
+    return None
+
+
+def _probe_pruned(root_path: Path, pruned_root: str, rest: list[str]) -> str | None:
+    """``lstat`` *rest* one component at a time beneath pruned *root*.
+
+    Mirrors the walk: an empty, ``.``, ``..`` or ``.git`` component is
+    refused, so the probe never leaves *root* nor enters a ``.git``; an
+    intermediate must be a real directory, never a symlink; the final
+    component must be a file, and a symlink to a file is followed as the
+    walk follows one. Any ``OSError`` is ``None`` -- nothing on the
+    content path raises.
+    """
+    if any(part in ("", ".", "..", GIT_DIR_NAME) for part in rest):
+        return None
+    current = root_path.joinpath(*pruned_root.split("/"))
+    last = len(rest) - 1
+    for index, part in enumerate(rest):
+        current = current / part
+        try:
+            info = current.lstat()
+            if stat.S_ISLNK(info.st_mode):
+                if index < last:
+                    return None
+                info = current.stat()
+        except OSError:
             return None
-        current = self.root.joinpath(*root.split("/"))
-        last = len(rest) - 1
-        for index, part in enumerate(rest):
-            current = current / part
-            try:
-                info = current.lstat()
-                if stat.S_ISLNK(info.st_mode):
-                    if index < last:
-                        return None
-                    info = current.stat()
-            except OSError:
-                return None
-            if stat.S_ISDIR(info.st_mode) != (index < last):
-                return None
-        return "/".join((root, *rest))
+        if stat.S_ISDIR(info.st_mode) != (index < last):
+            return None
+    return "/".join((pruned_root, *rest))
 
 
 def _is_pruned(relative: str, prune: Sequence[str]) -> bool:
@@ -237,7 +332,9 @@ def _is_pruned(relative: str, prune: Sequence[str]) -> bool:
     return any(fnmatchcase(relative, pattern) for pattern in prune)
 
 
-def _files(root: Path, *, unreadable: dict[str, str], prune: Sequence[str], pruned: set[str]) -> Iterator[Path]:
+def _files(
+    root: Path, *, unreadable: dict[str, str], prune: Sequence[str], pruned: set[str]
+) -> Iterator[tuple[str, MemberStat | None]]:
     """Yield every file under *root*, depth-first, in sorted order.
 
     Three walk defaults, documented because they are choices rather than
@@ -281,21 +378,23 @@ def _files(root: Path, *, unreadable: dict[str, str], prune: Sequence[str], prun
     first and win: an excluded directory is never recorded as pruned.
     """
 
-    pending: list[tuple[Literal["directory", "file"], Path, bool, int]] = [("directory", root, False, 0)]
+    pending: list[tuple[Literal["directory", "file"], Path, bool, int, MemberStat | None]] = [
+        ("directory", root, False, 0, None)
+    ]
     while pending:
-        kind, path, guarded, depth = pending.pop()
+        kind, path, guarded, depth, member_stat = pending.pop()
         if kind == "file":
-            yield path
+            yield path.relative_to(root).as_posix(), member_stat
             continue
-        if guarded:
-            try:
-                entries = sorted(path.iterdir(), reverse=True)
-            except OSError as exc:
-                relative = path.relative_to(root).as_posix()
-                unreadable[relative] = f"could not be read: {exc}"
-                continue
-        else:
-            entries = sorted(path.iterdir(), reverse=True)
+        try:
+            with os.scandir(path) as directory:
+                entries = sorted(directory, key=lambda entry: Path(entry.path), reverse=True)
+        except OSError as exc:
+            if not guarded:
+                raise
+            relative = path.relative_to(root).as_posix()
+            unreadable[relative] = f"could not be read: {exc}"
+            continue
         for entry in entries:
             if entry.name == GIT_DIR_NAME:
                 continue
@@ -303,15 +402,31 @@ def _files(root: Path, *, unreadable: dict[str, str], prune: Sequence[str], prun
                 continue
             if entry.is_symlink() and entry.is_dir():
                 continue
+            child = Path(entry.path)
             if entry.is_dir():
                 if prune:
-                    relative = entry.relative_to(root).as_posix()
+                    relative = child.relative_to(root).as_posix()
                     if _is_pruned(relative, prune):
                         pruned.add(relative)
                         continue
-                pending.append(("directory", entry, True, depth + 1))
+                pending.append(("directory", child, True, depth + 1, None))
             else:
-                pending.append(("file", entry, True, depth))
+                try:
+                    member_stat = MemberStat.of(entry.stat())
+                except OSError:
+                    member_stat = None
+                pending.append(("file", child, True, depth, member_stat))
+
+
+def walk(root: Path, *, ignore: Sequence[str] = (), prune: Sequence[str] = ()) -> Walk:
+    """Walk once, classifying members and carrying file metadata without reads."""
+    unreadable: dict[str, str] = {}
+    pruned: set[str] = set()
+    members = tuple(
+        Member(relative, _classify(relative, ignore=ignore), member_stat)
+        for relative, member_stat in _files(root, unreadable=unreadable, prune=prune, pruned=pruned)
+    )
+    return Walk(members, MappingProxyType(unreadable), frozenset(pruned))
 
 
 def _open_relative_directory(root_fd: int, relative: str) -> int:
@@ -469,41 +584,41 @@ def _load(root: Path, *, ignore: Sequence[str], prune: Sequence[str], root_fd: i
     collisions: dict[str, list[str]] = {}
     pruned: set[str] = set()
 
-    members = (
-        (
-            (path.relative_to(root).as_posix(), path)
-            for path in _files(root, unreadable=unreadable, prune=prune, pruned=pruned)
-        )
-        if root_fd is None
-        else (
-            (relative, root / relative)
+    members: Iterator[Member]
+    if root_fd is None:
+        result = walk(root, ignore=ignore, prune=prune)
+        unreadable.update(result.unreadable_dirs)
+        pruned.update(result.pruned)
+        members = iter(result.members)
+    else:
+        members = (
+            Member(relative, _classify(relative, ignore=ignore), None)
             for relative in _files_at(root_fd, unreadable=unreadable, prune=prune, pruned=pruned)
         )
-    )
-    for relative, path in members:
-        if any(fnmatchcase(relative, pattern) for pattern in ignore):
+    for member in members:
+        relative = member.id
+        path = root / relative
+        if member.kind == "ignored":
             ignored.add(relative)
             _track_canonical(canonical, collisions, relative)
             continue
-        if path.suffix != ".md":
+        if member.kind == "asset":
             assets.add(relative)
             _track_canonical(canonical, collisions, relative)
             continue
-        try:
-            document = (
-                Document.load(path)
-                if root_fd is None
-                else Document.parse(_read_bytes_at(root_fd, relative).decode("utf-8"), path=path)
-            )
-        except UnicodeDecodeError as exc:
-            unreadable[relative] = f"not valid UTF-8: {exc}"
+        if root_fd is None:
+            document = read_member(root, relative)
+        else:
+            try:
+                document = Document.parse(_read_bytes_at(root_fd, relative).decode("utf-8"), path=path)
+            except (UnicodeDecodeError, OSError) as exc:
+                document = _unreadable(exc)
+        if isinstance(document, Unreadable):
+            unreadable[relative] = document.reason
             continue
-        except OSError as exc:
-            unreadable[relative] = f"could not be read: {exc}"
-            continue
-        if path.name == INDEX_NAME:
+        if member.kind == "index":
             indexes[_directory_id(relative)] = document
-        elif path.name == LOG_NAME:
+        elif member.kind == "log":
             logs[_directory_id(relative)] = document
         else:
             concepts[relative[: -len(".md")]] = document

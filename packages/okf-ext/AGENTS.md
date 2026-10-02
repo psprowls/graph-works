@@ -18,10 +18,18 @@ polices itself.
 The capabilities today: `tags`, `schemas`, `render`, `health`, `sections`,
 `placement` (rule-emitting — each claims a `TOPIC` and a `CODES` tuple in
 okf-io's namespace); `tables`, `moves`, `generators`, `proposals`, `bundle`,
-`logs` (writers/primitives — no `TOPIC`, no `Finding`s, by design); and
+`logs`, `readindex` (writers/primitives — no `TOPIC`, no `Finding`s, by design); and
 `search` (answers questions, ships no rule at all). A shared layer
 (`context.py`, `body.py`, `writing.py`, `splice.py`, `shape/`) sits underneath
 all of them.
+
+`readindex` is a disposable SQLite projection of membership, frontmatter,
+links, headings and diagnostics, without page bodies. It uses only okf-io's
+public reader entry points and stdlib; no `TOPIC`. `MemberRow.fm_exact=False`
+marks a frontmatter JSON fallback (for example custom YAML values or recursive
+aliases); callers needing lossless frontmatter must use a full read for those
+rows. Standard columns remain exact. Surrogate-containing reader strings use
+reversible BLOB bindings, decoded by the index connection, including filters.
 
 ## Commands
 

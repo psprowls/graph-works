@@ -38,7 +38,7 @@ door.
 
 from __future__ import annotations
 
-from okf_io.bundle import Bundle
+from okf_io.bundle import Bundle, Member, MemberKind, MemberStat, Unreadable, Walk, read_member, resolve_member, walk
 from okf_io.bundle import load as load_bundle
 from okf_io.derive import (
     TrustTier,
@@ -63,7 +63,7 @@ from okf_io.index import (
 )
 from okf_io.index import outline as outline_index
 from okf_io.index import update as update_index
-from okf_io.links import Link, LinkGraph
+from okf_io.links import Heading, Link, LinkGraph, document_headings, document_links
 from okf_io.links import build as build_link_graph
 from okf_io.log import Log, LogAppend, LogEntry, LogSection
 from okf_io.log import append as append_log_entry
@@ -92,7 +92,7 @@ from okf_io.models import (
 )
 from okf_io.validate import Finding, Report, Rule, RuleContext, Severity, validate
 
-__version__ = "0.2.5"
+__version__ = "0.2.6"
 
 __all__ = [
     "Actor",
@@ -110,6 +110,7 @@ __all__ = [
     "Finding",
     "Frontmatter",
     "Generated",
+    "Heading",
     "IndexChange",
     "IndexEntry",
     "IndexHeading",
@@ -121,6 +122,9 @@ __all__ = [
     "LogAppend",
     "LogEntry",
     "LogSection",
+    "Member",
+    "MemberKind",
+    "MemberStat",
     "Migration",
     "MigrationChange",
     "MigrationChangeKind",
@@ -134,12 +138,16 @@ __all__ = [
     "TrustTier",
     "Unmigrated",
     "UnmigratedReason",
+    "Unreadable",
     "UsageWindow",
     "Verified",
+    "Walk",
     "__version__",
     "append_log_entry",
     "build_frontmatter",
     "build_link_graph",
+    "document_headings",
+    "document_links",
     "effective_status",
     "is_stale",
     "last_verified_at",
@@ -149,8 +157,11 @@ __all__ = [
     "outline_index",
     "parse",
     "parse_log",
+    "read_member",
+    "resolve_member",
     "trust_tier",
     "update_index",
     "validate",
     "value_shape",
+    "walk",
 ]

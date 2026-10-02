@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import sys
 import unicodedata
+from contextlib import contextmanager
 from pathlib import Path
 
 import helpers
@@ -288,13 +289,29 @@ def test_descriptor_rooted_per_entry_lstat_failure_matches_path_classification(
     transient = write(tmp_path, "nested/transient.md", CONCEPT)
     real_stat = bundle.os.stat
 
-    def fail_path_stat(path: os.PathLike[str] | str | bytes, *args: object, **kwargs: object):
-        if Path(path) == transient and kwargs.get("follow_symlinks") is False:
-            raise OSError("injected per-entry stat failure")
-        return real_stat(path, *args, **kwargs)
+    real_scandir = bundle.os.scandir
+
+    class FailingEntry:
+        def __init__(self, entry):
+            self.entry = entry
+            self.name = entry.name
+            self.path = entry.path
+
+        def __getattr__(self, name):
+            return getattr(self.entry, name)
+
+        def is_symlink(self):
+            if Path(self.path) == transient:
+                raise OSError("injected per-entry stat failure")
+            return self.entry.is_symlink()
+
+    @contextmanager
+    def fail_path_scandir(path):
+        with real_scandir(path) as entries:
+            yield (FailingEntry(entry) for entry in entries)
 
     with monkeypatch.context() as path_patch:
-        path_patch.setattr(bundle.os, "stat", fail_path_stat)
+        path_patch.setattr(bundle.os, "scandir", fail_path_scandir)
         with pytest.raises(OSError, match="injected per-entry stat failure"):
             bundle.load(tmp_path)
 
@@ -331,13 +348,29 @@ def test_descriptor_rooted_follow_stat_failure_matches_path_symlink_classificati
     linked.symlink_to("real.md")
     real_stat = bundle.os.stat
 
-    def fail_path_follow_stat(path: os.PathLike[str] | str | bytes, *args: object, **kwargs: object):
-        if Path(path) == linked and kwargs.get("follow_symlinks") is not False:
-            raise OSError("injected follow-stat failure")
-        return real_stat(path, *args, **kwargs)
+    real_scandir = bundle.os.scandir
+
+    class FailingEntry:
+        def __init__(self, entry):
+            self.entry = entry
+            self.name = entry.name
+            self.path = entry.path
+
+        def __getattr__(self, name):
+            return getattr(self.entry, name)
+
+        def is_dir(self):
+            if Path(self.path) == linked:
+                raise OSError("injected follow-stat failure")
+            return self.entry.is_dir()
+
+    @contextmanager
+    def fail_path_scandir(path):
+        with real_scandir(path) as entries:
+            yield (FailingEntry(entry) for entry in entries)
 
     with monkeypatch.context() as path_patch:
-        path_patch.setattr(bundle.os, "stat", fail_path_follow_stat)
+        path_patch.setattr(bundle.os, "scandir", fail_path_scandir)
         with pytest.raises(OSError, match="injected follow-stat failure"):
             bundle.load(tmp_path)
 
@@ -519,11 +552,11 @@ def _stand_up_canonical_collision(root: Path, monkeypatch: pytest.MonkeyPatch) -
     if (root / "concepts" / f"{_NFD}.md").exists():
         # Normalisation-insensitive volume (APFS, HFS+): one directory entry,
         # and both spellings open it. Two real siblings cannot be created, so
-        # stand two `Path`s in for the walk -- both opens succeed by the same
+        # stand two member tuples in for the walk -- both opens succeed by the same
         # folding property, and `_load` runs its real collision tracking.
         def fake_files(root: Path, *, unreadable: dict[str, str], **_walk: object):
-            yield root / "concepts" / f"{_NFD}.md"
-            yield root / "concepts" / f"{_NFC}.md"
+            yield f"concepts/{_NFD}.md", None
+            yield f"concepts/{_NFC}.md", None
 
         monkeypatch.setattr(bundle, "_files", fake_files)
         return "folded"

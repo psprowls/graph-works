@@ -159,6 +159,57 @@ def test_verify_reconciles_ctime_rewrite_and_new_members(layout):
         assert conn.execute("SELECT title FROM members WHERE id='a.md'").fetchone() == ("B",)
 
 
+@pytest.mark.parametrize("rebuild", [False, True], ids=["verify", "cold-rebuild"])
+def test_unsettled_new_members_refuse_maintenance_and_close_index(layout, monkeypatch, rebuild):
+    from okf_ext.readindex import sync
+
+    if not rebuild:
+        run_read_index(layout, rebuild=True)
+    db = location.database_path(layout)
+    assert db.exists() == (not rebuild)
+    new_ids = ("new.md", "other-new.md")
+    for mid in new_ids:
+        (layout.bundle_dir / mid).write_text("---\ntitle: New\n---\n", encoding="utf-8", newline="\n")
+    real_read = sync.read_member
+    real_reconcile = readindex.reconcile
+    results = []
+    connections = []
+
+    def changing_read(root, mid):
+        result = real_read(root, mid)
+        if mid in new_ids:
+            with (root / mid).open("a", encoding="utf-8", newline="\n") as stream:
+                stream.write("Changed during read\n")
+        return result
+
+    def capture(index):
+        connections.append(index.connection)
+        result = real_reconcile(index)
+        results.append(result)
+        assert index.connection.execute("SELECT id FROM members WHERE id IN (?, ?)", new_ids).fetchall() == []
+        return result
+
+    with monkeypatch.context() as patch:
+        patch.setattr(sync, "read_member", changing_read)
+        patch.setattr(readindex, "reconcile", capture)
+        with pytest.raises(ReadIndexUnavailable) as caught:
+            run_read_index(layout, verify=not rebuild, rebuild=rebuild)
+    assert isinstance(caught.value, OSError)
+    assert isinstance(caught.value.__cause__, readindex.IndexUnavailable)
+    assert all(mid in str(caught.value) and mid in str(caught.value.__cause__) for mid in new_ids)
+    assert len(results) == 1 and set(results[0].unsettled) == set(new_ids)
+    with pytest.raises(sqlite3.ProgrammingError, match="closed"):
+        connections[0].execute("SELECT 1")
+    assert list(db.parent.iterdir()) == [db]
+
+    settled = run_read_index(layout, verify=not rebuild, rebuild=rebuild)
+    assert settled.error is None and settled.parsed >= 2
+    assert settled.drift == (() if not rebuild else None)
+    with sqlite3.connect(db) as conn:
+        assert set(conn.execute("SELECT id FROM members WHERE id IN (?, ?)", new_ids)) == {(mid,) for mid in new_ids}
+    conn.close()
+
+
 def test_rebuild_discards_previous_cache_and_sidecars(layout):
     run_read_index(layout, rebuild=True)
     db = location.database_path(layout)

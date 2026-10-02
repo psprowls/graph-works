@@ -113,6 +113,69 @@ def test_verify_without_drift_exits_zero(initialized_workspace: Path) -> None:
     assert json.loads(result.stdout)["drift"] == []
 
 
+@pytest.mark.parametrize("flag", ["--verify", "--rebuild"])
+@pytest.mark.parametrize("json_mode", [False, True])
+def test_unsettled_new_members_exit_nonzero_without_clean_report(
+    initialized_workspace: Path, monkeypatch: pytest.MonkeyPatch, flag: str, json_mode: bool
+) -> None:
+    from okf_ext import readindex
+    from okf_ext.readindex import sync
+
+    if flag == "--verify":
+        warm = invoke(initialized_workspace, "--rebuild", "--json")
+        assert warm.exit_code == 0, warm.output
+    else:
+        assert not list((initialized_workspace / ".gw" / "cache").rglob("*.sqlite*"))
+    new_ids = ("new.md", "other-new.md")
+    for mid in new_ids:
+        (initialized_workspace / "okf" / mid).write_text("---\ntitle: New\n---\n", encoding="utf-8", newline="\n")
+    real_read = sync.read_member
+    real_reconcile = readindex.reconcile
+    indexes = []
+
+    def changing_read(root, mid):
+        result = real_read(root, mid)
+        if mid in new_ids:
+            with (root / mid).open("a", encoding="utf-8", newline="\n") as stream:
+                stream.write("Changed during read\n")
+        return result
+
+    def capture(index):
+        indexes.append(index)
+        result = real_reconcile(index)
+        assert set(result.unsettled) == set(new_ids)
+        assert index.connection.execute("SELECT id FROM members WHERE id IN (?, ?)", new_ids).fetchall() == []
+        return result
+
+    flags = [flag, *(["--json"] if json_mode else [])]
+    with monkeypatch.context() as patch:
+        patch.setattr(sync, "read_member", changing_read)
+        patch.setattr(readindex, "reconcile", capture)
+        result = invoke(initialized_workspace, *flags)
+    assert result.exit_code == exit_codes.GENERIC, result.output
+    assert result.stdout == ""
+    assert result.stderr.startswith("Error: ")
+    assert all(mid in result.stderr for mid in new_ids)
+    assert len(indexes) == 1
+    with pytest.raises(sqlite3.ProgrammingError, match="closed"):
+        indexes[0].connection.execute("SELECT 1")
+    database = indexes[0].db_path
+    assert list(database.parent.iterdir()) == [database]
+
+    settled = invoke(initialized_workspace, *flags)
+    assert settled.exit_code == 0, settled.output
+    if json_mode:
+        payload = json.loads(settled.stdout)
+        assert payload["error"] is None
+        if flag == "--verify":
+            assert payload["drift"] == []
+    else:
+        assert "drift: none" in settled.stdout
+    with sqlite3.connect(database) as conn:
+        assert set(conn.execute("SELECT id FROM members WHERE id IN (?, ?)", new_ids)) == {(mid,) for mid in new_ids}
+    conn.close()
+
+
 def test_verify_and_rebuild_together_is_a_usage_error(initialized_workspace: Path) -> None:
     result = invoke(initialized_workspace, "--verify", "--rebuild")
     assert result.exit_code == exit_codes.GENERIC

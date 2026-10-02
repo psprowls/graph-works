@@ -192,6 +192,8 @@ def run_read_index(
             busy_timeout_ms=location.BUSY_TIMEOUT_MS,
         ) as index:
             result = readindex.reconcile(index)
+            if result.unsettled:
+                raise readindex.IndexUnavailable("Unsettled members: " + ", ".join(result.unsettled))
             drift = readindex.verify(index) if verify else None
             report = replace(report, parsed=result.parsed, drift=drift, rebuilt_reason=index.rebuilt_reason)
     except readindex.IndexBusy as exc:

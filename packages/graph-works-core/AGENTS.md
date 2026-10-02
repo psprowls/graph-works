@@ -85,8 +85,8 @@ ingest/ : scan/ : query/ : lint_drift/ : archive/ : orchestrate/ : proposals/ : 
 `read_session/` — One entry point for display reads: `open_read_session(layout)`
 yields a `ReadSession` backed by the persisted read index (reconciled on open)
 or the full load; display reads only, never mutation, lint or guidance paths.
-The protocol and location helpers are defined here; concrete backends and the
-opener follow in subsequent tasks.
+It defines the protocol and cache location helpers, the lazy `BundleSession`
+and pinned `IndexSession` backends, and the opener's admission and fallback logic.
 
 `guidance/` — deterministic guidance inputs, its own layer so any vertical
 (the `work` vertical's guidance assembly first) may import it while it imports

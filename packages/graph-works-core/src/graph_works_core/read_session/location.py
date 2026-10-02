@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 from pathlib import Path
 
 from graph_works_core.workspace.bundle import CLONE_IGNORE, CLONE_PRUNE
@@ -35,3 +36,11 @@ def fingerprint(layout: WorkspaceLayout) -> str:
     payload = {"format": SESSION_FORMAT, "ignore": list(CLONE_IGNORE), "prune": list(CLONE_PRUNE), "bundle_dir": rel}
     text = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+logger = logging.getLogger("graph_works_core.read_session")
+
+
+def warn_fallback(reason: str, db_path: Path, exc: BaseException | None = None) -> None:
+    """Report one backend selection without hiding later pinned-query errors."""
+    logger.warning("read index %s; serving the full bundle load (%s)%s", reason, db_path, f": {exc}" if exc else "")

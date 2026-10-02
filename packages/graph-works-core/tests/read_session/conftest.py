@@ -57,3 +57,16 @@ def workspace(tmp_path: Path) -> WorkspaceLayout:
     layout = apply_init(plan_init(tmp_path / ".works", today=date(2026, 10, 2), topic="t")).layout
     write_bundle(layout.bundle_dir)
     return layout
+
+
+@pytest.fixture
+def index_session(workspace, tmp_path):
+    from graph_works_core.read_session import IndexSession
+    from graph_works_core.workspace.bundle import CLONE_IGNORE, CLONE_PRUNE
+    from okf_ext.readindex import open_index, read, reconcile
+
+    db = tmp_path / "i.db"
+    with open_index(db, workspace.bundle_dir, ignore=CLONE_IGNORE, prune=CLONE_PRUNE) as index:
+        reconcile(index)
+        with read(index) as view:
+            yield IndexSession(index, view, root=workspace.bundle_dir, db_path=db)

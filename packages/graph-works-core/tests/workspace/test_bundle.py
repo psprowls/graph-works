@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from collections.abc import Iterator
 from pathlib import Path
 from types import SimpleNamespace
@@ -175,16 +176,27 @@ def test_work_scope_of_a_missing_bundle_raises_oserror(tmp_path: Path) -> None:
 def test_work_bundle_never_lists_pruned_directories(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     root = _mixed_bundle(tmp_path)
     original_iterdir = Path.iterdir
+    original_scandir = os.scandir
     listed: list[Path] = []
 
-    def guarded_iterdir(path: Path) -> Iterator[Path]:
+    def record(path: Path) -> None:
+        if not path.is_relative_to(root):
+            return
         relative = path.relative_to(root)
         if relative.parts and relative.parts[0] != work_tracker_okf.WORK_DIR:
             pytest.fail(f"Listed pruned directory: {relative}")
         listed.append(path)
+
+    def guarded_iterdir(path: Path) -> Iterator[Path]:
+        record(path)
         return original_iterdir(path)
 
+    def guarded_scandir(path: str | os.PathLike[str]) -> os.scandir[str]:
+        record(Path(path))
+        return original_scandir(path)
+
     monkeypatch.setattr(Path, "iterdir", guarded_iterdir)
+    monkeypatch.setattr(os, "scandir", guarded_scandir)
     bundle = load_work_bundle(_layout(root))
     assert root / "work" in listed
     assert bundle.pruned == frozenset({"code-graph", "docs", "sources"})

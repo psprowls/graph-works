@@ -1502,8 +1502,8 @@
     },
     {
       "name": "gw util",
-      "help": "Diagnostics: platform/log/line-endings/tokens/trace and the surface freeze.",
-      "short_help": "Diagnostics: platform/log/line-endings/tokens/trace and the surface freeze.",
+      "help": "Diagnostics: platform/log/line-endings/read-index/tokens/trace and the surface freeze.",
+      "short_help": "Diagnostics: platform/log/line-endings/read-index/tokens/trace and the surface freeze.",
       "usage": [
         "[OPTIONS]",
         "COMMAND [ARGS]..."
@@ -1515,6 +1515,7 @@
         "line-endings",
         "log",
         "platform",
+        "read-index",
         "tokens",
         "trace"
       ],
@@ -1716,6 +1717,66 @@
       "path": [
         "util",
         "platform"
+      ]
+    },
+    {
+      "name": "gw util read-index",
+      "help": "Inspect, verify or rebuild the persisted read index.",
+      "short_help": "Inspect, verify or rebuild the persisted read index.",
+      "usage": [
+        "[OPTIONS]"
+      ],
+      "arguments": [],
+      "options": [
+        {
+          "name": "verify",
+          "opts": [
+            "--verify"
+          ],
+          "secondary_opts": [],
+          "help": "Reconcile, then re-hash every stored file; exit nonzero on drift.",
+          "required": false,
+          "default": false,
+          "is_flag": true
+        },
+        {
+          "name": "rebuild",
+          "opts": [
+            "--rebuild"
+          ],
+          "secondary_opts": [],
+          "help": "Delete the database and rebuild it.",
+          "required": false,
+          "default": false,
+          "is_flag": true
+        },
+        {
+          "name": "workspace",
+          "opts": [
+            "--workspace"
+          ],
+          "secondary_opts": [],
+          "help": "Workspace root; defaults to discovery.",
+          "required": false,
+          "default": "",
+          "is_flag": false
+        },
+        {
+          "name": "json_output",
+          "opts": [
+            "--json"
+          ],
+          "secondary_opts": [],
+          "help": "Emit the report as JSON.",
+          "required": false,
+          "default": false,
+          "is_flag": true
+        }
+      ],
+      "commands": [],
+      "path": [
+        "util",
+        "read-index"
       ]
     },
     {

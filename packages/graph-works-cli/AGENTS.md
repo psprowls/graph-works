@@ -84,7 +84,7 @@ loads everything (the walkers need that). The entries are:
   automatically; `sync` is the manual refresh after a hand edit.
 - `agent_config_cli` — `gw agent-config show`, a read-only report over core's agent configuration
   model. It injects home, environment, and platform; JSON is projected by `graph-works-wire`.
-- `util_cli` — diagnostics: `gw util describe-surface [--json]`, `log`, `tokens`, `trace`.
+- `util_cli` — diagnostics: `gw util describe-surface [--json]`, `platform`, `line-endings`, `log`, `read-index`, `tokens`, `trace`.
 
 Every workspace-backed sub-app command takes `--workspace PATH` and calls
 `workspace_resolution.resolve_workspace()` first (D-002): explicit path -> `GRAPH_WORKS_DIR` env -> cwd git walk-up, all via

@@ -48,6 +48,7 @@ _STUB_VERSIONS: dict[str, tuple[str, ...]] = {
         "0.5.1",
         "0.5.2",
         "0.5.3",
+        "0.5.4",
     ),
     "okf-io": ("0.1.1", "0.2.0", "0.2.1", "0.2.2", "0.2.3", "0.2.4", "0.2.5", "0.2.6"),
     "plugin-fork-io": ("0.1.0", "0.1.1"),
@@ -181,7 +182,7 @@ def test_built_wheel_resolves_with_core_from_published_metadata_offline(tmp_path
         requirement for requirement in core_requirements if canonicalize_name(requirement.name) == "okf-io"
     )
     assert str(cli_okf_io.specifier) == "<0.3,>=0.2.5"
-    assert str(core_okf_io.specifier) == "<0.3,>=0.2.5"
+    assert str(core_okf_io.specifier) == "<0.3,>=0.2.6"
 
     extras_by_name: dict[str, set[str]] = {}
     for requirement in (*cli_requirements, *core_requirements):

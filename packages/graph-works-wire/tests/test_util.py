@@ -65,3 +65,32 @@ def test_tokens_payload_carries_every_bucket_in_full() -> None:
 def test_line_endings_payload_lists_findings() -> None:
     report = LineEndingsReport(findings=(LineEndingFinding("notes/a.md", 2),), fixed=True)
     assert line_endings_payload(report) == {"fixed": True, "findings": [{"member": "notes/a.md", "crlf_count": 2}]}
+
+
+def test_read_index_payload_pins_every_field_and_sorted_counts() -> None:
+    from graph_works_wire import util
+    from samples_util import READ_INDEX_VERIFY
+
+    payload = util.read_index_payload(READ_INDEX_VERIFY)
+    assert payload == {
+        "mode": "verify",
+        "db_path": str(Path("/ws/.gw/cache/read-index.sqlite")),
+        "exists": True,
+        "enabled": True,
+        "backend": "index",
+        "backend_reason": None,
+        "fingerprint": {"current": "c", "stored": "s"},
+        "versions": {"schema": "1", "projection": "1", "okf_io": "0.2.0"},
+        "generation": 3,
+        "last_reconcile_ns": 2_000_000_000,
+        "tables": {"members": 1, "tags": 2},
+        "kinds": {"a": 1, "z": 2},
+        "unreadable_files": 4,
+        "rebuilt_reason": None,
+        "drift": ["a.md"],
+        "elapsed_s": None,
+        "parsed": 0,
+        "error": "inspection error",
+    }
+    assert list(payload["tables"]) == ["members", "tags"]
+    assert list(payload["kinds"]) == ["a", "z"]

@@ -98,6 +98,7 @@ def _read(concept_id: str, document: Any) -> Proposal:  # noqa: ANN401 -- an okf
     elif status is None:
         malformed = f"`page_status` {raw_status!r} is outside {list(PAGE_STATUSES)}"
 
+    raw_replacement = data.get("superseded_by")
     return Proposal(
         member=f"{concept_id}.md",
         concept_id=concept_id,
@@ -109,6 +110,7 @@ def _read(concept_id: str, document: Any) -> Proposal:  # noqa: ANN401 -- an okf
         sources=_entries(data.get("sources")),
         verified=_entries(data.get("verified")),
         malformed=malformed,
+        superseded_by=raw_replacement if isinstance(raw_replacement, str) and raw_replacement else None,
     )
 
 
@@ -427,6 +429,32 @@ def plan_propose(
     )
 
 
+def _replacement_member(raw: str) -> str:
+    """`/docs/x.md`, `docs/x.md` and `docs/x` all name member `docs/x.md`."""
+    member = raw.strip().lstrip("/")
+    return member if member.endswith(".md") else f"{member}.md"
+
+
+def _replacement_refusal(
+    bundle: Bundle, proposal: Proposal, decision: Decision, superseded_by: str | None
+) -> Refusal | None:
+    if decision != "superseded":
+        if superseded_by is None:
+            return None
+        return Refusal(proposal.member, "unexpected-replacement", "`superseded_by` is only allowed with `superseded`")
+    if superseded_by is None or not superseded_by.strip():
+        return Refusal(proposal.member, "missing-replacement", "`superseded` needs `superseded_by`")
+    member = _replacement_member(superseded_by)
+    if member in {proposal.member, proposal.target}:
+        return Refusal(proposal.member, "self-replacement", f"`{member}` is this proposal or its own target")
+    targets = {other.target for other in list_proposals(bundle)}
+    if not bundle.has_member(member) and member not in targets:
+        return Refusal(
+            proposal.member, "unknown-replacement", f"`{member}` is neither a bundle page nor a proposal target"
+        )
+    return None
+
+
 def plan_decide(
     bundle: Bundle,
     proposal: Proposal,
@@ -434,11 +462,15 @@ def plan_decide(
     *,
     by: str,
     at: datetime,
+    superseded_by: str | None = None,
+    note: str | None = None,
 ) -> DecisionPlan:
-    """Plan approving or rejecting *proposal*.
+    """Plan approving, rejecting or superseding *proposal*.
 
     Two edits, one document: the `page_status` flip, and a `verified` append
-    naming the deciding actor. There is deliberately no `decided:` key -- a
+    naming the deciding actor (plus the reviewer's `note` when given). A
+    `superseded` decision also records `superseded_by`, the replacement page as
+    a root-absolute `/<member>.md`. There is deliberately no `decided:` key -- a
     decision *is* OKF §5.2's `verified` event, and inventing a second key to
     say the same thing is the `sources: <int>` drift pattern.
 
@@ -449,39 +481,38 @@ def plan_decide(
     stamp = _require_aware(at)
     root = bundle.root
 
-    if proposal.malformed is not None:
-        return DecisionPlan(
-            root=root, proposal=proposal.member, decision=decision, writes=(), refusals=(_malformed(proposal),)
-        )
-    if proposal.page_status != "proposed":
-        return DecisionPlan(
-            root=root,
-            proposal=proposal.member,
-            decision=decision,
-            writes=(),
-            refusals=(
-                Refusal(
-                    path=proposal.member,
-                    kind="not-proposed",
-                    detail=f"`page_status` is `{proposal.raw_page_status}`; only a `proposed` proposal can be decided",
-                ),
-            ),
-        )
+    def refused(refusal: Refusal) -> DecisionPlan:
+        return DecisionPlan(root=root, proposal=proposal.member, decision=decision, writes=(), refusals=(refusal,))
 
+    if proposal.malformed is not None:
+        return refused(_malformed(proposal))
+    if proposal.page_status != "proposed":
+        return refused(
+            Refusal(
+                path=proposal.member,
+                kind="not-proposed",
+                detail=f"`page_status` is `{proposal.raw_page_status}`; only a `proposed` proposal can be decided",
+            )
+        )
+    replacement = _replacement_refusal(bundle, proposal, decision, superseded_by)
+    if replacement is not None:
+        return refused(replacement)
+
+    entry: dict[str, Any] = {"by": by, "at": stamp}
+    if note:
+        entry["note"] = note
+    frontmatter: dict[str, Any] = {
+        "page_status": decision,
+        "verified": [*(dict(item) for item in proposal.verified), entry],
+    }
+    if decision == "superseded":
+        assert superseded_by is not None
+        frontmatter["superseded_by"] = "/" + _replacement_member(superseded_by)
     return DecisionPlan(
         root=root,
         proposal=proposal.member,
         decision=decision,
-        writes=(
-            Write(
-                member=proposal.member,
-                mode="update",
-                frontmatter={
-                    "page_status": decision,
-                    "verified": [*(dict(entry) for entry in proposal.verified), {"by": by, "at": stamp}],
-                },
-            ),
-        ),
+        writes=(Write(member=proposal.member, mode="update", frontmatter=frontmatter),),
         refusals=(),
     )
 

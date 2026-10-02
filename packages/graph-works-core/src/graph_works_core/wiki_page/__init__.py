@@ -1,8 +1,8 @@
 """The wiki-page vertical: read one page with its link neighbourhood and code
-citations, and the root index as a tree of sections.
+citations, the root index as a tree of sections, and write one prose section.
 
-Layer 2 -- independent of every other vertical; imports `okf_io`, `okf_ext`
-and `workspace` only.
+Layer 2 -- independent of every other vertical; imports `okf_io`, `okf_ext`,
+`code_wiki_okf` and `workspace` only.
 """
 
 from __future__ import annotations
@@ -24,6 +24,7 @@ from graph_works_core.wiki_page.commands import (
     run_page_read,
     run_wiki_tree,
 )
+from graph_works_core.wiki_page.section import SectionRefusal, SectionWriteRun, run_section_write
 
 __all__ = [
     "Citation",
@@ -31,12 +32,15 @@ __all__ = [
     "CitationStatus",
     "PageLink",
     "PageRead",
+    "SectionRefusal",
+    "SectionWriteRun",
     "TreeNode",
     "TreePage",
     "WikiCitations",
     "WikiTree",
     "extract_citations",
     "run_page_read",
+    "run_section_write",
     "run_wiki_citations",
     "run_wiki_tree",
 ]

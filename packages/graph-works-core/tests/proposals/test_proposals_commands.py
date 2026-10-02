@@ -7,6 +7,7 @@ from datetime import UTC, date, datetime
 from pathlib import Path
 
 import pytest
+from _transaction_helpers import _init_git
 from graph_works_core import apply_init, plan_init, resolve
 from graph_works_core.proposals import (
     ProposalRefusal,
@@ -196,3 +197,33 @@ def test_file_naive_at_raises(tmp_path: Path) -> None:
             by="a",
             at=datetime(2026, 8, 24),
         )
+
+
+def test_supersede_applies_and_commits_when_the_workspace_is_its_own_repo(tmp_path: Path) -> None:
+    built = _layout(tmp_path / "w")
+    _init_git(built.root)
+    _file(built)
+    old = built.bundle_dir / "docs/explanations/old.md"
+    old.parent.mkdir(parents=True, exist_ok=True)
+    old.write_text(
+        "---\ntype: Explanation\ntitle: Old\ndescription: d\n---\n\n## Context\n\nx\n", encoding="utf-8", newline=""
+    )
+    run = run_proposal_decide(
+        built,
+        TARGET,
+        "superseded",
+        at=AT,
+        by="human:t",
+        superseded_by="/docs/explanations/old.md",
+        note="replaced",
+        dry_run=False,
+    )
+    assert run.ok and run.result is not None
+    assert run.commit is not None and run.commit.status == "committed"
+    assert run.commit.paths == (f"{built.bundle_dir.relative_to(built.root).as_posix()}/{MEMBER}",)
+    assert run.commit.subject == "workspace: supersede proposal docs-explanations-typed-cli"
+
+
+def test_dry_run_never_commits(layout: WorkspaceLayout) -> None:
+    run = run_proposal_decide(layout, TARGET, "approved", at=AT, by="human:t")
+    assert run.commit is None

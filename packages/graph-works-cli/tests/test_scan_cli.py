@@ -12,8 +12,10 @@ from graph_works_cli import exit_codes
 from graph_works_cli.cli import app
 from graph_works_cli.wiki_cli import scan as scan_module
 from graph_works_core.scan.commands import ScanResult, StructuralSummary
+from graph_works_core.scan.repo_scan import RepoScanRun
 from graph_works_core.scan.scan_contract import ApplyResult, ScanWorklist, worklist_payload
 from graph_works_core.workspace.errors import ScanError, WorkspaceConfigError
+from graph_works_wire.wiki import repo_scan_payload
 from typer.testing import CliRunner
 
 runner = CliRunner()
@@ -525,3 +527,75 @@ def test_retention_warnings_are_visible_without_changing_exit_status(
         assert [line for line in result.stderr.splitlines() if line.startswith("Warning:")] == [
             f"Warning: {warning}" for warning in warnings
         ]
+
+
+@pytest.mark.parametrize(
+    "args",
+    (
+        ("--repo", "code"),
+        ("--repo", "code", "--no-narrate", "--emit-worklist"),
+        ("--repo", "code", "--no-narrate", "--apply"),
+        ("--repo", "code", "--no-narrate", "--results-dir", "results"),
+    ),
+)
+def test_repo_scan_is_structural_only_and_rejects_other_modes(args: tuple[str, ...]) -> None:
+    """`--repo` must never reach the narrated or process-handoff paths."""
+    result = runner.invoke(app, ["scan", *args])
+
+    assert result.exit_code == 2
+    assert "--repo runs a structural scan" in result.stderr
+
+
+def test_dry_run_needs_repo() -> None:
+    result = runner.invoke(app, ["scan", "--no-narrate", "--dry-run"])
+
+    assert result.exit_code == 2
+    assert "--dry-run is only supported with --repo" in result.stderr
+
+
+@pytest.mark.parametrize("dry_run", (False, True))
+def test_repo_scan_writes_by_default_and_plans_with_dry_run(
+    monkeypatch: pytest.MonkeyPatch, initialized_workspace: Path, dry_run: bool
+) -> None:
+    calls: list[dict[str, object]] = []
+
+    def fake_run_repo_scan(*args: object, **kwargs: object) -> RepoScanRun:
+        calls.append(kwargs)
+        return RepoScanRun("code", StructuralSummary(), None, None, applied=not dry_run)
+
+    monkeypatch.setattr(scan_module, "run_repo_scan", fake_run_repo_scan)
+    args = ["scan", "--repo", "code", "--no-narrate", "--json", "--workspace", str(initialized_workspace)]
+    result = runner.invoke(app, [*args, "--dry-run"] if dry_run else args)
+
+    assert result.exit_code == 0, result.output
+    assert calls[0]["repo"] == "code" and calls[0]["dry_run"] is dry_run
+    assert json.loads(result.stdout) == repo_scan_payload(
+        RepoScanRun("code", StructuralSummary(), None, None, applied=not dry_run)
+    )
+
+
+def test_repo_scan_refusal_prints_the_payload_and_exits_one(
+    monkeypatch: pytest.MonkeyPatch, initialized_workspace: Path
+) -> None:
+    refused = RepoScanRun("nope", StructuralSummary(), "unknown-repository", "'nope' is not a declared repository")
+    monkeypatch.setattr(scan_module, "run_repo_scan", lambda *_a, **_k: refused)
+
+    result = runner.invoke(
+        app, ["scan", "--repo", "nope", "--no-narrate", "--json", "--workspace", str(initialized_workspace)]
+    )
+
+    assert result.exit_code == exit_codes.GENERIC
+    assert json.loads(result.stdout)["refusal"] == "unknown-repository"
+    assert "unknown-repository" in result.stderr
+
+
+def test_repo_scan_incomplete_apply_exits_one(monkeypatch: pytest.MonkeyPatch, initialized_workspace: Path) -> None:
+    broken = StructuralSummary(entities=SyncSummary(skipped=("code-graph/code.md: commit-error: disk full",)))
+    monkeypatch.setattr(
+        scan_module, "run_repo_scan", lambda *_a, **_k: RepoScanRun("code", broken, None, None, applied=True)
+    )
+
+    result = runner.invoke(app, ["scan", "--repo", "code", "--no-narrate", "--workspace", str(initialized_workspace)])
+
+    assert result.exit_code == exit_codes.GENERIC
+    assert result.stderr == "Error: scan --repo code: incomplete\n"

@@ -16,9 +16,9 @@ Root commands:
 - `gw bootstrap --topic TEXT [--workspace PATH] [--repo-root PATH] [--dry-run] [--json]` initializes a
   workspace. `--repo-root` pins the repository the workspace catalogs; pass it when the workspace lives
   outside that repository, where the `.git` walk-up cannot find it.
-- `gw scan [--no-narrate | --emit-worklist | --apply]` runs, emits, or applies a scan handoff.
+- `gw scan [--no-narrate | --emit-worklist | --apply] [--repo NAME [--dry-run]]` runs, emits, or applies a scan handoff. `--repo` structurally scans one declared repository (it needs `--no-narrate`) and leaves every other repository's pages untouched; `--dry-run` plans without writing.
 - `gw ingest --source PATH [--json]` ingests one source.
-- `gw query --query TEXT [--limit N]` answers a query with citations.
+- `gw query --query TEXT [--limit N] [--page ID]` answers a query with citations. `--page` pins one page first, then its matching links (brief backend only).
 
 For stage completion, `gw work advance PATH --from PHASE` checks the item's current phase under
 the advance lock before applying a transition. Use `--from none` for an item with no phase yet;
@@ -42,8 +42,10 @@ Wiki commands:
 - `gw wiki tags gate [--json]`
 - `gw wiki proposals [--json]`
 - `gw wiki proposal file --lane TEXT --title TEXT --id TEXT --resource PATH [--description TEXT] [--rationale TEXT] [--evidence TEXT]`
-- `gw wiki proposal approve TARGET`
-- `gw wiki proposal reject TARGET`
+- `gw wiki proposal approve TARGET [--note TEXT] [--dry-run] [--json]`
+- `gw wiki proposal reject TARGET [--note TEXT] [--dry-run] [--json]`
+- `gw wiki proposal supersede TARGET --by-page PATH [--note TEXT] [--dry-run] [--json]`
+- `gw wiki section write PAGE_ID --heading TEXT [--body-file PATH] [--apply] [--json]`
 - `gw wiki claims refresh [--force] [--json]`
 - `gw wiki claims show URI [--include-superseded] [--json]`
 - `gw wiki claims closure WORK_PATH [--include-superseded] [--json]`
@@ -51,6 +53,8 @@ Wiki commands:
 Most mutating commands apply by default; `--dry-run` is the preview option. `gw bootstrap --dry-run`
 and `gw wiki archive --dry-run` show the plan without applying. `gw wiki drift` inverts this: it
 previews by default (use `--no-dry-run` to apply).
+
+`gw wiki section write` is the other exception: it plans unless `--apply` is given, and reads the new body from `--body-file` or stdin.
 
 `gw wiki tags gate` is the narrow, CI-shaped question — it exits non-zero on any tag the
 vocabulary does not declare, without running a full lint.

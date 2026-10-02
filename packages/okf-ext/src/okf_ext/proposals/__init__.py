@@ -54,7 +54,7 @@ version (ADR 2026-08-21-a-colliding-name) and removed at `0.5.0`. Use `proposal_
 
 from __future__ import annotations
 
-from okf_ext.proposals.apply import apply
+from okf_ext.proposals.apply import apply, render_write
 from okf_ext.proposals.model import (
     OWNED_PROVENANCE_KEYS,
     PAGE_STATUSES,
@@ -121,4 +121,5 @@ __all__ = [
     "plan_propose",
     "proposal_path",
     "render_body",
+    "render_write",
 ]

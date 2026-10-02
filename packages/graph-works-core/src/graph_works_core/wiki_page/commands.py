@@ -11,15 +11,13 @@ from dataclasses import dataclass
 from types import MappingProxyType
 from typing import Literal
 
-from okf_ext.bundle import SECTIONS_DIRNAME
-from okf_ext.shape import SectionError, load_sections
 from okf_io import Bundle, build_link_graph
 from okf_io.bundle import INDEX_NAME
 from okf_io.index import IndexEntry, IndexHeading, outline
 from okf_io.links import Link, parse_destination, resolve_path
 
+from graph_works_core.wiki_page.declarations import load_declarations
 from graph_works_core.workspace.bundle import load_workspace_bundle
-from graph_works_core.workspace.errors import WorkspaceError
 from graph_works_core.workspace.layout import WorkspaceLayout
 
 
@@ -102,11 +100,7 @@ class WikiTree:
 
 def _root_ownership(layout: WorkspaceLayout) -> Mapping[str, str]:
     """Root-index heading -> declared `ownership`, from every section file's `directories[""]`."""
-    try:
-        declarations = load_sections(layout.config_dir / SECTIONS_DIRNAME)
-    except SectionError as exc:
-        raise WorkspaceError(str(exc)) from exc
-    root = declarations.indexes.get("")
+    root = load_declarations(layout).indexes.get("")
     if root is None:
         return MappingProxyType({})
     return MappingProxyType({spec.heading: spec.ownership for spec in root.sections})

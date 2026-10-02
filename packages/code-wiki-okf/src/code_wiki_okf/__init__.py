@@ -9,7 +9,7 @@ through: find-by-resource (`resources.py`), provenance stamping
 
 from __future__ import annotations
 
-__version__ = "0.5.3"
+__version__ = "0.5.4"
 
 from code_wiki_okf.about import about_rule
 from code_wiki_okf.config import (

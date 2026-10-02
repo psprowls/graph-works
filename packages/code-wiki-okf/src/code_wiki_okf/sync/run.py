@@ -15,7 +15,7 @@ from okf_ext.shape import load_sections
 from okf_ext.writing import ApplyResult
 from okf_io import Bundle, Document, load_bundle
 
-from code_wiki_okf.config import Config
+from code_wiki_okf.config import Config, RepoConfig
 from code_wiki_okf.entities.catalog import (
     CatalogEntry,
     CatalogPage,
@@ -44,6 +44,7 @@ from code_wiki_okf.placement import (
     affected_directories,
     context_from_resource,
     filesystem_member_identity,
+    is_code_wiki_type,
 )
 from code_wiki_okf.resources import ResourceIndex, resource_index
 
@@ -186,6 +187,33 @@ def _existing_file_resources(index: ResourceIndex, repository: str) -> frozenset
     return frozenset(found)
 
 
+def _scoped_repos(config: Config, repos: frozenset[str] | None) -> tuple[RepoConfig, ...]:
+    """The configured repositories a sync may plan, write or prune."""
+    return tuple(repo for repo in config.repos if repos is None or repo.name in repos)
+
+
+def _out_of_scope_resources(bundle: Bundle, repos: frozenset[str]) -> frozenset[str]:
+    """Every existing code-wiki page resource a scoped sync must keep.
+
+    A page whose resource names a repository outside *repos* is kept, and so
+    is one whose resource cannot be parsed: a scoped sync prunes only pages it
+    can prove belong to a scoped repository.
+    """
+    kept: set[str] = set()
+    for document in bundle.concepts.values():
+        type_name = (document.fm.type or "").strip()
+        resource = document.fm.resource
+        if not is_code_wiki_type(type_name) or resource is None:
+            continue
+        try:
+            repository = context_from_resource(type_name, resource).repository
+        except PlacementError:
+            repository = None
+        if repository not in repos:
+            kept.add(resource)
+    return frozenset(kept)
+
+
 def plan_sync(
     bundle_root: Path,
     *,
@@ -194,22 +222,33 @@ def plan_sync(
     at: str,
     ignore: tuple[str, ...] = (),
     prune: tuple[str, ...] = (),
+    repos: frozenset[str] | None = None,
 ) -> SyncPlan:
     """Build and cross-check the complete immutable entity/File plan.
 
     *ignore* and *prune* are the caller's bundle filters, preserved on every reload.
     graph-works supplies its clone patterns without coupling this package to that lane.
+
+    *repos* scopes the plan to those repository names: entity writes and
+    mirrors cover only them, and every existing page of another repository
+    counts as current, so pruning never sees it. `None` plans every repository.
     """
     generated_at = _at_datetime(at)
     bundle = load_bundle(bundle_root, ignore=ignore, prune=prune)
     index = resource_index(bundle)
     entities = plan_entities(bundle, reader, config, at=at, index=index)
+    if repos is not None:
+        entities = replace(
+            entities, writes=tuple(write for write in entities.writes if write.context.repository in repos)
+        )
 
     walked = tracked_files(config)
     mirrors: list[MirrorPlan] = []
     warnings = list(entities.warnings)
     current_resources = set(entities.current_resources)
-    for repo in config.repos:
+    if repos is not None:
+        current_resources.update(_out_of_scope_resources(bundle, repos))
+    for repo in _scoped_repos(config, repos):
         sha = head_commit(repo.path)
         if sha is None:
             warnings.append(f"{repo.name}: not a git checkout, skipping")
@@ -407,16 +446,22 @@ def sync_bundle(
     dry_run: bool = False,
     ignore: tuple[str, ...] = (),
     prune: tuple[str, ...] = (),
+    repos: frozenset[str] | None = None,
 ) -> SyncResult:
     """Apply only a completely planned sync, then prune against its resource set.
 
     *ignore* and *prune* are the caller's bundle filters, preserved on every reload.
     graph-works supplies its clone patterns without coupling this package to that lane.
+
+    *repos* scopes every write -- entities, mirrors, entity and index pruning,
+    catalogs -- to those repository names, leaving another repository's pages
+    and indexes byte-identical. `None` syncs every repository.
     """
-    plan = plan_sync(bundle_root, config=config, reader=reader, at=at, ignore=ignore, prune=prune)
+    plan = plan_sync(bundle_root, config=config, reader=reader, at=at, ignore=ignore, prune=prune, repos=repos)
     bundle = load_bundle(bundle_root, ignore=ignore, prune=prune)
-    skipped_repos = tuple(repo.name for repo in config.repos if repo.name not in {item.repo for item in plan.mirrors})
-    eligible_repos = tuple(repo for repo in config.repos if repo.name not in skipped_repos)
+    scoped_repos = _scoped_repos(config, repos)
+    skipped_repos = tuple(repo.name for repo in scoped_repos if repo.name not in {item.repo for item in plan.mirrors})
+    eligible_repos = tuple(repo for repo in scoped_repos if repo.name not in skipped_repos)
     # Preserve uncertain ownership before mirror reconciliation can prune an
     # authored annotation together with its dead generated link.
     protected_indexes = tuple(
@@ -457,6 +502,7 @@ def sync_bundle(
             pages=_project_catalog_pages(bundle, plan, raw_prune),
             protected_indexes=protected_indexes,
             declarations_dir=config.declarations_dir,
+            repos=repos,
         )
         return SyncResult(
             entities=replace(
@@ -539,7 +585,7 @@ def sync_bundle(
     protected_indexes = tuple(sorted(set(protected_indexes) | {member for member, _reason in indexes.declined}))
     post_prune = load_bundle(bundle_root, ignore=ignore, prune=prune)
     catalog_plan = plan_catalogs(
-        post_prune, declarations_dir=config.declarations_dir, protected_indexes=protected_indexes
+        post_prune, declarations_dir=config.declarations_dir, protected_indexes=protected_indexes, repos=repos
     )
     catalogs = reconcile_catalogs(
         post_prune,
@@ -548,6 +594,7 @@ def sync_bundle(
         protected_indexes=protected_indexes,
         ignore=ignore,
         prune=prune,
+        repos=repos,
     )
     return replace(
         combine_results(entities, mirror, prune_result, catalogs, catalog_plan, plan.warnings), indexes=indexes

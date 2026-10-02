@@ -16,17 +16,27 @@ from config_io import RegistryError, StoreValidationError
 from graph_works_core.agent_config import AGENTS
 from graph_works_core.agent_config import show as show_agent_config
 from graph_works_core.agent_config.records import AgentName
-from graph_works_core.code_read import run_code_excerpt
+from graph_works_core.code_read import (
+    run_code_excerpt,
+    run_code_graph_neighborhood,
+    run_code_graph_search,
+    run_code_graph_tree,
+)
+from graph_works_core.lint_drift.lint import run_mechanical
 from graph_works_core.orchestrate.commands import run_orchestrate
-from graph_works_core.proposals import PAGE_STATUSES, run_proposals_read
+from graph_works_core.proposals import PAGE_STATUSES, run_proposal_checks, run_proposal_preview, run_proposals_read
+from graph_works_core.query.commands import MAX_TOP_K, MIN_TOP_K, brief_embedder, plan_query_brief
 from graph_works_core.util.commands import run_log_read
 from graph_works_core.wiki_page.citations import run_wiki_citations
 from graph_works_core.wiki_page.commands import run_page_read, run_wiki_tree
 from graph_works_core.work import commands as work
+from graph_works_core.work.affecting import run_work_affecting
 from graph_works_core.workspace import manifest
+from graph_works_core.workspace.config import load_workspace_config
 from graph_works_core.workspace.dispatch_config import run_dispatch_rules
-from graph_works_core.workspace.errors import WorkspaceError
+from graph_works_core.workspace.errors import QueryError, WorkspaceError
 from graph_works_core.workspace.layout import WorkspaceLayout
+from graph_works_core.workspace.repos import resolve_repos
 from graph_works_core.workspace.schema_read import run_schema_read
 from graph_works_wire import agent_config as wire_agent_config
 from graph_works_wire import code as wire_code
@@ -39,7 +49,7 @@ from graph_works_serve import mutations, sse
 from graph_works_serve.context import Reply, ServeContext
 from graph_works_serve.errors import Catch, call, refusal
 from graph_works_serve.hub import Hub
-from graph_works_serve.mutation_specs import ADVANCE, ARCHIVE, DECIDE
+from graph_works_serve.mutation_specs import ADVANCE, ARCHIVE, DECIDE, DECISION_ANSWER, SCAN, SECTION_WRITE
 from graph_works_serve.mutations import MutationSpec, Outcome
 from graph_works_serve.params import Param, ParamError, parse
 
@@ -265,6 +275,17 @@ def _work_list(context: ServeContext, _args: Mapping[str, object]) -> Reply:
     return call("/v1/work/list", run, _READ)
 
 
+def _work_affecting(context: ServeContext, args: Mapping[str, object]) -> Reply:
+    def run() -> Reply:
+        result = run_work_affecting(context.layout(), cast(str, args["repo"]), cast(str, args["path"]))
+        payload = wire_work.work_affecting_payload(result)
+        if result.refusal is not None:
+            return refusal("/v1/work/affecting", "unresolved", f"{result.refusal}: {result.repo}", payload=payload)
+        return Reply(200, payload)
+
+    return call("/v1/work/affecting", run, _READ)
+
+
 def _proposals(context: ServeContext, args: Mapping[str, object]) -> Reply:
     page_status = _str(args, "page_status") or "proposed"
     if page_status not in PAGE_STATUSES:
@@ -321,6 +342,32 @@ def _dispatch_explain(context: ServeContext, args: Mapping[str, object]) -> Repl
     return call("/v1/dispatch/explain", run, _ROUTED)
 
 
+def _proposal_checks(context: ServeContext, args: Mapping[str, object]) -> Reply:
+    def run() -> Reply:
+        result = run_proposal_checks(context.layout(), cast(str, args["target"]), today=mutations.now().date())
+        payload = wire_wiki.proposal_checks_payload(result)
+        if result.refusal is not None:
+            return refusal(
+                "/v1/wiki/proposal/checks", "unresolved", f"{result.refusal}: {result.target}", payload=payload
+            )
+        return Reply(200, payload)
+
+    return call("/v1/wiki/proposal/checks", run, _READ)
+
+
+def _proposal_preview(context: ServeContext, args: Mapping[str, object]) -> Reply:
+    def run() -> Reply:
+        result = run_proposal_preview(context.layout(), cast(str, args["target"]), today=mutations.now().date())
+        payload = wire_wiki.proposal_preview_payload(result)
+        if result.refusal is not None:
+            return refusal(
+                "/v1/wiki/proposal/preview", "unresolved", f"{result.refusal}: {result.target}", payload=payload
+            )
+        return Reply(200, payload)
+
+    return call("/v1/wiki/proposal/preview", run, _READ)
+
+
 def _citations(context: ServeContext, args: Mapping[str, object]) -> Reply:
     def run() -> Reply:
         result = run_wiki_citations(context.layout(), cast(str, args["id"]))
@@ -330,6 +377,55 @@ def _citations(context: ServeContext, args: Mapping[str, object]) -> Reply:
         return Reply(200, payload)
 
     return call("/v1/wiki/citations", run, _READ)
+
+
+def _code_graph_tree(context: ServeContext, args: Mapping[str, object]) -> Reply:
+    def run() -> Reply:
+        tree = run_code_graph_tree(context.layout(), cast(str, args["repo"]))
+        payload = wire_code.code_graph_tree_payload(tree)
+        if tree.refusal is not None:
+            return refusal("/v1/code-graph/tree", "unresolved", f"{tree.refusal}: {tree.repo}", payload=payload)
+        return Reply(200, payload)
+
+    return call("/v1/code-graph/tree", run, _READ)
+
+
+def _code_graph_search(context: ServeContext, args: Mapping[str, object]) -> Reply:
+    def run() -> Reply:
+        result = run_code_graph_search(
+            context.layout(),
+            cast(str, args["q"]),
+            repo=cast("str | None", args.get("repo")),
+            limit=cast(int, args["limit"]),
+        )
+        payload = wire_code.code_graph_search_payload(result)
+        if result.refusal is not None:
+            return refusal("/v1/code-graph/search", "unresolved", f"{result.refusal}: {result.repo}", payload=payload)
+        return Reply(200, payload)
+
+    return call("/v1/code-graph/search", run, _READ)
+
+
+#: A neighbourhood refusal's wire reason.
+_NEIGHBORHOOD_REFUSALS: Mapping[str, str] = MappingProxyType(
+    {"unknown-page": "unresolved", "not-in-graph": "unresolved", "no-resource": "refused", "no-graph": "refused"}
+)
+
+
+def _code_graph_neighborhood(context: ServeContext, args: Mapping[str, object]) -> Reply:
+    def run() -> Reply:
+        result = run_code_graph_neighborhood(context.layout(), cast(str, args["id"]), cast(int, args["depth"]))
+        payload = wire_code.code_graph_neighborhood_payload(result)
+        if result.refusal is None:
+            return Reply(200, payload)
+        return refusal(
+            "/v1/code-graph/neighborhood",
+            _NEIGHBORHOOD_REFUSALS[result.refusal],
+            f"{result.refusal}: {result.id}",
+            payload=payload,
+        )
+
+    return call("/v1/code-graph/neighborhood", run, (*_READ, Catch(ValueError, "usage", 1)))
 
 
 #: An excerpt refusal's wire reason and, where it differs from the reason's default, its status.
@@ -359,6 +455,39 @@ def _excerpt(context: ServeContext, args: Mapping[str, object]) -> Reply:
         return refusal("/v1/code/excerpt", reason, message, payload=payload, status=status)
 
     return call("/v1/code/excerpt", run, (*_READ, Catch(ValueError, "usage", 1)))
+
+
+def _query_brief(context: ServeContext, args: Mapping[str, object]) -> Reply:
+    """Retrieval only (D-001): no model call, and no embedder is a lexical brief, not an error."""
+
+    def run() -> Reply:
+        brief = plan_query_brief(
+            cast(str, args["q"]),
+            context.layout(),
+            embedder=brief_embedder(),
+            top_k=cast(int, args["limit"]),
+            page=_str(args, "page"),
+        )
+        payload = wire_wiki.query_brief_payload(brief)
+        if brief.refusal is not None:
+            return refusal("/v1/query/brief", "unresolved", f"{brief.refusal}: {brief.page}", payload=payload)
+        return Reply(200, payload)
+
+    # QueryError is a WorkspaceError, so it is matched before `_READ`'s workspace catch.
+    return call("/v1/query/brief", run, (Catch(QueryError, "refused", 1), *_READ, Catch(ValueError, "usage", 1)))
+
+
+def _wiki_lint(context: ServeContext, _args: Mapping[str, object]) -> Reply:
+    """Mechanical lint only (D-001): no judge, so `semantic` is null."""
+
+    def run() -> Reply:
+        layout = context.layout()
+        report = run_mechanical(
+            layout, load_workspace_config(layout), today=mutations.now().date(), repo_roots=resolve_repos(layout)
+        )
+        return Reply(200, wire_wiki.wiki_lint_payload(report))
+
+    return call("/v1/wiki/lint", run, (*_READ, Catch(ValueError, "workspace", 4)))
 
 
 EVENTS_ROUTE = RouteSpec(
@@ -441,12 +570,22 @@ ROUTES: tuple[RouteSpec, ...] = (
         ),
         _agent_config,
     ),
+    RouteSpec(
+        "GET",
+        "/v1/work/affecting",
+        "Active work items in one repository whose affects contain, or sit under, a path.",
+        (
+            Param("repo", "str", required=True, summary="Declared repository name."),
+            Param("path", "str", required=True, summary="Repo-relative POSIX path, file or directory."),
+        ),
+        _work_affecting,
+    ),
     RouteSpec("GET", "/v1/work/list", "Every active work item as a board row, sorted by path.", (), _work_list),
     RouteSpec(
         "GET",
         "/v1/wiki/proposals",
         "Proposals by page_status (the gw wiki proposals --json array when proposed).",
-        (Param("page_status", "str", summary="proposed (default)|approved|rejected|created."),),
+        (Param("page_status", "str", summary="proposed (default)|approved|rejected|superseded|created."),),
         _proposals,
     ),
     RouteSpec(
@@ -458,6 +597,20 @@ ROUTES: tuple[RouteSpec, ...] = (
         "The root index's ## sections with ### nested, and the pages under each.",
         (),
         _wiki_tree,
+    ),
+    RouteSpec(
+        "GET",
+        "/v1/wiki/proposal/checks",
+        "Mechanical review checks for one proposal: schema, citations, code drift, related ADRs.",
+        (Param("target", "str", required=True, summary="The proposal's target page path."),),
+        _proposal_checks,
+    ),
+    RouteSpec(
+        "GET",
+        "/v1/wiki/proposal/preview",
+        "The page a proposal would produce, its current target and a unified diff; writes nothing.",
+        (Param("target", "str", required=True, summary="The proposal's target page path."),),
+        _proposal_preview,
     ),
     RouteSpec(
         "GET",
@@ -477,6 +630,34 @@ ROUTES: tuple[RouteSpec, ...] = (
             Param("end", "int", minimum=1, summary="Last cited line; defaults to start."),
         ),
         _excerpt,
+    ),
+    RouteSpec(
+        "GET",
+        "/v1/code-graph/tree",
+        "Every page under one repository's code-graph folder, index documents included, as a flat parent-linked list.",
+        (Param("repo", "str", required=True, summary="Declared repository name."),),
+        _code_graph_tree,
+    ),
+    RouteSpec(
+        "GET",
+        "/v1/code-graph/search",
+        "Code-graph pages matching a term: exact title, then title prefix, then any substring.",
+        (
+            Param("q", "str", required=True, summary="Search term, case-insensitive."),
+            Param("repo", "str", summary="Limit to one declared repository."),
+            Param("limit", "int", default=50, minimum=1, summary="Maximum hits."),
+        ),
+        _code_graph_search,
+    ),
+    RouteSpec(
+        "GET",
+        "/v1/code-graph/neighborhood",
+        "A code-graph page's depends-on/used-by neighbourhood to depth 1-3 (cap 200 nodes); not live.",
+        (
+            Param("id", "str", required=True, summary="Extensionless bundle-relative page id."),
+            Param("depth", "int", default=1, minimum=1, summary="Hops, 1-3."),
+        ),
+        _code_graph_neighborhood,
     ),
     RouteSpec(
         "GET",
@@ -502,7 +683,28 @@ ROUTES: tuple[RouteSpec, ...] = (
         (),
         _open_decisions,
     ),
+    RouteSpec(
+        "GET",
+        "/v1/query/brief",
+        "Retrieval brief for one question: hybrid when the embedder works, else lexical; no model call.",
+        (
+            Param("q", "str", required=True, summary="The question."),
+            Param("page", "str", summary="Pin this page id first, then its matching links."),
+            Param(
+                "limit",
+                "int",
+                default=5,
+                minimum=MIN_TOP_K,
+                summary=f"Pages to return, {MIN_TOP_K}-{MAX_TOP_K}.",
+            ),
+        ),
+        _query_brief,
+    ),
+    RouteSpec("GET", "/v1/wiki/lint", "Mechanical wiki lint findings and counts; no model.", (), _wiki_lint),
     *mutation_routes(ADVANCE),
     *mutation_routes(ARCHIVE),
     *mutation_routes(DECIDE),
+    *mutation_routes(DECISION_ANSWER),
+    *mutation_routes(SECTION_WRITE),
+    *mutation_routes(SCAN),
 )

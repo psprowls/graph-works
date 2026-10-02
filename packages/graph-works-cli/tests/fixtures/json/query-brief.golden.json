@@ -9,5 +9,9 @@
         "rrf": 0.2
       }
     }
-  ]
+  ],
+  "retrieval": "hybrid",
+  "page": null,
+  "refusal": null,
+  "warnings": []
 }

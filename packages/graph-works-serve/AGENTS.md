@@ -13,7 +13,7 @@ The loopback HTTP sidecar. Band: interface (above `graph-works-core`, beside
 | `guard` | pure ASGI token/Host/CORS middleware and its pure checks. |
 | `routes` | `RouteSpec`, handlers, and `ROUTES`. |
 | `mutations` | shared plan/apply engine, digest, clock seam, and lock. |
-| `mutation_specs` | concrete advance, archive, and proposal-decision adapters. |
+| `mutation_specs` | concrete advance, archive, proposal-decision, decision-answer, section-write, and repository-scan adapters. |
 | `catalog` | route description payload. |
 | `app` | `build_app()`; the sole Starlette import. |
 | `discovery_file` | sidecar record lifecycle and liveness checks. |
@@ -24,6 +24,8 @@ The loopback HTTP sidecar. Band: interface (above `graph-works-core`, beside
 - `app.py` is the only Starlette import and `main.py` is the only uvicorn import; the boundary test enforces this.
 - Adding a route means adding a `RouteSpec` to `routes.ROUTES` and regenerating `tests/fixtures/routes.golden.json`.
 - `/v1/wiki/citations` has no event kind of its own: citations derive from a page, so a `page` event already means they may be stale. `/v1/code/excerpt` is not live -- the sidecar does not watch code repositories.
+- `/v1/code-graph/neighborhood` is not live, because the sidecar does not watch `code.db`. `/v1/wiki/lint` is mechanical only (no model call). `/v1/query/brief` is lexical when the embedder fails, and its payload says so (`retrieval: "lexical"`).
+- Read refusals use the error envelope with the projection as `payload`: `unknown-page`, `unknown-repository`, `no-proposal` and `not-in-graph` answer `404` (`unresolved`); `no-resource` and `no-graph` answer `422` (`refused`).
 - `graph-works-cli` is a dev-group dependency for twin tests only.
 - `next` is `dry_run=True`, so `normalized` is always `null`.
 - `discovery_file` uses POSIX `fcntl.flock` to serialize record replacement
@@ -87,7 +89,7 @@ execution environment; both Linux and Windows typing arms are checked.
 
 ## Mutation routes
 
-All six mutation routes accept `POST` with a JSON body and require a header-only
+All twelve mutation routes accept `POST` with a JSON body and require a header-only
 `Authorization: Bearer` token. Query tokens are accepted only on `GET /v1/events`.
 
 | Operation | Plan | Apply |
@@ -95,6 +97,11 @@ All six mutation routes accept `POST` with a JSON body and require a header-only
 | Advance work | `/v1/work/advance/plan` | `/v1/work/advance/apply` |
 | Archive work | `/v1/work/archive/plan` | `/v1/work/archive/apply` |
 | Decide proposal | `/v1/wiki/proposal/decide/plan` | `/v1/wiki/proposal/decide/apply` |
+| Answer decision | `/v1/work/decision/answer/plan` | `/v1/work/decision/answer/apply` |
+| Write section | `/v1/wiki/section/plan` | `/v1/wiki/section/apply` |
+| Scan one repository | `/v1/scan/plan` | `/v1/scan/apply` |
+
+Proposal decide takes `target` and `decision` (`approve`, `reject` or `supersede`), plus `superseded_by` (required with `supersede`, `400` otherwise) and an optional reviewer `note`. A body with neither field keeps its earlier shape and digest. Section write replaces one existing prose-owned `##` section; scan is structural only (`narrate=False`) and scoped to one declared repository.
 
 `plan` returns `{as_of, digest, plan}` without writing. The digest contract is:
 
@@ -131,6 +138,21 @@ every apply 409 — fix the projection, never add a digest exclusion.
 | `incomplete-apply` | `500` |
 | Malformed body | `400` |
 | Non-JSON `Content-Type` | `415` |
+
+## Read routes added for gw-orca
+
+All `GET`, read-only, token-guarded like the other reads.
+
+| Route | Answers |
+|---|---|
+| `/v1/wiki/lint` | Mechanical lint findings with counts. |
+| `/v1/query/brief` | The retrieval brief for a query, optionally pinned to a `page`; hybrid or lexical. |
+| `/v1/code-graph/tree` | One repository's scanned code-graph tree. |
+| `/v1/code-graph/search` | Search over a repository's scanned code-graph pages. |
+| `/v1/code-graph/neighborhood` | The depends-on neighbourhood of one code-graph page, depth 1..3. |
+| `/v1/work/affecting` | Active work items in a repository whose `affects` meet a path. |
+| `/v1/wiki/proposal/checks` | Mechanical review checks for one proposal. |
+| `/v1/wiki/proposal/preview` | The would-be page a promotion produces, with its diff. |
 
 Advance always passes `infer_worktree=False`. Archive uses `wiki_slugs=()`;
 omitted or `null` paths mean sweep, while an empty paths list is `400`.

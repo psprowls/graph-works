@@ -390,7 +390,8 @@ def test_the_documented_schemas_surface_is_present() -> None:
     to compose against -- the capability may not import this one.
     `declared_members` is the fourth, and `schemas.unresolved-member` the third
     code: the `x-okf-member` annotation, checked by `schema_rule` itself.
-    `declared_about` is the fifth: the `x-okf-about` mandate `code_wiki_okf.about_rule` composes against."""
+    `declared_about` is the fifth: the `x-okf-about` mandate `code_wiki_okf.about_rule` composes against.
+    `declares_property` is the sixth: whether a type's schema, through `$ref`, declares a field."""
     from okf_ext import schemas
 
     assert callable(schemas.load_schemas)
@@ -398,6 +399,7 @@ def test_the_documented_schemas_surface_is_present() -> None:
     assert callable(schemas.declared_directories)
     assert callable(schemas.declared_members)
     assert callable(schemas.declared_about)
+    assert callable(schemas.declares_property)
     assert dataclasses.is_dataclass(schemas.AboutMandate)
     assert schemas.TOPIC == "schemas"
     assert schemas.CODES == ("schemas.invalid", "schemas.no-schema-for-type", "schemas.unresolved-member")
@@ -653,10 +655,11 @@ def test_the_documented_proposals_surface_is_present() -> None:
         "proposal_path",
         "apply",
         "render_body",
+        "render_write",
     ):
         assert callable(getattr(proposals, name))
     assert proposals.PROPOSAL_TYPE == "Proposal"
-    assert proposals.PAGE_STATUSES == ("proposed", "approved", "rejected", "created")
+    assert proposals.PAGE_STATUSES == ("proposed", "approved", "rejected", "superseded", "created")
     assert proposals.OWNED_PROVENANCE_KEYS == ("generated", "sources", "verified")
     assert proposals.Proposal.__dataclass_fields__.keys() == {
         "member",
@@ -669,6 +672,7 @@ def test_the_documented_proposals_surface_is_present() -> None:
         "sources",
         "verified",
         "malformed",
+        "superseded_by",
     }
     assert proposals.Write.__dataclass_fields__.keys() == {"member", "mode", "text", "frontmatter", "body", "digest"}
     assert proposals.PageRender.__dataclass_fields__.keys() == {"type", "body", "frontmatter"}

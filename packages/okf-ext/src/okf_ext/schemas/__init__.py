@@ -33,10 +33,11 @@ from okf_ext.schemas.loader import (
     declared_about,
     declared_directories,
     declared_members,
+    declares_property,
     load_schemas,
 )
 from okf_ext.schemas.model import AboutMandate, SchemaError, SchemaSet
-from okf_ext.schemas.rule import CODES, TOPIC, schema_rule
+from okf_ext.schemas.rule import CODES, TOPIC, frontmatter_errors, schema_rule
 
 #: `schema/` is a **documented convention, not magic** -- nothing here
 #: discovers it. A caller who keeps schemas inside the bundle they describe
@@ -62,6 +63,8 @@ __all__ = [
     "declared_about",
     "declared_directories",
     "declared_members",
+    "declares_property",
+    "frontmatter_errors",
     "load_schemas",
     "schema_rule",
 ]

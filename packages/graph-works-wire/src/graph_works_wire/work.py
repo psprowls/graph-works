@@ -30,6 +30,7 @@ from graph_works_core.orchestrate.reroute import RerouteResult
 from graph_works_core.orchestrate.stage_advance import StageAdvance
 from graph_works_core.orchestrate.wait import WaitResult
 from graph_works_core.orchestrate.workspace_prepare import WorkspacePrepareResult
+from graph_works_core.work.affecting import WorkAffecting
 from graph_works_core.work.carried import CarriedContext
 from graph_works_core.work.commands import (
     ActiveWorkTouch,
@@ -58,7 +59,7 @@ from graph_works_core.workspace.dispatch import DispatchResolution
 from graph_works_core.workspace.finish import FinishTarget
 from work_tracker_okf.workflow import RouteResult, blocker_messages
 
-from graph_works_wire._jsonable import jsonable
+from graph_works_wire._jsonable import commit_payload, jsonable
 from graph_works_wire.config import rule_payload
 
 # ---------------------------------------------------------------------------
@@ -78,7 +79,7 @@ def obligation_payload(result: ObligationRecord) -> dict[str, Any]:
         "applied": application is not None,
         "rolled_back": False if application is None else application.rolled_back,
         "failures": [] if application is None else list(application.failures),
-        "commit": _commit(None if application is None else application.commit),
+        "commit": commit_payload(None if application is None else application.commit),
         "warnings": [] if application is None else list(application.warnings),
         "refusal": None if plan.refusal is None else {"reason": plan.refusal, "detail": plan.detail},
     }
@@ -221,20 +222,7 @@ def _application(application: object | None) -> dict[str, Any]:
         "applied": viewed is not None,
         "rolled_back": False if viewed is None else viewed.rolled_back,
         "failures": [] if viewed is None else list(viewed.failures),
-        "commit": _commit(None if viewed is None else viewed.commit),
-    }
-
-
-def _commit(outcome: CommitOutcome | None) -> dict[str, Any] | None:
-    """Project a workspace commit outcome as plain JSON data."""
-    if outcome is None:
-        return None
-    return {
-        "status": outcome.status,
-        "sha": outcome.sha,
-        "subject": outcome.subject,
-        "paths": list(outcome.paths),
-        "reason": outcome.reason,
+        "commit": commit_payload(None if viewed is None else viewed.commit),
     }
 
 
@@ -584,7 +572,7 @@ def next_payload(result: NextResult, *, bundle_root: Path) -> dict[str, Any]:
         "child_rollup": _rollup(result.child_rollup),
         "descent": descent_payload(result),
         "normalized": normalized_payload(result),
-        "commits": [_commit(commit) for commit in result.application.commits],
+        "commits": [commit_payload(commit) for commit in result.application.commits],
         "guidance": _guidance_entries(result.guidance),
         "guidance_warnings": [] if result.guidance is None else list(result.guidance.warnings),
         "guidance_file": None if result.guidance_file is None else str(result.guidance_file),
@@ -680,7 +668,7 @@ def advance_payload(result: StageAdvance, path: str) -> dict[str, Any]:
         "applied": application is not None,
         "rolled_back": False if application is None else application.rolled_back,
         "failures": [] if application is None else list(application.failures),
-        "commit": _commit(None if application is None else application.commit),
+        "commit": commit_payload(None if application is None else application.commit),
         "warnings": list(result.warnings) + ([] if application is None else list(application.warnings)),
         "refusal": None if plan.refusal is None else {"reason": plan.refusal, "detail": plan.detail},
         "results_path": None if result.results_path is None else str(result.results_path),
@@ -773,7 +761,7 @@ def placement_payload(result: PlacementRecord) -> dict[str, Any]:
         "rolled_back": False if application is None else application.rolled_back,
         "failures": [] if application is None else list(application.failures),
         "warnings": list(result.warnings),
-        "commit": _commit(application.commit if application is not None else result.pending_commit),
+        "commit": commit_payload(application.commit if application is not None else result.pending_commit),
         "refusal": None if plan.refusal is None else {"reason": plan.refusal, "detail": plan.detail},
         "repo_note": result.repo_note,
     }
@@ -793,7 +781,7 @@ def baseline_payload(result: BaselineRecord) -> dict[str, Any]:
         "rolled_back": False if application is None else application.rolled_back,
         "failures": [] if application is None else list(application.failures),
         "warnings": [] if application is None else list(application.warnings),
-        "commit": _commit(None if application is None else application.commit),
+        "commit": commit_payload(None if application is None else application.commit),
         "refusal": None if plan.refusal is None else {"reason": plan.refusal, "detail": plan.detail},
         "repo_note": result.repo_note,
     }
@@ -857,7 +845,7 @@ def file_payload(outcome: FilingRun) -> dict[str, Any]:
         "applied": application is not None and application.ok and bool(application.written),
         "rolled_back": False if application is None else application.rolled_back,
         "failures": [] if application is None else list(application.failures),
-        "commit": _commit(None if application is None else application.commit),
+        "commit": commit_payload(None if application is None else application.commit),
     }
 
 
@@ -884,23 +872,32 @@ def status_payload(report: StatusReport) -> dict[str, Any]:
     }
 
 
+def _work_row(item: WorkItem) -> dict[str, Any]:
+    return {
+        "path": item.path,
+        "type": item.type,
+        "title": item.title,
+        "work_status": item.work_status,
+        "phase": item.phase,
+        "effort": item.effort,
+        "owner": item.owner,
+        "parent": item.parent_path,
+        "updated": item.updated,
+    }
+
+
 def work_list_payload(items: Sequence[WorkItem]) -> dict[str, Any]:
     """`/v1/work/list`: the board's rows. `parent` is the parent item's canonical path or null."""
+    return {"items": [_work_row(item) for item in items]}
+
+
+def work_affecting_payload(result: WorkAffecting) -> dict[str, Any]:
+    """`/v1/work/affecting`: the board rows whose `affects` meet a path, each carrying only its matching entries."""
     return {
-        "items": [
-            {
-                "path": item.path,
-                "type": item.type,
-                "title": item.title,
-                "work_status": item.work_status,
-                "phase": item.phase,
-                "effort": item.effort,
-                "owner": item.owner,
-                "parent": item.parent_path,
-                "updated": item.updated,
-            }
-            for item in items
-        ]
+        "repo": result.repo,
+        "path": result.path,
+        "items": [{**_work_row(row.item), "affects": list(row.matching)} for row in result.rows],
+        "refusal": result.refusal,
     }
 
 
@@ -932,7 +929,7 @@ def regen_index_payload(result: RegenIndexesResult) -> dict[str, Any]:
         "applied": application is not None,
         "rolled_back": False if application is None else application.rolled_back,
         "failures": [] if application is None else list(application.failures),
-        "commit": _commit(None if application is None else application.commit),
+        "commit": commit_payload(None if application is None else application.commit),
     }
 
 
@@ -970,7 +967,7 @@ def archive_payload(run: ArchiveRun, *, dry_run: bool) -> dict[str, Any]:
         "warnings": [*run.plan.warnings, *(() if result is None else result.warnings)],
         "refusals": [_refusal(refusal) for refusal in run.plan.refusals],
         **_application(result),
-        "wiki_commit": _commit(run.wiki_commit),
+        "wiki_commit": commit_payload(run.wiki_commit),
         "pointer_cleared": run.pointer_cleared,
         "logged": run.logged,
         "wiki": _wiki_archive(run),

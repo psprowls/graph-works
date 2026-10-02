@@ -255,7 +255,7 @@ PROPAGATOR_ACTOR = producer_actor("graph-works-core")
 #: anyway, and pre-filtering saves the judging call that produced the refusal.
 #: `_settled_targets` folds in a second reason — a malformed proposal — for the
 #: same purpose; see its docstring.
-HUMAN_DECIDED: frozenset[str] = frozenset({"approved", "rejected", "created"})
+HUMAN_DECIDED: frozenset[str] = frozenset({"approved", "rejected", "superseded", "created"})
 
 
 @dataclass(frozen=True, slots=True)

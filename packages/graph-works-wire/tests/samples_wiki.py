@@ -11,9 +11,20 @@ from types import SimpleNamespace as ns
 from graph_works_core.guidance.claims import ClaimRow, ClaimsRefresh, SkippedEntry
 from graph_works_core.guidance.closure import Closure, ClosureEntry, MatchedClaim
 from graph_works_core.guidance.commands import ClaimsClosureRun, ClaimsShow
-from graph_works_core.proposals import ProposalDecideRun, ProposalFileRun, ProposalRefusal
+from graph_works_core.proposals import (
+    ProposalCheck,
+    ProposalChecks,
+    ProposalDecideRun,
+    ProposalFileRun,
+    ProposalPreview,
+    ProposalRefusal,
+)
+from graph_works_core.scan.commands import StructuralSummary
+from graph_works_core.scan.repo_scan import RepoScanRun
 from graph_works_core.wiki_page.citations import Citation, CitationCandidate, WikiCitations
 from graph_works_core.wiki_page.commands import PageLink, PageRead, TreeNode, TreePage, WikiTree
+from graph_works_core.wiki_page.section import SectionWriteRun
+from graph_works_core.workspace.commits import CommitOutcome
 from graph_works_wire import wiki
 from okf_ext.proposals import ApplyResult, DecisionPlan, ProposalPlan, Write, WriteFailure
 
@@ -98,6 +109,9 @@ def proposal_decide(*, applied: bool, found: bool = True) -> ProposalDecideRun:
         plan=DecisionPlan(Path("/ws/okf"), "proposals/a.md", "approved", (write,), ()),
         refusals=(),
         result=ApplyResult(written=("proposals/a.md",), failed=(), skipped=()) if applied else None,
+        commit=CommitOutcome("committed", "abc123", "workspace: approve proposal a", ("okf/proposals/a.md",), None)
+        if applied
+        else None,
     )
 
 
@@ -123,6 +137,53 @@ def proposal_file(*, applied: bool) -> ProposalFileRun:
 
 
 WIKI: dict[str, tuple[Callable[[], object], ...]] = {
+    "wiki.proposal_checks_payload": (
+        lambda: wiki.proposal_checks_payload(
+            ProposalChecks(
+                "docs/explanations/x.md",
+                "proposals/x.md",
+                (
+                    ProposalCheck("schema", "pass", ()),
+                    ProposalCheck("citations", "fail", ("missing source: /sources/one.md",)),
+                    ProposalCheck("code-drift", "skipped", ()),
+                    ProposalCheck("related-adrs", "warn", ("adrs/2026-01-01-x#D1: c",)),
+                ),
+                None,
+            )
+        ),
+        lambda: wiki.proposal_checks_payload(ProposalChecks("docs/nope.md", None, (), "no-proposal")),
+    ),
+    "wiki.proposal_preview_payload": (
+        lambda: wiki.proposal_preview_payload(
+            ProposalPreview(
+                "docs/explanations/x.md",
+                "proposals/x.md",
+                "update",
+                "docs/explanations/x.md",
+                "new\n",
+                "old\n",
+                "--- a/docs/explanations/x.md\n+++ b/docs/explanations/x.md\n@@ -1 +1 @@\n-old\n+new\n",
+                (),
+                None,
+            )
+        ),
+        lambda: wiki.proposal_preview_payload(
+            ProposalPreview(
+                "docs/explanations/x.md",
+                "proposals/x.md",
+                "create",
+                None,
+                None,
+                None,
+                None,
+                (ProposalRefusal("proposals/x.md", "bad", "detail"),),
+                None,
+            )
+        ),
+        lambda: wiki.proposal_preview_payload(
+            ProposalPreview("docs/nope.md", None, None, None, None, None, None, (), "no-proposal")
+        ),
+    ),
     "wiki.citations_payload": (
         lambda: wiki.citations_payload(
             WikiCitations(
@@ -195,6 +256,24 @@ WIKI: dict[str, tuple[Callable[[], object], ...]] = {
             structural=STRUCTURAL,
         ),
     ),
+    "wiki.repo_scan_payload": (
+        lambda: wiki.repo_scan_payload(RepoScanRun("alpha", STRUCTURAL, None, None)),
+        lambda: wiki.repo_scan_payload(
+            RepoScanRun(
+                "alpha",
+                STRUCTURAL,
+                None,
+                None,
+                applied=True,
+                commit=CommitOutcome(
+                    "committed", "abc123", "workspace: scan alpha", ("okf/code-graph/alpha.md",), None
+                ),
+            )
+        ),
+        lambda: wiki.repo_scan_payload(
+            RepoScanRun("nope", StructuralSummary(), "unknown-repository", "'nope' is not a declared repository")
+        ),
+    ),
     "wiki.scan_apply_payload": (
         lambda: wiki.scan_apply_payload(ns(narrated=1, sections_filled=0, stamped=2, entity_errors=("x",))),
     ),
@@ -205,7 +284,24 @@ WIKI: dict[str, tuple[Callable[[], object], ...]] = {
     ),
     "wiki.query_brief_payload": (
         lambda: wiki.query_brief_payload(
-            ns(query="why", top_pages=(ns(path="a.md", excerpt="x", search_scores={"bm25": 1.0}),))
+            ns(
+                query="why",
+                top_pages=(ns(path="a.md", excerpt="x", search_scores={"bm25": 1.0}),),
+                retrieval="hybrid",
+                page=None,
+                refusal=None,
+                warnings=(),
+            )
+        ),
+        lambda: wiki.query_brief_payload(
+            ns(
+                query="why",
+                top_pages=(),
+                retrieval="lexical",
+                page="concepts/nope",
+                refusal="unknown-page",
+                warnings=("embedding unavailable: RuntimeError: no credentials",),
+            )
         ),
     ),
     "wiki.query_payload": (
@@ -223,6 +319,10 @@ WIKI: dict[str, tuple[Callable[[], object], ...]] = {
     "wiki.lint_payload": (
         lambda: wiki.lint_payload(lint_report(oldest=True)),
         lambda: wiki.lint_payload(lint_report(oldest=False)),
+    ),
+    "wiki.wiki_lint_payload": (
+        lambda: wiki.wiki_lint_payload(lint_report(oldest=True)),
+        lambda: wiki.wiki_lint_payload(lint_report(oldest=False)),
     ),
     "wiki.drift_brief_payload": (
         lambda: wiki.drift_brief_payload(
@@ -301,6 +401,7 @@ WIKI: dict[str, tuple[Callable[[], object], ...]] = {
                 page_status="proposed",
                 sources=({"resource": "s.md"},),
                 verified=({"by": "human"},),
+                superseded_by=None,
                 malformed=None,
             ),
             mode="create",
@@ -318,6 +419,7 @@ WIKI: dict[str, tuple[Callable[[], object], ...]] = {
                         page_status="proposed",
                         sources=(),
                         verified=(),
+                        superseded_by="/concepts/b.md",
                         malformed="missing target",
                     ),
                     mode="update",
@@ -330,6 +432,29 @@ WIKI: dict[str, tuple[Callable[[], object], ...]] = {
         lambda: wiki.proposal_decide_payload(proposal_decide(applied=False)),
         lambda: wiki.proposal_decide_payload(proposal_decide(applied=True)),
         lambda: wiki.proposal_decide_payload(proposal_decide(applied=False, found=False)),
+    ),
+    "wiki.section_write_payload": (
+        lambda: wiki.section_write_payload(SectionWriteRun("docs/x", "Context", "\nold\n", "\nnew\n", None)),
+        lambda: wiki.section_write_payload(
+            SectionWriteRun(
+                "docs/x",
+                "Context",
+                "\nold\n",
+                "\nnew\n",
+                None,
+                applied=True,
+                written=("docs/x.md",),
+                commit=CommitOutcome(
+                    "committed", "abc123", "workspace: write docs/x section Context", ("okf/docs/x.md",), None
+                ),
+            )
+        ),
+        lambda: wiki.section_write_payload(
+            SectionWriteRun("docs/x", "Files", "\ngen\n", "\ngen\n", "generated-section")
+        ),
+        lambda: wiki.section_write_payload(
+            SectionWriteRun("docs/x", "Context", "", "", None, applied=True, failures=("docs/x.md: io -- denied",))
+        ),
     ),
     "wiki.proposal_file_payload": (
         lambda: wiki.proposal_file_payload(proposal_file(applied=False)),

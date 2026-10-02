@@ -15,13 +15,15 @@ a module whose character is worth keeping. This is `body`'s write-side
 counterpart. `okf_ext.writing` stays what it is -- the file-level probe ->
 stage -> commit engine, one layer below.
 
-Imports stdlib only. Nothing here reads a file, and nothing here knows what a
+Imports stdlib and `okf_ext.body` only. Nothing here reads a file, and nothing here knows what a
 bundle or a document is.
 """
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
+
+from okf_ext.body import find_section, split_lines
 
 #: The three line terminators `okf_ext.body.split_lines` can leave on a line.
 CRLF, LF, CR = "\r\n", "\n", "\r"
@@ -165,3 +167,36 @@ __all__ = [
     "needs_gap",
     "replace",
 ]
+
+
+def splice_sections(body: str, sections: Mapping[str, str]) -> tuple[str, int]:
+    """*body* with each named section's lines replaced. Returns `(body, filled)`.
+
+    Sections are located and replaced one at a time against the running body:
+    every replace shifts the line numbers under it, so a span computed against
+    the original would write into the wrong place from the second edit onward.
+
+    The level comes from the key, which already carries it (`"## Purpose"`).
+    `find_section` is level-agnostic by default, so **keys must carry their `#`
+    prefix**: a bare key with no leading `#` silently falls back to
+    level-agnostic matching instead of raising. A missing section is skipped.
+
+    `okf_ext.generators.plan_regenerate` is deliberately not the writer here. It
+    only writes what a declaration *grants*, and a prose section is by definition
+    what the declaration does not grant.
+    """
+    newline = dominant_newline(body)
+    current = body
+    filled = 0
+    for key in sorted(sections):
+        heading = key.lstrip("#").strip()
+        level = len(key) - len(key.lstrip("#"))
+        section = find_section(current, heading, level=level or None)
+        if section is None:
+            continue
+        lines = split_lines(current)
+        trailing = has_trailing_newline(lines)
+        replaced = replace(lines, section.body_start, section.stop, ["", *bare_lines(sections[key]), ""], newline)
+        current = assemble(replaced, newline, trailing)
+        filled += 1
+    return current, filled

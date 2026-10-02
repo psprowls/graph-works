@@ -9,7 +9,7 @@ never an exception.
 
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from typing import Any
 
 from jsonschema.exceptions import ValidationError
@@ -72,6 +72,30 @@ def _member_target(value: object) -> str | None:
     return value[1:] if value.startswith("/") else value
 
 
+def _validators(schema_set: SchemaSet) -> dict[str, Any]:
+    """One validator per type in *schema_set*, sharing one registry."""
+    registry = build_registry(schema_set.documents)
+    return {
+        type_name: validator_for(dict(schema))(dict(schema), registry=registry)
+        for type_name, schema in schema_set.schemas.items()
+    }
+
+
+def frontmatter_errors(schema_set: SchemaSet, type_name: str, data: Mapping[str, Any]) -> tuple[str, ...] | None:
+    """Schema errors for one frontmatter mapping, or `None` when *type_name* has no schema.
+
+    One `"<where>: <message>"` per error (`<where>` is the `` at `key` `` clause,
+    omitted at the root), in the same order `schema_rule` reports them.
+    """
+    validator = _validators(schema_set).get(type_name)
+    if validator is None:
+        return None
+    return tuple(
+        f"{where.strip()}: {error.message}" if (where := _where(error)) else error.message
+        for error in sorted(validator.iter_errors(dict(data)), key=_sort_key)
+    )
+
+
 def schema_rule(schema_set: SchemaSet, *, severity: Severity = "warn") -> Rule:
     """Build an `okf_io.Rule` that validates frontmatter against *schema_set*.
 
@@ -100,11 +124,7 @@ def schema_rule(schema_set: SchemaSet, *, severity: Severity = "warn") -> Rule:
     Honours `RuleContext.scope`: this rule is per-document, so a narrowed pass
     asks the same question of fewer documents.
     """
-    registry = build_registry(schema_set.documents)
-    validators: dict[str, Any] = {
-        type_name: validator_for(dict(schema))(dict(schema), registry=registry)
-        for type_name, schema in schema_set.schemas.items()
-    }
+    validators = _validators(schema_set)
     members = declared_members(schema_set)
     set_name = schema_set.root.name or str(schema_set.root)
 

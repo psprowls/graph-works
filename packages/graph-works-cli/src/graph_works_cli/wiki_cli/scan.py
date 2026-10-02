@@ -19,10 +19,11 @@ from graph_works_core.scan.commands import (
     scan_cache_dir,
     scan_results_dir,
 )
+from graph_works_core.scan.repo_scan import run_repo_scan
 from graph_works_core.scan.scan_contract import UnsupportedWorklistSchema
 from graph_works_core.workspace.config import load_workspace_config
 from graph_works_core.workspace.errors import ScanError
-from graph_works_wire.wiki import scan_apply_payload, scan_emit_payload, scan_normal_payload
+from graph_works_wire.wiki import repo_scan_payload, scan_apply_payload, scan_emit_payload, scan_normal_payload
 
 from graph_works_cli import exit_codes
 from graph_works_cli.json_output import encode
@@ -55,9 +56,19 @@ def scan(
     short_head: str = typer.Option("", "--short-head"),
     json_output: bool = typer.Option(False, "--json"),
     workspace: str = typer.Option("", "--workspace"),
+    repo: str = typer.Option(
+        "", "--repo", help="Structurally scan only this declared repository (needs --no-narrate)."
+    ),
+    dry_run: bool = typer.Option(False, "--dry-run", help="With --repo: plan the scan and write nothing."),
 ) -> None:
     """Run scan locally, emit its worklist, or apply an external result directory."""
     # Click's usage code below is deliberately not exit_codes.STALE.
+    if repo and (not no_narrate or emit_worklist or apply or results_dir):
+        exit_error(
+            "--repo runs a structural scan: pass --no-narrate, and no --emit-worklist/--apply/--results-dir", code=2
+        )
+    if dry_run and not repo:
+        exit_error("--dry-run is only supported with --repo", code=2)
     if emit_worklist and apply:
         exit_error("--emit-worklist and --apply are mutually exclusive", code=2)
     if no_narrate and (emit_worklist or apply):
@@ -109,6 +120,22 @@ def scan(
         config = load_workspace_config(layout)
     except (OSError, ValueError) as exc:
         exit_error(str(exc), cause=exc)
+
+    if repo:
+        try:
+            run = run_repo_scan(layout, config, repo=repo, at=now, today=now.date(), dry_run=dry_run)
+        except (OSError, ScanError, ValueError) as exc:
+            exit_error(str(exc), cause=exc)
+        if json_output:
+            _emit_json(repo_scan_payload(run))
+        else:
+            for warning in run.structural.warnings:
+                typer.echo(f"Warning: {warning}", err=True)
+        if run.refusal is not None:
+            exit_error(f"scan --repo {repo}: {run.refusal}: {run.detail}")
+        if run.structural.errors:
+            exit_error(f"scan --repo {repo}: {'incomplete' if run.applied else 'plan has structural errors'}")
+        return
 
     try:
         if emit_worklist:

@@ -18,6 +18,7 @@ from graph_works_core.workspace.commits import CommitOutcome
 from graph_works_core.workspace.dispatch import packaged_rules_matching, resolve_dispatch
 from graph_works_wire import config as wire_config
 from graph_works_wire import work
+from graph_works_wire._jsonable import commit_payload
 from samples_work import (
     BUNDLE,
     advance,
@@ -44,14 +45,14 @@ def test_transition_projects_the_unresolved_baseline_request() -> None:
 
 def test_commit_projection() -> None:
     outcome = CommitOutcome("committed", "abc123", "workspace: t", ("okf/work/a.md",), None)
-    assert work._commit(outcome) == {
+    assert commit_payload(outcome) == {
         "status": "committed",
         "sha": "abc123",
         "subject": "workspace: t",
         "paths": ["okf/work/a.md"],
         "reason": None,
     }
-    assert work._commit(None) is None
+    assert commit_payload(None) is None
 
 
 def test_mutation_payloads_include_commit_outcome() -> None:
@@ -59,7 +60,7 @@ def test_mutation_payloads_include_commit_outcome() -> None:
     advanced = advance(applied=True)
     advanced.application = SimpleNamespace(**vars(advanced.application))
     advanced.application.commit = outcome
-    assert work.advance_payload(advanced, "work/a")["commit"] == work._commit(outcome)
+    assert work.advance_payload(advanced, "work/a")["commit"] == commit_payload(outcome)
     assert work.advance_payload(advance(applied=False), "work/a")["commit"] is None
     assert work.placement_payload(placement(applied=False))["commit"] is None
     assert work.baseline_payload(baseline(applied=False))["commit"] is None
@@ -87,7 +88,7 @@ def test_next_projects_normalization_commits() -> None:
     outcome = CommitOutcome("committed", None, "workspace: normalize", ("okf/work/a.md",), None)
     result = next_result(full=True)
     result.application.commits = (outcome,)
-    assert work.next_payload(result, bundle_root=BUNDLE)["commits"] == [work._commit(outcome)]
+    assert work.next_payload(result, bundle_root=BUNDLE)["commits"] == [commit_payload(outcome)]
 
 
 def test_placement_pending_commit_failure_warns_once() -> None:
@@ -95,7 +96,7 @@ def test_placement_pending_commit_failure_warns_once() -> None:
     result.pending_commit = CommitOutcome("failed", None, "workspace: placement", (), "hook-failed")
     result.warnings = ("workspace commit failed: hook-failed",)
     payload = work.placement_payload(result)
-    assert payload["commit"] == work._commit(result.pending_commit)
+    assert payload["commit"] == commit_payload(result.pending_commit)
     assert payload["warnings"] == ["workspace commit failed: hook-failed"]
 
 

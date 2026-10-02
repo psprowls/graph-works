@@ -19,6 +19,7 @@ from okf_ext.splice import (
     insert,
     needs_gap,
     replace,
+    splice_sections,
 )
 
 
@@ -140,3 +141,21 @@ def test_bare_lines_keeps_interior_blanks():
 def test_bare_lines_of_blank_text_is_empty():
     assert bare_lines("") == []
     assert bare_lines("\n  \n") == []
+
+
+def test_splice_sections_replaces_only_the_named_level() -> None:
+    body = "# T\n\n## Other\n\nold\n\n### Other\n\nkeep\n\n## Tail\n\nx\n"
+    spliced, filled = splice_sections(body, {"### Other": "new"})
+    assert filled == 1
+    assert spliced == "# T\n\n## Other\n\nold\n\n### Other\n\nnew\n\n## Tail\n\nx\n"
+
+
+def test_splice_sections_level_two_key_skips_level_three_namesake() -> None:
+    body = "# T\n\n### Other\n\nkeep\n\n## Other\n\nx\n"
+    spliced, filled = splice_sections(body, {"## Other": "new"})
+    assert filled == 1
+    assert spliced == "# T\n\n### Other\n\nkeep\n\n## Other\n\nnew\n\n"
+
+
+def test_splice_sections_skips_a_missing_heading() -> None:
+    assert splice_sections("## A\n\nx\n", {"## B": "y"}) == ("## A\n\nx\n", 0)

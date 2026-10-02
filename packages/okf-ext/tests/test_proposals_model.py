@@ -26,7 +26,7 @@ def test_the_page_status_vocabulary_is_closed_and_ordered():
     """Ledger order, not alphabetical: `proposed` -> decided -> `created` is
     the transition sequence, and reading it in that order is what makes the
     two legal transitions obvious."""
-    assert PAGE_STATUSES == ("proposed", "approved", "rejected", "created")
+    assert PAGE_STATUSES == ("proposed", "approved", "rejected", "superseded", "created")
 
 
 @pytest.mark.parametrize("cls", [Refusal, Proposal, PageRender, Write, ProposalPlan, DecisionPlan, PagePlan])
@@ -165,4 +165,8 @@ def test_the_refusal_vocabulary_is_closed_and_ordered():
         "malformed-proposal",
         "unreadable-target",
         "unrenderable-body",
+        "missing-replacement",
+        "unknown-replacement",
+        "self-replacement",
+        "unexpected-replacement",
     )

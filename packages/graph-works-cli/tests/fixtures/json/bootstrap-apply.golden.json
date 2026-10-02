@@ -44,7 +44,7 @@
     "sections/AgentPlugin.yaml",
     "sections/File.yaml",
     "sections/_code-wiki-okf.yaml",
-    "log.md: installed by code-wiki-okf/0.5.3",
+    "log.md: installed by code-wiki-okf/0.5.4",
     "schema/_base.schema.json",
     "schema/Release.schema.json",
     "schema/Epic.schema.json",

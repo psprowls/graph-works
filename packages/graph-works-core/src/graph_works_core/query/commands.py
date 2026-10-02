@@ -32,7 +32,7 @@ import sys
 import time
 import uuid
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, Protocol
@@ -41,12 +41,12 @@ from code_graph_io import GraphNotInitializedError, GraphReader, SchemaMismatchE
 from langchain_core.embeddings import Embeddings
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.tools import BaseTool, tool
-from models_io import make_bedrock_embeddings
+from models_io import ModelsIoError, make_bedrock_embeddings
 from models_io.pricing import cost_for_usage
 from okf_ext import search as ext_search
 from okf_ext.bundle import SCHEMA_DIRNAME
 from okf_ext.schemas import load_schemas
-from okf_io import Bundle
+from okf_io import Bundle, build_link_graph
 from subagents_io import FanOutResult, SubagentPool, TaskResult, write_trace_record
 
 from graph_works_core.agent_substrate.agent_loop import run_tool_loop
@@ -198,14 +198,33 @@ def default_embedder() -> Embedder:
     )
 
 
+def brief_embedder() -> Embedder | None:
+    """The workspace embedder when it resolves; `None` means the brief runs lexically (D-001).
+
+    Resolving is not working: a Bedrock embedder builds without credentials and
+    only fails at its first call. `_prepare_query_retrieval` covers that half.
+    """
+    try:
+        return default_embedder()
+    except (ModelsIoError, OSError):
+        return None
+
+
 @dataclass(frozen=True)
 class PreparedQueryRetrieval:
-    """The shared front half both pipelines run on. Retrieval happens once."""
+    """The shared front half both pipelines run on. Retrieval happens once.
+
+    `search_scores` covers `top_pages`; `candidates` is every fused candidate,
+    in rank order, before the `top_k` cut -- what page pinning reorders.
+    """
 
     layout: WorkspaceLayout
     bundle: Bundle
     top_pages: tuple[str, ...]
     search_scores: Mapping[str, Mapping[str, float]]
+    candidates: Mapping[str, Mapping[str, float]] = field(default_factory=dict)
+    retrieval: Literal["hybrid", "lexical"] = "hybrid"
+    warnings: tuple[str, ...] = ()
 
 
 def _corpus(bundle: Bundle) -> list[tuple[str, str]]:
@@ -524,7 +543,7 @@ def _prepare_query_retrieval(
     bundle: Bundle,
     *,
     top_k: int,
-    embedder: Embedder,
+    embedder: Embedder | None,
 ) -> PreparedQueryRetrieval:
     """Retrieve once. Both pipelines share the result; a fallback does not re-retrieve.
 
@@ -532,6 +551,11 @@ def _prepare_query_retrieval(
     what it needs and the index makes itself match. Stays private — the epic
     named this function as the reason the adapters live in this band, and
     making it public would remove the reason without removing the coupling.
+
+    With no *embedder* the ranking is BM25 alone and the index is never
+    touched (D-001). An embedder that fails -- missing credentials surface only
+    at call time -- degrades to the same lexical ranking and says so in
+    `warnings`; a `QueryError` (dimension mismatch) is a real refusal and raises.
     """
     if not (MIN_TOP_K <= top_k <= MAX_TOP_K):
         raise ValueError(f"top_k must be between {MIN_TOP_K} and {MAX_TOP_K} (got {top_k})")
@@ -539,36 +563,52 @@ def _prepare_query_retrieval(
     if not bundle.concepts:
         raise QueryError(f"no concepts to search under {bundle.root}: ingest at least one concept before querying")
 
-    refresh_index(bundle, layout.cache_dir, embedder=embedder)
-
+    width = top_k * _OVERSAMPLE
     # `search()` returns the whole corpus at 0.0 for text it cannot tokenize —
     # empty, all-stopwords, or any non-Latin script. Its own docstring tells
     # callers to check first rather than fuse that as lexical signal.
     if ext_search.tokenize(query):
-        bm25_paths, bm25_raw = lexical_query(bundle, query, top_k * _OVERSAMPLE)
+        bm25_paths, bm25_raw = lexical_query(bundle, query, width)
     else:
         bm25_paths, bm25_raw = [], []
     bm25_rank_map = {p: i + 1 for i, p in enumerate(bm25_paths)}
     bm25_score_map = dict(zip(bm25_paths, bm25_raw, strict=False))
 
-    embed_hits = _cosine_search_sqlite(layout.cache_dir, embedder.embed_query(query), top_k * _OVERSAMPLE)
+    embed_hits: list[tuple[str, float]] = []
+    retrieval: Literal["hybrid", "lexical"] = "lexical"
+    warnings: tuple[str, ...] = ()
+    if embedder is not None:
+        try:
+            refresh_index(bundle, layout.cache_dir, embedder=embedder)
+            embed_hits = _cosine_search_sqlite(layout.cache_dir, embedder.embed_query(query), width)
+            retrieval = "hybrid"
+        except QueryError:
+            raise
+        # A provider's failure modes are open-ended; D-001 says fall back, and say so.
+        except Exception as exc:
+            warnings = (f"embedding unavailable: {type(exc).__name__}: {exc}",)
     embed_rank_map = {path: i + 1 for i, (path, _) in enumerate(embed_hits)}
     embed_score_map = dict(embed_hits)
 
     fused = _rrf_fuse(bm25_rank_map, embed_rank_map)
-    top_pages = tuple(sorted(fused, key=lambda page: fused[page], reverse=True)[:top_k])
+    ranked = sorted(fused, key=lambda page: (-fused[page], page))
+    candidates = {
+        page: {
+            "bm25": bm25_score_map.get(page, 0.0),
+            "embed": embed_score_map.get(page, 0.0),
+            "rrf": fused[page],
+        }
+        for page in ranked
+    }
+    top_pages = tuple(ranked[:top_k])
     return PreparedQueryRetrieval(
         layout=layout,
         bundle=bundle,
         top_pages=top_pages,
-        search_scores={
-            page: {
-                "bm25": bm25_score_map.get(page, 0.0),
-                "embed": embed_score_map.get(page, 0.0),
-                "rrf": fused.get(page, 0.0),
-            }
-            for page in top_pages
-        },
+        search_scores={page: candidates[page] for page in top_pages},
+        candidates=candidates,
+        retrieval=retrieval,
+        warnings=warnings,
     )
 
 
@@ -583,10 +623,22 @@ class QueryPageBrief:
 
 @dataclass(frozen=True)
 class QueryBrief:
-    """The `claude_code`-backend counterpart to `QueryResult`: retrieval only."""
+    """The `claude_code`-backend counterpart to `QueryResult`: retrieval only.
+
+    `retrieval` names which ranking ran (D-001). `page` echoes the pinned page
+    (D-002); `refusal` is `unknown-page` when it names no concept, and then
+    `top_pages` is empty.
+    """
 
     query: str
     top_pages: tuple[QueryPageBrief, ...]
+    retrieval: Literal["hybrid", "lexical"] = "hybrid"
+    page: str | None = None
+    refusal: Literal["unknown-page"] | None = None
+    warnings: tuple[str, ...] = ()
+
+
+_NO_SCORES: Mapping[str, float] = {"bm25": 0.0, "embed": 0.0, "rrf": 0.0}
 
 
 def plan_query_brief(
@@ -594,8 +646,9 @@ def plan_query_brief(
     layout: WorkspaceLayout,
     *,
     bundle: Bundle | None = None,
-    embedder: Embedder,
+    embedder: Embedder | None,
     top_k: int = 5,
+    page: str | None = None,
 ) -> QueryBrief:
     """Retrieval only -- no role LLM call, no write.
 
@@ -603,19 +656,47 @@ def plan_query_brief(
     `_prepare_query_retrieval`, and nothing past it. The calling agent reads
     `top_pages` itself (via `Read`, following the pages' own links, or
     `gw graph`) and composes the answer.
+
+    *embedder* is required but may be `None`: the brief then ranks lexically
+    and never touches the embedding index. With *page*, that page is listed
+    first, then the candidates among its outlinks and backlinks, then the rest.
     """
     if bundle is None:
         bundle = load_workspace_bundle(layout)
+    if page is not None and bundle.concept(page) is None:
+        return QueryBrief(
+            query=query,
+            top_pages=(),
+            retrieval="lexical" if embedder is None else "hybrid",
+            page=page,
+            refusal="unknown-page",
+        )
     prepared = _prepare_query_retrieval(query, layout, bundle, top_k=top_k, embedder=embedder)
+    order = _pinned(prepared, page, top_k) if page is not None else prepared.top_pages
     pages = tuple(
         QueryPageBrief(
-            path=page,
-            excerpt=read_bounded_page(prepared.bundle, page, max_chars=_CANDIDATE_EXCERPT_CHARS),
-            search_scores=dict(prepared.search_scores[page]),
+            path=path,
+            excerpt=read_bounded_page(prepared.bundle, path, max_chars=_CANDIDATE_EXCERPT_CHARS),
+            search_scores=dict(prepared.candidates.get(path, _NO_SCORES)),
         )
-        for page in prepared.top_pages
+        for path in order
     )
-    return QueryBrief(query=query, top_pages=pages)
+    return QueryBrief(query=query, top_pages=pages, retrieval=prepared.retrieval, page=page, warnings=prepared.warnings)
+
+
+def _pinned(prepared: PreparedQueryRetrieval, page: str, top_k: int) -> tuple[str, ...]:
+    """*page*, then the candidates it links to or is linked from, then the other candidates (D-002)."""
+    bundle = prepared.bundle
+    graph = build_link_graph(bundle)
+    neighbours = set(graph.backlinks.get(page, ()))
+    for link in graph.out.get(page, ()):
+        member = bundle.member_id(link.target) if link.target is not None and not link.external else None
+        if member is not None and member.endswith(".md"):
+            neighbours.add(member.removesuffix(".md"))
+    rest = [candidate for candidate in prepared.candidates if candidate != page]
+    linked = [candidate for candidate in rest if candidate in neighbours]
+    unlinked = [candidate for candidate in rest if candidate not in neighbours]
+    return (page, *linked, *unlinked)[:top_k]
 
 
 _GRAPH_UNAVAILABLE_STDERR = "[graph unavailable: run 'gw graph build' to enable code-graph grounding tools]"

@@ -21,6 +21,8 @@ from __future__ import annotations
 import math
 from dataclasses import fields, is_dataclass
 
+from graph_works_core.workspace.commits import CommitOutcome
+
 
 def _mapping_key(key: object) -> str:
     if isinstance(key, str):
@@ -65,3 +67,16 @@ def jsonable(value: object) -> object:
     if isinstance(value, list | tuple):
         return [jsonable(item) for item in value]
     return str(value)
+
+
+def commit_payload(outcome: CommitOutcome | None) -> dict[str, object] | None:
+    """Project a workspace commit outcome as plain JSON data."""
+    if outcome is None:
+        return None
+    return {
+        "status": outcome.status,
+        "sha": outcome.sha,
+        "subject": outcome.subject,
+        "paths": list(outcome.paths),
+        "reason": outcome.reason,
+    }

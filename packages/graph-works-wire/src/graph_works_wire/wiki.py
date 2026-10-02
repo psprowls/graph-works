@@ -1,10 +1,11 @@
 """Plain-data projections for wiki results.
 
-Bootstrap, scan, ingest, query, lint, drift, stats, proposal decide/file, tags, claims.
+Bootstrap, scan, ingest, query, lint, drift, stats, proposal decide/file, section write, tags, claims.
 """
 
 from __future__ import annotations
 
+from collections import Counter
 from collections.abc import Sequence
 from pathlib import Path
 
@@ -14,19 +15,28 @@ from graph_works_core.guidance.commands import ClaimsClosureRun, ClaimsShow
 from graph_works_core.ingest.commands import IngestResult
 from graph_works_core.lint_drift.lint import LintReport
 from graph_works_core.lint_drift.propagate_drift import DriftBrief, PropagateResult
-from graph_works_core.proposals import ProposalDecideRun, ProposalFileRun, ProposalListing, ProposalRefusal
+from graph_works_core.proposals import (
+    ProposalChecks,
+    ProposalDecideRun,
+    ProposalFileRun,
+    ProposalListing,
+    ProposalPreview,
+    ProposalRefusal,
+)
 from graph_works_core.query.commands import QueryBrief, QueryResult
 from graph_works_core.scan.commands import ScanResult, StructuralSummary
+from graph_works_core.scan.repo_scan import RepoScanRun
 from graph_works_core.scan.scan_contract import ApplyResult
 from graph_works_core.wiki_page.citations import Citation, WikiCitations
 from graph_works_core.wiki_page.commands import PageLink, PageRead, TreeNode, WikiTree
+from graph_works_core.wiki_page.section import SectionWriteRun
 from graph_works_core.wiki_stats.commands import HubEntry, WikiStats
 from graph_works_core.workspace.init import WorkspaceInit, WorkspacePlan
 from okf_ext.proposals import ApplyResult as ProposalApplyResult
 from okf_ext.proposals import Proposal, Write
 from okf_ext.tags import TagInventory
 
-from graph_works_wire._jsonable import jsonable
+from graph_works_wire._jsonable import commit_payload, jsonable
 
 
 def _page_link(link: PageLink) -> dict[str, object]:
@@ -186,6 +196,30 @@ def scan_emit_payload(
     }
 
 
+def repo_scan_payload(run: RepoScanRun) -> dict[str, object]:
+    """`gw scan --repo --no-narrate --json`, and serve's `/v1/scan`: one repository's structural scan.
+
+    `errors` is every structural failure the plan or apply reported; `failures`
+    repeats them only once applied, which is what makes an apply incomplete.
+    """
+    errors = list(run.structural.errors)
+    return {
+        "repo": run.repo,
+        "refusal": run.refusal,
+        "detail": run.detail,
+        "applied": run.applied,
+        "rolled_back": False,
+        "failures": errors if run.applied else [],
+        "errors": errors,
+        "entities_created": list(run.structural.entities.created),
+        "entities_updated": list(run.structural.entities.updated),
+        "entities_deleted": list(run.structural.entities.deleted),
+        "warnings": list(run.structural.warnings),
+        **_mirror_keys(run.structural),
+        "commit": commit_payload(run.commit),
+    }
+
+
 def scan_apply_payload(result: ApplyResult) -> dict[str, object]:
     """Render durable scan application counts, excluding ``dry_run``."""
     return {
@@ -233,13 +267,21 @@ def ingest_payload(result: IngestResult) -> dict[str, object]:
 
 
 def query_brief_payload(brief: QueryBrief) -> dict[str, object]:
-    """Render a claude_code-backend query brief: retrieval only, no answer."""
+    """Render a claude_code-backend query brief: retrieval only, no answer.
+
+    ``retrieval`` names the ranking that ran (``hybrid`` or ``lexical``);
+    ``refusal`` is ``unknown-page`` when the pinned ``page`` names no concept.
+    """
     return {
         "query": brief.query,
         "top_pages": [
             {"path": page.path, "excerpt": page.excerpt, "search_scores": dict(page.search_scores)}
             for page in brief.top_pages
         ],
+        "retrieval": brief.retrieval,
+        "page": brief.page,
+        "refusal": brief.refusal,
+        "warnings": list(brief.warnings),
     }
 
 
@@ -302,6 +344,20 @@ def lint_payload(report: LintReport) -> dict[str, object]:
             "pending": coverage.pending,
         }
     return payload
+
+
+def wiki_lint_payload(report: LintReport) -> dict[str, object]:
+    """`/v1/wiki/lint`: the mechanical half only, with finding counts."""
+    findings = [finding for lane in report.mechanical for finding in lane.report.findings]
+    return {
+        **lint_payload(report),
+        "semantic": None,
+        "counts": {
+            "errors": sum(1 for f in findings if f.severity == "error"),
+            "warnings": sum(1 for f in findings if f.severity == "warn"),
+            "by_code": dict(sorted(Counter(f.code for f in findings).items())),
+        },
+    }
 
 
 def drift_brief_payload(brief: DriftBrief) -> dict[str, object]:
@@ -394,6 +450,7 @@ def proposal_payload(proposal: Proposal, *, mode: str) -> dict[str, object]:
         "mode": mode,
         "sources": [dict(source) for source in proposal.sources],
         "verified": [dict(entry) for entry in proposal.verified],
+        "superseded_by": proposal.superseded_by,
         "malformed": proposal.malformed,
     }
 
@@ -420,7 +477,7 @@ def _proposal_application(result: ProposalApplyResult | None) -> dict[str, objec
 
 
 def proposal_decide_payload(run: ProposalDecideRun) -> dict[str, object]:
-    """`gw wiki proposal approve|reject --json`, and serve's decide route."""
+    """`gw wiki proposal approve|reject|supersede --json`, and serve's decide route."""
     return {
         "target": run.target,
         "proposal": run.proposal,
@@ -429,6 +486,23 @@ def proposal_decide_payload(run: ProposalDecideRun) -> dict[str, object]:
         "refusals": [_proposal_refusal(refusal) for refusal in run.refusals],
         "writes": [] if run.plan is None or run.refusals else [_proposal_write(write) for write in run.plan.writes],
         **_proposal_application(run.result),
+        "commit": commit_payload(run.commit),
+    }
+
+
+def section_write_payload(run: SectionWriteRun) -> dict[str, object]:
+    """`gw wiki section write --json`, and serve's `/v1/wiki/section`: one `##` section's before and after."""
+    return {
+        "id": run.id,
+        "heading": run.heading,
+        "before": run.before,
+        "after": run.after,
+        "refusal": run.refusal,
+        "applied": run.applied,
+        "rolled_back": False,
+        "written": list(run.written),
+        "failures": list(run.failures),
+        "commit": commit_payload(run.commit),
     }
 
 
@@ -464,6 +538,33 @@ def tags_undeclared_payload(missing: Sequence[str]) -> dict[str, object]:
 def proposals_payload(listings: Sequence[ProposalListing]) -> list[dict[str, object]]:
     """`gw wiki proposals --json` and `/v1/wiki/proposals`."""
     return [proposal_payload(listing.proposal, mode=listing.mode) for listing in listings]
+
+
+def proposal_checks_payload(result: ProposalChecks) -> dict[str, object]:
+    """`/v1/wiki/proposal/checks`: the mechanical review checks for one proposal."""
+    return {
+        "target": result.target,
+        "proposal": result.proposal,
+        "checks": [
+            {"id": check.id, "status": check.status, "findings": list(check.findings)} for check in result.checks
+        ],
+        "refusal": result.refusal,
+    }
+
+
+def proposal_preview_payload(result: ProposalPreview) -> dict[str, object]:
+    """`/v1/wiki/proposal/preview`: the page a proposal would produce and its diff against the target."""
+    return {
+        "target": result.target,
+        "proposal": result.proposal,
+        "mode": result.mode,
+        "member": result.member,
+        "rendered": result.rendered,
+        "base": result.base,
+        "diff": result.diff,
+        "refusals": [_proposal_refusal(refusal) for refusal in result.refusals],
+        "refusal": result.refusal,
+    }
 
 
 def _tree_node(node: TreeNode) -> dict[str, object]:

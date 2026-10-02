@@ -25,10 +25,10 @@ _WORKSPACE_ROOT = Path(__file__).resolve().parents[3]
 _STUB_VERSIONS: dict[str, tuple[str, ...]] = {
     "click": ("8.0.0",),
     "code-graph-io": ("0.1.0", "0.1.1", "0.2.0", "0.3.0", "0.3.1", "0.3.2"),
-    "code-wiki-okf": ("0.1.0", "0.2.0", "0.3.0", "0.4.0", "0.5.0", "0.5.1", "0.5.2", "0.5.3"),
+    "code-wiki-okf": ("0.1.0", "0.2.0", "0.3.0", "0.4.0", "0.5.0", "0.5.1", "0.5.2", "0.5.3", "0.5.4"),
     "config-io": ("0.1.0", "0.2.0"),
     "doc-wiki-okf": ("0.1.0", "0.2.0", "0.2.1", "0.2.2", "0.3.0", "0.3.1", "0.3.2", "0.3.3"),
-    "graph-works-wire": ("0.1.0", "0.1.1", "0.1.2", "0.1.3", "0.1.4", "0.1.5", "0.1.6", "0.1.7"),
+    "graph-works-wire": ("0.1.0", "0.1.1", "0.1.2", "0.1.3", "0.1.4", "0.1.5", "0.1.6", "0.1.7", "0.1.8"),
     "langchain-core": ("1.4.0",),
     "markdown-it-py": ("3.0.0",),
     "models-io": ("0.2.0",),
@@ -46,6 +46,7 @@ _STUB_VERSIONS: dict[str, tuple[str, ...]] = {
         "0.4.14",
         "0.5.0",
         "0.5.1",
+        "0.5.2",
     ),
     "okf-io": ("0.1.1", "0.2.0", "0.2.1", "0.2.2", "0.2.3", "0.2.4", "0.2.5"),
     "plugin-fork-io": ("0.1.0", "0.1.1"),
@@ -91,7 +92,7 @@ def _manifest_requirements(relative_manifest: str) -> dict[str, Requirement]:
         (
             "packages/graph-works-core/pyproject.toml",
             "code-wiki-okf",
-            frozenset({">=0.5.3", "<0.6"}),
+            frozenset({">=0.5.4", "<0.6"}),
         ),
         (
             "packages/graph-works-cli/pyproject.toml",
@@ -101,12 +102,12 @@ def _manifest_requirements(relative_manifest: str) -> dict[str, Requirement]:
         (
             "packages/graph-works-cli/pyproject.toml",
             "code-wiki-okf",
-            frozenset({">=0.5.3", "<0.6"}),
+            frozenset({">=0.5.4", "<0.6"}),
         ),
         (
             "packages/graph-works-cli/pyproject.toml",
             "graph-works-wire",
-            frozenset({">=0.1.7", "<0.2"}),
+            frozenset({">=0.1.8", "<0.2"}),
         ),
         (
             "packages/graph-works-cli/pyproject.toml",

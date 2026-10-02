@@ -13,6 +13,7 @@ from pathlib import Path
 import pytest
 from graph_works_core.query import commands as q
 from graph_works_core.workspace.layout import layout_for
+from models_io import ProviderNotInstalled
 from okf_io import load_bundle
 
 
@@ -437,3 +438,116 @@ def test_a_leftover_bm25_directory_is_removed_without_re_embedding(tmp_path):
     assert not stale.exists()
     # The manifest still vouches for the embedding table, so nothing re-embeds.
     assert len(embedder.calls) == embedded_first
+
+
+def _linked_bundle_dir(tmp_path: Path) -> Path:
+    """`_bundle_dir` plus `concepts/session`, which links to auth, and a storage page that says "token".
+
+    A separate fixture rather than an edit to `_bundle_dir`, whose two-page
+    corpus is pinned by the index tests above.
+    """
+    root = _bundle_dir(tmp_path)
+    (root / "concepts" / "storage.md").write_text(
+        "---\ntitle: Storage\n---\n\nBlob storage, token buckets, retention, and lifecycle rules.\n", encoding="utf-8"
+    )
+    (root / "concepts" / "session.md").write_text(
+        "---\ntitle: Session\n---\n\nCookie lifetimes; see [Auth](/concepts/auth.md).\n", encoding="utf-8"
+    )
+    return root
+
+
+def test_lexical_brief_never_touches_the_index_or_embedder(tmp_path) -> None:
+    layout = _layout(tmp_path)
+    bundle = load_bundle(_linked_bundle_dir(tmp_path))
+    brief = q.plan_query_brief("token refresh", layout, bundle=bundle, embedder=None, top_k=3)
+    assert brief.retrieval == "lexical"
+    assert brief.warnings == ()
+    assert not q._search_db(layout.cache_dir).exists()
+    assert not (layout.cache_dir / "search" / "search.db").exists()
+    assert [page.path for page in brief.top_pages][:1] == ["concepts/auth"]
+    assert all(page.search_scores["embed"] == 0.0 for page in brief.top_pages)
+
+
+def test_a_working_embedder_brief_is_hybrid_and_builds_the_index(tmp_path) -> None:
+    """The counterpart that proves the lexical test's index assertion can fail."""
+    layout = _layout(tmp_path)
+    bundle = load_bundle(_linked_bundle_dir(tmp_path))
+    brief = q.plan_query_brief("token refresh", layout, bundle=bundle, embedder=FakeEmbedder(), top_k=3)
+    assert brief.retrieval == "hybrid"
+    assert q._search_db(layout.cache_dir).is_file()
+
+
+class ExplodingEmbedder(FakeEmbedder):
+    def embed_query(self, text):
+        raise RuntimeError("no credentials")
+
+
+def test_brief_falls_back_to_lexical_when_embedding_raises(tmp_path) -> None:
+    layout = _layout(tmp_path)
+    bundle = load_bundle(_linked_bundle_dir(tmp_path))
+    brief = q.plan_query_brief("token refresh", layout, bundle=bundle, embedder=ExplodingEmbedder(), top_k=3)
+    assert brief.retrieval == "lexical"
+    assert brief.warnings == ("embedding unavailable: RuntimeError: no credentials",)
+    assert brief.top_pages and all(page.search_scores["embed"] == 0.0 for page in brief.top_pages)
+
+
+def test_a_dimension_mismatch_still_raises_rather_than_falling_back(tmp_path) -> None:
+    from graph_works_core import QueryError
+
+    class EightDim(FakeEmbedder):
+        def embed_query(self, text):
+            return [1.0] * 8
+
+    layout = _layout(tmp_path)
+    bundle = load_bundle(_linked_bundle_dir(tmp_path))
+    q.build_index(bundle, layout.cache_dir, embedder=FakeEmbedder())  # 3-dim rows under fake-embed-v1
+    with pytest.raises(QueryError, match="dimension mismatch"):
+        q.plan_query_brief("token", layout, bundle=bundle, embedder=EightDim(), top_k=3)
+
+
+def test_page_is_pinned_first_then_its_neighbours(tmp_path) -> None:
+    layout = _layout(tmp_path)
+    bundle = load_bundle(_linked_bundle_dir(tmp_path))
+    brief = q.plan_query_brief("token", layout, bundle=bundle, embedder=None, top_k=3, page="concepts/session")
+    paths = [page.path for page in brief.top_pages]
+    assert paths[0] == "concepts/session"
+    assert paths[1] == "concepts/auth"  # outlink of session that matched
+    assert paths == ["concepts/session", "concepts/auth", "concepts/storage"]
+    assert brief.page == "concepts/session" and brief.refusal is None
+    # session never mentions "token", so it was not a candidate: all-zero scores.
+    assert brief.top_pages[0].search_scores == {"bm25": 0.0, "embed": 0.0, "rrf": 0.0}
+
+
+def test_a_matching_backlink_outranks_a_better_bundle_hit(tmp_path) -> None:
+    layout = _layout(tmp_path)
+    root = _linked_bundle_dir(tmp_path)
+    (root / "concepts" / "session.md").write_text(
+        "---\ntitle: Session\n---\n\nCookie lifetimes, one token; see [Auth](/concepts/auth.md).\n", encoding="utf-8"
+    )
+    (root / "concepts" / "billing.md").write_text(
+        "---\ntitle: Billing\n---\n\nToken token token: metered token billing.\n", encoding="utf-8"
+    )
+    bundle = load_bundle(root)
+    unpinned = [p.path for p in q.plan_query_brief("token", layout, bundle=bundle, embedder=None, top_k=4).top_pages]
+    assert unpinned.index("concepts/billing") < unpinned.index("concepts/session")
+
+    brief = q.plan_query_brief("token", layout, bundle=bundle, embedder=None, top_k=3, page="concepts/auth")
+    paths = [page.path for page in brief.top_pages]
+    # session links to auth (a backlink) and matched, so it jumps the stronger billing hit.
+    assert paths == ["concepts/auth", "concepts/session", "concepts/billing"]
+
+
+def test_unknown_page_is_a_refusal(tmp_path) -> None:
+    layout = _layout(tmp_path)
+    bundle = load_bundle(_linked_bundle_dir(tmp_path))
+    brief = q.plan_query_brief("token", layout, bundle=bundle, embedder=None, page="concepts/nope")
+    assert brief.refusal == "unknown-page" and brief.top_pages == ()
+    assert brief.page == "concepts/nope"
+
+
+def test_brief_embedder_returns_none_when_the_provider_is_missing(monkeypatch) -> None:
+    def missing(*_a, **_k):
+        raise ProviderNotInstalled("bedrock")
+
+    monkeypatch.setattr(q, "make_bedrock_embeddings", missing)
+    assert q.brief_embedder() is None

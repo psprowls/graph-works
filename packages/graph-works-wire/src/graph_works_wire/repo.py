@@ -4,23 +4,12 @@ from __future__ import annotations
 
 from graph_works_core.repositories.adopt import RepoAdoptResult
 from graph_works_core.repositories.commands import RepoAddResult, RepoAdvanceResult, RepoRefusal, RepoRestoreResult
-from graph_works_core.workspace.commits import CommitOutcome
+
+from graph_works_wire._jsonable import commit_payload
 
 
 def _refusal(refusal: RepoRefusal | None) -> dict[str, object] | None:
     return None if refusal is None else {"code": refusal.code, "detail": refusal.detail}
-
-
-def _commit(outcome: CommitOutcome | None) -> dict[str, object] | None:
-    if outcome is None:
-        return None
-    return {
-        "status": outcome.status,
-        "sha": outcome.sha,
-        "subject": outcome.subject,
-        "paths": list(outcome.paths),
-        "reason": outcome.reason,
-    }
 
 
 def repo_add_payload(result: RepoAddResult) -> dict[str, object]:
@@ -37,7 +26,7 @@ def repo_add_payload(result: RepoAddResult) -> dict[str, object]:
         "dry_run": result.dry_run,
         "ok": result.ok,
         "refusal": _refusal(result.refusal),
-        "workspace_commit": _commit(result.commit_outcome),
+        "workspace_commit": commit_payload(result.commit_outcome),
         "warnings": list(result.warnings),
     }
 
@@ -105,7 +94,7 @@ def repo_advance_payload(result: RepoAdvanceResult) -> dict[str, object]:
         "proposals": list(result.proposals),
         "skipped": list(result.skipped),
         "refusal": _refusal(result.refusal),
-        "workspace_commit": _commit(result.commit_outcome),
+        "workspace_commit": commit_payload(result.commit_outcome),
         "warnings": list(result.warnings),
     }
 
@@ -124,7 +113,7 @@ def repo_adopt_payload(result: RepoAdoptResult) -> dict[str, object]:
         "dry_run": result.dry_run,
         "ok": result.ok,
         "refusal": _refusal(result.refusal),
-        "workspace_commit": _commit(result.commit_outcome),
+        "workspace_commit": commit_payload(result.commit_outcome),
         "warnings": list(result.warnings),
     }
 

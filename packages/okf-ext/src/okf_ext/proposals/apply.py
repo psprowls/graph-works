@@ -79,6 +79,20 @@ def _rendered(document: Document, write: Write) -> tuple[str, CommentedMap, str 
     return scratch.serialize(), scratch_fm, write.body
 
 
+def render_write(bundle: Bundle, write: Write) -> str:
+    """The text *write* would leave at its member, without writing it.
+
+    A create write already carries its whole file; an update is rendered
+    against the member's current document exactly as `apply` would.
+    """
+    if write.mode == "create":
+        return write.text.decode("utf-8") if isinstance(write.text, bytes) else write.text
+    document = bundle.concept(write.member.removesuffix(".md"))
+    if document is None:
+        raise ValueError(f"`{write.member}` is not a member of the bundle")
+    return _rendered(document, write)[0]
+
+
 def apply(bundle: Bundle, plan: Plan) -> ApplyResult:
     """Write *plan* against *bundle*.
 

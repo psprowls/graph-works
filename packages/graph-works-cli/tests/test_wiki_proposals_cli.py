@@ -46,6 +46,7 @@ def _decide_run(*, plan_ok: bool = True, result_ok: bool = True, written: tuple[
         plan=_plan(ok=plan_ok),
         refusals=refusals,
         result=None if not plan_ok else _result(ok=result_ok, written=written),
+        commit=None,
     )
 
 
@@ -157,6 +158,40 @@ def test_proposal_decisions_pass_the_raw_target_to_core(
     assert "by" not in kwargs and kwargs["dry_run"] is False
     assert isinstance(kwargs["at"], datetime) and kwargs["at"].tzinfo is UTC
     assert layout.bundle_dir == proposals_module.resolve_workspace(str(initialized_workspace)).bundle_dir
+
+
+def test_supersede_and_note_reach_core(monkeypatch: pytest.MonkeyPatch, initialized_workspace: Path) -> None:
+    captured: list[dict[str, object]] = []
+
+    def fake_run(*args: object, **kwargs: object) -> SimpleNamespace:
+        captured.append({"decision": args[2], **kwargs})
+        return _decide_run()
+
+    monkeypatch.setattr(proposals_module, "run_proposal_decide", fake_run)
+    workspace = str(initialized_workspace)
+    superseded = runner.invoke(
+        app,
+        [
+            "wiki",
+            "proposal",
+            "supersede",
+            "concepts/a.md",
+            "--by-page",
+            "concepts/b",
+            "--note",
+            "dup",
+            "--workspace",
+            workspace,
+        ],
+    )
+    approved = runner.invoke(app, ["wiki", "proposal", "approve", "concepts/a.md", "--workspace", workspace])
+    assert superseded.exit_code == 0 and approved.exit_code == 0
+    assert (captured[0]["decision"], captured[0]["superseded_by"], captured[0]["note"]) == (
+        "superseded",
+        "concepts/b",
+        "dup",
+    )
+    assert (captured[1]["superseded_by"], captured[1]["note"]) == (None, None)
 
 
 def test_proposal_decision_unknown_target_is_a_real_workspace_refusal(initialized_workspace: Path) -> None:

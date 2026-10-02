@@ -15,6 +15,20 @@ from typer.testing import CliRunner
 runner = CliRunner()
 
 
+@pytest.fixture(autouse=True)
+def no_real_bedrock(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The brief resolves its embedder in core; no test here may build a real Bedrock client.
+
+    A test that wants an embedder patches `make_bedrock_embeddings` (or the CLI's own seams) itself.
+    """
+    from graph_works_core.query import commands as q
+
+    def unavailable(*_args: object, **_kwargs: object) -> object:
+        raise ProviderNotInstalled("bedrock is stubbed out in the CLI query tests")
+
+    monkeypatch.setattr(q, "make_bedrock_embeddings", unavailable)
+
+
 @pytest.fixture
 def initialized_workspace(tmp_path: Path) -> Path:
     """Create the smallest real initialized workspace for CLI boundary tests."""
@@ -79,14 +93,18 @@ def test_query_defaults_to_the_claude_code_brief_and_calls_no_role_llm(
     )
     calls: list[dict[str, object]] = []
 
-    def fake_plan_query_brief(query, layout, *, embedder, top_k):
-        calls.append({"query": query, "layout": layout, "embedder": embedder, "top_k": top_k})
+    def fake_plan_query_brief(query, layout, *, embedder, top_k, page):
+        calls.append({"query": query, "layout": layout, "embedder": embedder, "top_k": top_k, "page": page})
         return brief
 
     def fail_run_query(*args: object, **kwargs: object) -> object:
         raise AssertionError("run_query must not be called under the claude_code default")
 
-    monkeypatch.setattr(query_module, "default_embedder", lambda: embedder)
+    def fail_default_embedder() -> object:
+        raise AssertionError("the brief resolves its embedder through brief_embedder")
+
+    monkeypatch.setattr(query_module, "brief_embedder", lambda: embedder)
+    monkeypatch.setattr(query_module, "default_embedder", fail_default_embedder)
     monkeypatch.setattr(query_module, "plan_query_brief", fake_plan_query_brief)
     monkeypatch.setattr(query_module, "run_query", fail_run_query)
 
@@ -96,6 +114,10 @@ def test_query_defaults_to_the_claude_code_brief_and_calls_no_role_llm(
     assert json.loads(result.stdout) == {
         "query": "why",
         "top_pages": [{"path": "concepts/a", "excerpt": "…", "search_scores": {"bm25": 1.0, "embed": 0.5, "rrf": 0.2}}],
+        "retrieval": "hybrid",
+        "page": None,
+        "refusal": None,
+        "warnings": [],
     }
     assert calls == [
         {
@@ -103,6 +125,7 @@ def test_query_defaults_to_the_claude_code_brief_and_calls_no_role_llm(
             "layout": query_module.resolve_workspace(str(initialized_workspace)),
             "embedder": embedder,
             "top_k": 5,
+            "page": None,
         }
     ]
 
@@ -348,7 +371,8 @@ def test_query_large_page_returns_normal_brief_json(monkeypatch, initialized_wor
     )
     assert result.exit_code == 0, result.output
     payload = json.loads(result.stdout)
-    assert set(payload) == {"query", "top_pages"}
+    assert set(payload) == {"query", "top_pages", "retrieval", "page", "refusal", "warnings"}
+    assert payload["retrieval"] == "hybrid"
     page = next(p for p in payload["top_pages"] if p["path"] == "large")
     assert set(page) == {"path", "excerpt", "search_scores"}
     assert page["search_scores"]["bm25"] > 0
@@ -415,3 +439,104 @@ def test_query_real_bedrock_adapter_logs_rejections_without_uncaught_error(
         assert result.exception is None
         assert json.loads(result.stdout)["top_pages"][0]["path"] == "large"
         assert [len(t) for t in calls] == [32_000, 16_000, 4]
+
+
+def _concepts(root: Path) -> None:
+    concepts = root / "okf" / "concepts"
+    concepts.mkdir(parents=True, exist_ok=True)
+    (concepts / "auth.md").write_text("---\ntitle: Auth\n---\n\nToken exchange and refresh.\n", encoding="utf-8")
+    (concepts / "storage.md").write_text("---\ntitle: Storage\n---\n\nBlob token buckets.\n", encoding="utf-8")
+    (concepts / "session.md").write_text(
+        "---\ntitle: Session\n---\n\nCookies; see [Auth](/concepts/auth.md).\n", encoding="utf-8"
+    )
+
+
+def test_query_page_pins_the_page_and_runs_lexically_without_an_embedder(
+    monkeypatch: pytest.MonkeyPatch, initialized_workspace: Path
+) -> None:
+    """`--page` reaches the core brief; an unresolvable embedder is a lexical brief, not an error."""
+    _concepts(initialized_workspace)
+    monkeypatch.setattr(query_module, "brief_embedder", lambda: None)
+
+    result = runner.invoke(
+        app,
+        [
+            "query",
+            "--query",
+            "token",
+            "--page",
+            "concepts/session",
+            "--json",
+            "--workspace",
+            str(initialized_workspace),
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.stdout)
+    assert payload["retrieval"] == "lexical"
+    assert payload["page"] == "concepts/session"
+    assert [p["path"] for p in payload["top_pages"]][:2] == ["concepts/session", "concepts/auth"]
+
+
+def test_query_embedding_failure_is_a_lexical_brief_with_a_warning(
+    monkeypatch: pytest.MonkeyPatch, initialized_workspace: Path
+) -> None:
+    """Credentials missing at call time: the brief still answers, and says why it went lexical."""
+    from graph_works_core.query import commands as q
+
+    class NoCredentials:
+        def embed_query(self, text: str) -> list[float]:
+            raise RuntimeError("no credentials")
+
+    _concepts(initialized_workspace)
+    monkeypatch.setattr(q, "make_bedrock_embeddings", lambda *a, **kw: NoCredentials())
+
+    result = runner.invoke(app, ["query", "--query", "token", "--json", "--workspace", str(initialized_workspace)])
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.stdout)
+    assert payload["retrieval"] == "lexical"
+    assert payload["warnings"] == ["embedding unavailable: RuntimeError: no credentials"]
+    assert "Warning: embedding unavailable" in result.stderr
+
+
+def test_query_unknown_page_is_an_error_exit(monkeypatch: pytest.MonkeyPatch, initialized_workspace: Path) -> None:
+    _concepts(initialized_workspace)
+    monkeypatch.setattr(query_module, "brief_embedder", lambda: None)
+
+    result = runner.invoke(
+        app, ["query", "--query", "token", "--page", "concepts/nope", "--workspace", str(initialized_workspace)]
+    )
+
+    assert result.exit_code == 1
+    assert result.stdout == ""
+    assert result.stderr == "Error: unknown page 'concepts/nope'\n"
+
+
+def test_query_page_on_a_non_brief_backend_is_an_error(
+    monkeypatch: pytest.MonkeyPatch, initialized_workspace: Path
+) -> None:
+    def fail_run_query(*args: object, **kwargs: object) -> object:
+        raise AssertionError("run_query must not run when --page is refused")
+
+    monkeypatch.setattr(query_module, "run_query", fail_run_query)
+    monkeypatch.setattr(query_module, "default_embedder", object)
+
+    result = runner.invoke(
+        app,
+        [
+            "query",
+            "--query",
+            "why",
+            "--page",
+            "concepts/a",
+            "--backend",
+            "bedrock",
+            "--workspace",
+            str(initialized_workspace),
+        ],
+    )
+
+    assert result.exit_code == 1
+    assert result.stderr == "Error: --page needs the brief backend (claude_code)\n"

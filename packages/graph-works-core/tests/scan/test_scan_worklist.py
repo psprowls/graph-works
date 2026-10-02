@@ -795,11 +795,11 @@ async def test_a_misplaced_code_wiki_type_refuses_composite_sync(scanned):
 
 def test_an_unopenable_graph_raises_scan_error(tmp_path):
     from graph_works_core.graph.commands import GraphTarget
-    from graph_works_core.scan.commands import _open_reader
+    from graph_works_core.scan.commands import open_scan_reader
     from graph_works_core.workspace.errors import ScanError
 
     with pytest.raises(ScanError, match="cannot open the code graph"):
-        _open_reader(GraphTarget(graph_dir=tmp_path / "nope"))
+        open_scan_reader(GraphTarget(graph_dir=tmp_path / "nope"))
 
 
 def _results(*results: ProseRefreshResult) -> ScanResults:

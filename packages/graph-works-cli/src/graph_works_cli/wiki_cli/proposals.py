@@ -60,11 +60,29 @@ def _report(
         typer.echo(member)
 
 
-def _decide(target: str, decision: Decision, workspace: str, *, dry_run: bool, json_output: bool, command: str) -> None:
+def _decide(
+    target: str,
+    decision: Decision,
+    workspace: str,
+    *,
+    dry_run: bool,
+    json_output: bool,
+    command: str,
+    superseded_by: str | None = None,
+    note: str | None = None,
+) -> None:
     """Record one human decision against a proposal target."""
     layout = resolve_workspace(workspace, json_mode=json_output, command=command)
     try:
-        run = run_proposal_decide(layout, target, decision, at=datetime.now(UTC), dry_run=dry_run)
+        run = run_proposal_decide(
+            layout,
+            target,
+            decision,
+            at=datetime.now(UTC),
+            superseded_by=superseded_by,
+            note=note,
+            dry_run=dry_run,
+        )
     except (OSError, ValueError) as exc:
         fail(str(exc), reason="io", json_mode=json_output, command=command, cause=exc)
     payload = proposal_decide_payload(run)
@@ -154,25 +172,65 @@ def file_proposal(
 
 def approve(
     target: str = typer.Argument(...),
+    note: str = typer.Option("", "--note", help="Reviewer note recorded on the verified entry."),
     dry_run: bool = typer.Option(False, "--dry-run", help="Plan without writing proposal files."),
     json_output: bool = typer.Option(False, "--json", help="Print the proposal projection instead of text."),
     workspace: str = typer.Option("", "--workspace"),
 ) -> None:
     """Approve the proposal identified by TARGET."""
-    _decide(target, "approved", workspace, dry_run=dry_run, json_output=json_output, command="wiki proposal approve")
+    _decide(
+        target,
+        "approved",
+        workspace,
+        dry_run=dry_run,
+        json_output=json_output,
+        command="wiki proposal approve",
+        note=note or None,
+    )
 
 
 def reject(
     target: str = typer.Argument(...),
+    note: str = typer.Option("", "--note", help="Reviewer note recorded on the verified entry."),
     dry_run: bool = typer.Option(False, "--dry-run", help="Plan without writing proposal files."),
     json_output: bool = typer.Option(False, "--json", help="Print the proposal projection instead of text."),
     workspace: str = typer.Option("", "--workspace"),
 ) -> None:
     """Reject the proposal identified by TARGET."""
-    _decide(target, "rejected", workspace, dry_run=dry_run, json_output=json_output, command="wiki proposal reject")
+    _decide(
+        target,
+        "rejected",
+        workspace,
+        dry_run=dry_run,
+        json_output=json_output,
+        command="wiki proposal reject",
+        note=note or None,
+    )
+
+
+def supersede(
+    target: str = typer.Argument(...),
+    by_page: str = typer.Option(..., "--by-page", help="Bundle path of the page or proposal target that replaces it."),
+    note: str = typer.Option("", "--note", help="Reviewer note recorded on the verified entry."),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Plan without writing proposal files."),
+    json_output: bool = typer.Option(False, "--json", help="Print the proposal projection instead of text."),
+    workspace: str = typer.Option("", "--workspace"),
+) -> None:
+    """Supersede the proposal identified by TARGET with another page."""
+    _decide(
+        target,
+        "superseded",
+        workspace,
+        dry_run=dry_run,
+        json_output=json_output,
+        command="wiki proposal supersede",
+        superseded_by=by_page,
+        note=note or None,
+    )
 
 
 proposal_app = typer.Typer(name="proposal", help="File or decide one proposal.", no_args_is_help=True)
 proposal_app.command(name="file")(file_proposal)
 proposal_app.command(name="approve")(approve)
 proposal_app.command(name="reject")(reject)
+proposal_app.command(name="supersede")(supersede)

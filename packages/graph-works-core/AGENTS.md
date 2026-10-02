@@ -112,9 +112,9 @@ satisfying receipt. See "The dispatch seam" in the README.
 
 `integrate.py` is its code-repository sibling: `gw work integrate` resolves the strategy (`--strategy`, else `repositories.<name>.finish.strategy`, else `squash`), merges in the unique clean target worktree with exact flags (`--ff-only`, `--no-ff`, or `--squash` plus one commit), restores the target on any failure, and records the v2 receipt entry through `record_finish_in(..., evidence=)` under the same owner lock. `accept_integration.py` writes an `attested`/`accepted` receipt entry and an answered decision-ledger entry in one mutation, for evidence gw cannot verify; it never advances.
 
-`wiki_page/` — `run_page_read`: one page with outlinks, backlinks and broken links; `run_wiki_citations` (`citations.py`): the page's `path:N` inline-code citations with body-relative lines, resolved against `workspace.repo_files`; no cache.
+`wiki_page/` — `run_page_read`: one page with outlinks, backlinks and broken links; `run_wiki_citations` (`citations.py`): the page's `path:N` inline-code citations with body-relative lines, resolved against `workspace.repo_files`; no cache. `section.py`: `run_section_write` replaces one existing prose-owned `##` section, plan by default, with `before_apply` and a workspace commit; `declarations.py` reads the workspace's `.gw/sections` declarations once per call. The citation grammar and resolution live in `workspace/citations.py`, below the verticals, so `wiki_page` and `proposals` share one copy.
 
-`code_read/` — `run_code_excerpt`: a context window of one declared repository's tracked file; refusals are results. `workspace/repo_files.py` is the file set both share (tracked files minus ignore globs) and the confinement check.
+`code_read/` — `run_code_excerpt`: a context window of one declared repository's tracked file; refusals are results. `tree.py`: `run_code_graph_tree` and `run_code_graph_search` read the scanned `code-graph/` pages. `neighborhood.py`: `run_code_graph_neighborhood` reads one page's depends-on neighbourhood from `code.db`. `workspace/repo_files.py` is the file set both share (tracked files minus ignore globs) and the confinement check.
 
 `repositories/` — `run_repo_add`, `run_repo_restore`, `run_repo_advance`. Resolves git through `provenance.gate_git`, hands it to `repositories_okf.git`, runs clone and fetch outside the bundle lock, writes pages under `held_bundle_lock` through `writes.WriteLog` (rollback-able), and commits the written paths with `commit_pending`. `restore` writes no page and makes no commit. The incoming clone is staged under `<cache_dir>/repo-incoming/`. Per-repository operation locks under `<cache_dir>/repository-operations/` serialize clone HEAD changes through apply and rollback, including restore. Operation ownership always precedes the bundle lock; network calls hold no bundle lock.
 
@@ -123,7 +123,9 @@ satisfying receipt. See "The dispatch seam" in the README.
 
 `repositories/adopt.py` is `gw repo adopt`: it renames an existing primary checkout declared in `repositories:` to the lane's clone location, links its working checkout, repairs every linked worktree to relative links and records page, manifest and log in one commit. The manifest edit is a text splice (`workspace/manifest_edit.py`), not `set_value`, so authored comments survive. Every refusal is preflight; every failure after the first git step rolls back to the old layout, and rollback never deletes the tree — it is the user's only clone.
 
-`proposals/` — plan-by-default proposal file/decide (`run_proposal_file`, `run_proposal_decide`); no clock.
+`proposals/` — plan-by-default proposal file/decide (`run_proposal_file`, `run_proposal_decide`, which also supersedes with a replacement and takes a reviewer note); no clock. `review.py`: `run_proposal_checks` and `run_proposal_preview`, read-only mechanical review of one proposal.
+
+`scan/repo_scan.py` — `run_repo_scan`: structural scan of one declared repository through plan/apply, scoped so no other repository's pages, catalogs or indexes change. `work/affecting.py` — `run_work_affecting`: the active work items in one repository whose `affects` meet a path.
 
 `events/` is the one vertical with no command entry point: it is a pure
 `classify` (in `rules.py`) plus its closed vocabulary (`model.py`), consumed

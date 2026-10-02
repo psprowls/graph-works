@@ -21,6 +21,7 @@ from graph_works_core.orchestrate.placement import ReaderRecord
 from graph_works_core.orchestrate.reroute import RerouteResult
 from graph_works_core.orchestrate.wait import Absorbed, WaitResult
 from graph_works_core.orchestrate.workspace_prepare import WorkspacePrepareResult, WorkspaceStep
+from graph_works_core.work.affecting import AffectingRow, WorkAffecting
 from graph_works_core.work.carried import CarriedContext, FilledSlot, SlotFill
 from graph_works_core.work.commands import DispatchExplanation, ItemRead, ItemSource
 from graph_works_core.work.obligations import ObligationRecord
@@ -944,6 +945,32 @@ WORK: dict[str, tuple[Callable[[], object], ...]] = {
             ]
         ),
         lambda: work.work_list_payload([]),
+    ),
+    "work.work_affecting_payload": (
+        lambda: work.work_affecting_payload(
+            WorkAffecting(
+                "code",
+                "packages/a/src",
+                (
+                    AffectingRow(
+                        ns(
+                            path="work/a",
+                            type="Bug",
+                            title="A",
+                            work_status="accepted",
+                            phase=None,
+                            effort=None,
+                            owner="pat",
+                            parent_path=None,
+                            updated="2026-09-01",
+                        ),
+                        ("packages/a",),
+                    ),
+                ),
+                None,
+            )
+        ),
+        lambda: work.work_affecting_payload(WorkAffecting("nope", "x", (), "unknown-repository")),
     ),
     "work.work_queue_payload": (
         lambda: work.work_queue_payload(

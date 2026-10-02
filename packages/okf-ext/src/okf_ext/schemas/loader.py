@@ -199,6 +199,62 @@ def declared_members(schema_set: SchemaSet) -> dict[str, tuple[str, ...]]:
     return found
 
 
+def _resolve_ref(
+    schema_set: SchemaSet, ref: str, document: Mapping[str, Any]
+) -> tuple[Mapping[str, Any], Mapping[str, Any]] | None:
+    """`(target, its document)` for a `$ref`, or `None` when it dangles.
+
+    The file part is looked up by filename, as `build_registry` keys it; an
+    empty file part stays in *document*. The fragment is a JSON pointer.
+    """
+    file_part, _, fragment = ref.partition("#")
+    target_doc = schema_set.documents.get(file_part) if file_part else document
+    if target_doc is None:
+        return None
+    target: object = target_doc
+    for part in (p for p in fragment.split("/") if p):
+        if not isinstance(target, Mapping):
+            return None
+        target = target.get(part.replace("~1", "/").replace("~0", "~"))
+    return (target, target_doc) if isinstance(target, Mapping) else None
+
+
+def declares_property(schema_set: SchemaSet, type_name: str, name: str) -> bool:
+    """Whether *type_name*'s schema declares property *name*.
+
+    Follows `$ref` (file part by filename, then the `#/…` fragment), `allOf`,
+    `anyOf` and `oneOf`. Only `properties` keys at each reached schema count:
+    nested object properties are someone else's. An unknown type, a dangling
+    `$ref` and a cycle all answer no rather than raising.
+    """
+    root = schema_set.schemas.get(type_name)
+    if root is None:
+        return False
+    seen: set[int] = set()
+
+    def walk(schema: Mapping[str, Any], document: Mapping[str, Any]) -> bool:
+        if id(schema) in seen:
+            return False
+        seen.add(id(schema))
+        properties = schema.get("properties")
+        if isinstance(properties, Mapping) and name in properties:
+            return True
+        ref = schema.get("$ref")
+        if isinstance(ref, str):
+            resolved = _resolve_ref(schema_set, ref, document)
+            if resolved is not None and walk(*resolved):
+                return True
+        for key in ("allOf", "anyOf", "oneOf"):
+            branches = schema.get(key)
+            if isinstance(branches, list) and any(
+                walk(branch, document) for branch in branches if isinstance(branch, Mapping)
+            ):
+                return True
+        return False
+
+    return walk(root, root)
+
+
 def declared_about(schema_set: SchemaSet) -> dict[str, AboutMandate]:
     """`{type: AboutMandate}` for every type carrying an `x-okf-about` object.
 

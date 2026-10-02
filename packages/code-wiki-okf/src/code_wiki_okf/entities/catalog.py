@@ -228,11 +228,15 @@ def _required_catalogs(
     retained_directories: Sequence[str] = (),
     *,
     lane_pages: frozenset[str] = frozenset(),
+    repos: Collection[str] | None = None,
 ) -> tuple[dict[str, tuple[str, ...]], dict[str, Render], dict[str, Render]]:
     """Return declarations, index renders, and Repository-page renders.
 
     Every directory ID comes from `code_wiki_okf.placement`; nothing here
-    spells the layout.
+    spells the layout. With *repos*, only those repositories' catalogs and
+    Repository pages are rendered; the shared bundle-root and `code-graph`
+    indexes still list every Repository page, so another repository's rows
+    are carried from disk unchanged.
     """
     by_type: dict[str, list[CatalogPage]] = {}
     by_repository: dict[str, list[CatalogPage]] = {}
@@ -250,6 +254,8 @@ def _required_catalogs(
 
     concept_renders: dict[str, Render] = {}
     for repository, items in sorted(by_repository.items()):
+        if repos is not None and repository not in repos:
+            continue
         stub = repository_directory(repository)
         headings[stub] = ("Repository",)
         index_renders[stub] = Render(sections={"Repository": _section_body(_entries_of(items, "Repository"))})
@@ -453,11 +459,16 @@ def plan_catalogs(
     pages: Sequence[CatalogPage] | None = None,
     declarations_dir: Path | None = None,
     protected_indexes: Collection[str] = (),
+    repos: Collection[str] | None = None,
 ) -> CatalogPlan:
-    """Preview catalog creates and regenerations without touching disk."""
+    """Preview catalog creates and regenerations without touching disk.
+
+    *repos* limits per-repository catalogs to those repositories (see
+    `reconcile_catalogs`); `None` plans every repository.
+    """
     projected_pages = catalog_pages(bundle) if pages is None else tuple(pages)
     headings, index_renders, concept_renders = _required_catalogs(
-        projected_pages, tuple(bundle.indexes), lane_pages=lane_page_names(bundle)
+        projected_pages, tuple(bundle.indexes), lane_pages=lane_page_names(bundle), repos=repos
     )
     index_renders = {key: render for key, render in index_renders.items() if f"{key}/index.md" not in protected_indexes}
     declarations_root = bundle.root if declarations_dir is None else declarations_dir
@@ -485,16 +496,21 @@ def reconcile_catalogs(
     protected_indexes: Collection[str] = (),
     ignore: tuple[str, ...] = (),
     prune: tuple[str, ...] = (),
+    repos: Collection[str] | None = None,
 ) -> ApplyResult:
     """Reconcile every catalog from canonical pages retained on actual disk.
 
     *ignore* and *prune* are the caller's bundle filters, preserved on every reload.
     graph-works supplies its clone patterns without coupling this package to that lane.
+
+    *repos* scopes a repository-scoped sync: only those repositories'
+    catalogs under `code-graph/<repo>/` and their Repository pages are
+    written, plus the shared repository listings. `None` reconciles all.
     """
     _ = today
     classified = catalog_pages(bundle)
     headings, index_renders, concept_renders = _required_catalogs(
-        classified, tuple(bundle.indexes), lane_pages=lane_page_names(bundle)
+        classified, tuple(bundle.indexes), lane_pages=lane_page_names(bundle), repos=repos
     )
     index_renders = {key: render for key, render in index_renders.items() if f"{key}/index.md" not in protected_indexes}
     declarations_root = bundle.root if declarations_dir is None else declarations_dir

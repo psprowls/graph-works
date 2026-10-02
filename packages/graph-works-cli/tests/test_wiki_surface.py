@@ -70,9 +70,11 @@ def test_help_json_freezes_the_existing_root_and_complete_c4_wiki_surface() -> N
             "--short-head",
             "--json",
             "--workspace",
+            "--repo",
+            "--dry-run",
         },
         ("ingest",): {"--source", "--json", "--workspace", "--backend"},
-        ("query",): {"--query", "--limit", "--backend", "--json", "--workspace"},
+        ("query",): {"--query", "--limit", "--backend", "--page", "--json", "--workspace"},
         ("archive",): {"--dry-run", "--json", "--workspace"},
         ("wiki", "lint"): {"--json", "--workspace"},
         ("wiki", "drift"): {
@@ -104,11 +106,13 @@ def test_help_json_freezes_the_existing_root_and_complete_c4_wiki_surface() -> N
             "--json",
             "--workspace",
         },
-        ("wiki", "proposal", "approve"): {"--dry-run", "--json", "--workspace"},
-        ("wiki", "proposal", "reject"): {"--dry-run", "--json", "--workspace"},
+        ("wiki", "proposal", "approve"): {"--note", "--dry-run", "--json", "--workspace"},
+        ("wiki", "proposal", "reject"): {"--note", "--dry-run", "--json", "--workspace"},
+        ("wiki", "proposal", "supersede"): {"--by-page", "--note", "--dry-run", "--json", "--workspace"},
         ("wiki", "claims", "refresh"): {"--force", "--json", "--workspace"},
         ("wiki", "claims", "show"): {"--include-superseded", "--json", "--workspace"},
         ("wiki", "claims", "closure"): {"--include-superseded", "--json", "--workspace"},
+        ("wiki", "section", "write"): {"--heading", "--body-file", "--apply", "--json", "--workspace"},
     }
     for command_path, expected in expected_options.items():
         assert _option_names(_help(*command_path)) == expected
@@ -129,14 +133,17 @@ def test_help_json_freezes_the_existing_root_and_complete_c4_wiki_surface() -> N
         "tags",
         "proposal",
         "claims",
+        "section",
     ]
-    assert _command_names(proposal) == ["file", "approve", "reject"]
+    assert _command_names(proposal) == ["file", "approve", "reject", "supersede"]
     assert _option_names(wiki) == set()
     assert _option_names(proposal) == set()
     assert _command_names(_help("wiki", "tags")) == ["inventory", "draft", "apply", "gate"]
     assert _option_names(_help("wiki", "tags")) == set()
     assert _command_names(_help("wiki", "claims")) == ["refresh", "show", "closure"]
     assert _option_names(_help("wiki", "claims")) == set()
+    assert _command_names(_help("wiki", "section")) == ["write"]
+    assert _option_names(_help("wiki", "section")) == set()
 
     assert not {"--tool", "--force"} & _option_names(_help("bootstrap"))
     assert not {"--limit", "--all"} & _option_names(_help("ingest"))

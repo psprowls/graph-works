@@ -213,7 +213,7 @@ to silence: a guard that guesses is worse than no guard. Kill switch:
 ### `graph-works-core` is a real dependency — no deferred-import pattern
 
 `graph-works-core` is a real, `py.typed`, `mypy --strict`-clean workspace member and a pinned
-dependency (`graph-works-core>=0.6.8,<0.7` in `pyproject.toml`, workspace-sourced via
+dependency (`graph-works-core>=0.6.9,<0.7` in `pyproject.toml`, workspace-sourced via
 `[tool.uv.sources]`). `workspace_resolution.py` imports it at module level; `provenance.py` imports
 it inside `_source_checkout_root()` because only the provenance guard needs it there — that is an
 ownership choice, not a fallback for a package that might not exist. Do not reintroduce a

@@ -65,6 +65,7 @@ DECIDE_KEYS = {
     "applied",
     "rolled_back",
     "failures",
+    "commit",
 }
 
 
@@ -98,7 +99,7 @@ def test_decide_dry_run_projects_planned_frontmatter_only() -> None:
         }
     ]
     assert payload["applied"] is False and payload["written"] == [] and payload["rolled_back"] is False
-    assert payload["ok"] is True and payload["failures"] == []
+    assert payload["ok"] is True and payload["failures"] == [] and payload["commit"] is None
     assert "/ws/okf" not in json.dumps(payload)
 
 
@@ -445,6 +446,7 @@ def test_stats_and_proposal_payloads_have_exact_keys() -> None:
         raw_page_status="proposed",
         sources=({"resource": "/sources/demo.md"},),
         verified=({"by": "reviewer"},),
+        superseded_by="/concepts/new.md",
     )
 
     stats_result = stats_payload(stats)
@@ -470,10 +472,12 @@ def test_stats_and_proposal_payloads_have_exact_keys() -> None:
         "mode",
         "sources",
         "verified",
+        "superseded_by",
         "malformed",
     }
     assert proposal_result["sources"] == [{"resource": "/sources/demo.md"}]
     assert proposal_result["verified"] == [{"by": "reviewer"}]
+    assert proposal_result["superseded_by"] == "/concepts/new.md"
 
 
 def test_both_scan_payloads_report_identical_structural_errors(tmp_path: Path) -> None:
@@ -532,6 +536,7 @@ def test_proposal_payload_places_mode_after_page_status() -> None:
         page_status="approved",
         sources=(),
         verified=(),
+        superseded_by=None,
         malformed=None,
     )
 
@@ -546,6 +551,7 @@ def test_proposal_payload_places_mode_after_page_status() -> None:
         "mode",
         "sources",
         "verified",
+        "superseded_by",
         "malformed",
     ]
     assert payload["mode"] == "update"
@@ -560,6 +566,7 @@ def test_proposals_payload_projects_each_listing() -> None:
         page_status="proposed",
         sources=(),
         verified=(),
+        superseded_by=None,
         malformed=None,
     )
     listing = ns(proposal=proposal, mode="create")

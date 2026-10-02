@@ -6,7 +6,7 @@ from datetime import UTC, datetime
 
 import ext_helpers
 import pytest
-from okf_ext.proposals.apply import apply
+from okf_ext.proposals.apply import apply, render_write
 from okf_ext.proposals.model import Proposal
 from okf_ext.proposals.plan import list_proposals, plan_decide, plan_propose
 from okf_ext.proposals.render import HEADER, render_body
@@ -546,3 +546,96 @@ def test_custom_same_renderer_merge_preserves_old_and_new_evidence(tmp_path):
     body = load_bundle(root).concepts[creation.proposal.removesuffix(".md")].body
     assert "Original evidence" in body
     assert "New evidence" in body
+
+
+DECIDE_AT = datetime(2026, 10, 2, 9, 0, tzinfo=UTC)
+OLD_PAGE = "pages/existing.md"
+
+
+def _live():
+    bundle = ext_helpers.proposed_bundle()
+    return bundle, _by_id(bundle)["proposals/live"]
+
+
+@pytest.mark.parametrize("spelling", ["/pages/existing.md", "pages/existing.md", "pages/existing"])
+def test_supersede_normalizes_replacement_spellings(spelling):
+    bundle, proposal = _live()
+    plan = plan_decide(bundle, proposal, "superseded", by="human:t", at=DECIDE_AT, superseded_by=spelling)
+    assert plan.refusals == ()
+    (write,) = plan.writes
+    assert write.frontmatter["page_status"] == "superseded"
+    assert write.frontmatter["superseded_by"] == "/pages/existing.md"
+    assert write.frontmatter["verified"][-1] == {"by": "human:t", "at": "2026-10-02T09:00:00+00:00"}
+
+
+def test_note_rides_on_the_verified_entry():
+    bundle, proposal = _live()
+    plan = plan_decide(bundle, proposal, "rejected", by="human:t", at=DECIDE_AT, note="duplicate of ADR")
+    assert plan.writes[0].frontmatter["verified"][-1]["note"] == "duplicate of ADR"
+
+
+def test_no_note_leaves_the_verified_entry_unchanged():
+    bundle, proposal = _live()
+    plan = plan_decide(bundle, proposal, "approved", by="human:t", at=DECIDE_AT)
+    assert plan.writes[0].frontmatter["verified"][-1] == {"by": "human:t", "at": "2026-10-02T09:00:00+00:00"}
+    assert "superseded_by" not in plan.writes[0].frontmatter
+
+
+@pytest.mark.parametrize(
+    ("decision", "replacement", "kind"),
+    [
+        ("superseded", None, "missing-replacement"),
+        ("superseded", "pages/nowhere", "unknown-replacement"),
+        ("superseded", "pages/live.md", "self-replacement"),
+        ("superseded", "proposals/live", "self-replacement"),
+        ("approved", OLD_PAGE, "unexpected-replacement"),
+        ("rejected", OLD_PAGE, "unexpected-replacement"),
+    ],
+)
+def test_replacement_refusals(decision, replacement, kind):
+    bundle, proposal = _live()
+    plan = plan_decide(bundle, proposal, decision, by="human:t", at=DECIDE_AT, superseded_by=replacement)
+    assert [r.kind for r in plan.refusals] == [kind]
+    assert plan.writes == ()
+
+
+def test_replacement_may_be_another_proposals_target():
+    bundle, proposal = _live()
+    # `approved-new` is a proposal whose target page does not exist yet.
+    other = _by_id(bundle)["proposals/approved-new"]
+    assert not bundle.has_member(other.target)
+    plan = plan_decide(bundle, proposal, "superseded", by="human:t", at=DECIDE_AT, superseded_by=other.target)
+    assert plan.refusals == ()
+
+
+def test_superseded_by_is_read_back_and_filterable(tmp_path):
+    copy = ext_helpers.proposed_copy(tmp_path)
+    (copy / "proposals" / "replaced.md").write_text(
+        "---\ntype: Proposal\ntitle: Replaced\ndescription: d\ntarget: pages/replaced.md\n"
+        "page_status: superseded\nsuperseded_by: /pages/existing.md\n---\nbody\n",
+        encoding="utf-8",
+        newline="\n",
+    )
+    bundle = load_bundle(copy)
+    (read,) = list_proposals(bundle, page_status="superseded")
+    assert read.malformed is None
+    assert read.superseded_by == "/pages/existing.md"
+
+
+def test_render_write_matches_what_apply_lands(tmp_path):
+    copy = ext_helpers.proposed_copy(tmp_path)
+    bundle = load_bundle(copy)
+    proposal = _by_id(bundle)["proposals/live"]
+    plan = plan_decide(bundle, proposal, "superseded", by="human:t", at=DECIDE_AT, superseded_by=OLD_PAGE, note="n")
+    (write,) = plan.writes
+    rendered = render_write(bundle, write)
+    assert apply(bundle, plan).ok
+    assert (copy / write.member).read_text(encoding="utf-8") == rendered
+    assert "superseded_by: /pages/existing.md" in rendered
+
+
+def test_render_write_returns_a_create_writes_text():
+    bundle = ext_helpers.proposed_bundle()
+    plan = plan_propose(bundle, "pages/brand-new.md", [NEW_SOURCE], title="Brand new", description="why", by=BY, at=AT)
+    (write,) = plan.writes
+    assert render_write(bundle, write) == write.text

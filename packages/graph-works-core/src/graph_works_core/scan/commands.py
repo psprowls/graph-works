@@ -53,11 +53,10 @@ from code_wiki_okf.placement import (
 )
 from code_wiki_okf.sync import MirrorSummary, SyncResult, sync_bundle
 from langchain_core.tools import BaseTool
-from okf_ext.body import find_section, split_lines
+from okf_ext.body import find_section
 from okf_ext.bundle import SECTIONS_DIRNAME
 from okf_ext.shape import SectionSet, SectionSpec, load_sections
-from okf_ext.splice import assemble, bare_lines, dominant_newline, has_trailing_newline
-from okf_ext.splice import replace as splice_replace
+from okf_ext.splice import splice_sections
 from okf_ext.writing import PendingWrite, write_all
 from okf_io import Bundle, Document, append_log_entry, update_index
 from okf_io import parse as parse_document
@@ -550,7 +549,7 @@ def _classify_pages(
     )
 
 
-def _open_reader(target: graph.GraphTarget) -> GraphReader:
+def open_scan_reader(target: graph.GraphTarget) -> GraphReader:
     try:
         return open_reader(graph_dir=target.graph_dir)
     except (GraphNotInitializedError, SchemaMismatchError) as exc:
@@ -591,7 +590,7 @@ async def build_scan_worklist(
     if not build_result.ok:
         raise ScanError(build_result.error or "code graph build failed")
 
-    reader = _open_reader(target)
+    reader = open_scan_reader(target)
     try:
         synced = sync_bundle(
             layout.bundle_dir,
@@ -654,46 +653,6 @@ def _noop() -> None:
     Phase 3 re-reads the bundle after `write_all` for index reconciliation
     anyway, so there is no in-memory state to keep in step.
     """
-
-
-def splice_sections(body: str, sections: Mapping[str, str]) -> tuple[str, int]:
-    """*body* with each named section's lines replaced. Returns `(body, filled)`.
-
-    Sections are located and replaced one at a time against the running body:
-    every replace shifts the line numbers under it, so a span computed against
-    the original would write into the wrong place from the second edit onward.
-
-    The level comes from the key, which already carries it (`heading_key` emits
-    `"## Purpose"`). `find_section` is level-agnostic by default, and this was
-    the one reader using that default -- `_section_body` and `_still_placeholder`
-    both match by level. A `level: 3` prose section would have had phase 1 read
-    one section and phase 3 write a level-2 namesake. **Keys must carry their
-    `#` prefix**, the form `heading_key` emits (e.g. `"## Purpose"`); a bare
-    key with no leading `#` silently falls back to level-agnostic matching
-    instead of raising, so a caller passing plain `"Purpose"` gets exactly the
-    bug this note exists to prevent.
-
-    `okf_ext.generators.plan_regenerate` is deliberately not the writer here. It
-    only writes what a declaration *grants*, and a prose section is by definition
-    what the declaration does not grant.
-    """
-    newline = dominant_newline(body)
-    current = body
-    filled = 0
-    for key in sorted(sections):
-        heading = key.lstrip("#").strip()
-        level = len(key) - len(key.lstrip("#"))
-        section = find_section(current, heading, level=level or None)
-        if section is None:
-            continue
-        lines = split_lines(current)
-        trailing = has_trailing_newline(lines)
-        replaced = splice_replace(
-            lines, section.body_start, section.stop, ["", *bare_lines(sections[key]), ""], newline
-        )
-        current = assemble(replaced, newline, trailing)
-        filled += 1
-    return current, filled
 
 
 def _still_placeholder(body: str, specs: Sequence[SectionSpec]) -> bool:
@@ -1223,6 +1182,7 @@ __all__ = [
     "is_unfilled",
     "load_results_dir",
     "load_worklist",
+    "open_scan_reader",
     "prose_specs",
     "run_prose_fan_out",
     "run_scan",

@@ -181,6 +181,10 @@ def test_both_doors_write_the_same_page_but_for_verified(tmp_path):
         "malformed-proposal",
         "unreadable-target",
         "unrenderable-body",
+        "missing-replacement",
+        "unknown-replacement",
+        "self-replacement",
+        "unexpected-replacement",
     ],
 )
 def test_every_refusal_kind_is_reachable(kind, tmp_path):
@@ -204,6 +208,18 @@ def test_every_refusal_kind_is_reachable(kind, tmp_path):
         ),
         "unrenderable-body": lambda: proposals.plan_propose(
             bundle, "pages/hand-edited.md", [], title="Hand edited", description="a new spin", by=AGENT, at=AT
+        ),
+        "missing-replacement": lambda: proposals.plan_decide(
+            bundle, by_id["proposals/live"], "superseded", by=HUMAN, at=AT
+        ),
+        "unknown-replacement": lambda: proposals.plan_decide(
+            bundle, by_id["proposals/live"], "superseded", by=HUMAN, at=AT, superseded_by="pages/nowhere.md"
+        ),
+        "self-replacement": lambda: proposals.plan_decide(
+            bundle, by_id["proposals/live"], "superseded", by=HUMAN, at=AT, superseded_by="pages/live.md"
+        ),
+        "unexpected-replacement": lambda: proposals.plan_decide(
+            bundle, by_id["proposals/live"], "approved", by=HUMAN, at=AT, superseded_by="pages/existing.md"
         ),
     }[kind]()
     assert [r.kind for r in produced.refusals] == [kind]

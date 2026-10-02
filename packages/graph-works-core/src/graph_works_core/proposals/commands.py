@@ -12,6 +12,7 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import PurePosixPath
+from types import MappingProxyType
 from typing import Any
 
 from doc_wiki_okf.actors import human_actor
@@ -35,8 +36,12 @@ from okf_ext.schemas import load_schemas
 from okf_io import Bundle
 
 from graph_works_core.workspace.bundle import load_workspace_bundle
+from graph_works_core.workspace.commits import CommitOutcome, WorkspaceCommit
 from graph_works_core.workspace.config import load_workspace_config
 from graph_works_core.workspace.layout import WorkspaceLayout
+from graph_works_core.workspace.transactions import commit_pending
+
+_VERBS: Mapping[str, str] = MappingProxyType({"approved": "approve", "rejected": "reject", "superseded": "supersede"})
 
 
 @dataclass(frozen=True, slots=True)
@@ -48,7 +53,7 @@ class ProposalRefusal:
     detail: str
 
 
-def _lift(refusals: tuple[Refusal, ...]) -> tuple[ProposalRefusal, ...]:
+def lift_refusals(refusals: tuple[Refusal, ...]) -> tuple[ProposalRefusal, ...]:
     return tuple(ProposalRefusal(path=refusal.path, kind=refusal.kind, detail=refusal.detail) for refusal in refusals)
 
 
@@ -71,6 +76,7 @@ class ProposalDecideRun:
     plan: DecisionPlan | None
     refusals: tuple[ProposalRefusal, ...]
     result: ApplyResult | None = None
+    commit: CommitOutcome | None = None
 
     @property
     def ok(self) -> bool:
@@ -129,6 +135,8 @@ def run_proposal_decide(
     *,
     by: str | None = None,
     at: datetime,
+    superseded_by: str | None = None,
+    note: str | None = None,
     dry_run: bool = True,
     before_apply: Callable[[ProposalDecideRun], None] | None = None,
 ) -> ProposalDecideRun:
@@ -136,7 +144,10 @@ def run_proposal_decide(
 
     *by* is recorded in ``verified[]``. Omitted, it is ``human:<handle>`` read
     from git in the workspace root, so a decision made by hand is never stamped
-    with a string okf-io's actor convention rejects.
+    with a string okf-io's actor convention rejects. *superseded_by* (required
+    for, and only allowed with, ``superseded``) and *note* pass through to
+    `plan_decide`. An applied decision commits exactly the files it wrote under
+    `workflow.workspace_commits`, as ``workspace: <verb> proposal <stem>``.
 
     `before_apply`, when supplied on a live call, inspects the actual candidate
     with application fields empty before any domain write. Raising aborts the
@@ -154,25 +165,35 @@ def run_proposal_decide(
         if not dry_run and before_apply is not None:
             before_apply(run)
         return run
-    plan = plan_decide(bundle, proposal, decision, by=by or human_actor(layout.root), at=at)
+    plan = plan_decide(
+        bundle, proposal, decision, by=by or human_actor(layout.root), at=at, superseded_by=superseded_by, note=note
+    )
     run = ProposalDecideRun(
         target=normalized,
         decision=decision,
         proposal=proposal.member,
         plan=plan,
-        refusals=_lift(plan.refusals),
+        refusals=lift_refusals(plan.refusals),
     )
     if not dry_run and before_apply is not None:
         before_apply(run)
     if dry_run or not plan.ok or plan.is_empty:
         return run
+    result = apply(bundle, plan)
+    commit = None
+    if result.ok and result.written:
+        stem = PurePosixPath(proposal.member).stem
+        commit = commit_pending(
+            layout, WorkspaceCommit(f"workspace: {_VERBS[decision]} proposal {stem}", extra_paths=tuple(result.written))
+        )
     return ProposalDecideRun(
         target=run.target,
         decision=decision,
         proposal=run.proposal,
         plan=plan,
         refusals=run.refusals,
-        result=apply(bundle, plan),
+        result=result,
+        commit=commit,
     )
 
 
@@ -198,7 +219,7 @@ def run_proposal_file(
         target=plan.target,
         proposal=plan.proposal,
         plan=plan,
-        refusals=_lift(plan.refusals),
+        refusals=lift_refusals(plan.refusals),
     )
     if dry_run or not plan.ok or plan.is_empty:
         return run
@@ -244,6 +265,7 @@ __all__ = [
     "ProposalListing",
     "ProposalRefusal",
     "find_proposal",
+    "human_actor",
     "normalize_target",
     "run_proposal_decide",
     "run_proposal_file",

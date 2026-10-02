@@ -6,7 +6,14 @@ import asyncio
 
 import typer
 from graph_works_core.agent_substrate.roles import role_spec
-from graph_works_core.query.commands import MAX_TOP_K, MIN_TOP_K, default_embedder, plan_query_brief, run_query
+from graph_works_core.query.commands import (
+    MAX_TOP_K,
+    MIN_TOP_K,
+    brief_embedder,
+    default_embedder,
+    plan_query_brief,
+    run_query,
+)
 from graph_works_core.workspace.errors import QueryError, WorkspaceError
 from graph_works_wire.wiki import query_brief_payload, query_payload
 from models_io import ModelsIoError
@@ -20,6 +27,7 @@ def query(
     query_text: str = typer.Option(..., "--query"),
     limit: int = typer.Option(5, "--limit", min=MIN_TOP_K, max=MAX_TOP_K),
     backend: str = typer.Option(None, "--backend"),
+    page: str = typer.Option("", "--page", help="Pin this page first, then its matching links (brief backend only)."),
     json_output: bool = typer.Option(False, "--json"),
     workspace: str = typer.Option("", "--workspace"),
 ) -> None:
@@ -30,23 +38,29 @@ def query(
     except (KeyError, WorkspaceError) as exc:
         exit_error(str(exc), cause=exc)
 
-    try:
-        embedder = default_embedder()
-    except (ModelsIoError, OSError) as exc:
-        exit_error(str(exc), cause=exc)
-
     if resolved_backend == "claude_code":
         try:
-            brief = plan_query_brief(query_text, layout, embedder=embedder, top_k=limit)
+            brief = plan_query_brief(query_text, layout, embedder=brief_embedder(), top_k=limit, page=page or None)
         except (ModelsIoError, OSError, QueryError, ValueError) as exc:
             exit_error(str(exc), cause=exc)
+        if brief.refusal is not None:
+            exit_error(f"unknown page {page!r}")
+        for warning in brief.warnings:
+            typer.echo(f"Warning: {warning}", err=True)
         if json_output:
             typer.echo(encode(query_brief_payload(brief)))
         else:
             typer.echo(f"Query: {brief.query}")
-            for page in brief.top_pages:
-                typer.echo(f"- {page.path}")
+            for hit in brief.top_pages:
+                typer.echo(f"- {hit.path}")
         return
+
+    if page:
+        exit_error("--page needs the brief backend (claude_code)")
+    try:
+        embedder = default_embedder()
+    except (ModelsIoError, OSError) as exc:
+        exit_error(str(exc), cause=exc)
 
     try:
         result = asyncio.run(run_query(query_text, layout, embedder=embedder, top_k=limit))

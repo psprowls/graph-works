@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "graph-works-cli"
-version = "0.3.10"
+version = "0.3.11"
 description = "gw: the graph-works CLI — a thin Typer interface over graph-works-core (ADR 2026-08-13-command-modules)."
 authors = [
   { name = "Patrick Sprowls", email = "psprowls@gmail.com" },
@@ -12,14 +12,14 @@ authors = [
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
-  "graph-works-core>=0.6.8,<0.7",
-  "graph-works-wire>=0.1.7,<0.2",
+  "graph-works-core>=0.6.9,<0.7",
+  "graph-works-wire>=0.1.8,<0.2",
   "models-io>=0.2,<0.3",
   "code-graph-io>=0.3.2,<0.4",
   "config-io>=0.2,<0.3",
-  "code-wiki-okf>=0.5.3,<0.6",
+  "code-wiki-okf>=0.5.4,<0.6",
   "doc-wiki-okf>=0.3.2,<0.4",
-  "okf-ext[schemas]>=0.5.0,<0.6",
+  "okf-ext[schemas]>=0.5.2,<0.6",
   "okf-io>=0.2.5,<0.3",
   "subagents-io>=0.2.1,<0.3",
   "workflow-orca>=0.2.1,<0.3",

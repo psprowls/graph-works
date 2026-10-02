@@ -177,6 +177,9 @@ directly:
 - `okf_ext.splice` — five generic line-list primitives (dominant newline,
   trailing-newline state, assembly, insertion, the separating blank),
   hoisted out of `tables/splice.py` when `sections` needed the same five.
+- `okf_ext.splice.splice_sections(body, sections)` replaces named `##` section bodies and returns the new body with the count replaced, hoisted from core's wiki_page.
+- `okf_ext.schemas` also exposes `frontmatter_errors` (rule-level frontmatter check returning messages, or `None` for an undeclared type) and `declares_property` (whether a type's schema declares a property).
+- `okf_ext.proposals.apply.render_write` renders one planned write's final text, so a preview and the apply agree; the `superseded` disposition carries a replacement and an optional reviewer note.
 - `okf_ext.shape` — declaration *types* (`SectionSpec`, `TypeSections`,
   `SectionSet`, `load_sections`), hoisted out of `sections` when
   `generators` needed to read the same declaration `sections` seeds/validates

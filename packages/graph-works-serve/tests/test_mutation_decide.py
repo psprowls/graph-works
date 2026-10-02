@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from datetime import UTC, datetime, timedelta, tzinfo
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -13,7 +13,7 @@ from graph_works_cli.wiki_cli import proposals as proposal_cli
 from graph_works_core.workspace.layout import WorkspaceLayout
 from graph_works_serve import mutations
 from httpx import Response
-from mutation_helpers import make_client, serve_workspace, snapshot, write_proposal
+from mutation_helpers import frozen_datetime, make_client, serve_workspace, snapshot, write_proposal
 from okf_io import load
 from starlette.testclient import TestClient
 from typer.testing import CliRunner
@@ -59,12 +59,7 @@ def test_round_trip_matches_cli_and_stamps_the_echoed_plan_instant(
     twin = serve_workspace(tmp_path / "twin")
     write_proposal(twin, "widget", target=TARGET)
 
-    class FrozenDatetime(datetime):
-        @classmethod
-        def now(cls, tz: tzinfo | None = None) -> datetime:
-            return AT
-
-    monkeypatch.setattr(proposal_cli, "datetime", FrozenDatetime)
+    monkeypatch.setattr(proposal_cli, "datetime", frozen_datetime(AT))
     args = ["wiki", "proposal", decision, TARGET, "--workspace", str(twin.root), "--json"]
     cli_plan = CliRunner().invoke(app, [*args, "--dry-run"])
     assert cli_plan.exit_code == 0, cli_plan.output
@@ -130,7 +125,7 @@ def test_refused_plan_is_200_and_apply_is_422_without_writes(env: Env, status: s
     assert snapshot(layout) == before
 
 
-@pytest.mark.parametrize("decision", ["approved", "rejected", "", "Approve", None, [], 1])
+@pytest.mark.parametrize("decision", ["approved", "rejected", "superseded", "", "Approve", None, [], 1])
 @pytest.mark.parametrize("route", [PLAN, APPLY])
 def test_invalid_decision_is_400_without_writes(env: Env, decision: object, route: str) -> None:
     layout, _member, client, headers = env
@@ -141,3 +136,80 @@ def test_invalid_decision_is_400_without_writes(env: Env, decision: object, rout
     response = client.post(route, json=params, headers=headers)
     assert response.status_code == 400
     assert snapshot(layout) == before
+
+
+def _page(layout: WorkspaceLayout, member: str) -> None:
+    path = layout.bundle_dir / member
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        "---\ntype: Explanation\ntitle: Old\ndescription: d\n---\n\n## Context\n\nx\n", encoding="utf-8", newline=""
+    )
+
+
+def test_supersede_round_trip_matches_cli(env: Env, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("graph_works_core.proposals.commands.human_actor", lambda cwd=None: "human:tester")
+    layout, member, client, headers = env
+    _page(layout, "concepts/old.md")
+    params = {"target": TARGET, "decision": "supersede", "superseded_by": "concepts/old", "note": "dup"}
+    planned = client.post(PLAN, json=params, headers=headers)
+    assert planned.status_code == 200, planned.text
+    plan = planned.json()
+    assert plan["plan"]["refusals"] == []
+
+    twin = serve_workspace(tmp_path / "twin")
+    write_proposal(twin, "widget", target=TARGET)
+    _page(twin, "concepts/old.md")
+
+    monkeypatch.setattr(proposal_cli, "datetime", frozen_datetime(AT))
+    args = [
+        "wiki",
+        "proposal",
+        "supersede",
+        TARGET,
+        "--by-page",
+        "concepts/old",
+        "--note",
+        "dup",
+        "--workspace",
+        str(twin.root),
+        "--json",
+    ]
+    cli_plan = CliRunner().invoke(app, [*args, "--dry-run"])
+    assert cli_plan.exit_code == 0, cli_plan.output
+    assert plan["plan"] == json.loads(cli_plan.stdout)
+    cli = CliRunner().invoke(app, args)
+    assert cli.exit_code == 0, cli.output
+
+    applied = _apply(client, headers, params, plan)
+    assert applied.status_code == 200, applied.text
+    assert applied.json()["result"] == json.loads(cli.stdout)
+    fm = load(layout.bundle_dir / member).fm_data()
+    assert fm["page_status"] == "superseded"
+    assert fm["superseded_by"] == "/concepts/old.md"
+    assert fm["verified"][-1]["note"] == "dup"
+
+
+def test_pre_change_body_still_round_trips(env: Env) -> None:
+    _layout, _member, client, headers = env
+    params = {"target": TARGET, "decision": "approve"}
+    planned = client.post(PLAN, json=params, headers=headers).json()
+    assert _apply(client, headers, params, planned).status_code == 200
+
+
+@pytest.mark.parametrize("decision", ["approve", "reject"])
+def test_replacement_on_approve_or_reject_is_400(env: Env, decision: str) -> None:
+    layout, _member, client, headers = env
+    before = snapshot(layout)
+    body = {"target": TARGET, "decision": decision, "superseded_by": "concepts/old"}
+    assert client.post(PLAN, json=body, headers=headers).status_code == 400
+    assert snapshot(layout) == before
+
+
+def test_supersede_without_replacement_is_400(env: Env) -> None:
+    _layout, _member, client, headers = env
+    assert client.post(PLAN, json={"target": TARGET, "decision": "supersede"}, headers=headers).status_code == 400
+
+
+def test_proposals_list_accepts_superseded(env: Env) -> None:
+    _layout, _member, client, headers = env
+    assert client.get("/v1/wiki/proposals?page_status=superseded", headers=headers).status_code == 200

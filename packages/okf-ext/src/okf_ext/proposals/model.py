@@ -34,15 +34,15 @@ PROPOSAL_TYPE = "Proposal"
 #: describes the document carrying it, and not `work_status`, which would
 #: collide with the work lane's key. A fixed, closed vocabulary: a caller
 #: wanting different states wants a different capability.
-PageStatus = Literal["proposed", "approved", "rejected", "created"]
+PageStatus = Literal["proposed", "approved", "rejected", "superseded", "created"]
 
-#: The same four at runtime, in **ledger order** rather than alphabetical:
+#: The same five at runtime, in **ledger order** rather than alphabetical:
 #: `proposed` -> decided -> `created` is the transition sequence, and reading
-#: it in that order is what makes the two legal transitions obvious.
-PAGE_STATUSES: tuple[PageStatus, ...] = ("proposed", "approved", "rejected", "created")
+#: it in that order is what makes the legal transitions obvious.
+PAGE_STATUSES: tuple[PageStatus, ...] = ("proposed", "approved", "rejected", "superseded", "created")
 
-#: Which of the two decisions a `plan_decide` records.
-Decision = Literal["approved", "rejected"]
+#: Which of the three decisions a `plan_decide` records.
+Decision = Literal["approved", "rejected", "superseded"]
 
 #: Whether a promotion (or a proposal's own read) is bringing a page into
 #: being or editing one that is already there. **Derived, never stored** --
@@ -80,6 +80,10 @@ RefusalKind = Literal[
     "malformed-proposal",
     "unreadable-target",
     "unrenderable-body",
+    "missing-replacement",
+    "unknown-replacement",
+    "self-replacement",
+    "unexpected-replacement",
 ]
 
 _EMPTY_FM: Mapping[str, Any] = MappingProxyType({})
@@ -126,6 +130,7 @@ class Proposal:
     sources: tuple[Mapping[str, Any], ...]
     verified: tuple[Mapping[str, Any], ...]
     malformed: str | None = None
+    superseded_by: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

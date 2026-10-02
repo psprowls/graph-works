@@ -6,15 +6,21 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from datetime import date, datetime
+from types import MappingProxyType
 from typing import Any
 
 from graph_works_core.archive.commands import ArchiveRun, run_archive
 from graph_works_core.orchestrate.stage_advance import StageAdvance, run_stage_advance
-from graph_works_core.proposals import ProposalDecideRun, run_proposal_decide
+from graph_works_core.proposals import Decision, ProposalDecideRun, run_proposal_decide
+from graph_works_core.proposals.commands import human_actor
+from graph_works_core.scan import RepoScanRun, run_repo_scan
+from graph_works_core.wiki_page import SectionWriteRun, run_section_write
+from graph_works_core.work.commands import DecisionCommandResult, run_decision_answer
+from graph_works_core.workspace.config import load_workspace_config
 from graph_works_core.workspace.errors import WorkspaceError
 from graph_works_core.workspace.layout import WorkspaceLayout
-from graph_works_wire.wiki import proposal_decide_payload
-from graph_works_wire.work import advance_payload, archive_payload
+from graph_works_wire.wiki import proposal_decide_payload, repo_scan_payload, section_write_payload
+from graph_works_wire.work import advance_payload, archive_payload, decision_payload
 
 from graph_works_serve.mutations import BeforeApply, MutationSpec, Params
 from graph_works_serve.params import Param, ParamError, ParamType
@@ -57,7 +63,8 @@ def _project_advance(result: object, params: Params, _dry_run: bool) -> dict[str
     return advance_payload(result, str(params["path"]))
 
 
-def _advance_refused(plan: Mapping[str, Any], _params: Params) -> str | None:
+def _refusal_field(plan: Mapping[str, Any], _params: Params) -> str | None:
+    """Refused when the projection's single `refusal` field is set."""
     return "refused" if plan["refusal"] is not None else None
 
 
@@ -78,7 +85,7 @@ ADVANCE = MutationSpec(
     ),
     run=_run_advance,
     project=_project_advance,
-    refused=_advance_refused,
+    refused=_refusal_field,
 )
 
 
@@ -130,9 +137,19 @@ ARCHIVE = MutationSpec(
 )
 
 
+_DISPOSITIONS: Mapping[str, Decision] = MappingProxyType(
+    {"approve": "approved", "reject": "rejected", "supersede": "superseded"}
+)
+
+
 def _validate_decide(params: Params) -> None:
-    if params["decision"] not in {"approve", "reject"}:
-        raise ParamError("`decision` must be `approve` or `reject`")
+    decision = params["decision"]
+    if decision not in _DISPOSITIONS:
+        raise ParamError("`decision` must be `approve`, `reject` or `supersede`")
+    if decision == "supersede" and not params["superseded_by"]:
+        raise ParamError("`supersede` needs `superseded_by`")
+    if decision != "supersede" and params["superseded_by"] is not None:
+        raise ParamError("`superseded_by` is only allowed with `supersede`")
 
 
 def _run_decide(
@@ -143,8 +160,10 @@ def _run_decide(
     return run_proposal_decide(
         layout,
         str(params["target"]),
-        "approved" if params["decision"] == "approve" else "rejected",
+        _DISPOSITIONS[str(params["decision"])],
         at=as_of,
+        superseded_by=_opt(params, "superseded_by"),
+        note=_opt(params, "note"),
         dry_run=dry_run,
         before_apply=before_apply,
     )
@@ -162,10 +181,125 @@ def _decide_refused(plan: Mapping[str, Any], _params: Params) -> str | None:
 DECIDE = MutationSpec(
     route="/v1/wiki/proposal/decide",
     command="wiki proposal decide",
-    summary="Approve or reject a wiki proposal",
-    params=(_body("target", "str", required=True), _body("decision", "str", required=True)),
+    summary="Approve, reject or supersede a wiki proposal",
+    params=(
+        _body("target", "str", required=True),
+        _body("decision", "str", required=True),
+        _body("superseded_by", "str"),
+        _body("note", "str"),
+    ),
     run=_run_decide,
     project=_project_decide,
     refused=_decide_refused,
     validate=_validate_decide,
+)
+
+
+def _run_decision_answer(
+    layout: WorkspaceLayout, params: Params, as_of: datetime, dry_run: bool, before_apply: BeforeApply | None = None
+) -> DecisionCommandResult:
+    return run_decision_answer(
+        layout,
+        str(params["path"]),
+        str(params["id"]),
+        answer=str(params["answer"]),
+        rationale=_opt(params, "rationale"),
+        on=as_of.date(),
+        decided_by=_opt(params, "decided_by") or human_actor(layout.root),
+        dry_run=dry_run,
+        before_apply=before_apply,
+    )
+
+
+def _project_decision_answer(result: object, _params: Params, _dry_run: bool) -> dict[str, Any]:
+    assert isinstance(result, DecisionCommandResult)
+    return decision_payload(result)
+
+
+DECISION_ANSWER = MutationSpec(
+    route="/v1/work/decision/answer",
+    command="work decision answer",
+    summary="Answer an open decision in a work item's ledger",
+    params=(
+        _body("path", "str", required=True),
+        _body("id", "str", required=True),
+        _body("answer", "str", required=True),
+        _body("rationale", "str"),
+        _body("decided_by", "str"),
+    ),
+    run=_run_decision_answer,
+    project=_project_decision_answer,
+    refused=_refusal_field,
+)
+
+
+def _run_section(
+    layout: WorkspaceLayout, params: Params, as_of: datetime, dry_run: bool, before_apply: BeforeApply | None = None
+) -> SectionWriteRun:
+    return run_section_write(
+        layout,
+        str(params["id"]),
+        str(params["heading"]),
+        str(params["body"]),
+        today=as_of.date(),
+        dry_run=dry_run,
+        before_apply=before_apply,
+    )
+
+
+def _project_section(result: object, _params: Params, _dry_run: bool) -> dict[str, Any]:
+    assert isinstance(result, SectionWriteRun)
+    return section_write_payload(result)
+
+
+SECTION_WRITE = MutationSpec(
+    route="/v1/wiki/section",
+    command="wiki section write",
+    summary="Replace one prose-owned ## section of a wiki page",
+    params=(
+        _body("id", "str", required=True),
+        _body("heading", "str", required=True),
+        _body("body", "str", required=True),
+    ),
+    run=_run_section,
+    project=_project_section,
+    refused=_refusal_field,
+)
+
+
+def _run_scan(
+    layout: WorkspaceLayout, params: Params, as_of: datetime, dry_run: bool, before_apply: BeforeApply | None = None
+) -> RepoScanRun:
+    # Structural only (D-001): serve never narrates, so no model is ever built here.
+    return run_repo_scan(
+        layout,
+        load_workspace_config(layout),
+        repo=str(params["repo"]),
+        at=as_of,
+        today=as_of.date(),
+        dry_run=dry_run,
+        before_apply=before_apply,
+    )
+
+
+def _project_scan(result: object, _params: Params, _dry_run: bool) -> dict[str, Any]:
+    assert isinstance(result, RepoScanRun)
+    return repo_scan_payload(result)
+
+
+def _scan_refused(plan: Mapping[str, Any], _params: Params) -> str | None:
+    """A refusal, or a plan whose structural pass already reports errors, is not applied."""
+    if plan["refusal"] is not None or plan["errors"]:
+        return "refused"
+    return None
+
+
+SCAN = MutationSpec(
+    route="/v1/scan",
+    command="scan",
+    summary="Structural scan of one repository (no narration)",
+    params=(_body("repo", "str", required=True),),
+    run=_run_scan,
+    project=_project_scan,
+    refused=_scan_refused,
 )

@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "server": "graph-works-serve",
-  "version": "0.3.4",
+  "version": "0.3.11",
   "routes": [
     {
       "method": "GET",
@@ -23,6 +23,78 @@
           "default": null,
           "location": "query",
           "summary": "Limit to agents: claude,codex,pi."
+        }
+      ],
+      "response": "json"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/code-graph/neighborhood",
+      "summary": "A code-graph page's depends-on/used-by neighbourhood to depth 1-3 (cap 200 nodes); not live.",
+      "params": [
+        {
+          "name": "id",
+          "type": "str",
+          "required": true,
+          "default": null,
+          "location": "query",
+          "summary": "Extensionless bundle-relative page id."
+        },
+        {
+          "name": "depth",
+          "type": "int",
+          "required": false,
+          "default": 1,
+          "location": "query",
+          "summary": "Hops, 1-3."
+        }
+      ],
+      "response": "json"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/code-graph/search",
+      "summary": "Code-graph pages matching a term: exact title, then title prefix, then any substring.",
+      "params": [
+        {
+          "name": "q",
+          "type": "str",
+          "required": true,
+          "default": null,
+          "location": "query",
+          "summary": "Search term, case-insensitive."
+        },
+        {
+          "name": "repo",
+          "type": "str",
+          "required": false,
+          "default": null,
+          "location": "query",
+          "summary": "Limit to one declared repository."
+        },
+        {
+          "name": "limit",
+          "type": "int",
+          "required": false,
+          "default": 50,
+          "location": "query",
+          "summary": "Maximum hits."
+        }
+      ],
+      "response": "json"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/code-graph/tree",
+      "summary": "Every page under one repository's code-graph folder, index documents included, as a flat parent-linked list.",
+      "params": [
+        {
+          "name": "repo",
+          "type": "str",
+          "required": true,
+          "default": null,
+          "location": "query",
+          "summary": "Declared repository name."
         }
       ],
       "response": "json"
@@ -154,58 +226,43 @@
     },
     {
       "method": "GET",
-      "path": "/v1/schema",
-      "summary": "Every schema and section declaration file, parsed as-is, keyed by stem.",
-      "params": [],
-      "response": "json"
-    },
-    {
-      "method": "GET",
-      "path": "/v1/wiki/citations",
-      "summary": "A page's path:N code citations in body order, body-relative lines, resolved to repositories.",
+      "path": "/v1/query/brief",
+      "summary": "Retrieval brief for one question: hybrid when the embedder works, else lexical; no model call.",
       "params": [
         {
-          "name": "id",
+          "name": "q",
           "type": "str",
           "required": true,
           "default": null,
           "location": "query",
-          "summary": "Extensionless bundle-relative page id."
-        }
-      ],
-      "response": "json"
-    },
-    {
-      "method": "GET",
-      "path": "/v1/wiki/page",
-      "summary": "One wiki page with outlinks, backlinks and broken links.",
-      "params": [
+          "summary": "The question."
+        },
         {
-          "name": "id",
+          "name": "page",
           "type": "str",
-          "required": true,
+          "required": false,
           "default": null,
           "location": "query",
-          "summary": "Extensionless bundle-relative page id."
+          "summary": "Pin this page id first, then its matching links."
+        },
+        {
+          "name": "limit",
+          "type": "int",
+          "required": false,
+          "default": 5,
+          "location": "query",
+          "summary": "Pages to return, 3-10."
         }
       ],
       "response": "json"
     },
     {
       "method": "POST",
-      "path": "/v1/wiki/proposal/decide/apply",
-      "summary": "Approve or reject a wiki proposal: apply the plan whose digest is echoed; 409 if it went stale.",
+      "path": "/v1/scan/apply",
+      "summary": "Structural scan of one repository (no narration): apply the plan whose digest is echoed; 409 if it went stale.",
       "params": [
         {
-          "name": "target",
-          "type": "str",
-          "required": true,
-          "default": null,
-          "location": "body",
-          "summary": ""
-        },
-        {
-          "name": "decision",
+          "name": "repo",
           "type": "str",
           "required": true,
           "default": null,
@@ -233,8 +290,86 @@
     },
     {
       "method": "POST",
-      "path": "/v1/wiki/proposal/decide/plan",
-      "summary": "Approve or reject a wiki proposal: plan (writes nothing) and digest it.",
+      "path": "/v1/scan/plan",
+      "summary": "Structural scan of one repository (no narration): plan (writes nothing) and digest it.",
+      "params": [
+        {
+          "name": "repo",
+          "type": "str",
+          "required": true,
+          "default": null,
+          "location": "body",
+          "summary": ""
+        }
+      ],
+      "response": "json"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/schema",
+      "summary": "Every schema and section declaration file, parsed as-is, keyed by stem.",
+      "params": [],
+      "response": "json"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/wiki/citations",
+      "summary": "A page's path:N code citations in body order, body-relative lines, resolved to repositories.",
+      "params": [
+        {
+          "name": "id",
+          "type": "str",
+          "required": true,
+          "default": null,
+          "location": "query",
+          "summary": "Extensionless bundle-relative page id."
+        }
+      ],
+      "response": "json"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/wiki/lint",
+      "summary": "Mechanical wiki lint findings and counts; no model.",
+      "params": [],
+      "response": "json"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/wiki/page",
+      "summary": "One wiki page with outlinks, backlinks and broken links.",
+      "params": [
+        {
+          "name": "id",
+          "type": "str",
+          "required": true,
+          "default": null,
+          "location": "query",
+          "summary": "Extensionless bundle-relative page id."
+        }
+      ],
+      "response": "json"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/wiki/proposal/checks",
+      "summary": "Mechanical review checks for one proposal: schema, citations, code drift, related ADRs.",
+      "params": [
+        {
+          "name": "target",
+          "type": "str",
+          "required": true,
+          "default": null,
+          "location": "query",
+          "summary": "The proposal's target page path."
+        }
+      ],
+      "response": "json"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/wiki/proposal/decide/apply",
+      "summary": "Approve, reject or supersede a wiki proposal: apply the plan whose digest is echoed; 409 if it went stale.",
       "params": [
         {
           "name": "target",
@@ -251,6 +386,94 @@
           "default": null,
           "location": "body",
           "summary": ""
+        },
+        {
+          "name": "superseded_by",
+          "type": "str",
+          "required": false,
+          "default": null,
+          "location": "body",
+          "summary": ""
+        },
+        {
+          "name": "note",
+          "type": "str",
+          "required": false,
+          "default": null,
+          "location": "body",
+          "summary": ""
+        },
+        {
+          "name": "as_of",
+          "type": "str",
+          "required": true,
+          "default": null,
+          "location": "body",
+          "summary": ""
+        },
+        {
+          "name": "digest",
+          "type": "str",
+          "required": true,
+          "default": null,
+          "location": "body",
+          "summary": ""
+        }
+      ],
+      "response": "json"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/wiki/proposal/decide/plan",
+      "summary": "Approve, reject or supersede a wiki proposal: plan (writes nothing) and digest it.",
+      "params": [
+        {
+          "name": "target",
+          "type": "str",
+          "required": true,
+          "default": null,
+          "location": "body",
+          "summary": ""
+        },
+        {
+          "name": "decision",
+          "type": "str",
+          "required": true,
+          "default": null,
+          "location": "body",
+          "summary": ""
+        },
+        {
+          "name": "superseded_by",
+          "type": "str",
+          "required": false,
+          "default": null,
+          "location": "body",
+          "summary": ""
+        },
+        {
+          "name": "note",
+          "type": "str",
+          "required": false,
+          "default": null,
+          "location": "body",
+          "summary": ""
+        }
+      ],
+      "response": "json"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/wiki/proposal/preview",
+      "summary": "The page a proposal would produce, its current target and a unified diff; writes nothing.",
+      "params": [
+        {
+          "name": "target",
+          "type": "str",
+          "required": true,
+          "default": null,
+          "location": "query",
+          "summary": "The proposal's target page path."
         }
       ],
       "response": "json"
@@ -266,7 +489,87 @@
           "required": false,
           "default": null,
           "location": "query",
-          "summary": "proposed (default)|approved|rejected|created."
+          "summary": "proposed (default)|approved|rejected|superseded|created."
+        }
+      ],
+      "response": "json"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/wiki/section/apply",
+      "summary": "Replace one prose-owned ## section of a wiki page: apply the plan whose digest is echoed; 409 if it went stale.",
+      "params": [
+        {
+          "name": "id",
+          "type": "str",
+          "required": true,
+          "default": null,
+          "location": "body",
+          "summary": ""
+        },
+        {
+          "name": "heading",
+          "type": "str",
+          "required": true,
+          "default": null,
+          "location": "body",
+          "summary": ""
+        },
+        {
+          "name": "body",
+          "type": "str",
+          "required": true,
+          "default": null,
+          "location": "body",
+          "summary": ""
+        },
+        {
+          "name": "as_of",
+          "type": "str",
+          "required": true,
+          "default": null,
+          "location": "body",
+          "summary": ""
+        },
+        {
+          "name": "digest",
+          "type": "str",
+          "required": true,
+          "default": null,
+          "location": "body",
+          "summary": ""
+        }
+      ],
+      "response": "json"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/wiki/section/plan",
+      "summary": "Replace one prose-owned ## section of a wiki page: plan (writes nothing) and digest it.",
+      "params": [
+        {
+          "name": "id",
+          "type": "str",
+          "required": true,
+          "default": null,
+          "location": "body",
+          "summary": ""
+        },
+        {
+          "name": "heading",
+          "type": "str",
+          "required": true,
+          "default": null,
+          "location": "body",
+          "summary": ""
+        },
+        {
+          "name": "body",
+          "type": "str",
+          "required": true,
+          "default": null,
+          "location": "body",
+          "summary": ""
         }
       ],
       "response": "json"
@@ -455,6 +758,30 @@
       "response": "json"
     },
     {
+      "method": "GET",
+      "path": "/v1/work/affecting",
+      "summary": "Active work items in one repository whose affects contain, or sit under, a path.",
+      "params": [
+        {
+          "name": "repo",
+          "type": "str",
+          "required": true,
+          "default": null,
+          "location": "query",
+          "summary": "Declared repository name."
+        },
+        {
+          "name": "path",
+          "type": "str",
+          "required": true,
+          "default": null,
+          "location": "query",
+          "summary": "Repo-relative POSIX path, file or directory."
+        }
+      ],
+      "response": "json"
+    },
+    {
       "method": "POST",
       "path": "/v1/work/archive/apply",
       "summary": "Archive terminal work items (named, or a sweep): apply the plan whose digest is echoed; 409 if it went stale.",
@@ -494,6 +821,118 @@
         {
           "name": "paths",
           "type": "list[str]",
+          "required": false,
+          "default": null,
+          "location": "body",
+          "summary": ""
+        }
+      ],
+      "response": "json"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/work/decision/answer/apply",
+      "summary": "Answer an open decision in a work item's ledger: apply the plan whose digest is echoed; 409 if it went stale.",
+      "params": [
+        {
+          "name": "path",
+          "type": "str",
+          "required": true,
+          "default": null,
+          "location": "body",
+          "summary": ""
+        },
+        {
+          "name": "id",
+          "type": "str",
+          "required": true,
+          "default": null,
+          "location": "body",
+          "summary": ""
+        },
+        {
+          "name": "answer",
+          "type": "str",
+          "required": true,
+          "default": null,
+          "location": "body",
+          "summary": ""
+        },
+        {
+          "name": "rationale",
+          "type": "str",
+          "required": false,
+          "default": null,
+          "location": "body",
+          "summary": ""
+        },
+        {
+          "name": "decided_by",
+          "type": "str",
+          "required": false,
+          "default": null,
+          "location": "body",
+          "summary": ""
+        },
+        {
+          "name": "as_of",
+          "type": "str",
+          "required": true,
+          "default": null,
+          "location": "body",
+          "summary": ""
+        },
+        {
+          "name": "digest",
+          "type": "str",
+          "required": true,
+          "default": null,
+          "location": "body",
+          "summary": ""
+        }
+      ],
+      "response": "json"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/work/decision/answer/plan",
+      "summary": "Answer an open decision in a work item's ledger: plan (writes nothing) and digest it.",
+      "params": [
+        {
+          "name": "path",
+          "type": "str",
+          "required": true,
+          "default": null,
+          "location": "body",
+          "summary": ""
+        },
+        {
+          "name": "id",
+          "type": "str",
+          "required": true,
+          "default": null,
+          "location": "body",
+          "summary": ""
+        },
+        {
+          "name": "answer",
+          "type": "str",
+          "required": true,
+          "default": null,
+          "location": "body",
+          "summary": ""
+        },
+        {
+          "name": "rationale",
+          "type": "str",
+          "required": false,
+          "default": null,
+          "location": "body",
+          "summary": ""
+        },
+        {
+          "name": "decided_by",
+          "type": "str",
           "required": false,
           "default": null,
           "location": "body",

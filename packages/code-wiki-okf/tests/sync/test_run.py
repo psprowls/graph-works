@@ -710,8 +710,17 @@ def test_wet_sync_refuses_entity_target_drift_between_plan_and_apply(
         at: str,
         ignore: tuple[str, ...] = (),
         prune: tuple[str, ...] = (),
+        repos: frozenset[str] | None = None,
     ) -> run_module.SyncPlan:
-        plan = real_plan_sync(bundle_root_arg, config=config, reader=reader, at=at, ignore=ignore, prune=prune)  # type: ignore[arg-type]
+        plan = real_plan_sync(
+            bundle_root_arg,
+            config=config,
+            reader=reader,  # type: ignore[arg-type]
+            at=at,
+            ignore=ignore,
+            prune=prune,
+            repos=repos,
+        )
         blocked = bundle_root / "code-graph" / "demo" / "entities" / "packages" / "widgets.md"
         blocked.parent.mkdir(parents=True, exist_ok=True)
         blocked.mkdir()
@@ -748,8 +757,17 @@ def test_wet_sync_refuses_a_case_equivalent_entity_target_drift_between_plan_and
         at: str,
         ignore: tuple[str, ...] = (),
         prune: tuple[str, ...] = (),
+        repos: frozenset[str] | None = None,
     ) -> run_module.SyncPlan:
-        plan = real_plan_sync(bundle_root_arg, config=config, reader=reader, at=at, ignore=ignore, prune=prune)  # type: ignore[arg-type]
+        plan = real_plan_sync(
+            bundle_root_arg,
+            config=config,
+            reader=reader,  # type: ignore[arg-type]
+            at=at,
+            ignore=ignore,
+            prune=prune,
+            repos=repos,
+        )
         occupant = bundle_root / "code-graph" / "demo" / "entities" / "packages" / "WIDGETS.md"
         occupant.parent.mkdir(parents=True, exist_ok=True)
         occupant.write_text("---\ntype: Package\n---\n", encoding="utf-8")

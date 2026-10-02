@@ -18,10 +18,12 @@ import json
 import sqlite3
 import subprocess
 import sys
+from datetime import date
 from pathlib import Path
 
 import pytest
 from code_graph_io.testing import raw_conn
+from graph_works_core import apply_init, plan_init
 
 # `tests/work/_transaction_helpers.py` is a plain (non-package) module shared
 # by `tests/work/test_transactions.py` and `tests/workspace/test_windows_anchor.py`.
@@ -278,3 +280,17 @@ def declare_repos():
         layout.manifest_path.write_text("\n".join(lines) + "\n", encoding="utf-8", newline="\n")
 
     return declare
+
+
+@pytest.fixture
+def code_layout(tmp_path: Path, git_repo, declare_repos):
+    """A workspace layout declaring one repository, `code`, a git checkout whose only tracked file is `src/a.py`.
+
+    Shared by every core test directory (workspace, proposals) that resolves `path:N` citations.
+    """
+    host = tmp_path / "host"
+    (host / ".git").mkdir(parents=True)
+    layout = apply_init(plan_init(host / ".works", today=date(2026, 9, 19), topic="Code")).layout
+    code = git_repo(tmp_path / "code", {"src/a.py": "".join(f"a{n}\n" for n in range(1, 21))})
+    declare_repos(layout, {"code": (code, [])})
+    return layout

@@ -1586,6 +1586,7 @@ def run_decision_answer(
     on: date,
     decided_by: str,
     dry_run: bool = True,
+    before_apply: Callable[[DecisionCommandResult], None] | None = None,
 ) -> DecisionCommandResult:
     """Plan an answer in *path*'s nearest-owner ledger and optionally apply it."""
 
@@ -1608,6 +1609,8 @@ def run_decision_answer(
         with locked_decision_owner(layout, path) as context:
             ledger_before = _optional_bytes(context.owner.ledger)
             plan = planned(context)
+            if before_apply is not None:
+                before_apply(_decision_result(context, plan, None))
             application = _apply_decision(layout, context, plan, ledger_before, label=decision_id, verb="answer")
     return _decision_result(context, plan, application)
 

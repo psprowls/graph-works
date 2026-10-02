@@ -215,7 +215,7 @@ def query_brief(ctx: Ctx) -> None:
         query="why",
         top_pages=(QueryPageBrief(path="concepts/a", excerpt="x", search_scores={"bm25": 1.0, "rrf": 0.2}),),
     )
-    ctx.mp.setattr(query_module, "default_embedder", lambda: object())
+    ctx.mp.setattr(query_module, "brief_embedder", lambda: object())
     ctx.mp.setattr(query_module, "plan_query_brief", lambda *args, **kwargs: brief)
 
 

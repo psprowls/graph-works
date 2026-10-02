@@ -4,7 +4,7 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
-from datetime import date
+from datetime import date, datetime, tzinfo
 from pathlib import Path
 
 from graph_works_core import apply_init, plan_init
@@ -17,6 +17,17 @@ from starlette.testclient import TestClient
 TODAY = date(2026, 9, 18)
 TOKEN = "t" * 43
 PORT = 49152
+
+
+def frozen_datetime(at: datetime) -> type[datetime]:
+    """A `datetime` whose `now()` is *at*, for pinning a CLI module's clock."""
+
+    class FrozenDatetime(datetime):
+        @classmethod
+        def now(cls, tz: tzinfo | None = None) -> datetime:
+            return at
+
+    return FrozenDatetime
 
 
 def serve_workspace(tmp_path: Path) -> WorkspaceLayout:

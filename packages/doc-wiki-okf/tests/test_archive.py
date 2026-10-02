@@ -157,6 +157,22 @@ def test_sweep_archives_only_proposals_past_proposed(tmp_path):
     assert _page_path(tmp_path, "proposals/rejected-one", archived=True).is_file()
 
 
+def test_sweep_archives_a_superseded_proposal(tmp_path):
+    bundle = _build(
+        tmp_path,
+        {
+            "proposals/still-open": _PROPOSAL.format(status="proposed"),
+            "proposals/replaced-one": _PROPOSAL.format(status="superseded"),
+        },
+    )
+
+    result = apply_archive(bundle, plan_archive(bundle, lanes=_LANES))
+
+    assert result.archived == ("proposals/replaced-one",)
+    assert _page_path(tmp_path, "proposals/still-open").is_file()
+    assert _page_path(tmp_path, "proposals/replaced-one", archived=True).is_file()
+
+
 def test_a_sources_page_takes_its_reference_companion_with_it(tmp_path):
     _build(tmp_path, {"sources/2026-08-foo": _PAGE.format(title="Foo")})
     references = tmp_path / "sources" / "references"

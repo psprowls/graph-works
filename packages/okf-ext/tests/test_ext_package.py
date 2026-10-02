@@ -73,8 +73,10 @@ def test_version_is_static_and_pinned():
     `0.5.0` removes `health.duplicate-title` (`health.CODES` shrinks from
     three codes to two) -- a public-surface removal, so a minor.
 
-    `0.5.3` adds the `readindex` capability -- additive, so a patch."""
-    assert okf_ext.__version__ == "0.5.3"
+    `0.5.3` adds the `readindex` capability -- additive, so a patch.
+
+    `0.5.4` exposes `readindex.member_row` -- additive, so a patch."""
+    assert okf_ext.__version__ == "0.5.4"
 
 
 def test_the_distribution_version_matches_the_python_attribute():

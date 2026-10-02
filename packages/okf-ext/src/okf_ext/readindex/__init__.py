@@ -7,6 +7,7 @@ can always be discarded and rebuilt from the bundle.
 """
 
 from okf_ext.readindex.model import Diagnostics, IndexBusy, IndexUnavailable, MemberRow, RebuildReason, Reconcile
+from okf_ext.readindex.project import member_row
 from okf_ext.readindex.store import ReadIndex, open_index
 from okf_ext.readindex.sync import reconcile, verify
 from okf_ext.readindex.view import IndexView, read
@@ -20,6 +21,7 @@ __all__ = [
     "ReadIndex",
     "RebuildReason",
     "Reconcile",
+    "member_row",
     "open_index",
     "read",
     "reconcile",

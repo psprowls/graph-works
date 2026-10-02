@@ -4,17 +4,17 @@ from __future__ import annotations
 
 import hashlib
 import json
-import math
 import sqlite3
 import time
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
-from okf_io import Document, document_headings, document_links, effective_status, read_member, walk
+from okf_io import Document, document_headings, document_links, read_member, walk
 from okf_io.bundle import Member, MemberStat, Unreadable, canonical_id
 
 from okf_ext.readindex._sql import bindings, execute
 from okf_ext.readindex.model import IndexBusy, Reconcile
+from okf_ext.readindex.project import _columns, _tags, fm_json
 from okf_ext.readindex.store import ReadIndex, require_identity
 
 RACY_WINDOW_NS = 2_000_000_000
@@ -64,7 +64,7 @@ def _prepare(member: Member, row: list[object], doc: Document | None) -> _Prepar
     links: tuple[tuple[object, ...], ...] = ()
     if doc is not None:
         _project(row, doc)
-        tags = tuple(bindings((member.id, tag)) for tag in set(doc.fm.tags))
+        tags = tuple(bindings((member.id, tag)) for tag in _tags(doc))
         headings = tuple(
             bindings((member.id, n, h.level, h.text, h.line, int(h.quoted)))
             for n, h in enumerate(document_headings(doc))
@@ -151,45 +151,16 @@ def _base(member: Member, digest: str | None, racy: bool, unreadable: str | None
 
 
 def _project(row: list[object], doc: Document) -> None:
-    exact = True
-
-    def inexact(value: object) -> str:
-        nonlocal exact
-        exact = False
-        try:
-            return repr(value)
-        except RecursionError:
-            return "<recursive frontmatter value>"
-
-    def finite(value: object) -> object:
-        if isinstance(value, float) and not math.isfinite(value):
-            return inexact(value)
-        if isinstance(value, dict):
-            return {key: finite(item) for key, item in value.items()}
-        if isinstance(value, list):
-            return [finite(item) for item in value]
-        return value
-
-    try:
-        data = doc.fm_data(dates="iso")
-    except RecursionError:
-        # Preserve JSON-supported fields; only unrepresentable frontmatter
-        # values use repr. Never include the document body in this fallback.
-        data = {}
-        for key, value in doc.fm_raw.items():
-            try:
-                data[str(key)] = json.loads(json.dumps(value, allow_nan=False, default=inexact))
-            except (TypeError, ValueError, RecursionError):
-                data[str(key)] = inexact(value)
-    fm_json = json.dumps(finite(data), ensure_ascii=False, allow_nan=False, default=inexact)
+    text, exact = fm_json(doc)
+    type_, title, status, error, failures = _columns(doc)
     row[10:] = [
-        doc.fm.type,
-        doc.fm.title,
-        effective_status(doc.fm),
-        fm_json,
+        type_,
+        title,
+        status,
+        text,
         int(exact),
-        json.dumps(asdict(doc.parse_error), ensure_ascii=False) if doc.parse_error is not None else None,
-        json.dumps(sorted(doc.fm.coercion_failures)),
+        json.dumps(asdict(error), ensure_ascii=False) if error is not None else None,
+        json.dumps(sorted(failures)),
         doc.body_line_offset,
     ]
 

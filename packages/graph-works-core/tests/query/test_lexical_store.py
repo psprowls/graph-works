@@ -264,6 +264,38 @@ def test_busy_with_stale_rows_raises_and_busy_with_current_rows_scores(tmp_path)
         holder.close()
 
 
+class _WalConn:
+    """A connection whose journal-mode switch is busy for the first ``busy`` calls."""
+
+    def __init__(self, busy: int) -> None:
+        self.busy, self.calls = busy, 0
+
+    def execute(self, sql: str) -> None:
+        self.calls += 1
+        if self.calls <= self.busy:
+            raise sqlite3.OperationalError("database is locked")
+
+
+def test_wal_switch_retries_a_busy_database_within_the_budget() -> None:
+    conn = _WalConn(busy=2)
+    ls._enter_wal(conn, 1000)  # type: ignore[arg-type]
+    assert conn.calls == 3
+
+
+def test_wal_switch_surfaces_busy_once_the_budget_is_spent() -> None:
+    with pytest.raises(sqlite3.OperationalError, match="locked"):
+        ls._enter_wal(_WalConn(busy=10**6), 0)  # type: ignore[arg-type]
+
+
+def test_wal_switch_does_not_retry_other_errors() -> None:
+    class Broken:
+        def execute(self, sql: str) -> None:
+            raise sqlite3.OperationalError("disk I/O error")
+
+    with pytest.raises(sqlite3.OperationalError, match="disk I/O"):
+        ls._enter_wal(Broken(), 1000)  # type: ignore[arg-type]
+
+
 def test_two_processes_converge(tmp_path) -> None:
     root, db = tmp_path / "okf", tmp_path / "search.db"
     _write(root, {f"p{i}.md": f"---\ntitle: P{i}\n---\ntoken {i} words\n" for i in range(200)})

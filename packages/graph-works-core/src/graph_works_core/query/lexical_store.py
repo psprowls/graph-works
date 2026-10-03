@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import logging
 import sqlite3
+import time
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from pathlib import Path
@@ -90,11 +91,30 @@ def _connect(db_path: Path, busy_timeout_ms: int) -> sqlite3.Connection:
     db_path.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(str(db_path), timeout=busy_timeout_ms / 1000, isolation_level=None)
     try:
-        conn.execute("PRAGMA journal_mode=WAL")
+        _enter_wal(conn, busy_timeout_ms)
     except BaseException:
         conn.close()
         raise
     return conn
+
+
+def _enter_wal(conn: sqlite3.Connection, busy_timeout_ms: int) -> None:
+    """Switch to WAL, retrying within the busy budget.
+
+    SQLite's busy handler does not cover the journal-mode switch on a fresh
+    database: a second process opening the file while the first one switches
+    gets SQLITE_BUSY at once. Retry until the budget is spent, then let the
+    busy error surface (callers map it to LexicalBusy).
+    """
+    deadline = time.monotonic() + busy_timeout_ms / 1000
+    while True:
+        try:
+            conn.execute("PRAGMA journal_mode=WAL")
+            return
+        except sqlite3.DatabaseError as exc:
+            if not _is_busy(exc) or time.monotonic() >= deadline:
+                raise
+            time.sleep(0.01)
 
 
 def _begin_write(conn: sqlite3.Connection) -> None:

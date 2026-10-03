@@ -16,7 +16,10 @@ this reorg's design spec asks for.
 from __future__ import annotations
 
 import ast
+from importlib.util import resolve_name
 from pathlib import Path
+
+import pytest
 
 SRC = Path(__file__).resolve().parents[1] / "src" / "graph_works_core"
 
@@ -52,3 +55,77 @@ def test_no_module_imports_the_top_level_package() -> None:
                     if alias.name == "graph_works_core"
                 )
     assert not offenders, "\n".join(offenders)
+
+
+PACKAGES = SRC.parents[2]
+DISPLAY_CACHE = "graph_works_core.workspace.display_cache"
+DISPLAY_CACHE_IMPORTERS = frozenset(
+    SRC / module
+    for module in (
+        "workspace/repo_files.py",
+        "wiki_page/citations.py",
+        "code_read/commands.py",
+        "workspace/citations.py",
+    )
+)
+
+
+def _display_cache_offenders(paths: list[Path]) -> list[str]:
+    found: list[str] = []
+    for path in paths:
+        if path in DISPLAY_CACHE_IMPORTERS:
+            continue
+        source_root = next(parent for parent in path.parents if parent.name == "src")
+        package = ".".join(path.parent.relative_to(source_root).parts)
+        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"), filename=str(path))):
+            if isinstance(node, ast.Import):
+                targets = [alias.name for alias in node.names]
+            elif isinstance(node, ast.ImportFrom):
+                module = node.module or ""
+                if node.level:
+                    module = resolve_name("." * node.level + module, package)
+                targets = [module, *(f"{module}.{alias.name}" for alias in node.names)]
+            else:
+                continue
+            if any(target == DISPLAY_CACHE or target.startswith(DISPLAY_CACHE + ".") for target in targets):
+                found.append(f"{path}:{node.lineno}")
+    return found
+
+
+def test_only_display_read_modules_import_display_cache() -> None:
+    paths = sorted(path for root in PACKAGES.glob("*/src") for path in root.rglob("*.py"))
+    assert len(paths) > 100, "the walk is looking in the wrong place"
+    offenders = _display_cache_offenders(paths)
+    assert not offenders, "\n".join(offenders)
+
+
+@pytest.mark.parametrize(
+    ("module", "source"),
+    [
+        ("graph_works_serve/routes.py", "import graph_works_core.workspace.display_cache as cache"),
+        ("graph_works_serve/routes.py", "from graph_works_core.workspace.display_cache import open_display_cache"),
+        ("graph_works_serve/routes.py", "from graph_works_core.workspace import display_cache as cache"),
+        ("graph_works_core/workspace/transactions.py", "from . import display_cache"),
+        ("graph_works_core/workspace/transactions.py", "from .display_cache import open_display_cache"),
+        ("graph_works_core/work/commands.py", "from ..workspace import display_cache"),
+        ("graph_works_core/work/commands.py", "from ..workspace.display_cache import open_display_cache"),
+        ("graph_works_core/workspace/__init__.py", "from . import display_cache"),
+        ("graph_works_core/work/__init__.py", "from ..workspace import display_cache"),
+    ],
+)
+def test_display_cache_guard_catches_injected_imports(tmp_path: Path, module: str, source: str) -> None:
+    path = tmp_path / "src" / module
+    path.parent.mkdir(parents=True)
+    path.write_text(source + "\n", encoding="utf-8", newline="")
+    assert _display_cache_offenders([path]) == [f"{path}:1"]
+
+
+def test_display_cache_guard_ignores_comments_and_other_imports(tmp_path: Path) -> None:
+    path = tmp_path / "src" / "graph_works_core" / "workspace" / "transactions.py"
+    path.parent.mkdir(parents=True)
+    path.write_text(
+        "# from . import display_cache\nfrom . import layout\nfrom .layout import WorkspaceLayout\n",
+        encoding="utf-8",
+        newline="",
+    )
+    assert _display_cache_offenders([path]) == []

@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "graph-works-core"
-version = "0.6.9"
+version = "0.6.11"
 description = "What a workspace is: discovery, the layout object, the manifest, and init."
 authors = [
   { name = "Patrick Sprowls", email = "psprowls@gmail.com" },
@@ -32,14 +32,16 @@ requires-python = ">=3.12"
 # reads `adapters.adapter(name).config`, the single where-agents-keep-things table.
 # `repositories-okf` arrived with the repositories lane: `workspace.init` installs it and `workspace.bundle` appends its `CLONE_GLOB` to every bundle load.
 # `markdown-it-py` arrived with the citation routes: `workspace.citations` parses page bodies with the same `commonmark` preset okf-io uses, whose own helper is private.
+# `read_session` uses okf-ext's public member projection/DTOs, okf-io's member
+# and link/heading types, and work-tracker-okf's frozen WorkSnapshot contract.
 dependencies = [
-  "okf-io>=0.2.5,<0.3",
-  "okf-ext[schemas]>=0.5.2,<0.6",
+  "okf-io>=0.2.6,<0.3",
+  "okf-ext[schemas]>=0.5.5,<0.6",
   "code-wiki-okf>=0.5.4,<0.6",
   "doc-wiki-okf>=0.3.2,<0.4",
   "repositories-okf>=0.1.3,<0.2",
   "code-graph-io>=0.3.2,<0.4",
-  "work-tracker-okf>=0.6,<0.7",
+  "work-tracker-okf>=0.6.0,<0.7",
   "config-io>=0.2,<0.3",
   "langchain-core>=1.4",
   "subagents-io>=0.2,<0.3",

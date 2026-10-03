@@ -46,3 +46,13 @@ def test_changes_payload_keeps_order_and_carries_seq() -> None:
 def test_the_projection_names_every_change_event_field() -> None:
     """A field added to ChangeEvent fails here first; a human decides whether the wire gains it."""
     assert [f.name for f in fields(ChangeEvent)] == ["kind", "path", "member", "change"]
+
+
+def test_changes_payload_carries_generation_when_given() -> None:
+    payload = changes_payload(3, (), generation=9)
+    assert payload == {"schema_version": SCHEMA_VERSION, "seq": 3, "generation": 9, "events": []}
+    assert list(payload) == ["schema_version", "seq", "generation", "events"]
+
+
+def test_changes_payload_without_generation_is_unchanged() -> None:
+    assert "generation" not in changes_payload(3, ())

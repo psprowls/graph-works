@@ -14,10 +14,10 @@ from datetime import date
 from pathlib import Path
 from typing import Literal
 
-from work_tracker_okf.items import IGNORE, WorkItem, load_items
+from work_tracker_okf.items import WorkItem, load_items
 
 from graph_works_core.orchestrate.finish_receipt import receipt_problem, record_finish_in
-from graph_works_core.workspace.bundle import load_workspace_bundle
+from graph_works_core.workspace.bundle import load_work_bundle
 from graph_works_core.workspace.commits import commit_mode
 from graph_works_core.workspace.decision_owner import decision_context, locked_decision_owner
 from graph_works_core.workspace.finish import (
@@ -326,7 +326,7 @@ def run_integrate(
         return item, worktree, settled
 
     try:
-        _item, _worktree, settled = observe(load_items(load_workspace_bundle(layout, ignore=IGNORE)))
+        _item, _worktree, settled = observe(load_items(load_work_bundle(layout)))
     except _Refused as refused:
         return result(refused.refusal, refused.detail, conflicts=refused.conflicts)
     if not apply:

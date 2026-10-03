@@ -9,6 +9,7 @@ from okf_io import Bundle
 from work_tracker_okf.hierarchy import sweep_eligible
 from work_tracker_okf.items import WorkItem, item_index
 from work_tracker_okf.mutation import MutationRefusal, WorkMutationPlan, _plan_path_mutation, _subtree_items
+from work_tracker_okf.snapshot import as_snapshot
 from work_tracker_okf.vocabulary import TERMINAL_STATUSES
 
 
@@ -19,7 +20,8 @@ def _archive_destination(path: str) -> str:
 
 def _default_targets(items: Sequence[WorkItem]) -> tuple[str, ...]:
     """Top-level roots `sweep_eligible` accepts; every other item is skipped, never refused."""
-    return tuple(sorted(item.path for item in items if sweep_eligible(items, item)))
+    snapshot = as_snapshot(items)
+    return tuple(sorted(item.path for item in snapshot if sweep_eligible(snapshot, item)))
 
 
 def _archive_subtree_mapping(

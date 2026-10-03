@@ -36,6 +36,12 @@ _EMPTY_WHERE: Mapping[str, str] = MappingProxyType({})
 DEFAULT_WEIGHTS: Mapping[str, int] = MappingProxyType({"title": 3, "description": 2, "tags": 2, "body": 1})
 
 
+#: Names the tokenizer (`text.TOKEN_RE`), the stopword list and `DEFAULT_WEIGHTS`
+#: together. A persisted index stores it and rebuilds on a mismatch, so any
+#: change to those three bumps it. `test_search_stats.py` fails until it is bumped.
+SCORING_VERSION = "1"
+
+
 @dataclass(frozen=True, slots=True)
 class IndexedDocument:
     """One concept, reduced to what scoring and `where` need.

@@ -30,10 +30,11 @@ either way.
 
 from __future__ import annotations
 
-from okf_ext.search.bm25 import bm25_scores
-from okf_ext.search.index import build_index
+from okf_ext.search.bm25 import bm25_from_stats, bm25_scores
+from okf_ext.search.index import build_index, term_postings
 from okf_ext.search.model import (
     DEFAULT_WEIGHTS,
+    SCORING_VERSION,
     Filters,
     Hit,
     IndexedDocument,
@@ -47,15 +48,18 @@ from okf_ext.search.text import STOPWORDS, TOKEN_RE, snippet, tokenize
 #: asserts the same invariant independently.
 __all__ = [
     "DEFAULT_WEIGHTS",
+    "SCORING_VERSION",
     "STOPWORDS",
     "TOKEN_RE",
     "Filters",
     "Hit",
     "IndexedDocument",
     "SearchIndex",
+    "bm25_from_stats",
     "bm25_scores",
     "build_index",
     "search",
     "snippet",
+    "term_postings",
     "tokenize",
 ]

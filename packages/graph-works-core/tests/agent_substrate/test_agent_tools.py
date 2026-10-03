@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import pytest
 from graph_works_core.agent_substrate.agent_tools import (
     SourceChunks,
+    bounded_excerpt,
     build_catalog,
     chunk_text,
     filter_graph_tools,
+    missing_concept_excerpt,
     read_bounded_page,
     search_catalog,
     strip_code_fence,
@@ -131,6 +134,22 @@ def test_reading_a_page_is_a_key_lookup(tmp_path):
 def test_a_trailing_md_is_tolerated(tmp_path):
     bundle = _bundle(tmp_path, {"concepts/auth": _page(title="Auth", body="the body")})
     assert read_bounded_page(bundle, "concepts/auth.md").startswith("# Auth")
+
+
+@pytest.mark.parametrize(
+    ("page_request", "concept_id", "missing", "present"),
+    [
+        ("nested.md.md", "nested.md", "ERROR: no concept 'nested.md' in this bundle", "# Nested.Md"),
+        ("space .md", "space ", "ERROR: no concept 'space ' in this bundle", "# Space "),
+    ],
+)
+def test_page_lookup_normalizes_once_and_keeps_the_resolved_display_name(
+    tmp_path, page_request, concept_id, missing, present
+):
+    bundle = _bundle(tmp_path, {"other": _page()})
+    assert read_bounded_page(bundle, page_request) == missing
+    bundle = _bundle(tmp_path, {concept_id: _page(body="")})
+    assert read_bounded_page(bundle, page_request) == present
 
 
 def test_a_missing_concept_returns_the_error_string_the_loop_expects(tmp_path):
@@ -293,3 +312,24 @@ def test_no_command_module_keeps_a_private_fence_stripper():
 
     for module in (ingest, suggest_pages):
         assert not hasattr(module, "_strip_fence"), f"{module.__name__} kept a private fence stripper"
+
+
+def test_bounded_excerpt_is_what_read_bounded_page_renders(tmp_path):
+    bundle = _bundle(
+        tmp_path,
+        {
+            "concepts/auth": _page(title="Auth", body="x" * 200),
+            "concepts/token_bucket": _page(body=""),
+        },
+    )
+    for concept_id, doc in bundle.concepts.items():
+        for cap in (10, 40, 1_500):
+            assert bounded_excerpt(doc, concept_id, max_chars=cap) == read_bounded_page(
+                bundle, concept_id, max_chars=cap
+            )
+    assert bounded_excerpt(bundle.concept("concepts/token_bucket"), "concepts/token_bucket") == "# Token Bucket"
+    assert (
+        read_bounded_page(bundle, "nope.md")
+        == missing_concept_excerpt("nope")
+        == "ERROR: no concept 'nope' in this bundle"
+    )

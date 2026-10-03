@@ -30,26 +30,37 @@ def frame(event: str, data: Mapping[str, object]) -> bytes:
     return f"event: {event}\ndata: {encode_data(data)}\n\n".encode()
 
 
-def ready_frame(seq: int) -> bytes:
-    return f"retry: {RETRY_MS}\n".encode() + frame("ready", {"schema_version": SCHEMA_VERSION, "seq": seq})
+def ready_frame(seq: int, generation: int) -> bytes:
+    return f"retry: {RETRY_MS}\n".encode() + frame(
+        "ready", {"schema_version": SCHEMA_VERSION, "seq": seq, "generation": generation}
+    )
 
 
 def message_frame(message: Message) -> bytes:
     if isinstance(message, Changes):
-        return frame("changes", changes_payload(message.seq, message.events))
-    return frame("resync", {"schema_version": SCHEMA_VERSION, "seq": message.seq, "reason": message.reason})
+        return frame("changes", changes_payload(message.seq, message.events, generation=message.generation))
+    return frame(
+        "resync",
+        {
+            "schema_version": SCHEMA_VERSION,
+            "seq": message.seq,
+            "generation": message.generation,
+            "reason": message.reason,
+        },
+    )
 
 
 async def event_stream(
     hub: Hub,
     is_disconnected: Callable[[], Awaitable[bool]],
     *,
+    generation: Callable[[], int],
     ping_interval: float | None = None,
 ) -> AsyncIterator[bytes]:
     interval = PING_INTERVAL if ping_interval is None else ping_interval
     sub = hub.subscribe()
     try:
-        yield ready_frame(hub.seq)
+        yield ready_frame(hub.seq, generation())
         while True:
             try:
                 message = await asyncio.wait_for(sub.get(), timeout=interval)

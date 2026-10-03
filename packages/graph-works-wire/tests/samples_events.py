@@ -18,5 +18,6 @@ EVENTS: dict[str, tuple[Callable[[], object], ...]] = {
     "events.changes_payload": (
         lambda: events.changes_payload(0, ()),
         lambda: events.changes_payload(7, (_PAGE, _CONFIG)),
+        lambda: events.changes_payload(7, (_PAGE, _CONFIG), generation=4),
     ),
 }

@@ -153,11 +153,11 @@ def test_an_unwalkable_lane_root_is_an_error_and_not_a_raise(workspace, monkeypa
 
     calls = {"n": 0}
 
-    def _boom(root, *, ignore=()):
+    def _boom(root, *, ignore=(), prune=()):
         calls["n"] += 1
         if calls["n"] == 1:
             raise OSError("disk went away")
-        return _real_load(root, ignore=ignore)
+        return _real_load(root, ignore=ignore, prune=prune)
 
     _real_load = lint_module.load_bundle_at
     monkeypatch.setattr(lint_module, "load_bundle_at", _boom)
@@ -280,7 +280,7 @@ def test_a_wiki_lane_that_never_loaded_reports_an_empty_backlog(workspace, monke
     omitting the field."""
     from graph_works_core.lint_drift.lint import ProposalBacklog
 
-    def _boom(root, *, ignore=()):
+    def _boom(root, *, ignore=(), prune=()):
         raise OSError("disk went away")
 
     monkeypatch.setattr(lint_module, "load_bundle_at", _boom)
@@ -499,7 +499,7 @@ async def test_a_wiki_lane_that_never_loaded_says_the_semantic_pass_did_not_run(
     """D4: the walk error was reported, but nothing said the semantic half was
     skipped. Every other refusal in this module contributes its own line."""
 
-    def _boom(root, *, ignore=()):
+    def _boom(root, *, ignore=(), prune=()):
         raise OSError("disk went away")
 
     monkeypatch.setattr(lint_module, "load_bundle_at", _boom)

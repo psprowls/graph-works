@@ -70,6 +70,7 @@ __version__ = "0.6.0"
 from work_tracker_okf.init import BundleInstall, InitError, install_bundle, plan_install
 from work_tracker_okf.items import ARCHIVE_DIR, ARCHIVE_IGNORE, IGNORE, WORK_DIR, WorkItem, load_items
 from work_tracker_okf.resources import SEED_RELATIVE_PATHS, seed_files
+from work_tracker_okf.snapshot import WorkSnapshot, as_snapshot
 
 __all__ = [
     "ARCHIVE_DIR",
@@ -80,7 +81,9 @@ __all__ = [
     "BundleInstall",
     "InitError",
     "WorkItem",
+    "WorkSnapshot",
     "__version__",
+    "as_snapshot",
     "install_bundle",
     "load_items",
     "plan_install",

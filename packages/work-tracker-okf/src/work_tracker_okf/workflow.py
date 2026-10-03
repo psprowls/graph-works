@@ -46,6 +46,7 @@ from work_tracker_okf.pipeline import (
     resolve_path,
     row,
 )
+from work_tracker_okf.snapshot import as_snapshot
 from work_tracker_okf.vocabulary import (
     EFFORTS,
     PARENT_TYPES,
@@ -170,14 +171,16 @@ def state_for(
     read is IO, and this function stays pure. Default `None` is correct for
     callers that have no ledger to consult.
     """
-    item = next((candidate for candidate in items if candidate.path == path), None)
+    snapshot = as_snapshot(items)
+    # Caller-authored duplicate paths intentionally use the last item; loaders yield unique paths.
+    item = snapshot.by_path.get(path)
     if item is None:
         return None
     rollup: ChildRollup | None = None
     open_descendants: tuple[str, ...] = ()
     if item.type in PARENT_TYPES:
-        rollup = child_rollup(items, path)
-        open_descendants = active_nonterminal_descendants(items, path)
+        rollup = child_rollup(snapshot, path)
+        open_descendants = active_nonterminal_descendants(snapshot, path)
         if item.type not in DECOMPOSING_TYPES and rollup.total == 0:
             rollup = None
     structural_issues = tuple(
@@ -196,7 +199,7 @@ def state_for(
         hold=hold,
         stale_spec=stale_spec,
         dependency_edges=item.dependency_edges,
-        dependency_facts=resolve_facts(items, item.dependency_edges),
+        dependency_facts=resolve_facts(snapshot, item.dependency_edges),
         dependency_issues=(*item.dependency_issues, *structural_issues),
         child_rollup=rollup,
         open_descendants=open_descendants,

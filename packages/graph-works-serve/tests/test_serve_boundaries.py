@@ -50,6 +50,6 @@ def test_only_watch_imports_watchfiles() -> None:
     assert importers == {"watch.py"}
 
 
-@pytest.mark.parametrize("name", ["coalesce.py", "hub.py", "sse.py"])
+@pytest.mark.parametrize("name", ["coalesce.py", "hub.py", "sse.py", "readstate.py"])
 def test_change_stream_cores_are_framework_free(name: str) -> None:
     assert not _roots(SRC / name) & {"starlette", "uvicorn", "watchfiles", "graph_works_cli"}

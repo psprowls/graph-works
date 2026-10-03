@@ -308,6 +308,7 @@ BUILT_IN_TOPICS = frozenset(
         "bundle",
         "placement",
         "logs",
+        "readindex",
     ]
 )
 def capability(request):
@@ -332,6 +333,7 @@ def test_every_capability_on_disk_is_covered_by_these_tests(modules: list[Path])
         "bundle",
         "placement",
         "logs",
+        "readindex",
     }
 
 
@@ -433,11 +435,11 @@ def test_the_documented_health_surface_is_present() -> None:
 
 
 def test_the_documented_search_surface_is_present() -> None:
-    """Spec §3 of the search work item: five functions, three values, and
+    """Search front door: seven functions, four constants, and
     deliberately no `TOPIC` — the first capability that reports nothing."""
     from okf_ext import search
 
-    for name in ("bm25_scores", "build_index", "search", "snippet", "tokenize"):
+    for name in ("bm25_from_stats", "bm25_scores", "build_index", "search", "snippet", "term_postings", "tokenize"):
         assert callable(getattr(search, name))
     assert search.DEFAULT_WEIGHTS == {"title": 3, "description": 2, "tags": 2, "body": 1}
     assert search.TOKEN_RE.pattern == r"[a-zA-Z0-9][a-zA-Z0-9_\-']+"
@@ -766,3 +768,12 @@ def test_plan_regenerate_accepts_index_renders() -> None:
     parameters = inspect.signature(generators.plan_regenerate).parameters
     assert "index_renders" in parameters
     assert parameters["index_renders"].default == {}
+
+
+def test_readindex_is_a_primitive() -> None:
+    from okf_ext import readindex
+
+    assert not hasattr(readindex, "TOPIC")
+    assert not hasattr(readindex, "CODES")
+    for name in ("open_index", "reconcile", "read", "verify", "IndexBusy", "IndexUnavailable"):
+        assert callable(getattr(readindex, name))

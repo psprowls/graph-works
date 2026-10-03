@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import sqlite3
+
 import pytest
 from conftest import cli_json
 from graph_works_core.workspace.layout import WorkspaceLayout
@@ -46,7 +48,11 @@ def test_brief_is_lexical_and_matches_cli(client: TestClient, linked: WorkspaceL
     assert body["retrieval"] == "lexical"
     assert body["page"] == "concepts/session" and body["refusal"] is None
     assert [page["path"] for page in body["top_pages"]] == ["concepts/session", "concepts/auth", "concepts/storage"]
-    assert not (linked.cache_dir / "search" / "search.db").exists()
+    # Lexical-only briefs persist postings without creating an embedding index.
+    with sqlite3.connect(linked.cache_dir / "search" / "search.db") as conn:
+        assert conn.execute("SELECT count(*) FROM lex_docs").fetchone() == (3,)
+        assert conn.execute("SELECT name FROM sqlite_master WHERE name = 'pages'").fetchall() == []
+    assert not (linked.cache_dir / "search" / "manifest.json").exists()
 
 
 def test_embedding_failure_at_call_time_is_a_lexical_brief_not_a_500(

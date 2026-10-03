@@ -17,10 +17,10 @@ from pathlib import Path
 from okf_ext.locking import locked as _locked_file
 from okf_io import Bundle
 from work_tracker_okf import decisions as _decisions
-from work_tracker_okf._selection import path_index
 from work_tracker_okf.decisions import HoldFact
 from work_tracker_okf.hierarchy import decision_owner
 from work_tracker_okf.items import IGNORE, WorkItem, load_items
+from work_tracker_okf.snapshot import WorkSnapshot
 
 from graph_works_core.workspace.bundle import load_workspace_bundle
 from graph_works_core.workspace.layout import WorkspaceLayout
@@ -45,7 +45,7 @@ class DecisionContext:
 
     owner: DecisionOwner
     bundle: Bundle
-    items: tuple[WorkItem, ...]
+    items: WorkSnapshot
 
 
 @dataclass(frozen=True, slots=True)
@@ -65,11 +65,10 @@ def decision_lock_path(layout: WorkspaceLayout, owner_path: str) -> Path:
 
 def decision_context(layout: WorkspaceLayout, path: str) -> DecisionContext:
     bundle = load_workspace_bundle(layout, ignore=IGNORE)
-    items = tuple(load_items(bundle))
-    selected = path_index(items)
-    if path not in selected:
+    items = load_items(bundle)
+    if path not in items.by_path:
         raise ValueError(f"unknown work item {path!r}")
-    owner_path = decision_owner(tuple(selected.values()), path)
+    owner_path = decision_owner(items, path)
     if owner_path is None:  # pragma: no cover -- a known path always has an owner (D-001)
         raise ValueError(f"unknown work item {path!r}")
     ledger = _decisions.ledger_ref(owner_path).path(bundle.root)

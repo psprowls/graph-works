@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "graph-works-wire"
-version = "0.1.8"
+version = "0.1.9"
 description = "Typed graph-works results projected to plain JSON data, shared by every interface (CLI, serve)."
 authors = [
   { name = "Patrick Sprowls", email = "psprowls@gmail.com" },

@@ -132,6 +132,13 @@ $ gw scan --apply --results-dir .works/.gw/cache/scan/results --short-head abc12
   CRLF, with a count per file, and exits non-zero if any are found; `--fix`
   rewrites each to LF in place and exits zero.
 
+- `gw util read-index [--verify | --rebuild] [--workspace PATH] [--json]`
+  inspects the persisted read index without creating or reconciling it.
+  `--verify` reconciles then re-hashes stored files and exits 2 on drift;
+  `--rebuild` discards and rebuilds the disposable cache. Bare inspection
+  exits zero and reports missing or unreadable databases in the output.
+  The backend field describes configuration preference.
+
 ## Testing
 
     uv run --package graph-works-cli pytest packages/graph-works-cli/tests -v

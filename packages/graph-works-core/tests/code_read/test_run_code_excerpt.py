@@ -110,3 +110,26 @@ def test_refusals_are_results(layout, repo, path, refusal):
 def test_invalid_bounds_raise_value_error(layout, start, end):
     with pytest.raises(ValueError, match=r"start|end"):
         run_code_excerpt(layout, "code", "ten.py", start, end)
+
+
+def test_a_warm_excerpt_runs_no_git(layout, monkeypatch):
+    from graph_works_core.workspace import provenance, repo_files
+
+    monkeypatch.setattr(repo_files, "RACY_NS", 0)
+    run_code_excerpt(layout, "code", "ten.py", 2)
+    calls: list[tuple[str, ...]] = []
+    real = provenance.probe_git
+    monkeypatch.setattr(provenance, "probe_git", lambda cwd, *a, **kw: calls.append(a) or real(cwd, *a, **kw))
+    warm = run_code_excerpt(layout, "code", "ten.py", 2)
+    assert calls == []
+    assert warm.refusal is None and warm.lines
+
+
+def test_excerpt_refusals_are_unchanged_when_warm(layout, monkeypatch):
+    from graph_works_core.workspace import repo_files
+
+    monkeypatch.setattr(repo_files, "RACY_NS", 0)
+    for _ in range(2):
+        assert run_code_excerpt(layout, "code", "skip.py", 1).refusal == "unknown-file"
+        assert run_code_excerpt(layout, "code", "../x.py", 1).refusal == "outside-repository"
+        assert run_code_excerpt(layout, "nope", "ten.py", 1).refusal == "unknown-repository"

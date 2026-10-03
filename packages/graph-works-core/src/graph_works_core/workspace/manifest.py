@@ -197,6 +197,13 @@ CATALOG: tuple[ConfigEntry, ...] = (
         default=["main"],
         description="Branches the state gate treats as clean-required. Empty list is valid and intentional.",
     ),
+    ConfigEntry(
+        key="read_index.enabled",
+        type="bool",
+        default=True,
+        description="Whether display reads use the persisted read index; false forces the full bundle load "
+        "(a cache switch, settable per machine with --local).",
+    ),
     # The workspace role override. Five wildcard entries rather than one per
     # role per field: `config_io.expand_wildcards` handles the
     # `roles.*.<field>` shape natively, so the catalog stays the size of the

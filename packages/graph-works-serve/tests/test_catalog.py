@@ -91,3 +91,7 @@ def test_every_param_names_its_location() -> None:
     for route in doc["routes"]:
         for param in route["params"]:
             assert param["location"] in {"query", "body"}
+
+
+def test_catalog_declares_generation_header() -> None:
+    assert describe(ROUTES, "x")["response_headers"][0]["name"] == "X-GW-Generation"

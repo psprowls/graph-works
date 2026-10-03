@@ -47,6 +47,7 @@ package):
 - **The item view**: `items.WorkItem`, the tolerant path-keyed projection
   built by `load_items(bundle)`, plus the read-only rollups and resume
   selection over it in `projection.py` (`rollup()`, `ResumeSelection`).
+- `snapshot.py` — `WorkSnapshot`: the immutable, indexed `Sequence[WorkItem]` `load_items` returns; helpers coerce with `as_snapshot` and memoize per snapshot. `WorkSnapshot(items)` wraps as given; only `from_bundle` / `from_rows` sort and link `child_paths`.
 
 ## Module layering (import direction matters)
 

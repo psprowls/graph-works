@@ -99,7 +99,11 @@ _PREFLIGHT_HEADERS: tuple[tuple[bytes, bytes], ...] = (
 
 
 def _cors_headers(origin: str) -> list[tuple[bytes, bytes]]:
-    return [(b"access-control-allow-origin", origin.encode("latin-1")), (b"vary", b"Origin")]
+    return [
+        (b"access-control-allow-origin", origin.encode("latin-1")),
+        (b"vary", b"Origin"),
+        (b"access-control-expose-headers", b"X-GW-Generation"),
+    ]
 
 
 def _with_cors(send: Send, origin: str) -> Send:

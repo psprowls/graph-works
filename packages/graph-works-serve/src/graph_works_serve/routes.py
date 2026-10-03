@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import os
 import sys
-from collections.abc import AsyncIterator, Awaitable, Callable, Iterable, Mapping
+from collections.abc import AsyncIterator, Callable, Iterable, Mapping
 from dataclasses import dataclass
 from datetime import date
 from functools import partial
@@ -48,14 +48,13 @@ from graph_works_wire import work as wire_work
 from graph_works_serve import mutations, sse
 from graph_works_serve.context import Reply, ServeContext
 from graph_works_serve.errors import Catch, call, refusal
-from graph_works_serve.hub import Hub
 from graph_works_serve.mutation_specs import ADVANCE, ARCHIVE, DECIDE, DECISION_ANSWER, SCAN, SECTION_WRITE
-from graph_works_serve.mutations import MutationSpec, Outcome
+from graph_works_serve.mutations import MutationSpec, Outcome, WriteThrough
 from graph_works_serve.params import Param, ParamError, parse
 
 Handler = Callable[[ServeContext, Mapping[str, object]], Reply]
-MutationHandler = Callable[[WorkspaceLayout, bytes, str | None], Outcome]
-StreamHandler = Callable[[Hub, Callable[[], Awaitable[bool]]], AsyncIterator[bytes]]
+MutationHandler = Callable[[WorkspaceLayout, bytes, str | None, WriteThrough | None], Outcome]
+StreamHandler = Callable[..., AsyncIterator[bytes]]
 
 
 @dataclass(frozen=True, slots=True)
@@ -93,7 +92,9 @@ def mutation_routes(spec: MutationSpec) -> tuple[RouteSpec, RouteSpec]:
 def handle_mutation(spec: RouteSpec, context: ServeContext, body: bytes, content_type: str | None) -> Outcome:
     """Resolve and dispatch together in the adapter's worker thread."""
     handler = cast(MutationHandler, spec.handler)
-    return call(spec.path, lambda: handler(context.layout(), body, content_type), _ROUTED)
+    return call(
+        spec.path, lambda: handler(context.layout(), body, content_type, context.read_state.write_through), _ROUTED
+    )
 
 
 def handle(spec: RouteSpec, context: ServeContext, items: Iterable[tuple[str, str]]) -> Reply:

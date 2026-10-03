@@ -1,7 +1,14 @@
 {
   "schema_version": 1,
   "server": "graph-works-serve",
-  "version": "0.3.11",
+  "version": "0.3.12",
+  "response_headers": [
+    {
+      "name": "X-GW-Generation",
+      "on": "every JSON GET and every successful apply",
+      "summary": "The sidecar read generation the response reflects: the snapshot's for memo-served reads, otherwise the generation current when the request began (a lower bound)."
+    }
+  ],
   "routes": [
     {
       "method": "GET",

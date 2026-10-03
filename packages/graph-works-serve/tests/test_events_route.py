@@ -14,6 +14,7 @@ from graph_works_serve import sse
 from graph_works_serve.app import build_app
 from graph_works_serve.context import ServeContext
 from graph_works_serve.hub import Changes, Hub, Resync
+from graph_works_serve.readstate import ReadState
 from starlette.testclient import TestClient
 
 E = ChangeEvent(kind=EventKind.WORK_ITEM, path="work/a", member="work/a.md", change=Change.MODIFIED)
@@ -27,8 +28,8 @@ async def _until_subscribed(hub: Hub, count: int = 1) -> None:
 
 def scripted(
     *steps: Callable[[Hub], None], close: bool = True
-) -> Callable[[Path, Hub, asyncio.Event], Awaitable[None]]:
-    async def source(root: Path, hub: Hub, stop: asyncio.Event) -> None:
+) -> Callable[[Path, Hub, ReadState, asyncio.Event], Awaitable[None]]:
+    async def source(root: Path, hub: Hub, read_state: ReadState, stop: asyncio.Event) -> None:
         await _until_subscribed(hub)
         for step in steps:
             step(hub)
@@ -39,14 +40,16 @@ def scripted(
     return source
 
 
-def _client(workspace: WorkspaceLayout, source: Callable[[Path, Hub, asyncio.Event], Awaitable[None]]) -> TestClient:
+def _client(
+    workspace: WorkspaceLayout, source: Callable[[Path, Hub, ReadState, asyncio.Event], Awaitable[None]]
+) -> TestClient:
     return TestClient(
         build_app(ServeContext(workspace.root, workspace.root, 8123, 4242, "test"), token=TOKEN, change_source=source)
     )
 
 
 def test_stream_sends_ready_then_changes_then_resync(workspace: WorkspaceLayout) -> None:
-    source = scripted(lambda hub: hub.publish([E]), lambda hub: hub.resync("rewatch"))
+    source = scripted(lambda hub: hub.publish([E], 1), lambda hub: hub.resync("rewatch", 1))
     with _client(workspace, source) as client:
         response = client.get(f"/v1/events?token={TOKEN}", headers=HOST)
     assert response.status_code == 200
@@ -54,7 +57,7 @@ def test_stream_sends_ready_then_changes_then_resync(workspace: WorkspaceLayout)
     assert response.headers["cache-control"] == "no-store"
     assert response.headers["x-accel-buffering"] == "no"
     assert response.content == (
-        sse.ready_frame(0) + sse.message_frame(Changes(1, (E,))) + sse.message_frame(Resync(2, "rewatch"))
+        sse.ready_frame(0, 1) + sse.message_frame(Changes(1, (E,), 1)) + sse.message_frame(Resync(2, "rewatch", 1))
     )
 
 
@@ -62,7 +65,7 @@ def test_bearer_header_also_works(workspace: WorkspaceLayout) -> None:
     with _client(workspace, scripted()) as client:
         response = client.get("/v1/events", headers={**HOST, "Authorization": f"Bearer {TOKEN}"})
     assert response.status_code == 200
-    assert response.content == sse.ready_frame(0)
+    assert response.content == sse.ready_frame(0, 1)
 
 
 @pytest.mark.parametrize(
@@ -87,13 +90,13 @@ def test_guard_refuses_before_the_stream_starts(
 def test_last_event_id_is_ignored(workspace: WorkspaceLayout) -> None:
     with _client(workspace, scripted()) as client:
         response = client.get(f"/v1/events?token={TOKEN}", headers={**HOST, "Last-Event-ID": "12"})
-    assert response.content == sse.ready_frame(0)
+    assert response.content == sse.ready_frame(0, 1)
 
 
 def test_heartbeat_when_idle(workspace: WorkspaceLayout, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(sse, "PING_INTERVAL", 0.02)
 
-    async def source(root: Path, hub: Hub, stop: asyncio.Event) -> None:
+    async def source(root: Path, hub: Hub, read_state: ReadState, stop: asyncio.Event) -> None:
         await _until_subscribed(hub)
         await asyncio.sleep(0.1)
         hub.close()
@@ -101,14 +104,14 @@ def test_heartbeat_when_idle(workspace: WorkspaceLayout, monkeypatch: pytest.Mon
 
     with _client(workspace, source) as client:
         response = client.get(f"/v1/events?token={TOKEN}", headers=HOST)
-    assert response.content.startswith(sse.ready_frame(0))
+    assert response.content.startswith(sse.ready_frame(0, 1))
     assert sse.PING in response.content
 
 
 def test_lifespan_stops_the_source_and_closes_the_hub(workspace: WorkspaceLayout) -> None:
     seen: dict[str, object] = {}
 
-    async def source(root: Path, hub: Hub, stop: asyncio.Event) -> None:
+    async def source(root: Path, hub: Hub, read_state: ReadState, stop: asyncio.Event) -> None:
         seen["root"] = root
         await stop.wait()
         seen["stopped"] = True
@@ -122,7 +125,7 @@ def test_lifespan_stops_the_source_and_closes_the_hub(workspace: WorkspaceLayout
 
 
 def test_a_crashing_source_is_logged_not_raised(workspace: WorkspaceLayout, capsys: pytest.CaptureFixture[str]) -> None:
-    async def source(root: Path, hub: Hub, stop: asyncio.Event) -> None:
+    async def source(root: Path, hub: Hub, read_state: ReadState, stop: asyncio.Event) -> None:
         raise RuntimeError("boom")
 
     with TestClient(
@@ -138,7 +141,7 @@ def test_a_source_that_ignores_stop_is_cancelled(workspace: WorkspaceLayout, mon
     monkeypatch.setattr(app_module, "SHUTDOWN_TIMEOUT", 0.05)
     cancelled: list[bool] = []
 
-    async def source(root: Path, hub: Hub, stop: asyncio.Event) -> None:
+    async def source(root: Path, hub: Hub, read_state: ReadState, stop: asyncio.Event) -> None:
         try:
             await asyncio.sleep(3600)
         except asyncio.CancelledError:

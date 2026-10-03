@@ -14,38 +14,38 @@ E2 = ChangeEvent(kind=EventKind.PAGE, path="a.md", member="a.md", change=Change.
 async def test_publish_delivers_in_order_with_monotonic_seq() -> None:
     hub = Hub()
     a, b = hub.subscribe(), hub.subscribe()
-    hub.publish([E1])
-    hub.publish([E2])
+    hub.publish([E1], 1)
+    hub.publish([E2], 1)
     for sub in (a, b):
-        assert await sub.get() == Changes(1, (E1,))
-        assert await sub.get() == Changes(2, (E2,))
+        assert await sub.get() == Changes(1, (E1,), 1)
+        assert await sub.get() == Changes(2, (E2,), 1)
     assert hub.seq == 2
 
 
 async def test_empty_publish_is_a_no_op() -> None:
     hub = Hub()
     sub = hub.subscribe()
-    hub.publish([])
+    hub.publish([], 1)
     assert hub.seq == 0 and sub.queue_size == 0
 
 
 async def test_broadcast_resync_advances_seq() -> None:
     hub = Hub()
     sub = hub.subscribe()
-    hub.resync("rewatch")
-    assert await sub.get() == Resync(1, "rewatch")
+    hub.resync("rewatch", 1)
+    assert await sub.get() == Resync(1, "rewatch", 1)
 
 
 async def test_overflow_drains_and_enqueues_exactly_one_resync() -> None:
     hub = Hub()
     slow, fast = hub.subscribe(), hub.subscribe()
     for _ in range(Hub.QUEUE_SIZE):
-        hub.publish([E1])
+        hub.publish([E1], 1)
         await fast.get()
-    hub.publish([E2])  # slow's queue is full -> overflow
+    hub.publish([E2], 1)  # slow's queue is full -> overflow
     assert slow.queue_size == 1
-    assert await slow.get() == Resync(Hub.QUEUE_SIZE + 1, "overflow")
-    assert await fast.get() == Changes(Hub.QUEUE_SIZE + 1, (E2,))
+    assert await slow.get() == Resync(Hub.QUEUE_SIZE + 1, "overflow", 1)
+    assert await fast.get() == Changes(Hub.QUEUE_SIZE + 1, (E2,), 1)
     assert hub.seq == Hub.QUEUE_SIZE + 1
 
 
@@ -53,7 +53,7 @@ async def test_close_ends_every_subscriber_and_later_subscribers() -> None:
     hub = Hub()
     full = hub.subscribe()
     for _ in range(Hub.QUEUE_SIZE):
-        hub.publish([E1])
+        hub.publish([E1], 1)
     hub.close()
     hub.close()  # idempotent
     assert hub.closed
@@ -64,8 +64,8 @@ async def test_close_ends_every_subscriber_and_later_subscribers() -> None:
 async def test_publish_after_close_is_ignored() -> None:
     hub = Hub()
     hub.close()
-    hub.publish([E1])
-    hub.resync("rewatch")
+    hub.publish([E1], 1)
+    hub.resync("rewatch", 1)
     assert hub.seq == 0
 
 
@@ -76,7 +76,7 @@ async def test_unsubscribe_is_idempotent() -> None:
     hub.unsubscribe(sub)
     hub.unsubscribe(sub)
     assert hub.subscriber_count == 0
-    hub.publish([E1])
+    hub.publish([E1], 1)
     assert sub.queue_size == 0
 
 
@@ -100,3 +100,14 @@ def test_close_threadsafe_after_loop_closed_is_a_no_op() -> None:
 def test_hub_requires_a_running_loop() -> None:
     with pytest.raises(RuntimeError):
         Hub()
+
+
+async def test_overflow_uses_current_generation() -> None:
+    current = [7]
+    hub = Hub(lambda: current[0])
+    sub = hub.subscribe()
+    for _ in range(Hub.QUEUE_SIZE):
+        hub.publish([E1], 7)
+    current[0] = 9
+    hub.publish([E2], 9)
+    assert await sub.get() == Resync(hub.seq, "overflow", 9)

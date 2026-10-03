@@ -11,6 +11,8 @@ from graph_works_core.events import Change, ChangeEvent, EventKind
 from graph_works_core.workspace.layout import WorkspaceLayout
 from graph_works_serve import watch
 from graph_works_serve.hub import Changes, Hub, Resync
+from graph_works_serve.readstate import ReadState
+from readstate_fakes import FakeOpener, state_for
 
 # `workspace` is C5's initialized-workspace fixture (S6).
 
@@ -64,16 +66,21 @@ async def test_flush_publishes_one_classified_batch(workspace: WorkspaceLayout) 
     sets = watch.watch_sets(workspace, None)
     item = workspace.bundle_dir / "work" / "a.md"
     raw = {(watchfiles.Change.added, str(item)), (watchfiles.Change.modified, str(item))}
-    batch = watch.flush(raw, workspace, sets, hub, exists=lambda _: True)
+    batch = await watch.flush(raw, workspace, sets, hub, ReadState(), asyncio.Lock(), exists=lambda _: True)
     expected = (ChangeEvent(EventKind.WORK_ITEM, "work/a", "work/a.md", Change.MODIFIED),)
     assert batch == expected
-    assert await sub.get() == Changes(1, expected)
+    assert await sub.get() == Changes(1, expected, 2)
 
 
 async def test_flush_of_noise_publishes_nothing(workspace: WorkspaceLayout) -> None:
     hub = Hub()
     raw = {(watchfiles.Change.modified, str(workspace.bundle_dir / "not-markdown.bin"))}
-    assert watch.flush(raw, workspace, watch.watch_sets(workspace, None), hub, exists=lambda _: True) == ()
+    assert (
+        await watch.flush(
+            raw, workspace, watch.watch_sets(workspace, None), hub, ReadState(), asyncio.Lock(), exists=lambda _: True
+        )
+        == ()
+    )
     assert hub.seq == 0
 
 
@@ -116,7 +123,7 @@ async def test_supervisor_passes_the_documented_awatch_arguments(workspace: Work
     fake = FakeAwatch()
     hub = Hub()
     stop = asyncio.Event()
-    task = asyncio.create_task(watch.watch_workspace(workspace.root, hub, stop, awatch_fn=fake))
+    task = asyncio.create_task(watch.watch_workspace(workspace.root, hub, ReadState(), stop, awatch_fn=fake))
     while len(fake.calls) < 2:
         await asyncio.sleep(0.005)
     stop.set()
@@ -144,7 +151,9 @@ async def test_watcher_error_resyncs_and_restarts_with_backoff(
     hub = Hub()
     sub = hub.subscribe()
     stop = asyncio.Event()
-    task = asyncio.create_task(watch.watch_workspace(workspace.root, hub, stop, awatch_fn=fake, sleep=fake_sleep))
+    task = asyncio.create_task(
+        watch.watch_workspace(workspace.root, hub, ReadState(), stop, awatch_fn=fake, sleep=fake_sleep)
+    )
     messages = [await asyncio.wait_for(sub.get(), 5) for _ in range(3)]
     stop.set()
     await asyncio.wait_for(task, 5)
@@ -171,17 +180,26 @@ async def test_manifest_change_that_moves_dispatch_rules_rewatches(
     )
     monkeypatch.setattr(watch, "load_state", lambda root: next(states))
     fake = FakeAwatch(config=[[{(watchfiles.Change.modified, str(workspace.manifest_path))}]])
-    hub = Hub()
+    opener = FakeOpener()
+    state = state_for(opener)
+    with state.session(workspace):
+        pass
+    hub = Hub(lambda: state.generation)
     sub = hub.subscribe()
     stop = asyncio.Event()
-    task = asyncio.create_task(watch.watch_workspace(workspace.root, hub, stop, awatch_fn=fake))
+    task = asyncio.create_task(watch.watch_workspace(workspace.root, hub, state, stop, awatch_fn=fake))
     first = await asyncio.wait_for(sub.get(), 5)
     second = await asyncio.wait_for(sub.get(), 5)
     stop.set()
     await asyncio.wait_for(task, 5)
     assert isinstance(first, Changes) and first.events[0].path == "manifest"
-    assert second == Resync(2, "rewatch")
+    assert second == Resync(2, "rewatch", 3)
     assert len(fake.calls) >= 4  # both loops were started twice
+
+    assert state.bumps[-1][1] == "resync"
+    with state.session(workspace):
+        pass
+    assert opener.calls[-1] is True
 
 
 async def test_unloadable_manifest_keeps_the_old_sets(
@@ -203,7 +221,7 @@ async def test_unloadable_manifest_keeps_the_old_sets(
     hub = Hub()
     sub = hub.subscribe()
     stop = asyncio.Event()
-    task = asyncio.create_task(watch.watch_workspace(workspace.root, hub, stop, awatch_fn=fake))
+    task = asyncio.create_task(watch.watch_workspace(workspace.root, hub, ReadState(), stop, awatch_fn=fake))
     message = await asyncio.wait_for(sub.get(), 5)
     await asyncio.sleep(0.05)
     stop.set()
@@ -222,7 +240,7 @@ async def test_missing_config_dir_is_skipped_with_one_line(
     fake = FakeAwatch()
     hub = Hub()
     stop = asyncio.Event()
-    task = asyncio.create_task(watch.watch_workspace(workspace.root, hub, stop, awatch_fn=fake))
+    task = asyncio.create_task(watch.watch_workspace(workspace.root, hub, ReadState(), stop, awatch_fn=fake))
     while len(fake.calls) < 2:
         await asyncio.sleep(0.005)
     stop.set()
@@ -259,7 +277,7 @@ async def test_invalid_dispatch_reference_keeps_previous_watch_sets(
     hub = Hub()
     sub = hub.subscribe()
     stop = asyncio.Event()
-    task = asyncio.create_task(watch.watch_workspace(workspace.root, hub, stop, awatch_fn=fake))
+    task = asyncio.create_task(watch.watch_workspace(workspace.root, hub, ReadState(), stop, awatch_fn=fake))
     try:
         messages = [await asyncio.wait_for(sub.get(), 2) for _ in range(2)]
         assert all(isinstance(message, Changes) for message in messages)
@@ -297,7 +315,9 @@ async def test_error_backoff_caps_and_resets_after_clean_batch(workspace: Worksp
 
     hub = Hub()
     sub = hub.subscribe()
-    await asyncio.wait_for(watch.watch_workspace(workspace.root, hub, stop, awatch_fn=fake, sleep=sleep), 3)
+    await asyncio.wait_for(
+        watch.watch_workspace(workspace.root, hub, ReadState(), stop, awatch_fn=fake, sleep=sleep), 3
+    )
     assert sleeps == [1, 2, 4, 8, 16, 30, 30, 1]
     messages = [await sub.get() for _ in range(sub.queue_size)]
     assert sum(isinstance(message, Resync) for message in messages) == 8
@@ -317,7 +337,7 @@ async def test_initial_bad_dispatch_still_watches_bundle_and_manifest(
     hub = Hub()
     sub = hub.subscribe()
     stop = asyncio.Event()
-    task = asyncio.create_task(watch.watch_workspace(workspace.root, hub, stop, awatch_fn=fake))
+    task = asyncio.create_task(watch.watch_workspace(workspace.root, hub, ReadState(), stop, awatch_fn=fake))
     try:
         message = await asyncio.wait_for(sub.get(), 2)
         assert isinstance(message, Changes) and message.events[0].kind is EventKind.LOG
@@ -333,10 +353,95 @@ async def test_initial_bad_dispatch_still_watches_bundle_and_manifest(
 
 async def test_real_backoff_stops_promptly(workspace: WorkspaceLayout) -> None:
     fake = FakeAwatch(bundle=[RuntimeError("broken watcher")])
+    opener = FakeOpener()
+    state = state_for(opener)
+    with state.session(workspace):
+        pass
+    hub = Hub(lambda: state.generation)
+    sub = hub.subscribe()
+    stop = asyncio.Event()
+    task = asyncio.create_task(watch.watch_workspace(workspace.root, hub, state, stop, awatch_fn=fake))
+    assert await asyncio.wait_for(sub.get(), 2) == Resync(1, "watcher-error", 2)
+    stop.set()
+    await asyncio.wait_for(task, 0.5)
+
+    assert state.bumps[-1][1] == "resync"
+    with state.session(workspace):
+        pass
+    assert opener.calls[-1] is True
+
+
+@pytest.mark.parametrize("change", list(watchfiles.Change))
+@pytest.mark.parametrize("repository", ["example", "other-repo"])
+@pytest.mark.parametrize("suffix", ["", "/README.md", "/src/code.py", "/nested/docs/page.md"])
+def test_bundle_filter_rejects_clone_roots_and_descendants(
+    tmp_path: Path, change: watchfiles.Change, repository: str, suffix: str
+) -> None:
+    bundle = tmp_path / ".hidden-parent" / "relocated-bundle"
+    # No files exist: deletion filtering must be lexical too.
+    path = str(bundle / f"repositories/{repository}/references/git") + suffix
+    assert not watch.bundle_filter(bundle)(change, path)
+
+
+@pytest.mark.parametrize(
+    "relative",
+    [
+        "repositories/example.md",
+        "repositories/index.md",
+        "repositories/example/references/notes.md",
+        "repositories/example/references/github/README.md",
+        "repositories/example/references/git-notes/page.md",
+        "repositories/example/references/Git/page.md",
+        "docs/references/git/page.md",
+        "docs/repositories/example/references/git/page.md",
+        "repositories/example/nested/references/git/page.md",
+    ],
+)
+def test_bundle_filter_preserves_adjacent_and_unrelated_content(tmp_path: Path, relative: str) -> None:
+    bundle = tmp_path / ".hidden-parent" / "relocated-bundle"
+    assert watch.bundle_filter(bundle)(watchfiles.Change.modified, str(bundle / relative))
+
+
+async def test_loop_filters_clone_changes_before_publishing(workspace: WorkspaceLayout) -> None:
+    from collections.abc import Callable
+
+    clone = str(workspace.bundle_dir / "repositories/example/references/git/README.md")
+    reference = str(workspace.bundle_dir / "repositories/example/references/notes.md")
+
+    async def filtering_awatch(*paths: Path, **kwargs: object) -> AsyncIterator[watch.RawBatch]:
+        keep = cast(Callable[[watchfiles.Change, str], bool], kwargs["watch_filter"])
+        stop_event = cast(asyncio.Event, kwargs["stop_event"])
+        if kwargs["recursive"]:
+            for raw in [
+                {(watchfiles.Change.modified, clone)},
+                {(watchfiles.Change.deleted, clone), (watchfiles.Change.added, reference)},
+            ]:
+                filtered = {(change, path) for change, path in raw if keep(change, path)}
+                if filtered:
+                    yield filtered
+        await stop_event.wait()
+
     hub = Hub()
     sub = hub.subscribe()
     stop = asyncio.Event()
-    task = asyncio.create_task(watch.watch_workspace(workspace.root, hub, stop, awatch_fn=fake))
-    assert await asyncio.wait_for(sub.get(), 2) == Resync(1, "watcher-error")
-    stop.set()
-    await asyncio.wait_for(task, 0.5)
+    task = asyncio.create_task(
+        watch.watch_workspace(workspace.root, hub, ReadState(), stop, awatch_fn=filtering_awatch)
+    )
+    try:
+        message = await asyncio.wait_for(sub.get(), 2)
+        assert message == Changes(
+            1,
+            (
+                ChangeEvent(
+                    EventKind.PAGE,
+                    "repositories/example/references/notes.md",
+                    "repositories/example/references/notes.md",
+                    Change.DELETED,
+                ),
+            ),
+            2,
+        )
+        assert hub.seq == 1 and sub.queue_size == 0
+    finally:
+        stop.set()
+        await asyncio.wait_for(task, 2)

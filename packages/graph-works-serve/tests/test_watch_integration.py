@@ -12,6 +12,7 @@ from graph_works_core.workspace.dispatch_projection import write_dispatch_projec
 from graph_works_core.workspace.layout import WorkspaceLayout
 from graph_works_serve import watch
 from graph_works_serve.hub import Changes, Hub, Resync, Subscription
+from graph_works_serve.readstate import ReadState
 
 DEADLINE = 10.0
 
@@ -26,7 +27,7 @@ async def running(workspace: WorkspaceLayout) -> AsyncIterator[tuple[Hub, Subscr
     hub = Hub()
     sub = hub.subscribe()
     stop = asyncio.Event()
-    task = asyncio.create_task(watch.watch_workspace(workspace.root, hub, stop))
+    task = asyncio.create_task(watch.watch_workspace(workspace.root, hub, ReadState(), stop))
     await asyncio.sleep(0.5)  # let the native watchers arm; not a correctness wait
     try:
         yield hub, sub
@@ -145,3 +146,47 @@ async def test_local_manifest_and_dispatch_edits_emit_config(
     text = path.read_text(encoding="utf-8") if path.exists() else "{}\n"
     _write(path, text + "\n# edited\n")
     await _collect_until(sub, lambda es: any(e.kind is EventKind.CONFIG and e.path == token for e in es))
+
+
+async def test_existing_clone_edits_and_deletions_never_emit(workspace: WorkspaceLayout) -> None:
+    clone = workspace.bundle_dir / "repositories/example/references/git"
+    readme = clone / "README.md"
+    code = clone / "src/code.py"
+    _write(readme, "before")
+    _write(code, "before")
+    hub = Hub()
+    sub = hub.subscribe()
+    stop = asyncio.Event()
+    task = asyncio.create_task(watch.watch_workspace(workspace.root.resolve(), hub, ReadState(), stop))
+    await asyncio.sleep(0.5)
+    try:
+        _write(readme, "after")
+        _write(code, "after")
+        _write(workspace.bundle_dir / "repositories/example/references/notes.md", "notes")
+        _write(workspace.bundle_dir / "log.md", "sentinel")
+        _, events = await _collect_until(
+            sub,
+            lambda es: {"log.md", "repositories/example/references/notes.md"} <= {e.path for e in es},
+        )
+
+        # Drain late batches after the positive sentinel, not just its first batch.
+        async def drain() -> None:
+            while True:
+                message = await sub.get()
+                assert isinstance(message, Changes)
+                events.extend(message.events)
+
+        with pytest.raises(TimeoutError):
+            await asyncio.wait_for(drain(), 1.2)
+        assert {e.path for e in events} == {"log.md", "repositories/example/references/notes.md"}
+        before = hub.seq
+        readme.unlink()
+        code.unlink()
+        (clone / "src").rmdir()
+        clone.rmdir()
+        with pytest.raises(TimeoutError):
+            await asyncio.wait_for(sub.get(), 1.2)
+        assert hub.seq == before
+    finally:
+        stop.set()
+        await asyncio.wait_for(task, DEADLINE)

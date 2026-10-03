@@ -12,14 +12,14 @@ from graph_works_core.workspace.errors import InitError, WorkspaceError, Workspa
 
 
 def test_version_is_static_and_matches_the_distribution():
-    assert graph_works_core.__version__ == "0.6.9"
+    assert graph_works_core.__version__ == "0.6.11"
 
 
 def test_private_descriptor_loader_has_a_synchronized_okf_io_floor():
     manifest = Path(__file__).resolve().parents[1] / "pyproject.toml"
     with manifest.open("rb") as handle:
         dependencies = tomllib.load(handle)["project"]["dependencies"]
-    assert "okf-io>=0.2.5,<0.3" in dependencies
+    assert "okf-io>=0.2.6,<0.3" in dependencies
 
 
 def test_all_is_sorted_and_every_name_is_bound():
@@ -237,4 +237,4 @@ def test_nonblocking_lock_dependency_floor():
     manifest = Path(__file__).resolve().parents[1] / "pyproject.toml"
     with manifest.open("rb") as handle:
         dependencies = tomllib.load(handle)["project"]["dependencies"]
-    assert "okf-ext[schemas]>=0.5.2,<0.6" in dependencies
+    assert "okf-ext[schemas]>=0.5.5,<0.6" in dependencies

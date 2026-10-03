@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import hashlib
+from concurrent.futures import ThreadPoolExecutor
+from threading import Barrier
 
 import pytest
 from config_fakes import DictStore, InvalidAfterWriteStore, LossyStore
@@ -45,6 +47,41 @@ def test_read_and_read_explicit_agree(tmp_path):
     # registry's persistence check can never fire against it.
     store = _store(tmp_path, "topic: My Wiki\nstate_gate:\n  enabled: true\n")
     assert store.read() == store.read_explicit() == {"topic": "My Wiki", "state_gate": {"enabled": True}}
+
+
+def test_concurrent_reads_of_valid_yaml_return_identical_values(tmp_path):
+    # Enough nested content to overlap parsing across watcher/request threads.
+    text = "".join(f"entry_{i}:\n  enabled: true\n  values: [yes, 012, '1:30']\n" for i in range(200))
+    expected = {f"entry_{i}": {"enabled": True, "values": ["yes", 12, "1:30"]} for i in range(200)}
+    store = _store(tmp_path, text)
+    start = Barrier(8)
+
+    def read_repeatedly(_):
+        start.wait(timeout=10)
+        for _ in range(10):
+            assert store.read() == expected
+            assert store.read_explicit() == expected
+
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        list(pool.map(read_repeatedly, range(8)))
+
+
+def test_concurrent_writes_to_distinct_files_preserve_each_mapping(tmp_path):
+    # Separate files isolate serializer state from concurrent writes to one file.
+    start = Barrier(8)
+
+    def write_repeatedly(worker):
+        store = PlainYamlStore(tmp_path / f"config_{worker}.yaml")
+        data = {f"entry_{i}": {"worker": worker, "values": ["yes", 12, "1:30"]} for i in range(200)}
+        start.wait(timeout=10)
+        for _ in range(10):
+            store.write(data)
+        return store, data
+
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        results = list(pool.map(write_repeatedly, range(8)))
+    for store, expected in results:
+        assert store.read() == expected
 
 
 def test_malformed_yaml_raises_store_validation_error(tmp_path):

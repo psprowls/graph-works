@@ -6,7 +6,7 @@ workspace: it extends `okf-io` and never modifies it.
 | Tier | What it is | Members |
 |---|---|---|
 | 1. Core | The spec, nothing else | `okf-io` |
-| 2. Extension layer | Beyond-spec capabilities over *any* bundle | `okf-ext` — tags, schema validation, body-section declarations, table read/splice, render correctness, bundle health, search, member moves, generator-side regeneration, the proposal ledger, additive bundle setup, page placement and locked log appends today; budgeted context assembly later |
+| 2. Extension layer | Beyond-spec capabilities over *any* bundle | `okf-ext` — tags, schema validation, body-section declarations, table read/splice, render correctness, bundle health, search, member moves, generator-side regeneration, the proposal ledger, additive bundle setup, page placement, locked log appends and a disposable bundle read index today; budgeted context assembly later |
 | 3. Applications | Domain tools that produce or consume bundles | wiki generator, AST→graph tooling, `okf-attest` |
 
 ## Platform
@@ -81,7 +81,7 @@ and one extra:
   when it is absent. Neither promotion trigger fires: the dependency is cleanly
   optional, and nothing yet wants the capability without the rest.
 
-and one capability that needs nothing at all:
+and capabilities that need nothing at all:
 
 - **`search`** — the mirror image of the worked example above, and the case the
   policy's "unconditional dependencies stay few" clause is actually protecting.
@@ -108,6 +108,18 @@ and one capability that needs nothing at all:
   `logs` is the sixth: it appends through `okf-io`'s own `append_log_entry` and
   the shared `okf_ext.locking`, plus stdlib `tempfile`, so it too ships with no
   extra and no guard.
+
+- **`readindex`** stores membership, frontmatter, links, headings and diagnostics
+  using okf-io's public readers; it stores no page bodies and adds no dependency.
+  `MemberRow.fm_exact=False` identifies a JSON fallback for unrepresentable
+  frontmatter (such as custom YAML values or recursive aliases). Consumers
+  needing lossless frontmatter must fully read those rows; standard columns
+  stay exact. Surrogate-containing strings remain lossless through reversible
+  UTF-8 surrogatepass BLOBs, decoded by the index connection. Raw external SQL
+  clients must decode those rare BLOB values with the same convention.
+  Reconciliation raises `IndexBusy` without writing if a competing publisher
+  invalidates its snapshot; retry against the fresh snapshot. A handle surviving
+  an identity/reset-epoch change must be reopened after `IndexUnavailable`.
 
 `requires-python` is `>=3.12`, matching the rest of the workspace.
 `okf_io.models.Frontmatter.extra` defaults to `MappingProxyType({})`, which the

@@ -79,26 +79,26 @@ def test_a_malformed_dispatch_file_blocks_offered_transitions_only(tmp_path: Pat
     assert by_path[UNSIZED].dispatch_preflight is None
 
 
-def test_the_bundle_and_the_dispatch_config_are_each_loaded_once(tmp_path: Path, monkeypatch) -> None:
+def test_the_session_and_the_dispatch_config_are_each_read_once(tmp_path: Path, monkeypatch) -> None:
     layout = _layout(tmp_path)
     _fixture(layout)
-    calls = {"bundle": 0, "config": 0}
-    load_bundle, load_config = work.load_workspace_bundle, work.load_dispatch_config
+    calls = {"session": 0, "config": 0}
+    open_session, load_config = work.open_read_session, work.load_dispatch_config
 
-    def counting_bundle(*args, **kwargs):
-        calls["bundle"] += 1
-        return load_bundle(*args, **kwargs)
+    def counting_session(*args, **kwargs):
+        calls["session"] += 1
+        return open_session(*args, **kwargs)
 
     def counting_config(*args, **kwargs):
         calls["config"] += 1
         return load_config(*args, **kwargs)
 
-    monkeypatch.setattr(work, "load_workspace_bundle", counting_bundle)
+    monkeypatch.setattr(work, "open_read_session", counting_session)
     monkeypatch.setattr(work, "load_dispatch_config", counting_config)
 
     work.run_work_queue(layout)
 
-    assert calls == {"bundle": 1, "config": 1}
+    assert calls == {"session": 1, "config": 1}
 
 
 def test_the_queue_writes_nothing_when_a_design_source_needs_repair(tmp_path: Path) -> None:

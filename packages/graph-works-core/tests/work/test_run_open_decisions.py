@@ -66,3 +66,20 @@ def test_an_archived_items_ledger_is_never_read(tmp_path: Path, monkeypatch) -> 
     assert work.run_open_decisions(layout) == ()
     assert archived_ledger not in read
     assert len(read) == 1  # LONE's (absent) ledger, read once
+
+
+def test_open_decision_scan_builds_indexes_once(tmp_path: Path, monkeypatch) -> None:
+    from work_tracker_okf import snapshot as snapshot_module
+
+    layout = _layout(tmp_path)
+    _write(layout, EPIC, type="Epic", phase="execute")
+    _write(layout, CHILD, type="Bug", phase="plan")
+    _write(layout, LONE)
+    _ledger(layout, EPIC, f"## D-001 — q\nstatus: open\naffects: [{CHILD}, {LONE}]\n")
+    builds: list[int] = []
+    real = snapshot_module._build_indexes
+    monkeypatch.setattr(snapshot_module, "_build_indexes", lambda items: (builds.append(1), real(items))[1])
+
+    work.run_open_decisions(layout)
+
+    assert builds == [1]

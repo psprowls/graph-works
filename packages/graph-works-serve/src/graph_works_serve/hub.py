@@ -16,6 +16,8 @@ from typing import Literal
 
 from graph_works_core.events import ChangeEvent
 
+from graph_works_serve.readstate import ReadState
+
 ResyncReason = Literal["overflow", "rewatch", "watcher-error"]
 
 
@@ -23,12 +25,14 @@ ResyncReason = Literal["overflow", "rewatch", "watcher-error"]
 class Changes:
     seq: int
     events: tuple[ChangeEvent, ...]
+    generation: int
 
 
 @dataclass(frozen=True, slots=True)
 class Resync:
     seq: int
     reason: ResyncReason
+    generation: int
 
 
 Message = Changes | Resync
@@ -60,7 +64,8 @@ class Subscription:
 class Hub:
     QUEUE_SIZE = 64
 
-    def __init__(self) -> None:
+    def __init__(self, generation: Callable[[], int] = lambda: 1) -> None:
+        self._generation = generation
         self._loop = asyncio.get_running_loop()
         self._subscribers: list[Subscription] = []
         self._seq = 0
@@ -81,7 +86,7 @@ class Hub:
     def subscribe(self) -> Subscription:
         sub = Subscription(self.QUEUE_SIZE)
         if self._closed:
-            sub._offer(None, Resync(self._seq, "overflow"))
+            sub._offer(None, Resync(self._seq, "overflow", self._generation()))
         else:
             self._subscribers.append(sub)
         return sub
@@ -90,17 +95,17 @@ class Hub:
         if sub in self._subscribers:
             self._subscribers.remove(sub)
 
-    def publish(self, events: Sequence[ChangeEvent]) -> None:
+    def publish(self, events: Sequence[ChangeEvent], generation: int) -> None:
         if self._closed or not events:
             return
         self._seq += 1
-        self._broadcast(Changes(self._seq, tuple(events)))
+        self._broadcast(Changes(self._seq, tuple(events), generation))
 
-    def resync(self, reason: ResyncReason) -> None:
+    def resync(self, reason: ResyncReason, generation: int) -> None:
         if self._closed:
             return
         self._seq += 1
-        self._broadcast(Resync(self._seq, reason))
+        self._broadcast(Resync(self._seq, reason, generation))
 
     def close(self) -> None:
         if self._closed:
@@ -115,12 +120,12 @@ class Hub:
         self._loop.call_soon_threadsafe(self.close)
 
     def _broadcast(self, item: Message | None) -> None:
-        overflow = Resync(self._seq, "overflow")
+        overflow = Resync(self._seq, "overflow", self._generation())
         for sub in self._subscribers:
             sub._offer(item, overflow)
 
 
-ChangeSource = Callable[[Path, Hub, asyncio.Event], Awaitable[None]]
+ChangeSource = Callable[[Path, Hub, ReadState, asyncio.Event], Awaitable[None]]
 """Feeds a hub until `stop` is set: `watch.watch_workspace` in production, a script in tests."""
 
 

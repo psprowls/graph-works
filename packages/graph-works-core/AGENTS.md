@@ -75,12 +75,22 @@ shell-syntax command string here.
 ### Module layout (four import-linter layers, per the package `__init__.py`)
 
 ```
-workspace/    layer 0 — errors, layout, manifest, discovery, init, provenance, anchor, pipeline, dispatch, dispatch_config, dispatch_projection, repos, config, context_seed, transactions, decision_owner, repo_files, gate_config
+workspace/    layer 0 — errors, layout, manifest, discovery, init, provenance, anchor, pipeline, dispatch, dispatch_config, dispatch_projection, repos, config, context_seed, transactions, decision_owner, repo_files, display_cache, gate_config
 agent_config/  layer 1 — conventions resolves injected paths; git_state probes repository identity/state through provenance; local resolves Claude local-file placement/permission gates; trust reads decisions; merge models policy; read exposes project/workspace reports
-agent_substrate/ : graph/ : prompts/                                   layer 1, shared
+agent_substrate/ : graph/ : prompts/ : read_session/                   layer 1, shared
 guidance/                                                              layer 1.5 — claims index + affects closure, between the verticals and the shared substrate
 ingest/ : scan/ : query/ : lint_drift/ : archive/ : orchestrate/ : proposals/ : wiki_stats/ : wiki_page/ : work/ : events/ : code_read/ : repositories/    layer 2, independent verticals
 ```
+
+`read_session/` — One entry point for display reads: `open_read_session(layout)`
+yields a `ReadSession` backed by the persisted read index (reconciled on open)
+or the full load; display reads only, never mutation, lint or guidance paths.
+It defines the protocol and cache location helpers, the lazy `BundleSession`
+and pinned `IndexSession` backends, and the opener's admission and fallback logic.
+`materialize(session)` copies an open session into a connection-free `SnapshotSession`
+that preserves display reads and ignore overlays after the source closes.
+
+`query/` — Query briefs and the retrieval front half of `run_query` read through `open_read_session`; `run_query`'s answer roles retain the loaded full bundle. On the persisted-index backend, `query/lexical_store.py` keeps BM25 postings in `search.db`: each query diffs the session's SHA-256 hashes against stored hashes, refreshes changed documents, then scores postings inside the verifying transaction. Bundle sessions and a busy lexical store use the in-memory `okf_ext.search` retrieval path. That path is also the equivalence oracle in `tests/query/test_query_session.py`; tokenizer or weight changes must bump `okf_ext.search.SCORING_VERSION`.
 
 `guidance/` — deterministic guidance inputs, its own layer so any vertical
 (the `work` vertical's guidance assembly first) may import it while it imports
@@ -112,9 +122,9 @@ satisfying receipt. See "The dispatch seam" in the README.
 
 `integrate.py` is its code-repository sibling: `gw work integrate` resolves the strategy (`--strategy`, else `repositories.<name>.finish.strategy`, else `squash`), merges in the unique clean target worktree with exact flags (`--ff-only`, `--no-ff`, or `--squash` plus one commit), restores the target on any failure, and records the v2 receipt entry through `record_finish_in(..., evidence=)` under the same owner lock. `accept_integration.py` writes an `attested`/`accepted` receipt entry and an answered decision-ledger entry in one mutation, for evidence gw cannot verify; it never advances.
 
-`wiki_page/` — `run_page_read`: one page with outlinks, backlinks and broken links; `run_wiki_citations` (`citations.py`): the page's `path:N` inline-code citations with body-relative lines, resolved against `workspace.repo_files`; no cache. `section.py`: `run_section_write` replaces one existing prose-owned `##` section, plan by default, with `before_apply` and a workspace commit; `declarations.py` reads the workspace's `.gw/sections` declarations once per call. The citation grammar and resolution live in `workspace/citations.py`, below the verticals, so `wiki_page` and `proposals` share one copy.
+`wiki_page/` — `run_page_read` / `run_wiki_tree` open a read session around `page_read(session, layout, page_id)` / `wiki_tree(session, layout)`: on a warm index backend the page (or root `index.md`) is the only file parsed, links come from the session's stored edges and tree titles from stored member rows; the sidecar can call the session-taking pair with its own session; `run_wiki_citations` (`citations.py`): the page's `path:N` inline-code citations with body-relative lines, resolved against `workspace.repo_files`; spans cached by the read index's page hash and inventories cached by `workspace/display_cache` (`display.db`). `section.py`: `run_section_write` replaces one existing prose-owned `##` section, plan by default, with `before_apply` and a workspace commit; `declarations.py` reads the workspace's `.gw/sections` declarations once per call. The citation grammar and resolution live in `workspace/citations.py`, below the verticals, so `wiki_page` and `proposals` share one copy.
 
-`code_read/` — `run_code_excerpt`: a context window of one declared repository's tracked file; refusals are results. `tree.py`: `run_code_graph_tree` and `run_code_graph_search` read the scanned `code-graph/` pages. `neighborhood.py`: `run_code_graph_neighborhood` reads one page's depends-on neighbourhood from `code.db`. `workspace/repo_files.py` is the file set both share (tracked files minus ignore globs) and the confinement check.
+`code_read/` — `run_code_excerpt`: a context window of one declared repository's tracked file; refusals are results. `tree.py`: `run_code_graph_tree` and `run_code_graph_search` read the scanned `code-graph/` pages. `neighborhood.py`: `run_code_graph_neighborhood` reads one page's depends-on neighbourhood from `code.db`. `workspace/repo_files.py` is the file set both share (tracked files minus ignore globs) and the confinement check; `repo_files` caches the file set by a stat key.
 
 `repositories/` — `run_repo_add`, `run_repo_restore`, `run_repo_advance`. Resolves git through `provenance.gate_git`, hands it to `repositories_okf.git`, runs clone and fetch outside the bundle lock, writes pages under `held_bundle_lock` through `writes.WriteLog` (rollback-able), and commits the written paths with `commit_pending`. `restore` writes no page and makes no commit. The incoming clone is staged under `<cache_dir>/repo-incoming/`. Per-repository operation locks under `<cache_dir>/repository-operations/` serialize clone HEAD changes through apply and rollback, including restore. Operation ownership always precedes the bundle lock; network calls hold no bundle lock.
 
@@ -421,3 +431,5 @@ change the selected transition. Lock bookkeeping is not a domain mutation.
 Serve uses this seam to compare the shared wire projection with the reviewed
 digest. Existing transaction/snapshot preconditions remain responsible for
 later changes; this is not a claim of general filesystem atomicity.
+
+`read_session.index_revision(session)` compares an optional index epoch plus its pinned generation, so a rebuilt disposable database cannot reuse a stale sidecar memo even when its numeric generation restarts. Materialized sessions preserve the epoch; the required ReadSession protocol stays unchanged.

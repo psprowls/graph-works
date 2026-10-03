@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "graph-works-serve"
 # Ships at gw's version -- graph-works-cli's (ADR 2026-09-18-the-control-plane-splits); test_package.py pins the two equal.
-version = "0.3.11"
+version = "0.3.12"
 description = "gw-serve: a loopback HTTP sidecar over graph-works-core, emitting graph-works-wire projections."
 authors = [
   { name = "Patrick Sprowls", email = "psprowls@gmail.com" },
@@ -13,8 +13,8 @@ authors = [
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
-  "graph-works-core>=0.6.9,<0.7",
-  "graph-works-wire>=0.1.8,<0.2",
+  "graph-works-core>=0.6.10,<0.7",
+  "graph-works-wire>=0.1.9,<0.2",
   "config-io>=0.2,<0.3",
   "starlette>=0.40",
   "uvicorn>=0.30",

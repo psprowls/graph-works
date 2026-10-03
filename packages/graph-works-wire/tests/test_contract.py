@@ -50,6 +50,7 @@ EXPECTED: set[str] = {
     "util.log_payload",
     "util.platform_payload",
     "util.tokens_payload",
+    "util.read_index_payload",
     "wiki.bootstrap_payload",
     "wiki.bootstrap_plan_payload",
     "wiki.claims_closure_payload",

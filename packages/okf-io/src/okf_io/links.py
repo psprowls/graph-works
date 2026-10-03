@@ -20,6 +20,7 @@ from urllib.parse import unquote
 from okf_io import _md
 from okf_io._md import BodyIndex, MdLink
 from okf_io.bundle import Bundle
+from okf_io.document import Document
 
 #: A URI scheme, per RFC 3986 §3.1.
 _SCHEME_RE = re.compile(r"^[A-Za-z][A-Za-z0-9+.\-]*:")
@@ -43,6 +44,16 @@ class Link:
     line: int | None  # 1-based, in the file; every producer today is body-derived and
     # always supplies one, but the type stays Optional to admit a future
     # non-body-line producer without a signature change.
+
+
+@dataclass(frozen=True, slots=True)
+class Heading:
+    """One document heading, with a 1-based file-relative line."""
+
+    level: int
+    text: str
+    line: int
+    quoted: bool
 
 
 @dataclass(frozen=True, slots=True)
@@ -164,6 +175,24 @@ def _link_from(md_link: MdLink, *, source: str, line: int) -> Link | None:
     return Link(source, md_link.raw, target, fragment or None, False, md_link.image, line)
 
 
+def document_links(document: Document, *, source_id: str) -> tuple[Link, ...]:
+    """Resolve one document's unjudged links in ``build()``'s per-source order."""
+    offset = document.body_line_offset
+    found = [
+        link
+        for md_link in _md.parse_body(document.body).links
+        if (link := _link_from(md_link, source=source_id, line=md_link.line + offset)) is not None
+    ]
+    found.sort(key=lambda link: (link.line or 0, link.raw, link.image))
+    return tuple(found)
+
+
+def document_headings(document: Document) -> tuple[Heading, ...]:
+    """Read one document's headings with file-relative lines."""
+    offset = document.body_line_offset
+    return tuple(Heading(h.level, h.text, h.line + offset, h.quoted) for h in _md.parse_body(document.body).headings)
+
+
 def build(bundle: Bundle) -> LinkGraph:
     """Build the graph. One markdown parse per concept, shared through ``bodies``.
 
@@ -177,13 +206,8 @@ def build(bundle: Bundle) -> LinkGraph:
 
     for concept_id in sorted(bundle.concepts):
         document = bundle.concepts[concept_id]
-        index = _md.parse_body(document.body)
-        bodies[concept_id] = index
-        offset = document.body_line_offset
-        for md_link in index.links:
-            link = _link_from(md_link, source=concept_id, line=md_link.line + offset)
-            if link is not None:
-                collected.append(link)
+        bodies[concept_id] = _md.parse_body(document.body)
+        collected.extend(document_links(document, source_id=concept_id))
 
     collected.sort(key=lambda link: (link.source, link.line or 0, link.raw, link.image))
     links = tuple(collected)

@@ -14,6 +14,7 @@ from typing import Literal
 
 from code_graph_io import extension_languages
 
+from graph_works_core.workspace.display_cache import open_display_cache
 from graph_works_core.workspace.layout import WorkspaceLayout
 from graph_works_core.workspace.repo_files import confine, declared_repos, repo_file_set
 
@@ -67,7 +68,10 @@ def _lines(file: Path) -> list[str]:
 
 
 def run_code_excerpt(layout: WorkspaceLayout, repo: str, path: str, start: int, end: int | None = None) -> CodeExcerpt:
-    """Serve `start - 5` .. `min(end, start + 400) + 5`, clamped to the file. Never writes."""
+    """Serve `start - 5` .. `min(end, start + 400) + 5`, clamped to the file.
+
+    Preserve sources and bundle; may write the disposable display cache.
+    """
     if start < 1:
         raise ValueError(f"start: must be >= 1, got {start}")
     if end is not None and end < start:
@@ -80,7 +84,9 @@ def run_code_excerpt(layout: WorkspaceLayout, repo: str, path: str, start: int, 
     declared = next((entry for entry in declared_repos(layout) if entry.name == repo), None)
     if declared is None:
         return refused("unknown-repository")
-    confined = confine(repo_file_set(declared), path)
+    with open_display_cache(layout) as cache:
+        files = repo_file_set(declared, cache=cache)
+    confined = confine(files, path)
     if not isinstance(confined, Path):
         return refused(confined)
     lines = _lines(confined)

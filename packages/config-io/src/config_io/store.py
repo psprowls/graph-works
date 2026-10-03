@@ -43,20 +43,9 @@ from ruamel.yaml.error import YAMLError
 from config_io import dotted
 from config_io.errors import StoreValidationError
 
-#: YAML 1.2 is the workspace's dialect (D-001). One reader and one writer,
-#: built once: `YAML()` carries no per-document state across calls, and
-#: nothing in this workspace uses threads, so two module-level instances are
-#: safe. If threads are ever introduced, construct them per call instead.
-_READER = YAML(typ="safe")
-
-#: `sort_base_mapping_type_on_output` is load-bearing (D-003): ruamel's safe
-#: representer sorts mapping keys by default, where PyYAML's did so only when
-#: asked, so without this the first `gw config set` reorders the whole file.
-#: `width` deliberately stays at ruamel's default -- raising it makes a re-dump
-#: of the live `workspace.yaml` stop being byte-identical to the file on disk.
-_WRITER = YAML(typ="safe")
-_WRITER.default_flow_style = False
-_WRITER.representer.sort_base_mapping_type_on_output = False
+# YAML 1.2 is the workspace's dialect (D-001). Construct readers and writers
+# per call: ruamel's YAML instances hold mutable parser/serializer state that
+# cannot be shared by concurrent watcher and request threads.
 
 
 @dataclass(frozen=True, slots=True)
@@ -108,7 +97,7 @@ class PlainYamlStore:
         if not raw.strip():
             return {}
         try:
-            loaded = _READER.load(raw)
+            loaded = YAML(typ="safe").load(raw)
         except YAMLError as exc:
             raise StoreValidationError(f"{self.path} is not valid YAML: {exc}") from exc
         if loaded is None:
@@ -126,7 +115,12 @@ class PlainYamlStore:
     def write(self, data: Mapping[str, object]) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         buffer = io.StringIO()
-        _WRITER.dump(dict(data), buffer)
+        writer = YAML(typ="safe")
+        writer.default_flow_style = False
+        # Preserve insertion order (D-003); the safe representer sorts by default.
+        writer.representer.sort_base_mapping_type_on_output = False
+        # Keep ruamel's default width to preserve the existing output formatting.
+        writer.dump(dict(data), buffer)
         self.path.write_text(buffer.getvalue(), encoding="utf-8", newline="")
 
     def snapshot(self) -> bytes | None:

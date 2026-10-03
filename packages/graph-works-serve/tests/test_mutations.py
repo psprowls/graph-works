@@ -376,3 +376,20 @@ def test_unexpected_exceptions_propagate(store: Store) -> None:
     store.raise_ = RuntimeError("unexpected")
     with pytest.raises(RuntimeError, match="unexpected"):
         do_plan(store, {"name": "n"})
+
+
+def test_write_through_is_inside_apply_lock_and_refusals_skip_it(store: Store) -> None:
+    planned = do_plan(store, {"name": "n"}).body
+    body = req({"name": "n", "as_of": planned["as_of"], "digest": planned["digest"]})
+    calls = []
+
+    def write_through(layout: object) -> int:
+        assert mutations._LOCK.locked()
+        calls.append(1)
+        return 42
+
+    result = mutations.apply(make_spec(store), object(), body, JSON, write_through=write_through)
+    assert result.status == 200 and result.generation == 42 and calls == [1]
+    store.refuse = True
+    refused = mutations.apply(make_spec(store), object(), body, JSON, write_through=write_through)
+    assert refused.status == 409 and refused.generation is None and calls == [1]

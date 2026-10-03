@@ -182,3 +182,9 @@ def test_without_the_flag_a_null_origin_gets_no_cors_header(client: TestClient) 
 
     assert _access_control(preflight) == {} and _access_control(get) == {}
     assert "vary" not in get.headers
+
+
+def test_allowed_origin_exposes_generation(cors: TestClient) -> None:
+    response = cors.get("/v1/work/status", headers={"Origin": ORIGIN, "Authorization": f"Bearer {TOKEN}"})
+    assert response.headers["Access-Control-Expose-Headers"] == "X-GW-Generation"
+    assert response.headers["X-GW-Generation"] == "1"

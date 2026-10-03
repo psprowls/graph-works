@@ -15,7 +15,7 @@ from collections import Counter
 from collections.abc import Mapping
 from types import MappingProxyType
 
-from okf_io import Bundle
+from okf_io import Bundle, Document
 
 from okf_ext.search.model import DEFAULT_WEIGHTS, IndexedDocument, SearchIndex
 from okf_ext.search.text import tokenize
@@ -42,6 +42,33 @@ def _resolve_weights(weights: Mapping[str, int]) -> Mapping[str, int]:
     return MappingProxyType({**DEFAULT_WEIGHTS, **weights})
 
 
+def term_postings(document: Document, *, weights: Mapping[str, int] = DEFAULT_WEIGHTS) -> tuple[Mapping[str, int], int]:
+    """One concept's weighted term frequencies and length, as `build_index` stores them.
+
+    The per-document half of `build_index`, public so a persisted index can
+    tokenize only the pages that changed and still store exactly what an
+    in-memory build would.
+    """
+    resolved = _resolve_weights(weights)
+    fm = document.fm
+    fields = {
+        "title": fm.title or "",
+        "description": fm.description or "",
+        "tags": " ".join(fm.tags),
+        "body": document.body,
+    }
+    counts: Counter[str] = Counter()
+    for name, text in fields.items():
+        weight = resolved[name]
+        # A zero weight must skip the field, not add its terms at count
+        # zero: a term present in `tf` still counts toward document
+        # frequency, which would move idf for every other document.
+        if weight:
+            for token in tokenize(text):
+                counts[token] += weight
+    return MappingProxyType(dict(counts)), sum(counts.values())
+
+
 def build_index(bundle: Bundle, *, weights: Mapping[str, int] = DEFAULT_WEIGHTS) -> SearchIndex:
     """Index every concept in *bundle*.
 
@@ -57,27 +84,12 @@ def build_index(bundle: Bundle, *, weights: Mapping[str, int] = DEFAULT_WEIGHTS)
     resolved = _resolve_weights(weights)
     documents: list[IndexedDocument] = []
     for concept_id, doc in bundle.concepts.items():
-        fm = doc.fm
-        fields = {
-            "title": fm.title or "",
-            "description": fm.description or "",
-            "tags": " ".join(fm.tags),
-            "body": doc.body,
-        }
-        counts: Counter[str] = Counter()
-        for name, text in fields.items():
-            weight = resolved[name]
-            # A zero weight must skip the field, not add its terms at count
-            # zero: a term present in `tf` still counts toward document
-            # frequency, which would move idf for every other document.
-            if weight:
-                for token in tokenize(text):
-                    counts[token] += weight
+        tf, length = term_postings(doc, weights=resolved)
         documents.append(
             IndexedDocument(
                 concept_id=concept_id,
-                tf=MappingProxyType(dict(counts)),
-                length=sum(counts.values()),
+                tf=tf,
+                length=length,
                 text=doc.body,
                 data=MappingProxyType(doc.fm_data(dates="iso")),
             )

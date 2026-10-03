@@ -16,6 +16,14 @@ def describe(routes: Sequence[RouteSpec], version: str) -> dict[str, object]:
         "schema_version": SCHEMA_VERSION,
         "server": "graph-works-serve",
         "version": version,
+        "response_headers": [
+            {
+                "name": "X-GW-Generation",
+                "on": "every JSON GET and every successful apply",
+                "summary": "The sidecar read generation the response reflects: the snapshot's for memo-served reads, "
+                "otherwise the generation current when the request began (a lower bound).",
+            }
+        ],
         "routes": [
             {
                 "method": spec.method,

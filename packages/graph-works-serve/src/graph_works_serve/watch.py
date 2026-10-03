@@ -3,7 +3,7 @@
 Two `awatch` loops -- `okf/**` recursive, and the config files' parent
 directories non-recursive with an exact-path filter (never `.gw/worktrees`
 or `.gw/cache/traces`) -- feed `coalesce` -> `events.classify` ->
-`Hub.publish`. `watchfiles`' own `step`/`debounce` are the debounce window.
+`ReadState.reconcile` (worker thread) -> `Hub.publish`. `watchfiles`' own `step`/`debounce` are the debounce window.
 A manifest event re-derives the watch sets; a crashed loop publishes
 `resync(watcher-error)` and restarts with backoff. Nothing raises into the
 stream, and nothing here logs a query string or the token.
@@ -29,6 +29,7 @@ from graph_works_core.workspace.layout import WorkspaceLayout
 
 from graph_works_serve.coalesce import build_batch, net_changes
 from graph_works_serve.hub import Hub
+from graph_works_serve.readstate import ReadState
 
 STEP_MS = 300
 DEBOUNCE_MS = 800
@@ -76,6 +77,8 @@ def bundle_filter(bundle_dir: Path) -> Callable[[watchfiles.Change, str], bool]:
             parts = PurePath(path).relative_to(bundle_dir).parts
         except ValueError:
             return False
+        if len(parts) >= 4 and parts[0] == "repositories" and parts[2:4] == ("references", "git"):
+            return False
         return not any(part.startswith(".") for part in parts)
 
     return keep
@@ -99,17 +102,30 @@ def _classify(layout: WorkspaceLayout, sets: WatchSets, path: PurePath, change: 
     return classify(layout, path, change, dispatch_documents=sets.dispatch_documents)
 
 
-def flush(
+async def flush(
     raw: RawBatch,
     layout: WorkspaceLayout,
     sets: WatchSets,
     hub: Hub,
+    read_state: ReadState,
+    lock: asyncio.Lock,
     *,
     exists: Callable[[str], bool] = path_exists,
 ) -> tuple[ChangeEvent, ...]:
     net = net_changes(((change.name, path) for change, path in raw), exists)
     batch = build_batch(net, partial(_classify, layout, sets))
-    hub.publish(batch)
+    if not batch:
+        return ()
+    async with lock:
+        # Classification uses observed watch sets, but reconciliation always
+        # uses the latest valid manifest. A queued old-bundle batch cannot
+        # replace an identity already adopted by a new-layout request.
+        try:
+            current = resolve(workspace=layout.root)
+        except (WorkspaceError, OSError):
+            current = layout  # invalid replacements retain the previous watch
+        generation = await asyncio.to_thread(read_state.reconcile, current, batch)
+        hub.publish(batch, generation)
     return batch
 
 
@@ -135,6 +151,7 @@ async def _sleep_or_stop(stop: asyncio.Event, seconds: float, sleep: Callable[[f
 async def watch_workspace(
     root: Path,
     hub: Hub,
+    read_state: ReadState,
     stop: asyncio.Event,
     *,
     awatch_fn: AwatchFn = watchfiles.awatch,
@@ -147,6 +164,7 @@ async def watch_workspace(
         layout = resolve(workspace=root)
         sets = watch_sets(layout, None)
     state = _State(layout, sets)
+    lock = asyncio.Lock()
     while not stop.is_set():
         rewatch = asyncio.Event()
         inner = asyncio.Event()
@@ -161,7 +179,7 @@ async def watch_workspace(
             async for raw in awatch_fn(
                 *paths, watch_filter=keep, step=STEP_MS, debounce=DEBOUNCE_MS, stop_event=inner, recursive=recursive
             ):
-                batch = flush(raw, state.layout, state.sets, hub)
+                batch = await flush(raw, state.layout, state.sets, hub, read_state, lock)
                 state.backoff = BACKOFF_START
                 if needs_rewatch(batch):
                     try:
@@ -196,7 +214,8 @@ async def watch_workspace(
         except* Exception as group_error:
             first = group_error.exceptions[0]
             _log(f"watcher error: {type(first).__name__}: {first}; restarting in {state.backoff:g}s")
-            hub.resync("watcher-error")
+            read_state.mark_stale()
+            hub.resync("watcher-error", read_state.advance("resync"))
             await _sleep_or_stop(stop, state.backoff, sleep)
             state.backoff = min(state.backoff * 2, BACKOFF_MAX)
         finally:
@@ -204,7 +223,8 @@ async def watch_workspace(
             with contextlib.suppress(asyncio.CancelledError):
                 await relay_task
         if rewatch.is_set() and not stop.is_set():
-            hub.resync("rewatch")
+            read_state.mark_stale()
+            hub.resync("rewatch", read_state.advance("resync"))
 
 
 def _missing(directory: Path) -> bool:

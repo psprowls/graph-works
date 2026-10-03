@@ -158,8 +158,8 @@ def terminal(ctx: RuleContext) -> Iterable[Finding]:
     an open descendant are therefore silent.
     """
     projection = items(ctx)
-    for item in active(ctx):
-        if not sweep_eligible(projection, item):
+    for item in projection:
+        if item.archived or not sweep_eligible(projection, item):
             continue
         yield _finding(
             "state.archive-eligible",

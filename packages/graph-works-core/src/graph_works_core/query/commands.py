@@ -13,9 +13,10 @@ rather than enforced.
 
 **The embedding index lives under `layout.cache_dir`** — `<cache>/search/search.db`.
 Constraint 4 makes `cache_dir` gitignored and scanner-excluded, which is what a
-derived index needs on both counts. The lexical half is not persisted: it is
-`okf_ext.search`, rebuilt per query from the bundle already in memory, which is
-also what keeps one BM25 implementation in this workspace rather than two.
+derived index needs on both counts. The lexical half is persisted beside the
+embeddings (`query/lexical_store.py`) and synced from the read session. On the
+bundle backend it is still `okf_ext.search`, built in memory. Both score through
+the one BM25 implementation in okf-ext.
 """
 
 from __future__ import annotations
@@ -31,7 +32,7 @@ import struct
 import sys
 import time
 import uuid
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from pathlib import Path
@@ -46,17 +47,19 @@ from models_io.pricing import cost_for_usage
 from okf_ext import search as ext_search
 from okf_ext.bundle import SCHEMA_DIRNAME
 from okf_ext.schemas import load_schemas
-from okf_io import Bundle, build_link_graph
+from okf_io import Bundle, Document, build_link_graph, read_member
 from subagents_io import FanOutResult, SubagentPool, TaskResult, write_trace_record
 
 from graph_works_core.agent_substrate.agent_loop import run_tool_loop
-from graph_works_core.agent_substrate.agent_tools import read_bounded_page
+from graph_works_core.agent_substrate.agent_tools import missing_concept_excerpt, read_bounded_page
 from graph_works_core.agent_substrate.roles import make_llm, role_binding
 from graph_works_core.graph import graph_tools as gt
 from graph_works_core.graph.commands import GraphTarget, graph_target
+from graph_works_core.query import lexical_store
 from graph_works_core.query.prompts.code_reader import CODE_READER_SYSTEM
 from graph_works_core.query.prompts.librarian import build_librarian_system
 from graph_works_core.query.prompts.synthesizer import SYNTHESIZER_SYSTEM
+from graph_works_core.read_session import ReadSession, open_read_session
 from graph_works_core.workspace.bundle import load_workspace_bundle
 from graph_works_core.workspace.config import load_workspace_config
 from graph_works_core.workspace.errors import QueryError
@@ -84,10 +87,10 @@ SEARCH_DB_NAME = "search.db"
 #: shape changes. A manifest recording any other value describes a table this
 #: code cannot read, so it is re-embedded rather than interpreted.
 #:
-#: Deliberately NOT bumped when the persisted lexical index was removed: the
-#: embedding table's schema did not change, and a bump would have charged every
-#: existing workspace a full re-embed for a directory that stopped being
-#: written. `_LEGACY_BM25_SUBDIR` is swept on build instead.
+#: Deliberately not bumped when the legacy persisted BM25 directory was
+#: removed: the embedding table's schema did not change, and a bump would have
+#: charged every existing workspace a full re-embed. Current lexical postings
+#: live in tables in `search.db`; `_LEGACY_BM25_SUBDIR` is swept on build.
 INDEX_SCHEMA_VERSION = 1
 MANIFEST_NAME = "manifest.json"
 
@@ -108,6 +111,11 @@ _PRAGMA_WAL = "PRAGMA journal_mode=WAL"
 
 _RRF_K = 60
 _OVERSAMPLE = 3
+#: Cap on the excerpt handed to the orchestrator for each initial candidate.
+#: Kept far below `_LIBRARIAN_PAGE_CHARS` — this is a planning hint, not the
+#: text a worker reasons over.
+_CANDIDATE_EXCERPT_CHARS = 1_500
+
 _EMBED_MAX_CHARS = 32_000
 # Bump whenever the prefix cap or overflow recovery semantics change.
 _EMBED_POLICY = "prefix-32000-halve-v1"
@@ -249,6 +257,18 @@ def _manifest_path(cache_dir: Path) -> Path:
     return _search_dir(cache_dir) / MANIFEST_NAME
 
 
+def _discard_search_db(cache_dir: Path) -> None:
+    """Remove a `search.db` SQLite cannot open, and the manifest that vouched for its vectors.
+
+    The manifest goes first: a manifest left behind would call an empty
+    `pages` table fresh, and every query would degrade to lexical-only.
+    """
+    _manifest_path(cache_dir).unlink(missing_ok=True)
+    db = _search_db(cache_dir)
+    for path in (db, db.with_name(db.name + "-wal"), db.with_name(db.name + "-shm")):
+        path.unlink(missing_ok=True)
+
+
 @dataclass(frozen=True)
 class _Manifest:
     """What the index on disk was derived from. Three fields, all three read."""
@@ -362,6 +382,16 @@ class IndexRefresh:
 _LEGACY_BM25_SUBDIR = "bm25"
 
 
+_PageRef = tuple[str, str]
+
+
+def _bundle_pages(bundle: Bundle) -> tuple[list[_PageRef], Callable[[str], str]]:
+    """The oracle path's rows: `sha256(raw_text)` per concept, and the text from memory."""
+    corpus = _corpus(bundle)
+    hashes = _page_hashes(corpus)
+    return [(cid, hashes[cid]) for cid, _ in corpus], lambda cid: bundle.concepts[cid].raw_text
+
+
 def build_index(bundle: Bundle, cache_dir: Path, *, embedder: Embedder) -> IndexRefresh:
     """Rebuild the embedding index under `cache_dir`, unconditionally.
 
@@ -371,12 +401,19 @@ def build_index(bundle: Bundle, cache_dir: Path, *, embedder: Embedder) -> Index
     memory per query. The embedding table is incremental — but only where the
     manifest vouches for the signature its rows were written under.
     """
-    pages = _corpus(bundle)
+    pages, read_text = _bundle_pages(bundle)
+    return _embed_pages(pages, read_text, cache_dir, embedder=embedder)
+
+
+def _embed_pages(
+    pages: Sequence[_PageRef], read_text: Callable[[str], str], cache_dir: Path, *, embedder: Embedder
+) -> IndexRefresh:
+    """Incrementally embed hash rows, reading text only for changed or unvouched pages."""
     if not pages:
         logger.warning("build_index: no concepts in bundle")
         return IndexRefresh(rebuilt=False, reason="empty-bundle", pages=0, embedded=0, pruned=0)
 
-    page_hashes = _page_hashes(pages)
+    page_hashes = dict(pages)
     signature = embedder.model_id
 
     # ---- Lexical index ----
@@ -412,15 +449,15 @@ def build_index(bundle: Bundle, cache_dir: Path, *, embedder: Embedder) -> Index
             conn.execute("DELETE FROM pages")
 
         existing = {str(row[0]) for row in conn.execute("SELECT path FROM pages")}
-        stale = sorted(existing - set(bundle.concepts))
+        stale = sorted(existing - set(page_hashes))
         conn.executemany("DELETE FROM pages WHERE path = ?", [(path,) for path in stale])
 
-        for path, text in pages:
-            content_hash = page_hashes[path]
+        for path, content_hash in pages:
             row = conn.execute("SELECT content_hash FROM pages WHERE path = ?", (path,)).fetchone()
             if row is not None and row[0] == content_hash:
                 continue  # unchanged, and the manifest vouches for the vector
 
+            text = read_text(path)  # text-io-ok: caller-supplied text callback, not filesystem IO
             try:
                 vec = embedder.embed_query(text)
             except QueryError as exc:
@@ -444,7 +481,7 @@ def build_index(bundle: Bundle, cache_dir: Path, *, embedder: Embedder) -> Index
     return IndexRefresh(rebuilt=True, reason="forced", pages=len(pages), embedded=embedded, pruned=len(stale))
 
 
-def _staleness(cache_dir: Path, *, pages: Sequence[tuple[str, str]], signature: str) -> str | None:
+def _staleness(cache_dir: Path, *, page_hashes: Mapping[str, str], signature: str) -> str | None:
     """Why the index must be rebuilt, or `None` when it is already fresh.
 
     Three fields, all three compared, nothing else. A field written but never
@@ -458,7 +495,7 @@ def _staleness(cache_dir: Path, *, pages: Sequence[tuple[str, str]], signature: 
         return "schema-changed"
     if manifest.embed_signature != signature:
         return "model-changed"
-    if manifest.corpus_fingerprint != _corpus_fingerprint(_page_hashes(pages)):
+    if manifest.corpus_fingerprint != _corpus_fingerprint(page_hashes):
         return "corpus-changed"
     return None
 
@@ -471,17 +508,24 @@ def refresh_index(bundle: Bundle, cache_dir: Path, *, embedder: Embedder) -> Ind
     one-bit, monotone predicate: it flipped false→true once per workspace and
     never back, which is why a deleted page kept being retrieved.
     """
-    pages = _corpus(bundle)
+    pages, read_text = _bundle_pages(bundle)
+    return _refresh_embeddings(pages, read_text, cache_dir, embedder=embedder)
+
+
+def _refresh_embeddings(
+    pages: Sequence[_PageRef], read_text: Callable[[str], str], cache_dir: Path, *, embedder: Embedder
+) -> IndexRefresh:
+    """Refresh embeddings from hash rows without reading text for fresh pages."""
     if not pages:
         logger.warning("refresh_index: no concepts in bundle — nothing to index")
         return IndexRefresh(rebuilt=False, reason="empty-bundle", pages=0, embedded=0, pruned=0)
 
-    reason = _staleness(cache_dir, pages=pages, signature=embedder.model_id)
+    reason = _staleness(cache_dir, page_hashes=dict(pages), signature=embedder.model_id)
     if reason is None:
         return IndexRefresh(rebuilt=False, reason=None, pages=len(pages), embedded=0, pruned=0)
 
     logger.info("refreshing search index (%s)", reason)
-    return replace(build_index(bundle, cache_dir, embedder=embedder), reason=reason)
+    return replace(_embed_pages(pages, read_text, cache_dir, embedder=embedder), reason=reason)
 
 
 def lexical_query(bundle: Bundle, query_text: str, top_k: int) -> tuple[list[str], list[float]]:
@@ -556,19 +600,61 @@ def _prepare_query_retrieval(
     touched (D-001). An embedder that fails -- missing credentials surface only
     at call time -- degrades to the same lexical ranking and says so in
     `warnings`; a `QueryError` (dimension mismatch) is a real refusal and raises.
+
+    This is the in-memory oracle for session retrieval; the adapters keep using it.
     """
+    _check_top_k(top_k)
+    if not bundle.concepts:
+        raise QueryError(f"no concepts to search under {bundle.root}: ingest at least one concept before querying")
+    ranking = _rank(
+        query,
+        top_k=top_k,
+        embedder=embedder,
+        lexical=lambda width: lexical_query(bundle, query, width),
+        refresh=lambda e: refresh_index(bundle, layout.cache_dir, embedder=e),
+        cache_dir=layout.cache_dir,
+    )
+    return PreparedQueryRetrieval(
+        layout=layout,
+        bundle=bundle,
+        top_pages=ranking.top_pages,
+        search_scores=ranking.search_scores,
+        candidates=ranking.candidates,
+        retrieval=ranking.retrieval,
+        warnings=ranking.warnings,
+    )
+
+
+def _check_top_k(top_k: int) -> None:
     if not (MIN_TOP_K <= top_k <= MAX_TOP_K):
         raise ValueError(f"top_k must be between {MIN_TOP_K} and {MAX_TOP_K} (got {top_k})")
 
-    if not bundle.concepts:
-        raise QueryError(f"no concepts to search under {bundle.root}: ingest at least one concept before querying")
 
+@dataclass(frozen=True)
+class _Ranking:
+    top_pages: tuple[str, ...]
+    search_scores: Mapping[str, Mapping[str, float]]
+    candidates: Mapping[str, Mapping[str, float]]
+    retrieval: Literal["hybrid", "lexical"]
+    warnings: tuple[str, ...]
+
+
+def _rank(
+    query: str,
+    *,
+    top_k: int,
+    embedder: Embedder | None,
+    lexical: Callable[[int], tuple[list[str], list[float]]],
+    refresh: Callable[[Embedder], object],
+    cache_dir: Path,
+) -> _Ranking:
+    """BM25, cosine and RRF shared by the bundle and session backends."""
     width = top_k * _OVERSAMPLE
     # `search()` returns the whole corpus at 0.0 for text it cannot tokenize —
     # empty, all-stopwords, or any non-Latin script. Its own docstring tells
     # callers to check first rather than fuse that as lexical signal.
     if ext_search.tokenize(query):
-        bm25_paths, bm25_raw = lexical_query(bundle, query, width)
+        bm25_paths, bm25_raw = lexical(width)
     else:
         bm25_paths, bm25_raw = [], []
     bm25_rank_map = {p: i + 1 for i, p in enumerate(bm25_paths)}
@@ -579,8 +665,8 @@ def _prepare_query_retrieval(
     warnings: tuple[str, ...] = ()
     if embedder is not None:
         try:
-            refresh_index(bundle, layout.cache_dir, embedder=embedder)
-            embed_hits = _cosine_search_sqlite(layout.cache_dir, embedder.embed_query(query), width)
+            refresh(embedder)
+            embed_hits = _cosine_search_sqlite(cache_dir, embedder.embed_query(query), width)
             retrieval = "hybrid"
         except QueryError:
             raise
@@ -601,14 +687,92 @@ def _prepare_query_retrieval(
         for page in ranked
     }
     top_pages = tuple(ranked[:top_k])
+    return _Ranking(top_pages, {page: candidates[page] for page in top_pages}, candidates, retrieval, warnings)
+
+
+@dataclass(frozen=True)
+class _SessionCorpus:
+    """The session's concept ids and byte hashes, without parsed documents."""
+
+    root: Path
+    hashes: Mapping[str, str]
+
+    def page(self, concept_id: str, sha256: str) -> lexical_store.Prepared:
+        return lexical_store.prepare_page(self.root, concept_id, sha256, excerpt_chars=_CANDIDATE_EXCERPT_CHARS)
+
+    def text(self, concept_id: str) -> str:
+        result = read_member(self.root, f"{concept_id}.md")
+        return result.raw_text if isinstance(result, Document) else ""
+
+
+def _session_ranking(
+    query: str,
+    layout: WorkspaceLayout,
+    corpus: _SessionCorpus,
+    *,
+    top_k: int,
+    embedder: Embedder | None,
+) -> _Ranking:
+    """Retrieve from stored hashes and postings; a busy store lets the caller fall back."""
+    if not corpus.hashes:
+        raise QueryError(
+            f"no concepts to search under {layout.bundle_dir}: ingest at least one concept before querying"
+        )
+    result = lexical_store.sync_and_score(
+        _search_db(layout.cache_dir),
+        corpus.hashes,
+        corpus.page,
+        ext_search.tokenize(query),
+        top_k * _OVERSAMPLE,
+        discard=lambda: _discard_search_db(layout.cache_dir),
+        busy_timeout_ms=lexical_store.BUSY_TIMEOUT_MS,
+    )
+    paths = [cid for cid, _ in result.ranked]
+    scores = [score for _, score in result.ranked]
+    pages = list(corpus.hashes.items())
+    return _rank(
+        query,
+        top_k=top_k,
+        embedder=embedder,
+        lexical=lambda _width: (paths, scores),
+        refresh=lambda e: _refresh_embeddings(pages, corpus.text, layout.cache_dir, embedder=e),
+        cache_dir=layout.cache_dir,
+    )
+
+
+def _session_prepared(
+    query: str,
+    layout: WorkspaceLayout,
+    bundle: Bundle,
+    *,
+    top_k: int,
+    embedder: Embedder,
+) -> PreparedQueryRetrieval:
+    """Use session retrieval and retain the loaded bundle for the query roles.
+
+    A concurrent edit after the bundle load may make retrieval one edit newer
+    than the roles' text, as can already happen between retrieval and role reads.
+    """
+    with open_read_session(layout) as session:
+        hashes = session.concept_hashes()
+    if hashes is None:
+        return _prepare_query_retrieval(query, layout, bundle, top_k=top_k, embedder=embedder)
+    _check_top_k(top_k)
+    try:
+        ranking = _session_ranking(
+            query, layout, _SessionCorpus(layout.bundle_dir, hashes), top_k=top_k, embedder=embedder
+        )
+    except lexical_store.LexicalBusy as exc:
+        logger.warning("%s; answering from the in-memory index", exc)
+        return _prepare_query_retrieval(query, layout, bundle, top_k=top_k, embedder=embedder)
     return PreparedQueryRetrieval(
         layout=layout,
         bundle=bundle,
-        top_pages=top_pages,
-        search_scores={page: candidates[page] for page in top_pages},
-        candidates=candidates,
-        retrieval=retrieval,
-        warnings=warnings,
+        top_pages=ranking.top_pages,
+        search_scores=ranking.search_scores,
+        candidates=ranking.candidates,
+        retrieval=ranking.retrieval,
+        warnings=ranking.warnings,
     )
 
 
@@ -650,29 +814,97 @@ def plan_query_brief(
     top_k: int = 5,
     page: str | None = None,
 ) -> QueryBrief:
-    """Retrieval only -- no role LLM call, no write.
+    """Retrieval only -- no role LLM call or bundle write.
 
     The `claude_code`-backend counterpart to `run_query`: same
-    `_prepare_query_retrieval`, and nothing past it. The calling agent reads
+    ranking as `_prepare_query_retrieval`, and nothing past it. The calling agent reads
     `top_pages` itself (via `Read`, following the pages' own links, or
     `gw graph`) and composes the answer.
 
     *embedder* is required but may be `None`: the brief then ranks lexically
     and never touches the embedding index. With *page*, that page is listed
     first, then the candidates among its outlinks and backlinks, then the rest.
+
+    Without *bundle*, the read session parses, hashes and tokenizes only changed
+    pages on the index backend and builds no link graph. The bundle backend and
+    a busy lexical store use the in-memory path.
     """
-    if bundle is None:
-        bundle = load_workspace_bundle(layout)
-    if page is not None and bundle.concept(page) is None:
-        return QueryBrief(
-            query=query,
-            top_pages=(),
-            retrieval="lexical" if embedder is None else "hybrid",
-            page=page,
-            refusal="unknown-page",
+    if bundle is not None:
+        return _brief_from_bundle(query, layout, bundle, embedder=embedder, top_k=top_k, page=page)
+    with open_read_session(layout) as session:
+        hashes = session.concept_hashes()
+        if hashes is None:
+            return _brief_from_bundle(
+                query, layout, load_workspace_bundle(layout), embedder=embedder, top_k=top_k, page=page
+            )
+        if page is not None and page not in hashes:
+            return _refused(query, page, embedder)
+        _check_top_k(top_k)
+        corpus = _SessionCorpus(layout.bundle_dir, hashes)
+        try:
+            ranking = _session_ranking(query, layout, corpus, top_k=top_k, embedder=embedder)
+        except lexical_store.LexicalBusy as exc:
+            logger.warning("%s; answering from the in-memory index", exc)
+            return _brief_from_bundle(
+                query, layout, load_workspace_bundle(layout), embedder=embedder, top_k=top_k, page=page
+            )
+        order = (
+            _pin(tuple(ranking.candidates), page, top_k, _session_neighbours(session, page))
+            if page is not None
+            else ranking.top_pages
         )
+        # read_bounded_page normalizes the lookup key, while retrieval and
+        # pinning retain the original concept id. Read the normalized target's
+        # current excerpt even when both names are concepts in this corpus.
+        excerpt_ids = {path: path.strip().removesuffix(".md") for path in order}
+        excerpts = lexical_store.stored_excerpts(_search_db(layout.cache_dir), tuple(excerpt_ids.values()), hashes)
+        pages = tuple(
+            QueryPageBrief(
+                path=path,
+                excerpt=(
+                    excerpts[key]
+                    if key in excerpts
+                    else corpus.page(key, hashes[key]).excerpt
+                    if key in hashes
+                    else missing_concept_excerpt(key)
+                ),
+                search_scores=dict(ranking.candidates.get(path, _NO_SCORES)),
+            )
+            for path, key in excerpt_ids.items()
+        )
+        return QueryBrief(
+            query=query, top_pages=pages, retrieval=ranking.retrieval, page=page, warnings=ranking.warnings
+        )
+
+
+def _refused(query: str, page: str, embedder: Embedder | None) -> QueryBrief:
+    return QueryBrief(
+        query=query,
+        top_pages=(),
+        retrieval="lexical" if embedder is None else "hybrid",
+        page=page,
+        refusal="unknown-page",
+    )
+
+
+def _brief_from_bundle(
+    query: str,
+    layout: WorkspaceLayout,
+    bundle: Bundle,
+    *,
+    embedder: Embedder | None,
+    top_k: int,
+    page: str | None,
+) -> QueryBrief:
+    """The in-memory brief and the oracle for session retrieval."""
+    if page is not None and bundle.concept(page) is None:
+        return _refused(query, page, embedder)
     prepared = _prepare_query_retrieval(query, layout, bundle, top_k=top_k, embedder=embedder)
-    order = _pinned(prepared, page, top_k) if page is not None else prepared.top_pages
+    order = (
+        _pin(tuple(prepared.candidates), page, top_k, _bundle_neighbours(bundle, page))
+        if page is not None
+        else prepared.top_pages
+    )
     pages = tuple(
         QueryPageBrief(
             path=path,
@@ -684,19 +916,34 @@ def plan_query_brief(
     return QueryBrief(query=query, top_pages=pages, retrieval=prepared.retrieval, page=page, warnings=prepared.warnings)
 
 
-def _pinned(prepared: PreparedQueryRetrieval, page: str, top_k: int) -> tuple[str, ...]:
-    """*page*, then the candidates it links to or is linked from, then the other candidates (D-002)."""
-    bundle = prepared.bundle
+def _pin(candidates: Sequence[str], page: str, top_k: int, neighbours: set[str]) -> tuple[str, ...]:
+    """Pin the page first, its candidate neighbours next, then the remaining candidates."""
+    rest = [candidate for candidate in candidates if candidate != page]
+    linked = [candidate for candidate in rest if candidate in neighbours]
+    unlinked = [candidate for candidate in rest if candidate not in neighbours]
+    return (page, *linked, *unlinked)[:top_k]
+
+
+def _bundle_neighbours(bundle: Bundle, page: str) -> set[str]:
     graph = build_link_graph(bundle)
     neighbours = set(graph.backlinks.get(page, ()))
     for link in graph.out.get(page, ()):
         member = bundle.member_id(link.target) if link.target is not None and not link.external else None
         if member is not None and member.endswith(".md"):
             neighbours.add(member.removesuffix(".md"))
-    rest = [candidate for candidate in prepared.candidates if candidate != page]
-    linked = [candidate for candidate in rest if candidate in neighbours]
-    unlinked = [candidate for candidate in rest if candidate not in neighbours]
-    return (page, *linked, *unlinked)[:top_k]
+    return neighbours
+
+
+def _session_neighbours(session: ReadSession, page: str) -> set[str]:
+    """Read neighbours without a graph build; pruned clone files cannot be candidates."""
+    neighbours = set(session.backlinks(page))
+    for link in session.outlinks(page):
+        if link.target is None or link.external:
+            continue
+        row = session.member(link.target)
+        if row is not None and row.id.endswith(".md"):
+            neighbours.add(row.id.removesuffix(".md"))
+    return neighbours
 
 
 _GRAPH_UNAVAILABLE_STDERR = "[graph unavailable: run 'gw graph build' to enable code-graph grounding tools]"
@@ -1246,12 +1493,6 @@ async def _run_fixed_query(
     return apply_guardrails(query_result, bundle, fan_result, skip_g4=code_fallback_used), code_fallback_used
 
 
-#: Cap on the excerpt handed to the orchestrator for each initial candidate.
-#: Kept far below `_LIBRARIAN_PAGE_CHARS` — this is a planning hint, not the
-#: text a worker reasons over.
-_CANDIDATE_EXCERPT_CHARS = 1_500
-
-
 def _initial_candidates(prepared: PreparedQueryRetrieval, *, repo_head: str | None) -> list[InitialCandidate]:
     """The planner's candidate list, each row carrying a classified freshness.
 
@@ -1371,7 +1612,11 @@ async def run_query(
     query_id = uuid.uuid4().hex[:12]
     started_at = datetime.now(tz=UTC).isoformat()
     loaded_bundle = load_workspace_bundle(layout) if bundle is None else bundle
-    prepared = _prepare_query_retrieval(query, layout, loaded_bundle, top_k=top_k, embedder=embedder)
+    prepared = (
+        _prepare_query_retrieval(query, layout, loaded_bundle, top_k=top_k, embedder=embedder)
+        if bundle is not None
+        else _session_prepared(query, layout, loaded_bundle, top_k=top_k, embedder=embedder)
+    )
 
     reader, graph_tools = _load_query_graph_tools(graph_target(layout))
     fallback_error: str | None = None

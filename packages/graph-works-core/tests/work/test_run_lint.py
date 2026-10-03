@@ -236,3 +236,88 @@ def test_unknown_path_raises_lookup_error(tmp_path, bad):
     _write(layout, "feature-a", _FEATURE)
     with pytest.raises(LookupError, match="unknown work item"):
         work.run_lint(layout, _config(layout), today=TODAY, path=bad)
+
+
+def _legacy_work_only_ignore(bundle_dir):
+    """`_work_only_ignore` as it stood at c96c8eb, frozen here as the equivalence oracle."""
+    siblings = tuple(
+        f"{entry.name}/*" if entry.is_dir() else entry.name
+        for entry in sorted(bundle_dir.iterdir(), key=lambda path: path.name)
+        if entry.name != "work"
+    )
+    return (*siblings, *IGNORE)
+
+
+def test_run_lint_matches_the_legacy_recipe(tmp_path, monkeypatch):
+    """A working and a broken link into `docs/`, and a `sources[]` resource into `sources/`:
+    the lint fallback reports exactly what the legacy `ignore=` recipe reported."""
+    layout = _workspace(tmp_path)
+    bundle_dir = layout.bundle_dir
+    (bundle_dir / "docs").mkdir(exist_ok=True)
+    (bundle_dir / "docs" / "page.md").write_text(
+        "---\ntype: Explanation\ntitle: P\n---\n\nBody.\n", encoding="utf-8", newline=""
+    )
+    (bundle_dir / "sources").mkdir(exist_ok=True)
+    (bundle_dir / "sources" / "2026-10-s.md").write_text(
+        "---\ntype: Source\ntitle: S\n---\n\nBody.\n", encoding="utf-8", newline=""
+    )
+    item = (
+        _FEATURE.format(slug="linked")
+        .replace(
+            "## Summary\nd\n",
+            "## Summary\nSee [ok](/docs/page.md) and [gone](/docs/missing.md).\n",
+        )
+        .replace("affects:\n", "sources:\n- id: ref\n  resource: /sources/2026-10-s.md\naffects:\n")
+    )
+    (bundle_dir / "work" / "feature-linked.md").write_text(item, encoding="utf-8", newline="")
+
+    scoped = work.run_lint(layout, _config(layout), today=TODAY)
+
+    from graph_works_core.workspace import bundle as bundle_mod
+
+    seen = []
+
+    def legacy_load(lay, *, ignore=(), prune=()):
+        seen.append(lay)
+        return bundle_mod.load_workspace_bundle(lay, ignore=_legacy_work_only_ignore(lay.bundle_dir))
+
+    monkeypatch.setattr(
+        work,
+        "load_workspace_bundle",
+        legacy_load,
+    )
+    legacy = work.run_lint(layout, _config(layout), today=TODAY)
+
+    assert seen == [layout]
+    assert scoped.findings == legacy.findings
+    broken = [f for f in scoped.findings if f.code == "links.broken"]
+    assert [f.path for f in broken] == ["work/feature-linked.md"]
+    assert "missing.md" in broken[0].message
+
+
+def test_run_lint_retains_ignored_members_and_prunes_only_clones(tmp_path, monkeypatch):
+    from graph_works_core.workspace import bundle as bundle_mod
+
+    layout = _workspace(tmp_path)
+    _write(layout, "feature-a", _FEATURE)
+    docs = layout.bundle_dir / "docs"
+    docs.mkdir()
+    (docs / "page.md").write_text("# Doc\n", encoding="utf-8", newline="")
+    clone = layout.bundle_dir / "repositories/demo/references/git"
+    clone.mkdir(parents=True)
+    (clone / "README.md").write_text("# Upstream\n", encoding="utf-8", newline="")
+    seen = []
+
+    def capture(lay, *, ignore=(), prune=()):
+        bundle = bundle_mod.load_workspace_bundle(lay, ignore=ignore, prune=prune)
+        seen.append(bundle)
+        return bundle
+
+    monkeypatch.setattr(work, "load_workspace_bundle", capture)
+    work.run_lint(layout, _config(layout), today=TODAY)
+    [bundle] = seen
+    assert bundle.pruned == frozenset({"repositories/demo/references/git"})
+    assert "docs/page.md" in bundle.ignored
+    assert bundle.member_id("docs/page.md") == "docs/page.md"
+    assert "docs/page" not in bundle.concepts
+    assert "work/feature-a" in bundle.concepts

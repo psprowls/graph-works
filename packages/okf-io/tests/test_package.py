@@ -19,8 +19,11 @@ def test_version_is_static():
     private descriptor loader required by graph-works-core's synchronized
     transaction boundary. `0.2.5` adds `outline`/`outline_index` and its three
     result types, a read-only reader over the same entry cutting `update`
-    uses. All patches (ADR-0007)."""
-    assert okf_io.__version__ == "0.2.5"
+    uses. `0.2.6` adds `walk`, `read_member`, `resolve_member`,
+    `document_links` and `document_headings` with their result types — the
+    incremental entry points a persisted read index needs; `load` and
+    `build_link_graph` run on them. All patches (ADR-0007)."""
+    assert okf_io.__version__ == "0.2.6"
 
 
 def test_version_matches_package_metadata():
@@ -37,14 +40,15 @@ def test_public_surface():
         "ChangeKind",
         "Describe",
         "Descriptions",
-        "Drift",
         "Document",
+        "Drift",
         "EntryKind",
         "EntryTarget",
         "Executor",
         "Finding",
         "Frontmatter",
         "Generated",
+        "Heading",
         "IndexChange",
         "IndexEntry",
         "IndexHeading",
@@ -56,6 +60,9 @@ def test_public_surface():
         "LogAppend",
         "LogEntry",
         "LogSection",
+        "Member",
+        "MemberKind",
+        "MemberStat",
         "Migration",
         "MigrationChange",
         "MigrationChangeKind",
@@ -69,12 +76,16 @@ def test_public_surface():
         "TrustTier",
         "Unmigrated",
         "UnmigratedReason",
+        "Unreadable",
         "UsageWindow",
         "Verified",
+        "Walk",
         "__version__",
         "append_log_entry",
         "build_frontmatter",
         "build_link_graph",
+        "document_headings",
+        "document_links",
         "effective_status",
         "is_stale",
         "last_verified_at",
@@ -84,10 +95,13 @@ def test_public_surface():
         "outline_index",
         "parse",
         "parse_log",
+        "read_member",
+        "resolve_member",
         "trust_tier",
         "update_index",
         "validate",
         "value_shape",
+        "walk",
     }
     assert set(okf_io.__all__) == expected
 

@@ -184,3 +184,39 @@ def test_the_queue_writes_nothing_and_is_idempotent(tmp_path: Path) -> None:
 
     assert _snapshot(layout.bundle_dir) == before
     assert first == second
+
+
+def test_non_string_origin_is_ignored(tmp_path: Path) -> None:
+    layout = _workspace(tmp_path)
+    _write_item(layout, "work/bug-a")
+    sources = layout.bundle_dir / "sources"
+    sources.mkdir(parents=True, exist_ok=True)
+    (sources / "2026-09-dated.md").write_text(
+        "---\ntype: Source\ntitle: D\norigin: 2026-09-01\n---\n", encoding="utf-8", newline="\n"
+    )
+    (sources / "2026-09-listy.md").write_text(
+        "---\ntype: Source\ntitle: L\norigin: [a, b]\n---\n", encoding="utf-8", newline="\n"
+    )
+    assert [entry.path for entry in work.run_ingest_queue(layout).pending] == ["work/bug-a"]
+
+
+def test_origin_rows_only_accept_source_concepts_with_nonempty_text(tmp_path: Path) -> None:
+    from dataclasses import replace
+
+    from graph_works_core.read_session import open_read_session
+
+    layout = _workspace(tmp_path)
+    _write_item(layout, "work/bug-a")
+    _write_source(layout, "matched", "work/_archive/bug-a/references/01-design.md")
+    (layout.bundle_dir / "index.md").write_text(
+        "---\ntype: Source\ntitle: Index\norigin: https://ignored.example\n---\n", encoding="utf-8", newline="\n"
+    )
+    for name, origin in (("empty", "''"), ("list", "[a, b]"), ("int", "123"), ("bool", "true")):
+        _write_source(layout, name, origin)
+    with open_read_session(layout) as session:
+        rows = session.members()
+        source = session.member("sources/2026-08-matched.md")
+    assert source is not None
+    assert work._ingested_origins((*rows, replace(source, fm=None)), layout.bundle_dir) == frozenset(
+        {"work/bug-a/references/01-design.md"}
+    )

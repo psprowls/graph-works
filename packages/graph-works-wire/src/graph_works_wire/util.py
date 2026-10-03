@@ -6,6 +6,7 @@ from typing import Any
 
 from graph_works_core.util.commands import LineEndingsReport, LogAppendResult, LogRead, TokensUpdate
 from graph_works_core.util.platform import PlatformReport
+from graph_works_core.util.read_index import ReadIndexReport
 
 
 def log_payload(result: LogAppendResult) -> dict[str, object]:
@@ -79,4 +80,32 @@ def line_endings_payload(report: LineEndingsReport) -> dict[str, Any]:
     return {
         "fixed": report.fixed,
         "findings": [{"member": finding.member, "crlf_count": finding.crlf_count} for finding in report.findings],
+    }
+
+
+def read_index_payload(report: ReadIndexReport) -> dict[str, Any]:
+    """The whole report; paths as strings, nothing derived."""
+    return {
+        "mode": report.mode,
+        "db_path": str(report.db_path),
+        "exists": report.exists,
+        "enabled": report.enabled,
+        "backend": report.backend,
+        "backend_reason": report.backend_reason,
+        "fingerprint": {"current": report.current_fingerprint, "stored": report.stored_fingerprint},
+        "versions": {
+            "schema": report.schema_version,
+            "projection": report.projection_version,
+            "okf_io": report.okf_io_version,
+        },
+        "generation": report.generation,
+        "last_reconcile_ns": report.last_reconcile_ns,
+        "tables": dict(sorted(report.tables.items())),
+        "kinds": dict(sorted(report.kinds.items())),
+        "unreadable_files": report.unreadable_files,
+        "rebuilt_reason": report.rebuilt_reason,
+        "drift": None if report.drift is None else list(report.drift),
+        "elapsed_s": report.elapsed_s,
+        "parsed": report.parsed,
+        "error": report.error,
     }

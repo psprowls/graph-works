@@ -19,7 +19,7 @@ from typing import Any, Literal
 
 from okf_ext.locking import locked
 from work_tracker_okf.affects import code_affects
-from work_tracker_okf.items import IGNORE, WorkItem, load_items
+from work_tracker_okf.items import WorkItem, load_items
 
 from graph_works_core.orchestrate import gate_git
 from graph_works_core.orchestrate.gate_receipts import (
@@ -33,7 +33,7 @@ from graph_works_core.orchestrate.gate_receipts import (
 )
 from graph_works_core.orchestrate.wait import WaitClock
 from graph_works_core.workspace import provenance
-from graph_works_core.workspace.bundle import load_workspace_bundle
+from graph_works_core.workspace.bundle import load_work_bundle
 from graph_works_core.workspace.commits import item_stem
 from graph_works_core.workspace.errors import WorkspaceError
 from graph_works_core.workspace.gate_config import ScopedGate, repo_gate
@@ -190,7 +190,7 @@ def _git_detail(failure: provenance.GitFailure) -> str:
 def _resolve(
     layout: WorkspaceLayout, path: str, worktree: Path | None
 ) -> tuple[GateTarget, WorkItem] | GateCheckResult:
-    items = load_items(load_workspace_bundle(layout, ignore=IGNORE))
+    items = load_items(load_work_bundle(layout))
     by_path = {item.path: item for item in items}
     item = by_path.get(path)
     if item is None:

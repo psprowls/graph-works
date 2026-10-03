@@ -28,7 +28,7 @@ _STUB_VERSIONS: dict[str, tuple[str, ...]] = {
     "code-wiki-okf": ("0.1.0", "0.2.0", "0.3.0", "0.4.0", "0.5.0", "0.5.1", "0.5.2", "0.5.3", "0.5.4"),
     "config-io": ("0.1.0", "0.2.0"),
     "doc-wiki-okf": ("0.1.0", "0.2.0", "0.2.1", "0.2.2", "0.3.0", "0.3.1", "0.3.2", "0.3.3"),
-    "graph-works-wire": ("0.1.0", "0.1.1", "0.1.2", "0.1.3", "0.1.4", "0.1.5", "0.1.6", "0.1.7", "0.1.8"),
+    "graph-works-wire": ("0.1.0", "0.1.1", "0.1.2", "0.1.3", "0.1.4", "0.1.5", "0.1.6", "0.1.7", "0.1.8", "0.1.9"),
     "langchain-core": ("1.4.0",),
     "markdown-it-py": ("3.0.0",),
     "models-io": ("0.2.0",),
@@ -47,8 +47,11 @@ _STUB_VERSIONS: dict[str, tuple[str, ...]] = {
         "0.5.0",
         "0.5.1",
         "0.5.2",
+        "0.5.3",
+        "0.5.4",
+        "0.5.5",
     ),
-    "okf-io": ("0.1.1", "0.2.0", "0.2.1", "0.2.2", "0.2.3", "0.2.4", "0.2.5"),
+    "okf-io": ("0.1.1", "0.2.0", "0.2.1", "0.2.2", "0.2.3", "0.2.4", "0.2.5", "0.2.6"),
     "plugin-fork-io": ("0.1.0", "0.1.1"),
     "repositories-okf": ("0.1.0", "0.1.1", "0.1.2", "0.1.3"),
     "ruamel-yaml": ("0.18.0",),
@@ -180,7 +183,7 @@ def test_built_wheel_resolves_with_core_from_published_metadata_offline(tmp_path
         requirement for requirement in core_requirements if canonicalize_name(requirement.name) == "okf-io"
     )
     assert str(cli_okf_io.specifier) == "<0.3,>=0.2.5"
-    assert str(core_okf_io.specifier) == "<0.3,>=0.2.5"
+    assert str(core_okf_io.specifier) == "<0.3,>=0.2.6"
 
     extras_by_name: dict[str, set[str]] = {}
     for requirement in (*cli_requirements, *core_requirements):

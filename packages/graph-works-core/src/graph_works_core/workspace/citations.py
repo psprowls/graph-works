@@ -14,20 +14,29 @@ from __future__ import annotations
 
 import re
 from collections import defaultdict
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import PurePosixPath
 from typing import Literal
 
+import markdown_it
 from markdown_it import MarkdownIt
 from markdown_it.rules_inline import StateInline
 from markdown_it.rules_inline.backticks import backtick
 
+from graph_works_core.workspace.display_cache import DisplayCache, Span, open_display_cache
 from graph_works_core.workspace.layout import WorkspaceLayout
-from graph_works_core.workspace.repo_files import RepoFiles, repo_file_sets
+from graph_works_core.workspace.repo_files import RepoFiles, repo_file_sets_in
 
 CitationStatus = Literal["resolved", "ambiguous", "missing"]
 
 _GRAMMAR = re.compile(r"(?P<path>[^\s:]+\.[A-Za-z0-9]+):(?P<start>[1-9]\d*)(?:-(?P<end>[1-9]\d*))?")
+EXTRACTOR_VERSION = 1  # Bump when the extraction rules or grammar change.
+
+
+def extractor_version() -> str:
+    """Identify both the citation rules and their Markdown parser for cached spans."""
+    return f"{EXTRACTOR_VERSION}:{markdown_it.__version__}"
 
 
 @dataclass(frozen=True, slots=True)
@@ -111,11 +120,21 @@ def _resolve(
 
 
 def resolve_citations(layout: WorkspaceLayout, body: str) -> tuple[Citation, ...]:
-    """Every `path:N` inline-code citation in *body*, resolved against declared repositories. Never writes."""
+    """Resolve *body*'s `path:N` citations; preserve sources and bundle, but may write the disposable display cache."""
     spans = extract_citations(body)
     if not spans:
         return ()
-    sets = repo_file_sets(layout)
+    with open_display_cache(layout) as cache:
+        return resolve_spans(layout, spans, cache=cache)
+
+
+def resolve_spans(
+    layout: WorkspaceLayout, spans: Sequence[Span], *, cache: DisplayCache | None = None
+) -> tuple[Citation, ...]:
+    """Resolve spans with the caller's cache; `None` lists fresh without opening a cache."""
+    if not spans:
+        return ()
+    sets = repo_file_sets_in(layout, cache)
     basenames = _by_basename(sets)
     citations = []
     for raw, line, path, start, end in spans:
@@ -129,5 +148,7 @@ __all__ = [
     "CitationCandidate",
     "CitationStatus",
     "extract_citations",
+    "extractor_version",
     "resolve_citations",
+    "resolve_spans",
 ]

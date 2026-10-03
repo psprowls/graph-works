@@ -19,7 +19,7 @@ from work_tracker_okf.items import IGNORE, WorkItem, load_items
 from work_tracker_okf.paths import MANAGED_ARTIFACTS, artifact_ref
 from work_tracker_okf.vocabulary import TERMINAL_STATUSES
 
-from graph_works_core.workspace.bundle import load_workspace_bundle
+from graph_works_core.workspace.bundle import load_work_bundle, load_workspace_bundle
 from graph_works_core.workspace.errors import WorkspaceConfigError, WorkspaceError
 from graph_works_core.workspace.layout import WorkspaceLayout
 from graph_works_core.workspace.manifest import workspace_store
@@ -608,7 +608,7 @@ def discover_integration(target: FinishTarget) -> VerifiedIntegration | str:
 @finish_toolchain
 def inspect_finish(layout: WorkspaceLayout, path: str) -> FinishVerification:
     """Reverify every recorded integration against live repository-local refs."""
-    bundle = load_workspace_bundle(layout, ignore=IGNORE)
+    bundle = load_work_bundle(layout)
     items = load_items(bundle)
     by_path = {item.path: item for item in items}
     if path not in by_path:
@@ -705,7 +705,7 @@ def _worktree_list(repo: Path) -> tuple[tuple[str, str], ...] | None:
 @finish_toolchain
 def plan_finish_cleanup(layout: WorkspaceLayout, path: str, *, runner_cwd: Path | None) -> CleanupPlan:
     """Plan removal of resolved, receipted stamps from read-only Git observations."""
-    items = load_items(load_workspace_bundle(layout, ignore=IGNORE))
+    items = load_items(load_work_bundle(layout))
     by_path = {item.path: item for item in items}
     item = by_path.get(path)
     if item is None:

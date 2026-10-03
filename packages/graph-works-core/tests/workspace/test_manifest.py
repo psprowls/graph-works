@@ -55,6 +55,7 @@ def test_the_catalog_carries_exactly_the_documented_keys():
         "ignore",
         "state_gate.enabled",
         "state_gate.branches",
+        "read_index.enabled",
         "roles.*.model_id",
         "roles.*.backend",
         "roles.*.region",
@@ -642,3 +643,12 @@ def test_toolchain_git_is_a_declared_optional_string():
 
     [entry] = [entry for entry in CATALOG if entry.key == "toolchain.git"]
     assert entry.type == "str" and entry.default is None and entry.env_var is None
+
+
+def test_read_index_enabled_defaults_true_and_honours_local(tmp_path):
+    from graph_works_core.workspace.init import apply_init, plan_init
+
+    layout = apply_init(plan_init(tmp_path / ".works", today=TODAY, topic="t")).layout
+    assert checked_bool(layout, "read_index.enabled") is True
+    layout.local_manifest_path.write_text("read_index:\n  enabled: false\n", encoding="utf-8", newline="\n")
+    assert checked_bool(layout, "read_index.enabled") is False

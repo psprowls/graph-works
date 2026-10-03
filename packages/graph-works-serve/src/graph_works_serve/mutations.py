@@ -41,6 +41,7 @@ _INSTANT_SHAPE = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z")
 _LOCK = threading.Lock()
 
 Params = Mapping[str, Any]
+WriteThrough = Callable[[WorkspaceLayout], int]
 BeforeApply = Callable[[object], None]
 ErrorMap = tuple[tuple[type[BaseException] | tuple[type[BaseException], ...], str], ...]
 DEFAULT_ERRORS: ErrorMap = ((WorkspaceError, "workspace"), (ValueError, "unresolved"), (OSError, "io"))
@@ -151,7 +152,13 @@ def _pinned() -> datetime:
     return now().astimezone(UTC).replace(microsecond=0)
 
 
-def plan(spec: MutationSpec, layout: WorkspaceLayout, body: bytes, content_type: str | None) -> Outcome:
+def plan(
+    spec: MutationSpec,
+    layout: WorkspaceLayout,
+    body: bytes,
+    content_type: str | None,
+    write_through: WriteThrough | None = None,
+) -> Outcome:
     """`200 {as_of, digest, plan}`. A refused plan is still `200`: it is the answer."""
     try:
         params = _parse(spec, spec.params, body, content_type)
@@ -160,14 +167,26 @@ def plan(spec: MutationSpec, layout: WorkspaceLayout, body: bytes, content_type:
         return refusal.outcome
 
 
-def apply(spec: MutationSpec, layout: WorkspaceLayout, body: bytes, content_type: str | None) -> Outcome:
+def apply(
+    spec: MutationSpec,
+    layout: WorkspaceLayout,
+    body: bytes,
+    content_type: str | None,
+    write_through: WriteThrough | None = None,
+) -> Outcome:
     try:
-        return _apply(spec, layout, body, content_type)
+        return _apply(spec, layout, body, content_type, write_through)
     except _Refusal as refusal:
         return refusal.outcome
 
 
-def _apply(spec: MutationSpec, layout: WorkspaceLayout, body: bytes, content_type: str | None) -> Outcome:
+def _apply(
+    spec: MutationSpec,
+    layout: WorkspaceLayout,
+    body: bytes,
+    content_type: str | None,
+    write_through: WriteThrough | None = None,
+) -> Outcome:
     params = _parse(spec, (*spec.params, *APPLY_FIELDS), body, content_type)
     claimed = str(params.pop("digest"))
     raw = str(params.pop("as_of"))
@@ -206,4 +225,5 @@ def _apply(spec: MutationSpec, layout: WorkspaceLayout, body: bytes, content_typ
         reason = spec.refused(result, params)
         if reason is not None:
             return _error(spec, reason, f"{spec.command}: apply was {reason}; nothing was applied", result)
-    return Outcome(200, {"as_of": fresh["as_of"], "digest": fresh["digest"], "result": result})
+        generation = write_through(layout) if write_through is not None else None
+        return Outcome(200, {"as_of": fresh["as_of"], "digest": fresh["digest"], "result": result}, generation)

@@ -107,3 +107,60 @@ def test_item_read_is_available_from_work_facade(tmp_path):
 
     assert isinstance(result, ItemRead)
     assert result.sources == (ItemSource("design", "/work/feature-a/references/01-design.md", "Design: A"),)
+
+
+def test_item_deleted_after_reconcile_is_unreadable(tmp_path, monkeypatch):
+    layout = _workspace(tmp_path)
+    _write(layout)
+    page = layout.bundle_dir / f"{PATH}.md"
+    real = work.read_member
+
+    def vanish(root, member_id):
+        page.unlink()
+        return real(root, member_id)
+
+    monkeypatch.setattr(work, "read_member", vanish)
+    result = work.run_item_read(layout, PATH)
+    assert result.refusal == "unreadable"
+    assert result.detail
+    assert result.body == ""
+
+
+def test_item_edited_after_reconcile_returns_one_version(tmp_path, monkeypatch):
+    layout = _workspace(tmp_path)
+    _write(layout)
+    page = layout.bundle_dir / f"{PATH}.md"
+    real = work.read_member
+
+    def edit(root, member_id):
+        page.write_text(
+            ITEM.replace("title: A", "title: Edited").replace("## Summary\nd", "## Summary\nedited body"),
+            encoding="utf-8",
+            newline="\n",
+        )
+        return real(root, member_id)
+
+    monkeypatch.setattr(work, "read_member", edit)
+    result = work.run_item_read(layout, PATH)
+    assert result.refusal is None
+    assert result.frontmatter["title"] == "Edited"
+    assert "edited body" in result.body
+
+
+def test_unreadable_item_page_is_refused_with_detail(tmp_path):
+    layout = _workspace(tmp_path)
+    (layout.bundle_dir / f"{PATH}.md").write_bytes(b"\xff\xfe nope")
+    result = work.run_item_read(layout, PATH)
+    assert result.refusal == "unreadable"
+    assert result.detail
+
+
+def test_item_read_parses_exactly_one_file(tmp_path, monkeypatch):
+    layout = _workspace(tmp_path)
+    _write(layout)
+    work.run_status(layout)  # warm the index
+    seen: list[str] = []
+    real = work.read_member
+    monkeypatch.setattr(work, "read_member", lambda root, mid: seen.append(mid) or real(root, mid))
+    work.run_item_read(layout, PATH)
+    assert seen == [f"{PATH}.md"]

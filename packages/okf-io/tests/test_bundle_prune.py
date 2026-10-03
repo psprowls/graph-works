@@ -42,17 +42,18 @@ def _beneath(listed: list[str], directory: str) -> list[str]:
 def test_load_never_lists_inside_a_pruned_directory(tmp_path, monkeypatch):
     _big_tree(tmp_path)
     listed: list[str] = []
-    real_iterdir = Path.iterdir
+    real_scandir = os.scandir
 
-    def recording_iterdir(self: Path):
-        listed.append(self.relative_to(tmp_path).as_posix())
-        return real_iterdir(self)
+    def recording_scandir(path):
+        if not isinstance(path, int) and Path(path).is_relative_to(tmp_path):
+            listed.append(Path(path).relative_to(tmp_path).as_posix())
+        return real_scandir(path)
 
-    monkeypatch.setattr(Path, "iterdir", recording_iterdir)
+    monkeypatch.setattr(os, "scandir", recording_scandir)
     loaded = bundle.load(tmp_path, prune=["big"])
 
     assert _beneath(listed, "big") == []
-    assert listed == ["."]  # the root was listed, through the real iterdir
+    assert listed == ["."]  # the root was listed, through the real scandir
     assert loaded.pruned == frozenset({"big"})
     assert set(loaded.concepts) == {"top"}
     assert dict(loaded.indexes) == {}
@@ -277,10 +278,10 @@ def test_the_probe_is_never_consulted_without_pruned_roots(tmp_path, monkeypatch
     write_tree(tmp_path, {"top.md": CONCEPT})
     loaded = bundle.load(tmp_path)
 
-    def exploding(self, member):
+    def exploding(member, *, root, pruned):
         raise AssertionError("probe consulted with no pruned roots")
 
-    monkeypatch.setattr(bundle.Bundle, "_pruned_member", exploding)
+    monkeypatch.setattr(bundle, "_pruned_member", exploding)
     assert loaded.member_id("missing.md") is None
     assert loaded.member_id("café-missing.md") is None
 

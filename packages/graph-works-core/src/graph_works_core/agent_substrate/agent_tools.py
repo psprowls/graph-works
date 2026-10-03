@@ -145,16 +145,26 @@ def build_catalog(
     return catalog
 
 
+def missing_concept_excerpt(concept_id: str) -> str:
+    """What an excerpt says when the resolved *concept_id* names no concept."""
+    return f"ERROR: no concept {concept_id!r} in this bundle"
+
+
+def bounded_excerpt(document: Document, concept_id: str, *, max_chars: int = DEFAULT_EXCERPT_CHARS) -> str:
+    """Render *document* using its resolved *concept_id*, capped at *max_chars*."""
+    title = str(document.fm.title or _humanized(_slug(concept_id)))
+    body = document.body.strip()
+    content = f"# {title}\n\n{body}" if body else f"# {title}"
+    return truncate_text(content, max_chars)
+
+
 def read_bounded_page(bundle: Bundle, concept_id: str, *, max_chars: int = DEFAULT_EXCERPT_CHARS) -> str:
     """One concept rendered as `# Title` plus its body, capped at *max_chars*."""
     key = concept_id.strip().removesuffix(".md")
     doc = bundle.concept(key)
     if doc is None:
-        return f"ERROR: no concept {key!r} in this bundle"
-    title = str(doc.fm.title or _humanized(_slug(key)))
-    body = doc.body.strip()
-    content = f"# {title}\n\n{body}" if body else f"# {title}"
-    return truncate_text(content, max_chars)
+        return missing_concept_excerpt(key)
+    return bounded_excerpt(doc, key, max_chars=max_chars)
 
 
 def _flatten_catalog(catalog: dict[str, list[dict[str, Any]]]) -> list[dict[str, Any]]:
@@ -220,9 +230,11 @@ def filter_graph_tools(graph_tools: list[BaseTool], allowed_names: set[str]) -> 
 __all__ = [
     "DEFAULT_EXCERPT_CHARS",
     "SourceChunks",
+    "bounded_excerpt",
     "build_catalog",
     "chunk_text",
     "filter_graph_tools",
+    "missing_concept_excerpt",
     "read_bounded_page",
     "search_catalog",
     "strip_code_fence",

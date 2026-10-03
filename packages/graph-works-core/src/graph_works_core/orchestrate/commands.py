@@ -38,9 +38,10 @@ from work_tracker_okf.affects import code_affects, touches_workspace
 from work_tracker_okf.asks import plan_checkpoints
 from work_tracker_okf.decisions import HoldFact
 from work_tracker_okf.hierarchy import PICK_ORDER, active_nonterminal_descendants, child_gated, decision_owner
-from work_tracker_okf.items import IGNORE, WorkItem, load_items
+from work_tracker_okf.items import WorkItem, load_items
 from work_tracker_okf.pipeline import PACKAGED_DEFINITION, PipelineDefinition, dispatch_phases, read_only_phases
 from work_tracker_okf.placement import CODE_PHASES
+from work_tracker_okf.snapshot import as_snapshot
 from work_tracker_okf.vocabulary import (
     PLAN_SOURCE_ID,
     SLUG_PREFIXES,
@@ -71,7 +72,7 @@ from graph_works_core.orchestrate.claims import (
     paths_overlap,
 )
 from graph_works_core.orchestrate.rank import dependent_counts
-from graph_works_core.workspace.bundle import load_workspace_bundle
+from graph_works_core.workspace.bundle import load_work_bundle
 from graph_works_core.workspace.decision_owner import HoldReport, holds_by_path, open_holds
 from graph_works_core.workspace.dispatch import (
     DispatchProfileError,
@@ -381,14 +382,6 @@ def _classify(kind: BlockerKind | None) -> str:
     return "invalid" if kind is None else BLOCKER_KIND_TO_BLOCKED[kind]
 
 
-def _children_of(items: Sequence[WorkItem]) -> dict[str, list[WorkItem]]:
-    grouped: dict[str, list[WorkItem]] = {}
-    for item in items:
-        if item.parent_path:
-            grouped.setdefault(item.parent_path, []).append(item)
-    return grouped
-
-
 def _frontier(
     items: Sequence[WorkItem],
     root: str,
@@ -408,11 +401,11 @@ def _frontier(
     by a child filed afterwards) is checked *before* the `child_gated` branch,
     so the widened gate never swallows the repair.
     """
-    by_path = {item.path: item for item in items}
+    snapshot = as_snapshot(items)
+    by_path = snapshot.by_path
     if root not in by_path:
         return [], [], [BlockedItem(path=root, kind="invalid", reason=f"unknown path {root!r}")]
 
-    children_of = _children_of(items)
     candidates: list[tuple[WorkItem, RouteResult]] = []
     advances: list[PlannedAdvance] = []
     blocked: list[BlockedItem] = []
@@ -423,7 +416,7 @@ def _frontier(
         path, depth = stack.pop()
         node = by_path.get(path)
         if node is None:  # pragma: no cover -- every pushed path is `root` (checked above) or
-            # drawn from `children_of`, which groups the same `items` `by_path` was built from
+            # drawn from `snapshot.by_parent`, which indexes the same items as `by_path`
             blocked.append(BlockedItem(path=path, kind="invalid", reason=f"unknown path {path!r}"))
             continue
         if depth >= WALK_DEPTH_CAP:
@@ -435,8 +428,8 @@ def _frontier(
                 )
             )
             continue
-        children = children_of.get(path, [])
-        state = state_for(items, path, hold=holds.get(path), stale_spec=stale.get(path, ()))
+        children = snapshot.by_parent.get(path, ())
+        state = state_for(snapshot, path, hold=holds.get(path), stale_spec=stale.get(path, ()))
         if state is None:  # pragma: no cover -- `path` came out of `by_path`
             continue
         result = route(state, definition=definition)
@@ -446,9 +439,9 @@ def _frontier(
         if result.repair is not None and result.repair == result.on_return:
             advances.append(PlannedAdvance(path=path, reason=result.reason, mode="return"))
             continue
-        if child_gated(items, node):
+        if child_gated(snapshot, node):
             for child in children:
-                if child.work_status in TERMINAL_STATUSES and not active_nonterminal_descendants(items, child.path):
+                if child.work_status in TERMINAL_STATUSES and not active_nonterminal_descendants(snapshot, child.path):
                     continue
                 if child.path in visited:
                     blocked.append(
@@ -506,7 +499,7 @@ def _descendants(items: Sequence[WorkItem], root: str) -> list[WorkItem]:
     """Every descendant of *root* at any depth and any status -- what the epic
     worktree fallback reads, because the gated frontier walk would not visit
     a terminal or non-dispatchable child that nonetheless carries the stamp."""
-    children_of = _children_of(items)
+    children_of = as_snapshot(items).by_parent
     out: list[WorkItem] = []
     stack = list(children_of.get(root, []))
     seen = {root}
@@ -1282,12 +1275,13 @@ def plan(
     writing a spec or plan may change both during a run. An unresolvable
     live profile counts as attend, with a warning.
     """
+    items = as_snapshot(items)
     workspace_enabled = (
         workspace_repo is not None and workspace_context is not None and workspace_worktrees_dir is not None
     )
     exists = worktree_exists or {}
     inventory = worktree_inventory or {}
-    by_path = {item.path: item for item in items}
+    by_path = items.by_path
     # A session name carries a hash, so nothing recovers a path by parsing
     # one -- `session_index` is the only reverse there is. Validate every
     # live owner before planning, including for an already-terminal root.
@@ -2336,7 +2330,7 @@ def run_orchestrate(
     `provisions_worktrees` passes straight through to `plan()` -- see its
     docstring; this shell resolves no backend itself; that is a caller's job.
     """
-    bundle = load_workspace_bundle(layout, ignore=IGNORE)
+    bundle = load_work_bundle(layout)
     config = load_dispatch_config(layout)
     items = routing_items(bundle.root, load_items(bundle), definition=config.definition)
     # Checked, not coerced. A silent `2` from a mistyped `max_parallel` is
@@ -2346,7 +2340,7 @@ def run_orchestrate(
     max_attend = checked_int(layout, "workflow.auto_drive.max_attend")
     supervise_merges = checked_bool(layout, "workflow.auto_drive.supervise_merges")
 
-    by_path = {item.path: item for item in items}
+    by_path = items.by_path
     by_session, _ = session_index(items)
     live_finishes = {
         by_session[key].path
@@ -2420,7 +2414,7 @@ def run_orchestrate(
         # itself is still known and still reported.
         repo_path = None
 
-    planning_items = items
+    planning_items: Sequence[WorkItem] = items
     if item_repos is not None:
         planning_items = tuple(
             replace(

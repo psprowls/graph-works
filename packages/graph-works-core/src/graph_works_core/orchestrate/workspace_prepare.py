@@ -16,13 +16,13 @@ from datetime import date
 from pathlib import Path
 from typing import Literal
 
-from work_tracker_okf.items import IGNORE, WorkItem, load_items
+from work_tracker_okf.items import WorkItem, load_items
 from work_tracker_okf.pipeline import code_phases
 
 from graph_works_core.orchestrate.anchors import workspace_chain, workspace_worktree_path
 from graph_works_core.orchestrate.commands import branch_name
 from graph_works_core.orchestrate.placement import preparation_guard, run_record_placement
-from graph_works_core.workspace.bundle import load_workspace_bundle
+from graph_works_core.workspace.bundle import load_work_bundle
 from graph_works_core.workspace.errors import WorkspaceError
 from graph_works_core.workspace.layout import WorkspaceLayout
 from graph_works_core.workspace.provenance import probe_git
@@ -124,7 +124,7 @@ def run_prepare_workspace(
         return WorkspacePrepareResult(path, (), None, "", note, False)
     workspace_path = workspace.path
     assert workspace_path is not None
-    bundle = load_workspace_bundle(layout, ignore=IGNORE)
+    bundle = load_work_bundle(layout)
     items = {i.path: i for i in load_items(bundle)}
     item = items.get(path)
     if item is None:
@@ -143,7 +143,7 @@ def run_prepare_workspace(
     for index, owner_path in enumerate(planned_chain):
         # Earlier steps legitimately stamped their pages. Re-read for this step,
         # then bind entitlement, parent selection and the guard to that bundle.
-        bundle = load_workspace_bundle(layout, ignore=IGNORE)
+        bundle = load_work_bundle(layout)
         items = {i.path: i for i in load_items(bundle)}
         item = items.get(path)
         if item is None:

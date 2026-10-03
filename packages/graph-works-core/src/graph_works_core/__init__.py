@@ -23,7 +23,7 @@ Four `import-linter` layers (root `pyproject.toml`, `[[tool.importlinter.contrac
 
     workspace/                                             # layer 0
       errors, layout, manifest, discovery, init, provenance, pipeline
-    agent_substrate/ : graph/ : prompts/                   # layer 1, shared
+    agent_substrate/ : graph/ : prompts/ : read_session/   # layer 1, shared
     guidance/                                              # between: claims index,
                                                            #   affects closure
     ingest/ : scan/ : query/ : lint_drift/ : archive/ : orchestrate/
@@ -134,7 +134,7 @@ from __future__ import annotations
 import importlib
 from typing import TYPE_CHECKING, Any
 
-__version__ = "0.6.9"
+__version__ = "0.6.11"
 
 _EXPORTS: dict[str, tuple[str, str]] = {
     "ToolLoopResult": ("graph_works_core.agent_substrate.agent_loop", "ToolLoopResult"),

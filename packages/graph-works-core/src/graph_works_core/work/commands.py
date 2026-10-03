@@ -50,18 +50,18 @@ from __future__ import annotations
 import hashlib
 import os
 import time
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from datetime import date
 from pathlib import Path
 from types import MappingProxyType
-from typing import Literal
+from typing import Literal, Protocol
 
 from code_wiki_okf.config import Config
 from doc_wiki_okf.sources import SOURCE_TYPE, normalize_origin
 from okf_ext.bundle import SECTIONS_DIRNAME
 from okf_ext.shape import load_sections
-from okf_io import Bundle, parse
+from okf_io import Bundle, Unreadable, parse, read_member
 from okf_io import validate as okf_validate
 from okf_io.validate import Report
 from repositories_okf.repository import repository_rule
@@ -100,11 +100,12 @@ from work_tracker_okf.vocabulary import PARENT_TYPES, SPEC_SOURCE_ID, TERMINAL_S
 from work_tracker_okf.workflow import RouteResult, RouteState, Transition, route, state_for
 
 from graph_works_core.guidance.assembly import Guidance, assemble_guidance, write_guidance
+from graph_works_core.read_session import open_read_session
 from graph_works_core.work import carried as _carried
 from graph_works_core.work.carried import CarriedContext, SlotInput
 from graph_works_core.work.path_report import PathReport, StageArtifactReport, artifact_reports, path_report
 from graph_works_core.workspace import provenance
-from graph_works_core.workspace.bundle import load_workspace_bundle
+from graph_works_core.workspace.bundle import load_work_bundle, load_workspace_bundle, work_scope
 from graph_works_core.workspace.commits import (
     COMMIT_FAILED_PREFIX,
     CommitOutcome,
@@ -340,7 +341,8 @@ class StatusReport:
 
 def run_status(layout: WorkspaceLayout) -> StatusReport:
     """Count the active items and name the one worth resuming. Never writes."""
-    items = load_items(load_workspace_bundle(layout, ignore=IGNORE))
+    with open_read_session(layout) as session:
+        items = session.work_snapshot()
     return StatusReport(rollup=rollup(items), resume=select_resume(items))
 
 
@@ -350,7 +352,8 @@ def run_work_list(layout: WorkspaceLayout) -> tuple[WorkItem, ...]:
     Archived items are left out, the same population `rollup` counts, so a
     board built from this agrees with `gw work status`.
     """
-    items = load_items(load_workspace_bundle(layout, ignore=IGNORE))
+    with open_read_session(layout) as session:
+        items = session.work_snapshot()
     return tuple(sorted((item for item in items if not item.archived), key=lambda item: item.path))
 
 
@@ -393,12 +396,19 @@ def _owned_references(bundle_root: Path, path: str) -> tuple[str, ...]:
 
 
 def run_item_read(layout: WorkspaceLayout, path: str) -> ItemRead:
-    """Read *path*'s work item and list its owned `references/`. Never writes."""
-    bundle = load_workspace_bundle(layout, ignore=IGNORE)
-    if path not in item_index(load_items(bundle)):
-        detail = unreadable_detail(bundle, path)
+    """Read *path*'s work item and list its owned `references/`. Never writes.
+
+    The session decides membership; every content field comes from one fresh
+    parse, so frontmatter and body share the same version of the page (D-002).
+    """
+    with open_read_session(layout) as session:
+        known = path in item_index(session.work_snapshot())
+        detail = None if known else session.diagnostics(ignore=IGNORE).unreadable.get(f"{path}.md")
+    if not known:
         return _refused_item(path, "unreadable" if detail is not None else "unknown-item", detail)
-    document = bundle.concepts[path]
+    document = read_member(layout.bundle_dir, f"{path}.md")
+    if isinstance(document, Unreadable):
+        return _refused_item(path, "unreadable", document.reason)
     error = document.parse_error
     return ItemRead(
         path=path,
@@ -442,7 +452,7 @@ def run_touch_active_work(layout: WorkspaceLayout, path: str, *, today: date) ->
     ran, not the phase its closing advance moved the item into. Idempotent.
     A failed write degrades to `pointer_path=None` (provenance never fails).
     """
-    bundle = load_workspace_bundle(layout, ignore=IGNORE)
+    bundle = load_work_bundle(layout)
     item = item_index(load_items(bundle)).get(path)
     if item is None:
         detail = unreadable_detail(bundle, path)
@@ -483,8 +493,21 @@ class IngestQueueReport:
     pending: tuple[PendingIngest, ...]
 
 
-def _ingested_origins(bundle: Bundle) -> frozenset[str]:
-    """Every normalized `origin` some `Source` page in *bundle* already carries.
+class _SourceRow(Protocol):
+    """Frontmatter fields consumed from the read session's member rows."""
+
+    @property
+    def kind(self) -> str: ...
+
+    @property
+    def type(self) -> str | None: ...
+
+    @property
+    def fm(self) -> Mapping[str, object] | None: ...
+
+
+def _ingested_origins(rows: Iterable[_SourceRow], bundle_dir: Path) -> frozenset[str]:
+    """Every normalized `origin` some `Source` row already carries.
 
     A `Source` page with **no** `origin` contributes nothing. It is not evidence
     of anything -- only 10 of the live vault's Source pages populate the field
@@ -495,12 +518,12 @@ def _ingested_origins(bundle: Bundle) -> frozenset[str]:
     spec.
     """
     origins: set[str] = set()
-    for document in bundle.concepts.values():
-        if document.fm.type != SOURCE_TYPE:
+    for row in rows:
+        if row.kind != "concept" or row.type != SOURCE_TYPE or row.fm is None:
             continue
-        stored = document.fm.extra.get("origin")
+        stored = row.fm.get("origin")
         if isinstance(stored, str) and stored:
-            origins.add(normalize_origin(stored, bundle.root))
+            origins.add(normalize_origin(stored, bundle_dir))
     return frozenset(origins)
 
 
@@ -524,10 +547,13 @@ def run_ingest_queue(layout: WorkspaceLayout) -> IngestQueueReport:
     Read-only for the same reason `run_next` is: a queue that mutates while you
     look at it cannot be polled safely.
     """
-    bundle = load_workspace_bundle(layout, ignore=IGNORE)
-    ingested = _ingested_origins(bundle)
+    with open_read_session(layout) as session:
+        ingested = _ingested_origins(
+            session.members(kind="concept", type=SOURCE_TYPE, ignore=IGNORE), layout.bundle_dir
+        )
+        items = session.work_snapshot()
     pending: list[PendingIngest] = []
-    for item in load_items(bundle):
+    for item in items:
         if item.work_status not in TERMINAL_STATUSES:
             continue
         resource = next(
@@ -699,14 +725,15 @@ def _resolve_dispatch_with(
 
 def _plan_route(
     layout: WorkspaceLayout,
-    bundle: Bundle,
+    root: Path,
+    unreadable: Mapping[str, str],
     items: Sequence[WorkItem],
     path: str,
     *,
     descend: bool,
     definition: PipelineDefinition,
 ) -> tuple[NextResult, WorkItem]:
-    """The dry-run routing preview for *path* over an already-loaded bundle.
+    """The dry-run routing preview for *path* over already-read items.
 
     Resolves no dispatch and writes nothing: the planned source
     normalizations are applied to the in-memory items only, so routing sees
@@ -715,12 +742,12 @@ def _plan_route(
     """
     requested = next((item for item in items if item.path == path), None)
     if requested is None:
-        detail = unreadable_detail(bundle, path)
+        detail = unreadable.get(f"{path}.md")
         if detail is not None:
             raise ValueError(f"{path}.md {detail}")
         raise ValueError(f"unknown work item {path!r}")
 
-    planned_items = routing_items(bundle.root, items, definition=definition)
+    planned_items = routing_items(root, items, definition=definition)
     descent_result = descend_to_leaf(planned_items, path, definition=definition) if descend else None
     selected_path = descent_result.leaf if descent_result is not None and descent_result.leaf is not None else path
     selected = next(item for item in items if item.path == selected_path)
@@ -729,12 +756,12 @@ def _plan_route(
     normalizations = tuple(
         change
         for item in normalization_items
-        if (change := _plan_source_normalization(bundle.root, item, definition=definition)) is not None
+        if (change := _plan_source_normalization(root, item, definition=definition)) is not None
     )
     state = state_for(
         planned_items,
         selected_path,
-        hold=hold_for(planned_items, bundle.root, selected_path),
+        hold=hold_for(planned_items, root, selected_path),
         stale_spec=stale_spec_for(layout, planned_items, selected),
     )
     assert state is not None
@@ -748,9 +775,9 @@ def _plan_route(
         child_rollup=state.child_rollup,
         descent=descent_result,
         normalizations=normalizations,
-        artifact=_stage_artifact(bundle.root, selected, computed, definition=definition),
+        artifact=_stage_artifact(root, selected, computed, definition=definition),
         path=report,
-        artifacts=artifact_reports(bundle.root, selected_path, definition, report),
+        artifacts=artifact_reports(root, selected_path, definition, report),
     )
     return preview, selected
 
@@ -760,8 +787,10 @@ def _plan_next(
 ) -> tuple[NextResult, Bundle, WorkItem]:
     """Load the bundle once and plan *path* over it (`_plan_route`)."""
     bundle = load_workspace_bundle(layout, ignore=IGNORE)
-    items = tuple(load_items(bundle))
-    preview, selected = _plan_route(layout, bundle, items, path, descend=descend, definition=definition)
+    items = load_items(bundle)
+    preview, selected = _plan_route(
+        layout, bundle.root, bundle.unreadable, items, path, descend=descend, definition=definition
+    )
     if preview.route.dispatch is not None and preview.route.dispatch.stage == "finish":
         finish = resolve_finish_targets(layout, items, preview.selected_path)
         preview = replace(preview, finish_targets=finish.targets, dispatch_preflight="; ".join(finish.blockers) or None)
@@ -892,7 +921,7 @@ def run_next(
         resolved = replace(
             preview, dispatch_resolution=resolution, dispatch_preflight=preview.dispatch_preflight or preflight
         )
-        items = tuple(load_items(bundle))
+        items: Sequence[WorkItem] = load_items(bundle)
         guided = _with_guidance(layout, resolved, bundle, items if guidance else (), guidance)
         result = _with_repository_notes(layout, _with_carried(layout, guided, bundle, items), items)
         return replace(result, path=None, artifacts=()) if isinstance(config, WorkspaceError) else result
@@ -1002,22 +1031,25 @@ class QueueEntry:
 def run_work_queue(layout: WorkspaceLayout) -> tuple[QueueEntry, ...]:
     """Route every active, non-terminal item as a dry-run `run_next` would. Never writes.
 
-    The bundle and the dispatch config are each loaded once for the whole
+    The work items (through the read session) and dispatch config are each read once for the whole
     queue. A malformed dispatch file is each item's preflight blocker whenever
     its route offers a dispatch or a transition, exactly as `next` reports it,
     rather than a failure of the read.
     Epics waiting on their children are included with that blocker, so no
     active item is silently dropped.
     """
-    bundle = load_workspace_bundle(layout, ignore=IGNORE)
-    items = tuple(load_items(bundle))
+    with open_read_session(layout) as session:
+        items = session.work_snapshot()
+        unreadable = session.diagnostics(ignore=IGNORE).unreadable
     config = _load_config(layout)
     definition = _definition_of(config)
     entries: list[QueueEntry] = []
     for item in sorted(items, key=lambda candidate: candidate.path):
         if item.archived or item.work_status in TERMINAL_STATUSES:
             continue
-        preview, _selected = _plan_route(layout, bundle, items, item.path, descend=False, definition=definition)
+        preview, _selected = _plan_route(
+            layout, layout.bundle_dir, unreadable, items, item.path, descend=False, definition=definition
+        )
         resolution, preflight = _resolve_dispatch_with(config, preview.state, preview.route)
         entries.append(QueueEntry(item, replace(preview, dispatch_resolution=resolution, dispatch_preflight=preflight)))
     return tuple(entries)
@@ -1056,7 +1088,10 @@ def run_lint(
     a conformant vault. A caller wiring this into an acceptance gate wants
     `strict=False`.
     """
-    bundle = load_workspace_bundle(layout, ignore=_work_only_ignore(layout))
+    # Lint retains ignored-member identity pending the separate pruned-resolver
+    # fix; projection readers keep using load_work_bundle's pruning.
+    partition = work_scope(layout)
+    bundle = load_workspace_bundle(layout, ignore=partition.as_ignore())
     rules = rule_set(
         layout.bundle_dir,
         repo_root=repo_root,
@@ -1083,28 +1118,6 @@ def run_lint(
     )
 
 
-def _work_only_ignore(layout: WorkspaceLayout) -> tuple[str, ...]:
-    """Every top-level bundle member except `work/`, plus the lane's own
-    recipe — the same partition `graph_works_core.lint_drift.lanes` computes
-    for the combined workspace lint's work lane, duplicated rather than
-    shared. The package's import contract keeps verticals independent, so the
-    two copies stay small rather than reach across that forbidden edge.
-
-    Without this, `load_bundle` walks the whole bundle — wiki content
-    included — and `okf_io.validate`'s built-in catalog (links, lifecycle,
-    frontmatter) reports on pages this function was never asked about,
-    contradicting `run_lint`'s own "does the work lane conform" contract:
-    a broken link in an unrelated concept page must not fail a work-item
-    check.
-    """
-    siblings = tuple(
-        f"{entry.name}/*" if entry.is_dir() else entry.name
-        for entry in sorted(layout.bundle_dir.iterdir(), key=lambda path: path.name)
-        if entry.name != WORK_DIR
-    )
-    return (*siblings, *IGNORE)
-
-
 @dataclass(frozen=True, slots=True)
 class RegenIndexesResult:
     """Every required lane index plan plus an optional journaled application.
@@ -1126,9 +1139,9 @@ def _absent_index_lane_preconditions(root: Path, items: Sequence[WorkItem]) -> M
 
     The lane set must equal `work_tracker_okf.indexes._required_lanes`' -- a
     precondition on a lane the planner never plans is a claim on a directory
-    nothing creates. It is duplicated rather than imported for the same reason
-    `_work_only_ignore` duplicates the lane partition: the vertical stays
-    independent, and the copy stays small.
+    nothing creates. It is duplicated rather than imported so the vertical
+    stays independent of `work_tracker_okf.indexes`' private helper, and the
+    copy stays small.
     """
     lanes = {"work", "work/_archive"}
     for item in items:
@@ -1694,14 +1707,14 @@ def run_open_decisions(layout: WorkspaceLayout) -> tuple[OpenDecision, ...]:
     own decision owner is this ledger's owner, in `affects` order: exactly the
     items `hold_for` would report this entry as holding.
     """
-    bundle = load_workspace_bundle(layout, ignore=IGNORE)
-    items = tuple(load_items(bundle))
+    with open_read_session(layout) as session:
+        items = session.work_snapshot()
     active = tuple(item for item in items if not item.archived)
     active_paths = {item.path for item in active}
     owners = sorted({owner for item in active if (owner := decision_owner(items, item.path)) is not None})
     found: list[OpenDecision] = []
     for owner in owners:
-        ledger = _decisions.ledger_ref(owner).path(bundle.root)
+        ledger = _decisions.ledger_ref(owner).path(layout.bundle_dir)
         for entry in sorted(_decisions.load(ledger).entries, key=lambda decision: decision.number):
             if entry.status != "open":
                 continue

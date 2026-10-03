@@ -109,7 +109,7 @@ ROOT_REGISTRY: tuple[RootEntry, ...] = (
     RootEntry(
         "util",
         "group",
-        "Diagnostics: platform/log/line-endings/tokens/trace and the surface freeze.",
+        "Diagnostics: platform/log/line-endings/read-index/tokens/trace and the surface freeze.",
         "graph_works_cli.util_cli.main",
         "util_app",
     ),

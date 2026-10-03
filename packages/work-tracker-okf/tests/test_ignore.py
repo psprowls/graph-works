@@ -148,8 +148,8 @@ def test_load_items_is_lens_independent(minimal_root: Path) -> None:
     remainder under `work/` contains a `/`, so the wider lens adds concepts
     that project to nothing -- which is what lets one walk serve both
     eligibility and the move plan."""
-    assert load_items(load_bundle(minimal_root, ignore=IGNORE)) == load_items(
-        load_bundle(minimal_root, ignore=ARCHIVE_IGNORE)
+    assert tuple(load_items(load_bundle(minimal_root, ignore=IGNORE))) == tuple(
+        load_items(load_bundle(minimal_root, ignore=ARCHIVE_IGNORE))
     )
 
 

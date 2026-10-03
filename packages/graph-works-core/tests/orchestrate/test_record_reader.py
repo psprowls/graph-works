@@ -147,9 +147,7 @@ def test_advance_before_lock_refuses_stale_evidence(tmp_path, monkeypatch):
 def test_attempt_ids_validated_before_path_access(tmp_path, monkeypatch, dispatch_id, entry):
     layout = _vault(tmp_path)
     monkeypatch.setattr(Path, "read_text", lambda *a, **k: pytest.fail("read before validation"))
-    monkeypatch.setattr(
-        placement, "load_workspace_bundle", lambda *a, **k: pytest.fail("bundle read before validation")
-    )
+    monkeypatch.setattr(placement, "load_work_bundle", lambda *a, **k: pytest.fail("bundle read before validation"))
     with pytest.raises(WorkspaceError, match="attempt identifier"):
         if entry == "path":
             placement.reader_receipt_path(layout, NESTED, dispatch_id)

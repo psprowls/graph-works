@@ -178,7 +178,7 @@ type = "layers"
 # fine -- `test_every_capability_is_named_in_the_layers_contract` is what
 # actually keeps it honest, not its width.
 layers = [
-    "okf_ext.bundle : okf_ext.generators : okf_ext.health : okf_ext.logs : okf_ext.moves : okf_ext.placement : okf_ext.proposals : okf_ext.render : okf_ext.schemas : okf_ext.search : okf_ext.sections : okf_ext.tags : okf_ext.tables",
+    "okf_ext.bundle : okf_ext.generators : okf_ext.health : okf_ext.logs : okf_ext.moves : okf_ext.placement : okf_ext.proposals : okf_ext.readindex : okf_ext.render : okf_ext.schemas : okf_ext.search : okf_ext.sections : okf_ext.tags : okf_ext.tables",
     "okf_ext.shape",
     "okf_ext.locking : okf_ext.splice : okf_ext.writing",
     "okf_ext.body",
@@ -199,6 +199,7 @@ modules = [
     "okf_ext.sections",
     "okf_ext.generators",
     "okf_ext.proposals",
+    "okf_ext.readindex",
     "okf_ext.bundle",
     "okf_ext.placement",
     "okf_ext.logs",
@@ -340,7 +341,7 @@ containers = ["graph_works_core"]
 layers = [
     "ingest : scan : query : lint_drift : archive : orchestrate : wiki_stats : wiki_page : tag_policy : work : util : agent_config : events : proposals : code_read : repositories",
     "guidance",
-    "agent_substrate : graph : prompts",
+    "agent_substrate : graph : prompts : read_session",
     "workspace",
 ]
 
@@ -365,3 +366,11 @@ modules = [
     "graph_works_core.code_read",
     "graph_works_core.repositories",
 ]
+
+# Display interfaces reach the read index through core's read-session seam.
+[[tool.importlinter.contracts]]
+name = "Only core reads the read index"
+type = "forbidden"
+source_modules = ["graph_works_cli", "graph_works_serve", "graph_works_wire"]
+forbidden_modules = ["okf_ext.readindex"]
+allow_indirect_imports = true

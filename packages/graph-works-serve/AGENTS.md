@@ -7,6 +7,7 @@ The loopback HTTP sidecar. Band: interface (above `graph-works-core`, beside
 
 | Module | Holds |
 |---|---|
+| `readstate` | Monotonic read generation and the single-flight snapshot memo. |
 | `context` | `ServeContext` and framework-neutral `Reply`. |
 | `params` | `Param`, `ParamError`, and query/JSON body parsing. |
 | `errors` | exit/status mappings, error calls, and refusals. |
@@ -69,7 +70,11 @@ watchfiles batches are unordered. The disk at flush decides the net change:
 | Absent | Anything | deleted |
 
 The debounce uses 300 ms quiet / 800 ms maximum windows. Bundle watching is
-recursive with dot-prefixed path segments excluded. Config watching covers the
+recursive with dot-prefixed path segments excluded. The event filter also excludes
+`repositories/<name>/references/git` itself and every descendant, including
+deleted paths, before coalescing and publication. Adjacent repository references
+still emit. This filter does not prune native watch registration, polling traversal,
+or raw backend event collection. Config watching covers the
 exact manifest, local manifest, projection, dispatch, and local dispatch paths
 through their parent directories, non-recursively: watching the directory
 survives atomic replacement of `config.json`. `.gw/worktrees` and
@@ -158,3 +163,43 @@ Advance always passes `infer_worktree=False`. Archive uses `wiki_slugs=()`;
 omitted or `null` paths mean sweep, while an empty paths list is `400`.
 Adding a mutation = one `MutationSpec` in `mutation_specs.py` +
 `mutation_routes()` in `ROUTES` + a golden regen.
+
+## Read state
+
+`readstate.py` owns the only read state: one process-local generation, starting
+at 1, and one materialized snapshot per workspace identity and generation.
+Concurrent callers share a future. Superseded futures still answer their original
+waiters with their original generation; identity, generation and stale epoch fence
+all completion bookkeeping. Identity adoption and future selection are atomic.
+The index baseline is its `(epoch, generation)` revision, so replacing a disposable
+database cannot reuse an old memo when its numeric generation restarts.
+
+Bump reasons are `index`, `config`, `fallback`, `reconcile-failed`, `resync`,
+`identity`, and `write-through`. Config changes and disabled/failed reconciles
+leave the next build reconciling. One operation lock serializes builds (including
+materialization), fallback opening, watcher reconciliation and write-through.
+Slow I/O runs outside the state lock. Lock order is mutation lock, then operation
+lock, then state lock; ReadState never takes the mutation lock. A fallback opens
+under the operation lock and yields after releasing it.
+
+`watch.flush` resolves the latest valid manifest under its shared publication
+lock, reconciles in a worker thread, then broadcasts the resulting generation.
+Classification retains the observed watch sets; an invalid manifest retains the
+previous layout. A queued old-bundle flush cannot restore a superseded identity.
+Watcher errors and rewatches mark stale and advance before resync. Overflow
+reports the current generation without advancing it. `ready`, `changes` and
+`resync` frames carry generation separately from the hub's message sequence.
+
+Successful `mutations._apply` calls write-through while holding the mutation
+lock. Refused and incomplete applies return before it. Every routed JSON GET
+carries `X-GW-Generation`; successful applies carry their write-through generation.
+Allowed origins expose it through `Access-Control-Expose-Headers`. Memo reads
+report their snapshot generation; other reads report the generation when the
+request began, a lower bound. Generations restart at 1 when the process restarts.
+
+A display read is served from the memo by
+`with context.read_state.session(layout) as (generation, session): result = run_x(layout, …, session=session)`
+and returns `Reply(200, payload, generation)`. Mutation plan/apply, `next`,
+`orchestrate`, lint, code-graph, excerpts and query never take the memo. No
+production display `run_*` accepts `session=` yet; a test-only route pins the
+convention for the subsequent display-read conversions.

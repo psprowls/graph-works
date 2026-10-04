@@ -34,6 +34,12 @@ def _seed_checkout(root: Path) -> None:
     (root / MARKER).write_text("[project]\nname = 'graph-works-core'\n", encoding="utf-8")
 
 
+@pytest.fixture(autouse=True)
+def _kill_switch_unset(monkeypatch) -> None:
+    """The guard's warning advertises the kill switch, so callers often have it exported."""
+    monkeypatch.delenv("GRAPH_WORKS_PROVENANCE_GUARD", raising=False)
+
+
 @pytest.fixture
 def checkouts(tmp_path: Path) -> tuple[Path, Path]:
     """(main_checkout, worktree) — a real git worktree pair sharing one ODB."""
@@ -67,7 +73,8 @@ def test_warns_when_worktree_routing_differs(checkouts, monkeypatch, capsys) -> 
     assert captured.out == ""
     assert "gw is running routing code from" in captured.err
     assert str(main) in captured.err
-    assert "GRAPH_WORKS_PROVENANCE_GUARD=0" in captured.err
+    assert "GRAPH_WORKS_PROVENANCE_GUARD=0 gw <args>" in captured.err
+    assert "never export it" in captured.err
 
 
 def test_warns_when_the_editable_source_checkout_is_dirty(checkouts, monkeypatch, capsys) -> None:

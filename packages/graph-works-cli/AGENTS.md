@@ -208,7 +208,9 @@ invocation and be filtered out as noise). It only fires at call sites that are a
 routing-sensitive — `gw work next`/`advance`/`orchestrate` (and their root aliases) — not globally
 from `cli.py`. Every resolution failure (no source checkout found, git not runnable, etc.) degrades
 to silence: a guard that guesses is worse than no guard. Kill switch:
-`GRAPH_WORKS_PROVENANCE_GUARD=0`.
+`GRAPH_WORKS_PROVENANCE_GUARD=0`, for one call only (`GRAPH_WORKS_PROVENANCE_GUARD=0 gw <args>`) —
+never exported into a session, where it leaks into gate runs. The provenance tests clear it
+themselves, so an inherited value cannot fail them.
 
 ### `graph-works-core` is a real dependency — no deferred-import pattern
 

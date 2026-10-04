@@ -133,7 +133,7 @@ def _format_warning(source_root: Path, sha: str) -> str:
         "         Fix: merge this branch to main and pull the main checkout\n"
         "              (editable install — no reinstall needed).\n"
         "         Override for one call: uv run --package graph-works-cli gw <args>\n"
-        f"         Silence: {_KILL_SWITCH}=0"
+        f"         Silence this call only (never export it): {_KILL_SWITCH}=0 gw <args>"
     )
 
 

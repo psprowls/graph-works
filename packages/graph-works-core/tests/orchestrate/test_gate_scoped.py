@@ -43,3 +43,36 @@ def test_an_unsafe_name_is_shell_quoted_and_never_executes(tmp_path) -> None:
 
 def test_a_safe_name_stays_byte_identical() -> None:
     assert expand_scoped(SCOPED, ["packages/okf-io/x"]).command == "just check-pkg okf-io"
+
+
+def test_implicit_scoped_pending_hash_covers_the_expanded_command(env) -> None:
+    import json
+
+    from _gate_helpers import NOW
+    from graph_works_core.orchestrate import gate_units
+    from graph_works_core.orchestrate.gate import run_gate_run
+
+    result = run_gate_run(env.layout, env.path, scope="scoped", now=NOW, token="a1b2c3d4", spawn=env.spawn)
+    record = json.loads(env.spawned[0].read_text(encoding="utf-8"))
+    assert result.command == "echo a"
+    assert record["units"][0]["command"] == "echo a"
+    assert record["manifest_hash"] == gate_units.implicit_manifest("true").digest
+    assert record["units"][0]["hash"] == gate_units.tree_hash(env.tree, "echo a")
+    assert record["units"][0]["hash"] != gate_units.tree_hash(env.tree, "true")
+
+
+def test_equal_implicit_scoped_command_keeps_the_scoped_marker(env) -> None:
+    import json
+
+    from _gate_helpers import NOW
+    from graph_works_core.orchestrate import gate_units
+    from graph_works_core.orchestrate.gate import run_gate_run
+
+    env.set_manifest(
+        gate="    gate:\n      full: 'echo a'\n      scoped:\n"
+        "        roots: packages/*\n        command: 'echo {name}'\n"
+    )
+    run_gate_run(env.layout, env.path, scope="scoped", now=NOW, token="a1b2c3d4", spawn=env.spawn)
+    record = json.loads(env.spawned[0].read_text(encoding="utf-8"))
+    assert record["implicit"] is True and record["scope"] == "scoped"
+    assert record["units"][0]["hash"] == gate_units.tree_hash(env.tree, "echo a")

@@ -274,6 +274,42 @@
     "shadowed": null
   },
   {
+    "key": "workflow.gate.unit_jobs",
+    "value": null,
+    "origin": "default",
+    "entry": {
+      "key": "workflow.gate.unit_jobs",
+      "type": "int",
+      "default": null,
+      "description": "Per-machine cap on how many gate units one run executes at once (min with the manifest's jobs).",
+      "kind": "manifest",
+      "env_var": null,
+      "allowed": [],
+      "secret": false,
+      "write_policy": "writable",
+      "write_hint": null
+    },
+    "shadowed": null
+  },
+  {
+    "key": "workflow.gate.max_concurrent",
+    "value": null,
+    "origin": "default",
+    "entry": {
+      "key": "workflow.gate.max_concurrent",
+      "type": "int",
+      "default": null,
+      "description": "How many `gw work gate` runs may execute at once on this machine; unset is unlimited. Set per machine in workspace.local.yaml.",
+      "kind": "manifest",
+      "env_var": null,
+      "allowed": [],
+      "secret": false,
+      "write_policy": "writable",
+      "write_hint": null
+    },
+    "shadowed": null
+  },
+  {
     "key": "workflow.workspace_commits",
     "value": "auto",
     "origin": "default",

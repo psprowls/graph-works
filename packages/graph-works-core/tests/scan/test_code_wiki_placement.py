@@ -16,7 +16,7 @@ from graph_works_core.scan import commands as scan
 from graph_works_core.workspace.layout import WorkspaceLayout
 from okf_io import RuleContext, build_link_graph, load_bundle
 from ruamel.yaml import YAML
-from scan_helpers import AT, TODAY, make_repo, seed_graph
+from scan_helpers import AT, TODAY, copy_repo, seed_graph
 
 _TRACKED_FILES = (
     "README.md",
@@ -207,10 +207,10 @@ def _seed_npm_dependency(graph_dir: Path) -> None:
 
 
 def make_placement_workspace(
-    tmp_path: Path, workspace_location: str
+    tmp_path: Path, workspace_location: str, repo_seed: Path
 ) -> tuple[WorkspaceLayout, Config, tuple[str, ...]]:
     first_root = tmp_path / "first"
-    demo = make_repo(first_root)
+    demo = copy_repo(repo_seed, first_root)
     repositories = {"demo": demo}
 
     if workspace_location == "inside":
@@ -218,7 +218,7 @@ def make_placement_workspace(
     elif workspace_location == "beside":
         workspace_root = first_root / ".works"
     else:
-        other = make_repo(tmp_path / "second")
+        other = copy_repo(repo_seed, tmp_path / "second")
         renamed = other.with_name("other-checkout")
         other.rename(renamed)
         other = renamed
@@ -235,8 +235,8 @@ def make_placement_workspace(
 
 
 @pytest.mark.parametrize("workspace_location", ["inside", "beside", "outside-multiple"])
-async def test_workspace_location_does_not_change_inner_bundle_layout(tmp_path, workspace_location) -> None:
-    layout, config, repositories = make_placement_workspace(tmp_path, workspace_location)
+async def test_workspace_location_does_not_change_inner_bundle_layout(tmp_path, workspace_location, repo_seed) -> None:
+    layout, config, repositories = make_placement_workspace(tmp_path, workspace_location, repo_seed)
 
     await scan.run_scan(layout, config, today=TODAY, at=AT, narrate=False, dry_run=False)
 
@@ -277,8 +277,8 @@ async def test_workspace_location_does_not_change_inner_bundle_layout(tmp_path, 
     assert second.structural.mirror.deleted == 0
 
 
-async def test_misplaced_page_refuses_scan_before_any_partial_sync_write(tmp_path) -> None:
-    layout, config, _repositories = make_placement_workspace(tmp_path, "beside")
+async def test_misplaced_page_refuses_scan_before_any_partial_sync_write(tmp_path, repo_seed) -> None:
+    layout, config, _repositories = make_placement_workspace(tmp_path, "beside", repo_seed)
     await scan.run_scan(layout, config, today=TODAY, at=AT, narrate=False, dry_run=False)
     canonical = layout.bundle_dir / "code-graph" / "demo" / "entities" / "packages" / "widgets.md"
     misplaced = layout.bundle_dir / "packages" / "widgets.md"

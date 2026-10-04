@@ -4866,6 +4866,28 @@
       ],
       "options": [
         {
+          "name": "fresh",
+          "opts": [
+            "--fresh"
+          ],
+          "secondary_opts": [],
+          "help": "Run every unit and the repo-wide step, ignoring green evidence.",
+          "required": false,
+          "default": false,
+          "is_flag": true
+        },
+        {
+          "name": "notify",
+          "opts": [
+            "--notify"
+          ],
+          "secondary_opts": [],
+          "help": "Register this terminal (ORCA_TERMINAL_HANDLE) to be woken with a resume line when the run finishes.",
+          "required": false,
+          "default": false,
+          "is_flag": true
+        },
+        {
           "name": "scope",
           "opts": [
             "--scope"
@@ -4950,7 +4972,7 @@
             "--timeout"
           ],
           "secondary_opts": [],
-          "help": "Seconds to wait before reporting running.",
+          "help": "Seconds to wait before reporting running; values below 55 are raised to 55.",
           "required": false,
           "default": 540.0,
           "is_flag": false
@@ -6247,7 +6269,7 @@
             "--timeout-s"
           ],
           "secondary_opts": [],
-          "help": "Seconds before timeout; 0 reads pending questions only, without consuming or acknowledging deliveries.",
+          "help": "Seconds before timeout; values between 0 and 55 are raised to 55; 0 reads pending questions only, without consuming or acknowledging deliveries.",
           "required": false,
           "default": 600.0,
           "is_flag": false

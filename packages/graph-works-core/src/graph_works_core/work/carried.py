@@ -18,7 +18,7 @@ vertical would edit both import-linter contracts, and appending would grow a
 module that already claims another concern.
 
 The producer children (`feature-spec-baseline-and-sibling-context`,
-`feature-finish-obligations-and-caveats`) edit only their producer body here
+`feature-finish-obligations-and-caveats`, `feature-epic-brief`) edit only their producer body here
 (or a sibling module it calls) and its tests; a new input on `SlotInput` is a
 frame change recorded in this item's ledger.
 """
@@ -33,7 +33,9 @@ from typing import Final
 from okf_io import Bundle
 from work_tracker_okf.affects import code_affects
 from work_tracker_okf.items import WorkItem
+from work_tracker_okf.pipeline import DESIGN, EXECUTE, PLAN
 
+from graph_works_core.work.epic_brief import epic_brief
 from graph_works_core.workspace import provenance
 from graph_works_core.workspace.landed import landed_since
 from graph_works_core.workspace.layout import WorkspaceLayout
@@ -178,7 +180,14 @@ def _finish_obligations(inp: SlotInput) -> SlotFill:
     )
 
 
+def _epic_brief(inp: SlotInput) -> SlotFill:
+    """Owned by `feature-epic-brief` (its ledger D-001): see `work/epic_brief.py`."""
+    brief = epic_brief(inp.layout, inp.items, inp.item)
+    return SlotFill(lines=brief.lines, data=MappingProxyType(dict(brief.data)), warnings=brief.warnings)
+
+
 SLOTS: Final[tuple[Slot, ...]] = (
+    Slot("epic_brief", "Epic brief", frozenset({DESIGN, PLAN, EXECUTE}), _epic_brief),
     Slot("landed_since", "Landed since your design", frozenset({"plan"}), _landed_since),
     Slot("finish_obligations", "Finish obligations", frozenset({"finish"}), _finish_obligations),
 )

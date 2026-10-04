@@ -61,14 +61,31 @@ class GitOutcome:
 
 
 def probe_git(
-    cwd: Path, *args: str, executable: str = "git", timeout: float = _GIT_TIMEOUT_SECONDS, input_text: str | None = None
+    cwd: Path,
+    *args: str,
+    executable: str = "git",
+    timeout: float = _GIT_TIMEOUT_SECONDS,
+    input_text: str | None = None,
+    preserve_output: bool = False,
 ) -> GitOutcome:
     """Run `git <args>` in *cwd*, retaining its exit status for state probes.
 
     *timeout* defaults to the advance-path cap; `workspace.commits` passes a
     longer one because a commit runs the user's own git hooks.
+    *preserve_output* decodes strict UTF-8 bytes without newline translation;
+    use it for NUL-delimited paths whose CR/LF characters must remain exact.
     """
     try:
+        if preserve_output:
+            raw = subprocess.run(
+                [executable, *args],
+                cwd=cwd,
+                capture_output=True,
+                input=input_text.encode("utf-8") if input_text is not None else None,
+                check=False,
+                timeout=timeout,
+            )
+            return GitOutcome(raw.returncode, raw.stdout.decode("utf-8"), "ok", raw.stderr.decode("utf-8"))
         completed = subprocess.run(
             [executable, *args],
             cwd=cwd,
@@ -191,8 +208,12 @@ def gate_git(layout: WorkspaceLayout, *, environ: Mapping[str, str] | None = Non
     return resolve_git(configured, environ=env)
 
 
-def strict_git(cwd: Path, *args: str, git: GitExecutable) -> str | GitFailure:
-    outcome = probe_git(cwd, *args, executable=git.path)
+def strict_git(cwd: Path, *args: str, git: GitExecutable, preserve_output: bool = False) -> str | GitFailure:
+    outcome = (
+        probe_git(cwd, *args, executable=git.path, preserve_output=True)
+        if preserve_output
+        else probe_git(cwd, *args, executable=git.path)
+    )
     label = f"`git {' '.join(args[:2])}` in {cwd}"
     if outcome.cause == "timeout":
         return GitFailure("timeout", f"{label} timed out")

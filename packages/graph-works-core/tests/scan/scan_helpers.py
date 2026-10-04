@@ -10,10 +10,12 @@ from __future__ import annotations
 
 import json
 import subprocess
+from dataclasses import dataclass
 from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Any
 
+from _seed_copy import copy_tree_into, rebase_layout
 from code_graph_io.testing import raw_conn
 from graph_works_core import apply_init, plan_init
 from graph_works_core.workspace.layout import WorkspaceLayout
@@ -206,31 +208,60 @@ def seed_graph(graph_dir: Path, repo: Path) -> None:
     _ = repo  # the seeded graph is independent of the checkout; kept for call-site symmetry
 
 
-def make_workspace(tmp_path: Path) -> tuple[WorkspaceLayout, Path]:
-    """A real workspace beside a real repo, with `workspace.yaml`'s `repositories`
-    block pointing at it.
+@dataclass(frozen=True, slots=True)
+class ScanSeed:
+    """One built workspace + repo, copied into each test by `make_workspace`."""
 
-    Returns `(layout, repo)`. The graph is seeded but the caller decides whether
-    to let `commands.graph.build` re-run over it.
-    """
-    repo = make_repo(tmp_path)
-    init = apply_init(plan_init(tmp_path / ".works", today=TODAY, topic="Scan"))
-    layout = init.layout
+    root: Path
+    layout: WorkspaceLayout
+    repo: Path
+
+
+def _set_repository(layout: WorkspaceLayout, repo: Path) -> None:
     # `repositories`/`ignore`/`state_gate` are merged into `workspace.yaml`
     # itself (ADR-0033), alongside `version`/`layout`/`roles` that `init`
     # already rendered -- so this loads the pristine document with the
-    # YAML round-trip loader, edits just the three blocks `load_config`
-    # reads, and rewrites the whole file. That keeps every other key
-    # (`version`, `layout.*`, `roles`) intact instead of depending on this
-    # test's own idea of the template's exact shape.
+    # YAML round-trip loader, edits just the blocks `load_config` reads, and
+    # rewrites the whole file, keeping every other key intact.
     yaml = YAML()
     yaml.preserve_quotes = True
     with layout.manifest_path.open(encoding="utf-8") as handle:
         data = yaml.load(handle)
     data["repositories"] = {REPO_NAME: {"path": str(repo)}}
     data["state_gate"] = {"enabled": False}
-    with layout.manifest_path.open("w", encoding="utf-8") as handle:
+    with layout.manifest_path.open("w", encoding="utf-8", newline="\n") as handle:
         yaml.dump(data, handle)
+
+
+def build_scan_seed(root: Path) -> ScanSeed:
+    """`make_repo` + `apply_init` + the manifest edit, once -- the expensive part."""
+    repo = make_repo(root)
+    layout = apply_init(plan_init(root / ".works", today=TODAY, topic="Scan")).layout
+    _set_repository(layout, repo)
+    return ScanSeed(root=root, layout=layout, repo=repo)
+
+
+def copy_repo(seed_repo: Path, root: Path) -> Path:
+    """A private copy of a `make_repo` seed at `root / "repo"`."""
+    root.mkdir(parents=True, exist_ok=True)
+    return copy_tree_into(seed_repo, root / "repo")
+
+
+def make_workspace(tmp_path: Path, seed: ScanSeed) -> tuple[WorkspaceLayout, Path]:
+    """A real workspace beside a real repo, copied from *seed*, with
+    `workspace.yaml`'s `repositories` block pointing at the copy.
+
+    Returns `(layout, repo)`. The graph is seeded but the caller decides whether
+    to let `commands.graph.build` re-run over it.
+    """
+    repo = copy_repo(seed.repo, tmp_path)
+    copy_tree_into(seed.layout.root, tmp_path / ".works")
+    layout = rebase_layout(seed.layout, seed.root, tmp_path)
+    # `.gw/cache/config.json` is a derived projection of the manifest that names
+    # the seed's paths; it is disposable, so the copy drops it and it is
+    # re-derived from the (rewritten) manifest on demand.
+    (layout.cache_dir / "config.json").unlink(missing_ok=True)
+    _set_repository(layout, repo)
     return layout, repo
 
 

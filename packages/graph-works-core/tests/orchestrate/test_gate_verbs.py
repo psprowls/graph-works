@@ -5,10 +5,12 @@ from __future__ import annotations
 import json
 from datetime import timedelta
 
-from _gate_helpers import NOW, mint_receipt, raise_, snapshot_dirs
+import pytest
+from _gate_helpers import NOW, mint_receipt, raise_, set_max_concurrent, snapshot_dirs
 from conftest import git, make_repo
 from graph_works_core.orchestrate import gate
-from graph_works_core.orchestrate.gate import run_gate_check, run_gate_run, runs_dir
+from graph_works_core.orchestrate.gate import gate_max_concurrent, run_gate_check, run_gate_run, runs_dir
+from graph_works_core.workspace.errors import WorkspaceError
 
 
 def test_run_starts_one_pending_record(env):
@@ -23,7 +25,7 @@ def test_dirty_tree_refuses_and_mints_nothing(env):
     (env.repo / "packages/a/new.py").write_text("x", encoding="utf-8", newline="\n")
     result = run_gate_run(env.layout, env.path, now=NOW, token="a1b2c3d4", spawn=env.spawn)
     assert result.refusal == "dirty-tree" and "packages/a/new.py" in result.detail
-    assert env.spawned == [] and not runs_dir(env.layout, env.path).exists()
+    assert env.spawned == [] and not runs_dir(env.layout).exists()
 
 
 def test_satisfied_receipt_runs_nothing(env):
@@ -107,7 +109,7 @@ def test_a_spawn_failure_marks_the_record_dead(env):
 
     result = run_gate_run(env.layout, env.path, now=NOW, token="a1b2c3d4", spawn=boom)
     assert (result.refusal, result.detail) == ("runner-failed", "cannot exec")
-    record = next(runs_dir(env.layout, env.path).glob("*.json"))
+    record = next(runs_dir(env.layout).glob("*.json"))
     assert json.loads(record.read_text(encoding="utf-8"))["result"] == {"exit": None, "error": "cannot exec"}
 
 
@@ -150,7 +152,7 @@ def test_resolve_target_returns_the_target_for_a_clean_tree(env):
 
 
 def test_unreadable_records_are_skipped_when_joining(env):
-    directory = runs_dir(env.layout, env.path)
+    directory = runs_dir(env.layout)
     directory.mkdir(parents=True)
     (directory / "bad.json").write_bytes(b"\xff")
     (directory / "list.json").write_text("[]", encoding="utf-8", newline="\n")
@@ -174,3 +176,27 @@ def test_an_undeclared_repo_refuses(env):
     assert (
         run_gate_run(env.layout, env.path, now=NOW, token="a1b2c3d4", spawn=env.spawn).refusal == "no-gate-configured"
     )
+
+
+def test_max_concurrent_is_unlimited_when_unset(env):
+    assert gate_max_concurrent(env.layout) is None
+
+
+def test_max_concurrent_reads_a_positive_integer(env):
+    set_max_concurrent(env, "2")
+    assert gate_max_concurrent(env.layout) == 2
+
+
+def test_max_concurrent_reads_the_local_overlay(env):
+    env.layout.local_manifest_path.write_text(
+        "workflow:\n  gate:\n    max_concurrent: 1\n", encoding="utf-8", newline="\n"
+    )
+    assert gate_max_concurrent(env.layout) == 1
+
+
+@pytest.mark.parametrize("value", ["0", "-1", "true", "'two'"])
+def test_a_bad_max_concurrent_refuses_gate_run(env, value):
+    set_max_concurrent(env, value)
+    with pytest.raises(WorkspaceError, match="max_concurrent"):
+        run_gate_run(env.layout, env.path, now=NOW, token="aaaaaaaa", spawn=env.spawn)
+    assert env.spawned == []

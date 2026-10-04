@@ -78,3 +78,92 @@ def test_an_unresolvable_git_is_git_unavailable(tmp_path: Path, monkeypatch: pyt
     monkeypatch.setattr(provenance, "resolve_git", lambda *a, **k: provenance.GitFailure("missing", "no git"))
     with pytest.raises(gate_git.GitUnavailable, match="no git"):
         gate_git.snapshot(tmp_path)
+
+
+def test_ls_tree_lists_every_blob_with_its_sha(tmp_path: Path) -> None:
+    repo = make_repo(tmp_path / "r")
+    (repo / "d").mkdir()
+    (repo / "d" / "f.txt").write_text("x", encoding="utf-8", newline="\n")
+    git(repo, "add", "-A")
+    git(repo, "commit", "-qm", "f")
+    listing = gate_git.ls_tree(repo, git(repo, "rev-parse", "HEAD^{tree}"))
+    assert listing == {
+        "a.txt": gate_git.GitLeaf("100644", git(repo, "rev-parse", "HEAD:a.txt")),
+        "d/f.txt": gate_git.GitLeaf("100644", git(repo, "rev-parse", "HEAD:d/f.txt")),
+    }
+
+
+def test_ls_tree_unknown_tree_is_git_unavailable(tmp_path: Path) -> None:
+    repo = make_repo(tmp_path / "r")
+    with pytest.raises(gate_git.GitUnavailable):
+        gate_git.ls_tree(repo, "f" * 40)
+
+
+def test_ls_tree_preserves_newlines_tabs_and_whitespace_in_paths(tmp_path: Path) -> None:
+    repo = make_repo(tmp_path / "r")
+    name = " space\nwith\ttabs \n"
+    (repo / name).write_text("x", encoding="utf-8", newline="\n")
+    git(repo, "add", "-A")
+    git(repo, "commit", "-qm", "unusual filename")
+    assert gate_git.ls_tree(repo, "HEAD")[name].object_sha == git(repo, "rev-parse", f"HEAD:{name}")
+
+
+def test_ls_tree_includes_gitlinks_so_changed_submodules_are_inputs(tmp_path: Path) -> None:
+    repo = make_repo(tmp_path / "r")
+    head = git(repo, "rev-parse", "HEAD")
+    git(repo, "update-index", "--add", "--cacheinfo", f"160000,{head},vendor/lib")
+    git(repo, "commit", "-qm", "submodule pointer")
+    assert gate_git.ls_tree(repo, "HEAD")["vendor/lib"] == gate_git.GitLeaf("160000", head)
+
+
+@pytest.mark.parametrize(
+    "output",
+    [
+        "no metadata\0",
+        "100644 blob " + "a" * 40 + "\tfile",  # unterminated
+        "100644 blob " + "a" * 40 + "\t\0",  # absent path
+        "100644 blob bad-sha\tfile\0",
+        "100644 tree " + "a" * 40 + "\tfile\0",  # mode/type mismatch
+        "040000 tree " + "a" * 40 + "\tdir\0",  # recursive listing must be leaves
+        "100644 blob " + "a" * 40 + "\t../file\0",
+        "100644 blob " + "a" * 40 + "\t/abs\0",
+        "100644 blob " + "a" * 40 + "\tfile\0\0",
+        ("100644 blob " + "a" * 40 + "\tfile\0") * 2,
+    ],
+)
+def test_ls_tree_refuses_malformed_records(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, output: str) -> None:
+    monkeypatch.setattr(provenance, "strict_git", lambda *a, **k: output)
+    executable = provenance.GitExecutable("git", "path", "git version x")
+    with pytest.raises(gate_git.GitUnavailable, match="ls-tree"):
+        gate_git.ls_tree(tmp_path, "HEAD", git=executable)
+
+
+def test_ls_tree_empty_tree_is_empty(tmp_path: Path) -> None:
+    repo = make_repo(tmp_path / "r")
+    empty = git(repo, "mktree")
+    assert gate_git.ls_tree(repo, empty) == {}
+
+
+def test_ls_tree_preserves_carriage_returns_in_filenames(tmp_path: Path) -> None:
+    repo = make_repo(tmp_path / "r")
+    name = "a\rfile\r\n"
+    (repo / name).write_text("x", encoding="utf-8", newline="\n")
+    git(repo, "add", "-A")
+    git(repo, "commit", "-qm", "CR filename")
+    assert name in gate_git.ls_tree(repo, "HEAD")
+
+
+def test_ls_tree_refuses_non_utf8_paths_instead_of_replacing_bytes(tmp_path: Path) -> None:
+    repo = make_repo(tmp_path / "r")
+    blob = git(repo, "rev-parse", "HEAD:a.txt")
+    # Build the tree directly: APFS and Windows cannot create arbitrary byte paths.
+    done = subprocess.run(
+        ["git", "mktree", "-z"],
+        cwd=repo,
+        input=f"100644 blob {blob}\t".encode("ascii") + b"bad-\xff\0",
+        capture_output=True,
+        check=True,
+    )
+    tree = done.stdout.decode("ascii").strip()
+    with pytest.raises(gate_git.GitUnavailable):
+        gate_git.ls_tree(repo, tree)

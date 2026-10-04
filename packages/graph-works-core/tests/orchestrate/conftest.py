@@ -99,7 +99,7 @@ class GateEnv:
         return (self.layout.bundle_dir / f"{self.path}.md").read_text(encoding="utf-8") == self.page_text
 
     def mark_runner_alive(self, run_id: str) -> None:
-        self.stack.enter_context(locked(runs_dir(self.layout, self.path) / f"{run_id}.lock"))
+        self.stack.enter_context(locked(runs_dir(self.layout) / f"{run_id}.lock"))
 
 
 @pytest.fixture

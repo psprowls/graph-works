@@ -13,7 +13,7 @@ uv run --package repositories-okf pytest packages/repositories-okf/tests
 uv run --package repositories-okf pytest packages/repositories-okf/tests --cov=repositories_okf --cov-branch --cov-report=term-missing --cov-fail-under=95
 ```
 
-Or `just check-pkg repositories-okf` for lint, types on both arms and coverage together.
+Or `just check-affected` (or `just check-pkg repositories-okf`) for lint, types on both arms and coverage together.
 
 ## Module map
 

@@ -117,6 +117,7 @@ def test_projection_is_plain_json_with_progress_nested_or_null():
     }
     assert data[0]["notes"] == ["no terminal"]
     assert data[1]["progress"] is None
+    assert data[0]["terminal"] is None
     assert list(data[0]) == [
         "key",
         "handle",
@@ -130,6 +131,7 @@ def test_projection_is_plain_json_with_progress_nested_or_null():
         "worktree_path",
         "progress",
         "notes",
+        "terminal",
     ]
 
 

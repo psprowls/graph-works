@@ -55,6 +55,8 @@ RefusalReason = Literal[
     "gate-bypass-unused",
     "gate-bypass-unrecorded",
     "no-gate-receipt",
+    "units-invalid",
+    "units-command-failed",
     "no-gate-configured",
 ]
 
@@ -85,6 +87,8 @@ COMMIT_GATE_REFUSALS: frozenset[str] = frozenset(
         "no-commits",
         "no-affects-touched",
         "no-gate-receipt",
+        "units-invalid",
+        "units-command-failed",
         "no-gate-configured",
     }
 )

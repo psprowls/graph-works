@@ -120,7 +120,7 @@ Packaged defaults are ten attribute-matched rules, folded before shared and loca
 | `execute-planned` | `{stage: execute, has_plan: true}` | `superpowers:subagent-driven-development` | `autonomous` | `EXECUTE_TAIL` |
 | `finish` | `{stage: finish}` | `superpowers:finishing-a-development-branch` | `relay` | — |
 
-Tail names are constants in `graph_works_core.workspace.pipeline`. The finish tail is workspace-owned: initialization seeds it in the shared file as a `{stage: finish}` rule, and relay mode requires a nonblank final tail. The execute tail carries the coverage-report obligation.
+Tail names are constants in `graph_works_core.workspace.pipeline`. The finish tail is workspace-owned: initialization seeds it in the shared file as a `{stage: finish}` rule, and relay mode requires a nonblank final tail. The execute tail carries the coverage-report obligation, the deferral sentence, a context-hygiene paragraph (no hand-tailing of gate logs, artifacts handed to subagents as files, skills read once) and the gate instructions.
 
 ## Pipeline path
 

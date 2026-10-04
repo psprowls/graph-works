@@ -28,7 +28,7 @@ class LandedSibling:
     affects: tuple[str, ...]
 
 
-def _has_landed(item: WorkItem) -> bool:
+def has_landed(item: WorkItem) -> bool:
     """Terminal AND carrying a ref. Terminal alone is not enough: a `wontfix`
     sibling changed no code and cannot have invalidated anything.
 
@@ -61,12 +61,34 @@ def landed_siblings(items: Sequence[WorkItem], item: WorkItem) -> tuple[LandedSi
     declared = {edge.path for edge in item.dependency_edges}
     selected: dict[str, LandedSibling] = {}
     for other in items:
-        if other.path == item.path or not _has_landed(other):
+        if other.path == item.path or not has_landed(other):
             continue
         overlaps = other.parent_path == item.parent_path and bool(own_affects & set(code_affects(other.affects)))
         if other.path in declared or overlaps:
             selected[other.path] = LandedSibling(path=other.path, resolved_in=other.resolved_in, affects=other.affects)
     return tuple(selected.values())
+
+
+@dataclass(frozen=True, slots=True)
+class BaselineComparison:
+    """`new` is True when the ref is not an ancestor of the baseline, False when
+    it is, None when undetermined (`missing` ref, or a probe failure with `cause`)."""
+
+    new: bool | None
+    missing: bool = False
+    cause: str | None = None
+
+
+def compare_to_baseline(repo: Path, ref: str, baseline: str) -> BaselineComparison:
+    """One `merge-base --is-ancestor <ref> <baseline>` probe, after checking *ref* is a commit."""
+    if not provenance.commit_exists(repo, ref):
+        return BaselineComparison(None, missing=True)
+    outcome = provenance.probe_git(repo, "merge-base", "--is-ancestor", ref, baseline)
+    if outcome.returncode == 0:
+        return BaselineComparison(False)
+    if outcome.returncode == 1:
+        return BaselineComparison(True)
+    return BaselineComparison(None, cause=outcome.cause)
 
 
 @dataclass(frozen=True, slots=True)
@@ -109,22 +131,19 @@ def landed_since(layout: WorkspaceLayout, items: Sequence[WorkItem], item: WorkI
     own = set(code_affects(item.affects))
     entries: list[LandedEntry] = []
     warnings: list[str] = []
-    comparisons: dict[str, tuple[bool, provenance.GitOutcome | None]] = {}
+    comparisons: dict[str, BaselineComparison] = {}
     for sibling in candidates:
         ref = sibling.resolved_in or ""
         if ref not in comparisons:
-            exists = provenance.commit_exists(repo, ref)
-            outcome = provenance.probe_git(repo, "merge-base", "--is-ancestor", ref, code) if exists else None
-            comparisons[ref] = (exists, outcome)
-        exists, outcome = comparisons[ref]
-        if not exists:
+            comparisons[ref] = compare_to_baseline(repo, ref, code)
+        comparison = comparisons[ref]
+        if comparison.missing:
             warnings.append(f"landed-since: {sibling.path} resolved_in {ref!r} is not a commit in {repo}; skipped")
             continue
-        assert outcome is not None
-        if outcome.returncode == 0:
+        if comparison.new is False:
             continue
-        if outcome.returncode != 1:
-            warnings.append(f"landed-since: could not compare {ref} with baseline {code} ({outcome.cause}); skipped")
+        if comparison.new is None:
+            warnings.append(f"landed-since: could not compare {ref} with baseline {code} ({comparison.cause}); skipped")
             continue
         overlaps = bool(own & set(code_affects(sibling.affects)))
         entries.append(LandedEntry(sibling, overlaps))
@@ -152,9 +171,12 @@ def stale_by_path(
 
 
 __all__ = [
+    "BaselineComparison",
     "LandedEntry",
     "LandedSibling",
     "LandedSince",
+    "compare_to_baseline",
+    "has_landed",
     "landed_siblings",
     "landed_since",
     "stale_by_path",

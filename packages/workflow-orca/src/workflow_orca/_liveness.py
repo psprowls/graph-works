@@ -42,7 +42,11 @@ def transcript_unavailable(source: str) -> str:
 
 @dataclass(frozen=True)
 class LivenessRow:
-    """One live dispatch at the moment a wait timed out."""
+    """One live dispatch at the moment a wait timed out.
+
+    `terminal` is the agent terminal the latest `worker-show` proved for this dispatch
+    (its `agentTerminalHandle`), or None; `handle` is the dispatch id.
+    """
 
     key: str
     handle: str
@@ -56,6 +60,7 @@ class LivenessRow:
     worktree_path: str | None
     progress: SddProgress | None
     notes: tuple[str, ...]
+    terminal: str | None = None
 
 
 def as_object(value: object) -> dict[str, Any]:

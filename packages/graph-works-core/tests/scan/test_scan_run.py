@@ -15,8 +15,8 @@ FILLED = "Widgets is the demo package. It exists to exercise this pipeline."
 
 
 @pytest.fixture
-def ready(tmp_path):
-    layout, repo = make_workspace(tmp_path)
+def ready(tmp_path, scan_seed):
+    layout, repo = make_workspace(tmp_path, scan_seed)
     config = load_config(
         layout.bundle_dir,
         config_path=layout.manifest_path,

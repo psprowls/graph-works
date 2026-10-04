@@ -149,7 +149,14 @@
   "guidance_file": null,
   "repository_notes": [],
   "carried_context": {
-    "slots": {},
+    "slots": {
+      "epic_brief": {
+        "title": "Epic brief",
+        "lines": [],
+        "data": {},
+        "warnings": []
+      }
+    },
     "warnings": []
   }
 }

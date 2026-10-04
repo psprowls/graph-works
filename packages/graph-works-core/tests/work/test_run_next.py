@@ -341,8 +341,7 @@ def test_without_overlap_it_routes_to_writing_plans(tmp_path: Path) -> None:
     layout, _, sibling, landed = _landed_plan(tmp_path, overlap=False)
     result = work.run_next(layout, CHILD)
     assert result.route.dispatch == Dispatch("plan")
-    (slot,) = result.carried.slots
-    assert slot.name == "landed_since"
+    slot = next(s for s in result.carried.slots if s.name == "landed_since")
     assert slot.fill.data["siblings"] == [{"path": sibling, "resolved_in": landed, "overlaps": False}]
 
 

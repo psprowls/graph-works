@@ -37,9 +37,9 @@ FILLED = "Widgets is the demo package. It exists to exercise this pipeline."
 
 
 @pytest.fixture
-def scanned(tmp_path):
+def scanned(tmp_path, scan_seed):
     """A workspace whose graph is seeded and whose structural pass has not run yet."""
-    layout, repo = make_workspace(tmp_path)
+    layout, repo = make_workspace(tmp_path, scan_seed)
     config = load_config(
         layout.bundle_dir,
         config_path=layout.manifest_path,
@@ -175,10 +175,10 @@ async def test_a_prose_section_added_to_a_declaration_enters_the_worklist(scanne
     assert "## Operational notes" in _package_task(worklist).prose_sections
 
 
-async def test_an_unbuildable_graph_refuses(tmp_path):
+async def test_an_unbuildable_graph_refuses(tmp_path, scan_seed):
     from graph_works_core.workspace.errors import ScanError
 
-    layout, _repo = make_workspace(tmp_path)
+    layout, _repo = make_workspace(tmp_path, scan_seed)
     # No `code.db` and no repository git dir the builder can read: the build
     # comes back non-SUCCESS and phase 1 refuses rather than narrating nothing.
     layout.manifest_path.write_text(
@@ -616,13 +616,13 @@ async def test_an_unfilled_dependency_page_first_fills_against_its_repository(sc
     assert task.owning_short_head is not None
 
 
-async def test_a_repository_absent_from_the_graph_contributes_no_refs(tmp_path):
+async def test_a_repository_absent_from_the_graph_contributes_no_refs(tmp_path, scan_seed):
     """`entity_refs` skips it, matching `entities.sync`'s own skip."""
     from code_graph_io import open_reader
     from code_wiki_okf.config import load_config as _load
     from graph_works_core.graph import commands as graph
 
-    layout, repo = make_workspace(tmp_path)
+    layout, repo = make_workspace(tmp_path, scan_seed)
     config = _load(
         layout.bundle_dir,
         config_path=layout.manifest_path,
@@ -648,14 +648,14 @@ async def test_a_repository_absent_from_the_graph_contributes_no_refs(tmp_path):
     assert not [uri for uri in refs if uri.startswith("pkg:acme/")]
 
 
-def test_a_dependency_node_with_no_uri_contributes_no_ref(tmp_path):
+def test_a_dependency_node_with_no_uri_contributes_no_ref(tmp_path, scan_seed):
     """The dependency loop's own `if not uri: continue` -- distinct from a
     repository absent from the graph, this is a dependency node the graph
     itself never gave a `uri` attribute."""
     from code_graph_io import open_reader
     from code_graph_io.testing import raw_conn
 
-    layout, repo = make_workspace(tmp_path)
+    layout, repo = make_workspace(tmp_path, scan_seed)
     config = load_config(
         layout.bundle_dir,
         config_path=layout.manifest_path,

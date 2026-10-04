@@ -322,3 +322,18 @@ def test_each_enumeration_failure_raises(command):
     runner.replies[command] = _failure("run_not_found")
     with pytest.raises(OrcaCliError):
         sess.liveness(now=NOW)
+
+
+AGENT_TERMINAL = "term_ff2faacf-db5b-43ad-b05b-c6dfee58eb53"
+
+
+def test_a_proven_agent_terminal_is_on_the_row(tmp_path):
+    sess, _ = session(show=_show(tmp_path, terminal__handle=AGENT_TERMINAL))
+    [row] = sess.liveness(now=NOW)
+    assert row.handle == LIVE_HANDLE and row.terminal == AGENT_TERMINAL
+
+
+def test_an_unproven_terminal_is_null(tmp_path):
+    sess, _ = session(show=_show(tmp_path))
+    [row] = sess.liveness(now=NOW)
+    assert row.terminal is None

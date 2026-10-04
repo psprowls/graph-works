@@ -14,19 +14,19 @@ from graph_works_core.workspace.config import load_workspace_config
 from graph_works_core.workspace.layout import WorkspaceLayout
 from graph_works_core.workspace.transactions import _HELD_BUNDLE_LOCKS
 from ruamel.yaml import YAML
-from scan_helpers import TODAY, make_repo
+from scan_helpers import TODAY, copy_repo
 
 AT = datetime(2026, 10, 2, 9, 0, tzinfo=UTC)
 
 
-def _repo(tmp_path: Path, name: str) -> Path:
+def _repo(tmp_path: Path, name: str, repo_seed: Path) -> Path:
     """A committed checkout whose directory, and so its graph identity, is *name*."""
-    return make_repo(tmp_path / f"{name}-src").rename(tmp_path / name)
+    return copy_repo(repo_seed, tmp_path / f"{name}-src").rename(tmp_path / name)
 
 
 @pytest.fixture
-def two_repo_workspace(tmp_path: Path) -> tuple[WorkspaceLayout, Config]:
-    alpha, beta = _repo(tmp_path, "alpha"), _repo(tmp_path, "beta")
+def two_repo_workspace(tmp_path: Path, repo_seed: Path) -> tuple[WorkspaceLayout, Config]:
+    alpha, beta = _repo(tmp_path, "alpha", repo_seed), _repo(tmp_path, "beta", repo_seed)
     layout = apply_init(plan_init(tmp_path / ".works", today=TODAY, topic="Scan")).layout
     yaml = YAML()
     yaml.preserve_quotes = True

@@ -24,9 +24,9 @@ FILLED = "Widgets is the demo package. It exists to exercise this pipeline."
 
 
 @pytest.fixture
-async def synced(tmp_path):
+async def synced(tmp_path, scan_seed):
     """A workspace whose structural pass has run, with a worklist in hand."""
-    layout, repo = make_workspace(tmp_path)
+    layout, repo = make_workspace(tmp_path, scan_seed)
     config = load_config(
         layout.bundle_dir,
         config_path=layout.manifest_path,

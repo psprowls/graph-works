@@ -178,6 +178,17 @@ def test_execute_tail_names_the_gate_verbs():
     assert "/private/tmp" not in pipeline.EXECUTE_TAIL
 
 
+def test_wait_line_is_vendor_neutral_and_in_the_execute_tail():
+    line = pipeline.WAIT_LINE
+    assert line in pipeline.EXECUTE_TAIL
+    assert "gw work gate wait {path}" in line
+    assert "600000 ms" in line and "at least 60 s" in line
+    for vendor in ("Codex", "Claude", "codex", "claude", "write_stdin", "yield_ms"):
+        assert vendor not in line
+    # `_prompt` substitutes a fixed placeholder set; WAIT_LINE uses only {path}.
+    assert line.replace("{path}", "").count("{") == 0
+
+
 def test_execute_tail_tells_the_worker_to_record_deferred_steps() -> None:
     assert (
         "When the plan marks a step `Deferred to finish`, record it with "
@@ -256,3 +267,39 @@ def test_findings_line_is_public_and_needs_no_substitution():
     assert "--body" in line
     assert "canonical path" in line
     assert not re.search(r"\{[^}]*\}", line)
+
+
+CONTEXT_HYGIENE = (
+    "Context hygiene: when the gate fails, `gw work gate wait` already prints the last 40 lines of its log -- "
+    "never `tail`, `cat` or `grep` a gate or test log by hand. Hand artifacts to subagents as file paths "
+    "(task briefs, review packages, reports), never pasted inline. Read each skill file once per session; "
+    "re-open only a named section when you need it again.\n"
+)
+
+
+def test_execute_tail_carries_context_hygiene_before_the_gate():
+    tail = pipeline.EXECUTE_TAIL
+    assert CONTEXT_HYGIENE in tail
+    assert tail.index("Deferred to finish") < tail.index("Context hygiene:") < tail.index("The gate is")
+
+
+def test_the_quoted_log_tail_length_is_the_code_default():
+    import inspect
+
+    from graph_works_core.orchestrate.gate_receipts import sanitize_tail
+
+    assert inspect.signature(sanitize_tail).parameters["lines"].default == 40
+
+
+def test_notify_line_precedes_the_wait_line_in_the_execute_tail() -> None:
+    tail = pipeline.EXECUTE_TAIL
+    assert pipeline.NOTIFY_LINE in tail and pipeline.WAIT_LINE in tail
+    assert tail.index(pipeline.NOTIFY_LINE) < tail.index(pipeline.WAIT_LINE)
+    assert pipeline.NOTIFY_LINE + " " + pipeline.WAIT_LINE in tail
+
+
+def test_notify_line_names_no_vendor_and_only_the_path_placeholder() -> None:
+    line = pipeline.NOTIFY_LINE
+    for word in ("Codex", "Claude", "write_stdin", "yield_ms", "Orca"):
+        assert word not in line
+    assert re.findall(r"\{(\w+)\}", line) == ["path", "path"]

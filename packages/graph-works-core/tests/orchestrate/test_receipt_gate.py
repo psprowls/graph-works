@@ -4,11 +4,11 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from _gate_helpers import TODAY, mint_receipt, raise_
+from _gate_helpers import TODAY, mint_receipt, mint_unit_receipt, raise_
 from conftest import GateEnv, git, make_repo
-from graph_works_core.orchestrate import gate_git
+from graph_works_core.orchestrate import gate_git, gate_units
 from graph_works_core.orchestrate import stage_advance as stage
-from graph_works_core.workspace import provenance
+from graph_works_core.workspace import gate_config, provenance
 from work_tracker_okf import decisions as _decisions
 
 
@@ -163,3 +163,64 @@ def test_bypassing_a_commit_gate_code_with_no_gate_configured_refuses(env: GateE
     env.set_manifest(gate="")
     result = advance(env, skip_gate=("uncommitted-work", "unrelated dirt"))
     assert result.outcome.plan.refusal == "no-gate-configured"
+
+
+UNITS_GATE = "    gate:\n      full: 'true'\n      units: 'cat units.json'\n"
+
+
+def _units_manifest(env: GateEnv) -> None:
+    (env.repo / "units.json").write_text(
+        '{"version": 1, "jobs": 1, "units": [{"name": "a", "inputs": ["packages/a/**"], "command": "true"}]}',
+        encoding="utf-8",
+        newline="\n",
+    )
+    git(env.repo, "add", "-A")
+    git(env.repo, "commit", "-qm", "units")
+
+
+def test_units_repo_with_green_unit_evidence_passes(env: GateEnv) -> None:
+    env.set_manifest(gate=UNITS_GATE)
+    _units_manifest(env)
+    _ready(env)
+    state = gate_units.resolve_unit_state(gate_config.repo_gate(env.layout, "code"), env.repo, env.tree, git=None)
+    mint_unit_receipt(env, owner="work/other", hashes=state.hashes)
+    result = advance(env)
+    assert result.outcome.written and result.gate_receipt is not None
+    assert [u.name for u in result.gate_receipt.units] == ["a"]
+
+
+def test_units_repo_without_evidence_names_stale_units(env: GateEnv) -> None:
+    env.set_manifest(gate=UNITS_GATE)
+    _units_manifest(env)
+    _ready(env)
+    result = advance(env)
+    assert result.outcome.plan.refusal == "no-gate-receipt"
+    assert "stale units: a" in result.outcome.plan.detail
+
+
+def test_broken_units_command_refuses_units_command_failed(env: GateEnv) -> None:
+    env.set_manifest(gate="    gate:\n      full: 'true'\n      units: 'exit 4'\n")
+    _ready(env)
+    result = advance(env)
+    assert result.outcome.plan.refusal == "units-command-failed"
+
+
+def test_units_refusal_is_bypassable(env: GateEnv) -> None:
+    env.set_manifest(gate="    gate:\n      full: 'true'\n      units: 'echo nope'\n")
+    _ready(env)
+    result = advance(env, skip_gate=("units-command-failed", "manifest broken on this host"))
+    assert result.outcome.written
+
+
+def test_invalid_units_manifest_refuses_units_invalid(env: GateEnv) -> None:
+    env.set_manifest(gate="    gate:\n      full: 'true'\n      units: 'echo {}'\n")
+    _ready(env)
+    result = advance(env)
+    assert result.outcome.plan.refusal == "units-invalid"
+
+
+def test_git_failure_during_unit_resolution_refuses(env: GateEnv, monkeypatch) -> None:
+    _ready(env)
+    monkeypatch.setattr(stage.gate_units, "resolve_unit_state", raise_(gate_git.GitUnavailable("units git")))
+    result = advance(env)
+    assert result.outcome.plan.refusal == "git-unavailable" and "units git" in result.outcome.plan.detail

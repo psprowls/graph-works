@@ -780,6 +780,16 @@ assert_contains "skills/planning-epics/SKILL.md" "artifacts.design.path" \
 assert_contains "skills/planning-epics/SKILL.md" "artifacts.plan.path" \
     "planning-epics falls back to artifacts.plan.path"
 
+CONTEXT_RIDER='**Context.** Read each skill file once; re-open only a named section. Hand work to subagents as files, not pasted text.'
+assert_contains "skills/workflow/references/brief-riders.md" "$CONTEXT_RIDER" \
+    "SDD/TDD riders carry the Context paragraph"
+context_count=$(grep -cF -- "$CONTEXT_RIDER" "$PLUGIN_ROOT/skills/workflow/references/brief-riders.md")
+if [[ "$context_count" -eq 2 ]]; then
+    pass "Context rider paragraph appears in exactly the SDD and TDD riders"
+else
+    fail "Context rider paragraph appears $context_count times, expected 2 (SDD and TDD)"
+fi
+
 if [[ "$FAILURES" -gt 0 ]]; then
     echo "STATUS: FAILED ($FAILURES failure(s))"
     exit 1

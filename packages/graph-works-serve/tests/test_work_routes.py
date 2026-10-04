@@ -30,12 +30,13 @@ def test_next_is_the_cli_twin_with_null_normalized(client: TestClient, workspace
     assert body["carried_context"] == twin["carried_context"]
     assert body["carried_context"] == {
         "slots": {
+            "epic_brief": {"title": "Epic brief", "lines": [], "data": {}, "warnings": []},
             "landed_since": {
                 "title": "Landed since your design",
                 "lines": ["No spec baseline recorded; landed-since unavailable."],
                 "data": {"code_baseline": None, "workspace_baseline": None},
                 "warnings": [],
-            }
+            },
         },
         "warnings": [],
     }

@@ -614,6 +614,7 @@ def test_liveness_projects_observation_without_binding_or_nudging():
         "worktree_path",
         "progress",
         "notes",
+        "terminal",
     }
     assert json.loads(json.dumps(row)) == row
     assert not any(token in call for call in runner.calls for token in ("run-use", "run-create", "send", "check"))
@@ -753,3 +754,11 @@ def test_pending_full_run_inbox_preserves_truncation_after_dispatch_reads():
         return response
 
     assert OrcaCliPort(run=runner).pending_questions(RUN_Q)["truncated"] is True
+
+
+def test_terminal_send_text_types_a_prompt():
+    p, runner = port([(("terminal", "send"), "terminal_send")])
+    p.terminal_send_text("term_1", "Gate run r finished.")
+    assert runner.calls[-1] == (
+        "orca", "terminal", "send", "--terminal", "term_1", "--text", "Gate run r finished.", "--enter", "--json",
+    )  # fmt: skip

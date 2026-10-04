@@ -784,6 +784,8 @@ def test_the_gate_vocabulary_is_closed_and_in_the_refusal_reason() -> None:
         "no-commits",
         "no-affects-touched",
         "no-gate-receipt",
+        "units-invalid",
+        "units-command-failed",
         "no-gate-configured",
     } == COMMIT_GATE_REFUSALS
     assert {

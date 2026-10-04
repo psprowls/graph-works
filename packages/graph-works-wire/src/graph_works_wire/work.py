@@ -20,8 +20,8 @@ from graph_works_core.orchestrate.accept_integration import AcceptIntegrationRes
 from graph_works_core.orchestrate.asks import AskAnswerResult, AskResult
 from graph_works_core.orchestrate.commands import OrchestrateResult
 from graph_works_core.orchestrate.dispatch import DispatchFailure, DispatchResult, ObservedPlacement
-from graph_works_core.orchestrate.gate import GateCheckResult, GateRunResult, GateWaitResult
-from graph_works_core.orchestrate.gate_receipts import GateMatch
+from graph_works_core.orchestrate.gate import GateCheckResult, GateRunResult, GateWaitResult, NotifyResult
+from graph_works_core.orchestrate.gate_receipts import GateEvidence, UnitEvidence
 from graph_works_core.orchestrate.integrate import IntegrateResult
 from graph_works_core.orchestrate.merge_workspace import MergeWorkspaceResult
 from graph_works_core.orchestrate.orca_port import OrcaMessage
@@ -687,12 +687,28 @@ def advance_payload(result: StageAdvance, path: str) -> dict[str, Any]:
     }
 
 
-def _gate_match(match: GateMatch | None) -> dict[str, str] | None:
-    return None if match is None else {"owner": match.owner, "run_id": match.run.run_id}
+def _gate_match(match: GateEvidence | None) -> dict[str, Any] | None:
+    if match is None:
+        return None
+    return {
+        "owner": match.owner,
+        "run_id": match.run_id,
+        "units": [{"name": unit.name, "owner": unit.owner, "run_id": unit.run_id} for unit in match.units],
+    }
+
+
+def _reuse(evidence: UnitEvidence | None) -> dict[str, str] | None:
+    return None if evidence is None else {"owner": evidence.owner, "run_id": evidence.run_id}
 
 
 def _gate_refusal(refusal: str | None, detail: str) -> dict[str, str] | None:
     return None if refusal is None else {"reason": refusal, "detail": detail}
+
+
+def _gate_notify(notify: NotifyResult | None) -> dict[str, Any] | None:
+    if notify is None:
+        return None
+    return {"registered": notify.registered, "terminal": notify.terminal, "reason": notify.reason}
 
 
 def gate_run_payload(result: GateRunResult, path: str) -> dict[str, Any]:
@@ -700,27 +716,38 @@ def gate_run_payload(result: GateRunResult, path: str) -> dict[str, Any]:
     return {
         "path": path,
         "status": result.status,
+        "position": result.position,
         "run_id": result.run_id,
         "command": result.command,
         "names": list(result.names),
+        "units": [
+            {"name": unit.name, "planned": unit.planned, "reused_from": _reuse(unit.reused_from)}
+            for unit in result.units
+        ],
+        "stale": list(result.stale),
         "log_path": result.log_path,
         "match": _gate_match(result.match),
         "warnings": list(result.warnings),
+        "notify": _gate_notify(result.notify),
         "refusal": _gate_refusal(result.refusal, result.detail),
     }
 
 
-def gate_wait_payload(result: GateWaitResult, path: str) -> dict[str, Any]:
-    """The `gw work gate wait` contract."""
+def gate_wait_payload(result: GateWaitResult, path: str, *, warnings: Sequence[str] = ()) -> dict[str, Any]:
+    """The `gw work gate wait` contract; `warnings` carries the interface's own notes (the wait floor)."""
     return {
         "path": path,
         "status": result.status,
+        "position": result.position,
         "run_id": result.run_id,
         "exit": result.exit,
         "recorded": result.recorded,
         "log_path": result.log_path,
         "log_tail": result.log_tail,
         "receipt_path": result.receipt_path,
+        "units": [{"name": name, "exit": exit_value} for name, exit_value in result.units],
+        "repo_wide_exit": result.repo_wide_exit,
+        "warnings": list(warnings),
         "refusal": _gate_refusal(result.refusal, result.detail),
     }
 
@@ -732,6 +759,7 @@ def gate_check_payload(result: GateCheckResult, path: str) -> dict[str, Any]:
         "status": result.status,
         "reason": result.detail if result.status == "unsatisfied" else None,
         "tree": result.tree,
+        "stale": list(result.stale),
         "match": _gate_match(result.match),
         "warnings": list(result.warnings),
         "refusal": _gate_refusal(result.refusal, result.detail),

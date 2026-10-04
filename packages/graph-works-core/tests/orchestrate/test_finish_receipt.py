@@ -1,13 +1,18 @@
 """Finish evidence is established against real independent Git repositories."""
 
 import subprocess
+from dataclasses import dataclass
 from datetime import date
+from pathlib import Path
 
+import pytest
+from _seed_copy import copy_tree_into, files_containing, rebase_layout
 from _transaction_helpers import _git, _init_git
 from graph_works_core import apply_init, plan_init
 from graph_works_core.orchestrate.finish_receipt import run_record_finish
 from graph_works_core.orchestrate.stage_advance import run_stage_advance
 from graph_works_core.workspace.finish import inspect_finish
+from graph_works_core.workspace.layout import WorkspaceLayout
 from okf_io import load_bundle
 from work_tracker_okf.items import load_items
 
@@ -19,22 +24,48 @@ def git(path, *args):
     return subprocess.run(["git", "-C", str(path), *args], check=True, capture_output=True, text=True).stdout.strip()
 
 
-def setup(tmp_path):
-    repos = {}
-    for name in ("code", "ui"):
-        repo = tmp_path / name
+@dataclass(frozen=True, slots=True)
+class ReceiptSeed:
+    root: Path
+    layout: WorkspaceLayout
+
+
+NAMES = ("code", "ui")
+
+
+def build_receipt_seed(root):
+    for name in NAMES:
+        repo = root / name
         repo.mkdir()
         git(repo, "init", "-b", "main")
         git(repo, "config", "user.name", "Test")
         git(repo, "config", "user.email", "test@example.test")
         git(repo, "commit", "--allow-empty", "-m", "base")
-        worktree = tmp_path / (name + "-source")
+        worktree = root / (name + "-source")
         git(repo, "worktree", "add", "-b", "feature", str(worktree))
         git(worktree, "commit", "--allow-empty", "-m", "source")
+    workspace = root / "workspace"
+    workspace.mkdir()
+    layout = apply_init(plan_init(workspace, today=TODAY, topic="Finish")).layout
+    return ReceiptSeed(root=root, layout=layout)
+
+
+@pytest.fixture(scope="module")
+def receipt_seed(tmp_path_factory):
+    return build_receipt_seed(tmp_path_factory.mktemp("receipt_seed"))
+
+
+def setup(tmp_path, seed):
+    repos = {}
+    for name in NAMES:
+        repo = copy_tree_into(seed.root / name, tmp_path / name)
+        worktree = copy_tree_into(seed.root / (name + "-source"), tmp_path / (name + "-source"))
+        git(repo, "worktree", "repair", str(worktree))
         repos[name] = (repo, worktree)
-    root = tmp_path / "workspace"
-    root.mkdir()
-    layout = apply_init(plan_init(root, today=TODAY, topic="Finish")).layout
+    copy_tree_into(seed.layout.root, tmp_path / "workspace")
+    layout = rebase_layout(seed.layout, seed.root, tmp_path)
+    # apply_init's disposable config projection names the seed root; nothing here reads it.
+    (layout.cache_dir / "config.json").unlink(missing_ok=True)
     layout.manifest_path.write_text(
         "version: 1\nworkflow: {dispatch_rules: dispatch.yaml}\nrepositories:\n"
         + "".join(f"  {n}: {{path: {r}}}\n" for n, (r, _) in repos.items()),
@@ -55,8 +86,8 @@ def record(layout, repo):
     return run_record_finish(layout, OWNER, repo_name=repo, today=TODAY)
 
 
-def test_finish_receipt_commits_owned_files(tmp_path):
-    layout, repos = setup(tmp_path)
+def test_finish_receipt_commits_owned_files(tmp_path, receipt_seed):
+    layout, repos = setup(tmp_path, receipt_seed)
     _init_git(layout.root)
     git(repos["code"][0], "merge", "feature")
 
@@ -69,8 +100,8 @@ def test_finish_receipt_commits_owned_files(tmp_path):
     assert _git(layout.root, "status", "--porcelain", "--", "okf") == ""
 
 
-def test_failed_workspace_commit_preserves_receipt_and_warning(tmp_path):
-    layout, repos = setup(tmp_path)
+def test_failed_workspace_commit_preserves_receipt_and_warning(tmp_path, receipt_seed):
+    layout, repos = setup(tmp_path, receipt_seed)
     _init_git(layout.root)
     git(repos["code"][0], "merge", "feature")
     (layout.root / ".git/index.lock").write_text("held\n", encoding="utf-8", newline="\n")
@@ -89,8 +120,8 @@ def advance(layout, sha, **kwargs):
     return run_stage_advance(layout, OWNER, today=TODAY, resolved_in=sha, infer_worktree=False, **kwargs)
 
 
-def test_partial_retry_and_final_advance(tmp_path):
-    layout, repos = setup(tmp_path)
+def test_partial_retry_and_final_advance(tmp_path, receipt_seed):
+    layout, repos = setup(tmp_path, receipt_seed)
     git(repos["code"][0], "merge", "feature")
     first = record(layout, "code")
     assert first.refusal is None and first.changed
@@ -122,11 +153,11 @@ def merge_all(repos):
         git(repo, "merge", "feature")
 
 
-def test_merge_then_failed_receipt_is_recoverable_without_remerge(tmp_path, monkeypatch):
+def test_merge_then_failed_receipt_is_recoverable_without_remerge(tmp_path, receipt_seed, monkeypatch):
 
     from graph_works_core.orchestrate import finish_receipt
 
-    layout, repos = setup(tmp_path)
+    layout, repos = setup(tmp_path, receipt_seed)
     git(repos["code"][0], "merge", "feature")
     original = finish_receipt.apply_mutation
 
@@ -146,8 +177,8 @@ def test_merge_then_failed_receipt_is_recoverable_without_remerge(tmp_path, monk
     assert not record(layout, "code").changed
 
 
-def test_new_source_and_rewritten_target_invalidate_history(tmp_path):
-    layout, repos = setup(tmp_path)
+def test_new_source_and_rewritten_target_invalidate_history(tmp_path, receipt_seed):
+    layout, repos = setup(tmp_path, receipt_seed)
     merge_all(repos)
     assert record(layout, "code").changed
     assert record(layout, "ui").changed
@@ -166,8 +197,8 @@ def test_new_source_and_rewritten_target_invalidate_history(tmp_path):
     assert record(layout, "ui").refusal
 
 
-def test_malformed_and_forged_receipts_refuse_without_overwrite(tmp_path):
-    layout, repos = setup(tmp_path)
+def test_malformed_and_forged_receipts_refuse_without_overwrite(tmp_path, receipt_seed):
+    layout, repos = setup(tmp_path, receipt_seed)
     merge_all(repos)
     assert record(layout, "code").changed
     original = receipt_path(layout).read_bytes()
@@ -190,11 +221,11 @@ def test_malformed_and_forged_receipts_refuse_without_overwrite(tmp_path):
     assert record(layout, "code").refusal
 
 
-def test_timeout_is_unverified(tmp_path, monkeypatch):
+def test_timeout_is_unverified(tmp_path, receipt_seed, monkeypatch):
     from graph_works_core.workspace import finish
     from graph_works_core.workspace.provenance import GitOutcome
 
-    layout, repos = setup(tmp_path)
+    layout, repos = setup(tmp_path, receipt_seed)
     merge_all(repos)
     assert record(layout, "code").changed
     monkeypatch.setattr(finish, "finish_git", lambda *a, **k: GitOutcome(None, "", "timeout"))
@@ -202,8 +233,8 @@ def test_timeout_is_unverified(tmp_path, monkeypatch):
     assert record(layout, "code").refusal
 
 
-def test_crlf_and_authored_receipt_content_preserved(tmp_path):
-    layout, repos = setup(tmp_path)
+def test_crlf_and_authored_receipt_content_preserved(tmp_path, receipt_seed):
+    layout, repos = setup(tmp_path, receipt_seed)
     merge_all(repos)
     assert record(layout, "code").changed
     receipt = receipt_path(layout)
@@ -220,10 +251,10 @@ def test_crlf_and_authored_receipt_content_preserved(tmp_path):
     assert not (receipt.parent / "04-finish-results.md").exists()
 
 
-def test_owner_change_at_transaction_boundary_refuses(tmp_path, monkeypatch):
+def test_owner_change_at_transaction_boundary_refuses(tmp_path, receipt_seed, monkeypatch):
     from graph_works_core.orchestrate import finish_receipt
 
-    layout, repos = setup(tmp_path)
+    layout, repos = setup(tmp_path, receipt_seed)
     merge_all(repos)
     original = finish_receipt.apply_mutation
 
@@ -237,10 +268,10 @@ def test_owner_change_at_transaction_boundary_refuses(tmp_path, monkeypatch):
     assert not receipt_path(layout).exists()
 
 
-def test_advance_rechecks_evidence_at_transaction_boundary(tmp_path, monkeypatch):
+def test_advance_rechecks_evidence_at_transaction_boundary(tmp_path, receipt_seed, monkeypatch):
     from graph_works_core.orchestrate import stage_advance
 
-    layout, repos = setup(tmp_path)
+    layout, repos = setup(tmp_path, receipt_seed)
     merge_all(repos)
     record(layout, "code")
     record(layout, "ui")
@@ -256,8 +287,8 @@ def test_advance_rechecks_evidence_at_transaction_boundary(tmp_path, monkeypatch
     assert load_items(load_bundle(layout.bundle_dir))[0].phase == "finish"
 
 
-def test_foreign_only_owner_resolves_to_first_verified_entry(tmp_path):
-    layout, repos = setup(tmp_path)
+def test_foreign_only_owner_resolves_to_first_verified_entry(tmp_path, receipt_seed):
+    layout, repos = setup(tmp_path, receipt_seed)
     page = layout.bundle_dir / (OWNER + ".md")
     page.write_bytes(page.read_bytes().replace(f"worktree: {repos['code'][1]}\nbranch: feature\n".encode(), b""))
     git(repos["ui"][0], "merge", "feature")
@@ -270,8 +301,8 @@ def test_foreign_only_owner_resolves_to_first_verified_entry(tmp_path):
     assert advance(layout, verified.resolved_in, dry_run=False).outcome.written
 
 
-def test_resolved_in_mismatch_and_release_date_remain_gates(tmp_path):
-    layout, repos = setup(tmp_path)
+def test_resolved_in_mismatch_and_release_date_remain_gates(tmp_path, receipt_seed):
+    layout, repos = setup(tmp_path, receipt_seed)
     merge_all(repos)
     record(layout, "code")
     record(layout, "ui")
@@ -282,10 +313,10 @@ def test_resolved_in_mismatch_and_release_date_remain_gates(tmp_path):
     assert advance(layout, sha, dry_run=True).outcome.plan.refusal == "released-at-required"
 
 
-def test_receipt_stamp_or_configuration_race_refuses(tmp_path, monkeypatch):
+def test_receipt_stamp_or_configuration_race_refuses(tmp_path, receipt_seed, monkeypatch):
     from graph_works_core.orchestrate import finish_receipt
 
-    layout, repos = setup(tmp_path)
+    layout, repos = setup(tmp_path, receipt_seed)
     merge_all(repos)
     original = finish_receipt.apply_mutation
 
@@ -298,8 +329,8 @@ def test_receipt_stamp_or_configuration_race_refuses(tmp_path, monkeypatch):
     assert not receipt_path(layout).exists()
 
 
-def test_unknown_and_wrong_phase_are_refusals(tmp_path):
-    layout, _ = setup(tmp_path)
+def test_unknown_and_wrong_phase_are_refusals(tmp_path, receipt_seed):
+    layout, _ = setup(tmp_path, receipt_seed)
     assert record(layout, "missing").refusal
     assert run_record_finish(layout, "work/epic-missing", repo_name="code", today=TODAY).refusal
     assert not inspect_finish(layout, "work/epic-missing").complete
@@ -308,8 +339,8 @@ def test_unknown_and_wrong_phase_are_refusals(tmp_path):
     assert record(layout, "code").refusal
 
 
-def test_squash_is_rediscovered_as_integration(tmp_path):
-    layout, repos = setup(tmp_path)
+def test_squash_is_rediscovered_as_integration(tmp_path, receipt_seed):
+    layout, repos = setup(tmp_path, receipt_seed)
     repo, source = repos["code"]
     (source / "change.txt").write_text("content", encoding="utf-8")
     git(source, "add", "change.txt")
@@ -320,10 +351,10 @@ def test_squash_is_rediscovered_as_integration(tmp_path):
     assert "strategy: squash\n" in receipt_path(layout).read_text(encoding="utf-8")
 
 
-def test_receipt_and_stamp_preimage_races_refuse(tmp_path, monkeypatch):
+def test_receipt_and_stamp_preimage_races_refuse(tmp_path, receipt_seed, monkeypatch):
     from graph_works_core.orchestrate import finish_receipt
 
-    layout, repos = setup(tmp_path)
+    layout, repos = setup(tmp_path, receipt_seed)
     merge_all(repos)
     assert record(layout, "code").changed
     original = finish_receipt.apply_mutation
@@ -347,10 +378,10 @@ def test_receipt_and_stamp_preimage_races_refuse(tmp_path, monkeypatch):
     assert record(layout, "ui").refusal
 
 
-def test_malformed_entry_and_unexpected_repository_are_not_overwritten(tmp_path):
+def test_malformed_entry_and_unexpected_repository_are_not_overwritten(tmp_path, receipt_seed):
     from okf_io import parse
 
-    layout, repos = setup(tmp_path)
+    layout, repos = setup(tmp_path, receipt_seed)
     merge_all(repos)
     record(layout, "code")
     receipt = receipt_path(layout)
@@ -372,11 +403,11 @@ def test_malformed_entry_and_unexpected_repository_are_not_overwritten(tmp_path)
         assert receipt.read_bytes() == raw
 
 
-def test_invalid_commit_config_rejects_valid_finish_before_lock_and_preserves_preview(tmp_path):
+def test_invalid_commit_config_rejects_valid_finish_before_lock_and_preserves_preview(tmp_path, receipt_seed):
     import pytest
     from graph_works_core.workspace.errors import WorkspaceError
 
-    layout, repos = setup(tmp_path)
+    layout, repos = setup(tmp_path, receipt_seed)
     git(repos["code"][0], "merge", "feature")
     git(repos["ui"][0], "merge", "feature")
     layout.local_manifest_path.write_text("workflow:\n  workspace_commits: invalid\n", encoding="utf-8", newline="\n")
@@ -389,8 +420,8 @@ def test_invalid_commit_config_rejects_valid_finish_before_lock_and_preserves_pr
     assert preview.outcome.plan.refusal == "finish-incomplete"
 
 
-def test_first_v2_write_upgrades_a_v1_receipt_without_rewriting_other_entries(tmp_path):
-    layout, repos = setup(tmp_path)
+def test_first_v2_write_upgrades_a_v1_receipt_without_rewriting_other_entries(tmp_path, receipt_seed):
+    layout, repos = setup(tmp_path, receipt_seed)
     git(repos["code"][0], "merge", "feature")
     code_source = git(repos["code"][0], "rev-parse", "refs/heads/feature")
     code_tip = git(repos["code"][0], "rev-parse", "refs/heads/main")
@@ -411,3 +442,21 @@ def test_first_v2_write_upgrades_a_v1_receipt_without_rewriting_other_entries(tm
     text = receipt_path(layout).read_text(encoding="utf-8")
     assert "receipt_version: 2\n" in text and code_lines in text
     assert inspect_finish(layout, OWNER).complete
+
+
+def test_copied_worktree_is_detached_from_seed(tmp_path, receipt_seed):
+    _, repos = setup(tmp_path, receipt_seed)
+    repo, worktree = repos["code"]
+    common = Path(git(worktree, "rev-parse", "--path-format=absolute", "--git-common-dir"))
+    assert common.resolve() == (repo / ".git").resolve()
+    seed_head = git(receipt_seed.root / "code-source", "rev-parse", "HEAD")
+    git(worktree, "commit", "--allow-empty", "-m", "private")
+    assert git(receipt_seed.root / "code-source", "rev-parse", "HEAD") == seed_head
+    listed = [Path(line.split()[0]).resolve() for line in git(repo, "worktree", "list").splitlines()]
+    assert (tmp_path / "code-source").resolve() in listed
+
+
+def test_receipt_copy_contains_no_seed_path(tmp_path, receipt_seed):
+    setup(tmp_path, receipt_seed)
+    for needle in {str(receipt_seed.root), str(receipt_seed.root.resolve())}:
+        assert files_containing(tmp_path, needle) == []

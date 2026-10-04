@@ -4,6 +4,7 @@ sides of every None/non-None branch the projections take."""
 from __future__ import annotations
 
 from collections.abc import Callable
+from dataclasses import replace
 from datetime import date
 from pathlib import Path
 from types import MappingProxyType
@@ -13,8 +14,8 @@ from graph_works_core.orchestrate.accept_integration import AcceptIntegrationRes
 from graph_works_core.orchestrate.asks import AskAnswerResult, AskResult
 from graph_works_core.orchestrate.dispatch import DispatchFailure, DispatchResult, ObservedPlacement
 from graph_works_core.orchestrate.dispatch_record import Overrides
-from graph_works_core.orchestrate.gate import GateCheckResult, GateRunResult, GateWaitResult
-from graph_works_core.orchestrate.gate_receipts import GateMatch, GateRun
+from graph_works_core.orchestrate.gate import GateCheckResult, GateRunResult, GateWaitResult, NotifyResult, PlannedUnit
+from graph_works_core.orchestrate.gate_receipts import GateEvidence, GateRun, UnitEvidence
 from graph_works_core.orchestrate.integrate import IntegrateResult
 from graph_works_core.orchestrate.merge_workspace import MergeWorkspaceResult
 from graph_works_core.orchestrate.placement import ReaderRecord
@@ -155,13 +156,34 @@ GATE_RUN = GateRun(
     "2026-09-28T12:00:00Z",
     1.0,
 )
-GATE_MATCH = GateMatch("work/other", GATE_RUN)
-GATE_RUN_STARTED = GateRunResult("started", None, "", GATE_RUN.run_id, None, "just check", ("a",), "/l", ("w",))
+GATE_MATCH = GateEvidence("work/other", GATE_RUN.run_id, (UnitEvidence("a", "1" * 64, "work/x", "r0"),))
+GATE_RUN_STARTED = GateRunResult(
+    "started",
+    None,
+    "",
+    GATE_RUN.run_id,
+    None,
+    "just check",
+    ("a",),
+    "/l",
+    ("w",),
+    units=(
+        PlannedUnit("a", "1" * 64, True, None),
+        PlannedUnit("b", "2" * 64, False, UnitEvidence("b", "2" * 64, "work/x", "r0")),
+    ),
+    stale=("a",),
+)
+GATE_RUN_NOTIFIED = replace(GATE_RUN_STARTED, notify=NotifyResult(True, "term_a", None))
+GATE_RUN_UNNOTIFIED = replace(GATE_RUN_STARTED, notify=NotifyResult(False, None, "no-terminal"))
 GATE_RUN_REFUSED = GateRunResult(None, "dirty-tree", "d", None, None, None, (), None, ())
-GATE_WAIT_FINISHED = GateWaitResult("finished", None, "", GATE_RUN.run_id, 0, True, "/l", "tail", "/r.md")
+GATE_WAIT_FINISHED = GateWaitResult(
+    "finished", None, "", GATE_RUN.run_id, 0, True, "/l", "tail", "/r.md", units=(("a", 0),), repo_wide_exit=0
+)
+GATE_RUN_QUEUED = GateRunResult("queued", None, "", GATE_RUN.run_id, None, "just check", ("a",), "/l", (), position=2)
+GATE_WAIT_QUEUED = GateWaitResult("queued", None, "", GATE_RUN.run_id, None, False, "/l", None, None, position=2)
 GATE_WAIT_REFUSED = GateWaitResult(None, "no-run", "d", None, None, False, None, None, None)
 GATE_CHECK_SATISFIED = GateCheckResult("satisfied", None, "", GATE_MATCH, "b" * 40, ())
-GATE_CHECK_UNSATISFIED = GateCheckResult("unsatisfied", None, "no receipt", None, "b" * 40, ("w",))
+GATE_CHECK_UNSATISFIED = GateCheckResult("unsatisfied", None, "no receipt", None, "b" * 40, ("w",), stale=("a",))
 
 
 def advance(*, applied: bool, bypass: bool = False) -> object:
@@ -191,7 +213,7 @@ def advance(*, applied: bool, bypass: bool = False) -> object:
         gate_bypass=ns(code="no-start-sha", reason="r", actor="pat", detail="d", decision_id="D-001")
         if bypass
         else None,
-        gate_receipt=ns(owner="work/other", run=ns(run_id="20260928T120000Z-0a1b2c3d")) if bypass else None,
+        gate_receipt=GATE_MATCH if bypass else None,
     )
 
 
@@ -584,6 +606,14 @@ WORK: dict[str, tuple[Callable[[], object], ...]] = {
                     {
                         "key": "work/a#execute",
                         "handle": "ctx_1",
+                        "terminal": "term_a",
+                        "gate_wait": {
+                            "run_id": "r",
+                            "path": "work/a",
+                            "terminal": "term_a",
+                            "state": "running",
+                            "resume_line": None,
+                        },
                         "state": "running",
                         "heartbeat_at": "2026-09-27T12:00:00Z",
                         "heartbeat_age_s": 90,
@@ -628,11 +658,15 @@ WORK: dict[str, tuple[Callable[[], object], ...]] = {
     ),
     "work.gate_run_payload": (
         lambda: work.gate_run_payload(GATE_RUN_STARTED, "work/a"),
+        lambda: work.gate_run_payload(GATE_RUN_NOTIFIED, "work/a"),
+        lambda: work.gate_run_payload(GATE_RUN_UNNOTIFIED, "work/a"),
         lambda: work.gate_run_payload(GATE_RUN_REFUSED, "work/a"),
+        lambda: work.gate_run_payload(GATE_RUN_QUEUED, "work/a"),
     ),
     "work.gate_wait_payload": (
         lambda: work.gate_wait_payload(GATE_WAIT_FINISHED, "work/a"),
         lambda: work.gate_wait_payload(GATE_WAIT_REFUSED, "work/a"),
+        lambda: work.gate_wait_payload(GATE_WAIT_QUEUED, "work/a"),
     ),
     "work.gate_check_payload": (
         lambda: work.gate_check_payload(GATE_CHECK_SATISFIED, "work/a"),

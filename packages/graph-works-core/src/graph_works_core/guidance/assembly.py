@@ -46,6 +46,7 @@ from graph_works_core.workspace.repos import declared_repositories
 
 __all__ = [
     "CUT_WARNING",
+    "EPIC_TYPES",
     "GUIDANCE_TOKEN_BUDGET",
     "MISSING_ANSWER_WARNING",
     "SKIPPED_CLAIMS_WARNING",
@@ -57,6 +58,7 @@ __all__ = [
     "assemble_guidance",
     "build_guidance",
     "claim_candidates",
+    "covered_epic",
     "ledger_candidates",
     "section_candidates",
     "write_guidance",
@@ -236,6 +238,25 @@ def affects_overlap(a: Sequence[str], b: Sequence[str]) -> bool:
     return any(_related(x, y) for x in left for y in right)
 
 
+EPIC_TYPES: Final = frozenset({"Epic", "Release"})
+
+
+def covered_epic(items: Sequence[WorkItem], item: WorkItem) -> WorkItem | None:
+    """The nearest ancestor of *item* typed Epic or Release, or None.
+
+    This is the epic whose answered decisions the `epic_brief` carried-context
+    slot (`graph_works_core.work.epic_brief`) carries inline, so stream 3 skips
+    its ledger. It lives here, not in the brief's module, because `guidance`
+    sits below `work` in the layer contract. `ancestor_paths` is root-first.
+    """
+    index = {other.path: other for other in items}
+    for path in reversed(item.ancestor_paths):
+        ancestor = index.get(path)
+        if ancestor is not None and ancestor.type in EPIC_TYPES:
+            return ancestor
+    return None
+
+
 def ledger_candidates(
     bundle_root: Path, items: Sequence[WorkItem], item: WorkItem, *, fallback_repo: str | None = None
 ) -> tuple[list[Candidate], tuple[str, ...]]:
@@ -248,10 +269,16 @@ def ledger_candidates(
     that inherits its parent's `repo:` counts, and the overlap agrees with the
     closure's repository resolution. Propagates `OSError` / `UnicodeDecodeError` from a
     ledger read; `assemble_guidance` drops the stream on those.
+
+    The nearest Epic/Release ancestor's ledger is skipped (`covered_epic`): the
+    `epic_brief` carried-context slot carries its answered entries inline, unbudgeted.
     """
+    covered = covered_epic(items, item)
+    skip = covered.path if covered is not None else None
     why: dict[str, str] = {item.path: "own ledger"}
     for ancestor in reversed(item.ancestor_paths):
-        why.setdefault(ancestor, "ancestor ledger")
+        if ancestor != skip:
+            why.setdefault(ancestor, "ancestor ledger")
     index = item_index(tuple(items))
 
     def resolved(x: WorkItem) -> str | None:
@@ -262,6 +289,7 @@ def ledger_candidates(
         other.path
         for other in items
         if other.path not in why
+        and other.path != skip
         and not other.archived
         and other.work_status not in TERMINAL_STATUSES
         and resolved(other) == repo

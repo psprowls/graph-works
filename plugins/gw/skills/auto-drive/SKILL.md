@@ -998,10 +998,12 @@ heartbeat-only or absorbed-only delivery is acked by the verb itself.
 - **On `status: timeout`, triage from `liveness[]`**, one row per still-live
   dispatch, instead of a per-dispatch `worker-show` sweep. Rows carry facts
   (`key`, `handle`, `state`, heartbeat/transcript/output instants and ages,
-  `worktree_path`, `progress`, `notes[]`), never a verdict. A `failed` or
+  `worktree_path`, `progress`, `notes[]`, `terminal`, `gate_wait`), never a verdict. A `failed` or
   `stopped` row → failure flow (§4.2), then continue to the pending display
   below. A `worker-show failed` note or an unknown state enters inspection
-  without nudging. A `ready`/`running` row → before looping back into another
+  without nudging.
+  - **A row with a non-null `gate_wait` is decided by `gate_wait.state` first, before the probe.** `running`: the worker is parked on a gate (`gw work gate run --notify`); do not probe or nudge it, and print `waiting on gate <run_id>` as its progress line. `woken`: an ordinary live row. `wake_failed` or `orphaned`: the runner's wake did not land, so type the resume line yourself, once, with `orca terminal send --terminal <gate_wait.terminal> --text "<gate_wait.resume_line>" --enter --json`, print `resumed gate <run_id>`, and do not also probe that row this cycle; the worker's own `gate wait` then settles it, so the next timeout no longer reports it. A null `gate_wait` is an ordinary row.
+  Any other `ready`/`running` row → before looping back into another
   wait, run §3's **Manual ordered probe** on that dispatch, unchanged: it
   takes its own fresh reads and keeps its heartbeat veto. An `attend` dispatch
   may legitimately be waiting on a dialog, while an unsent prompt can report
@@ -1185,7 +1187,7 @@ paths, which relaunch an existing Task; new dispatches do not use them.
 
 ### Gates
 
-The coordinator runs no gates. Workers gate through `gw work gate run` and `gw work gate wait`; gw records the receipt. A worker resumed after a crash or park calls `gw work gate wait <work-path>` before anything else, so an in-flight run is reused rather than restarted. An advance refused `no-gate-receipt` or `no-gate-configured` reaches the human through the same skip-gate question as every other fail-closed gate refusal: the human either answers with `--skip-gate <code> --reason "…"` or sends the worker back to run the gate (or to have `repositories.<name>.gate.full` configured).
+The coordinator runs no gates. Workers gate through `gw work gate run` and `gw work gate wait`; gw records the receipt. A worker resumed after a crash or park calls `gw work gate wait <work-path>` before anything else, so an in-flight run is reused rather than restarted. An advance refused `no-gate-receipt` or `no-gate-configured` reaches the human through the same skip-gate question as every other fail-closed gate refusal: the human either answers with `--skip-gate <code> --reason "…"` or sends the worker back to run the gate (or to have `repositories.<name>.gate.full` configured). A worker parked on `gw work gate run --notify` is woken by the runner; §2.7's `gate_wait` rule keeps the coordinator from nudging it.
 
 ## 4. Delivery processing
 

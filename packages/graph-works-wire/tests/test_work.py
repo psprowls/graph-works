@@ -989,7 +989,14 @@ def test_reader_receipt_payload_freezes_attempt_and_outcome_fields() -> None:
 def test_wait_liveness_preserves_empty_populated_and_uncomputed():
     from graph_works_core.orchestrate.wait import WaitResult
 
-    for rows in (None, [], [{"handle": "ctx_1", "progress": None, "notes": ["no SDD ledger"]}]):
+    resume = "Gate run r for work/a finished (exit 0). Run gw work gate wait work/a --run r, then continue the stage."
+    gate_wait = {"run_id": "r", "path": "work/a", "terminal": "term_a", "state": "wake_failed", "resume_line": resume}
+    for rows in (
+        None,
+        [],
+        [{"handle": "ctx_1", "progress": None, "notes": ["no SDD ledger"]}],
+        [{"handle": "ctx_1", "terminal": "term_a", "gate_wait": gate_wait}],
+    ):
         result = WaitResult(
             status="event" if rows is None else "timeout",
             run_id="run_1",

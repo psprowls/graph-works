@@ -462,8 +462,12 @@ class OrcaCliPort:
             truncated = truncated or inbox_truncated(inbox)
         return join_pending_questions(questions, worker_states=states, replied=replied, truncated=truncated)
 
+    def terminal_send_text(self, terminal: str, text: str) -> None:
+        """Type *text* and Enter into a live terminal: a prompt for an idle agent, queued for a busy one."""
+        self._call_top(("terminal", "send", "--terminal", terminal, "--text", text, "--enter"))
+
     def terminal_send_enter(self, terminal: str) -> None:
-        self._call_top(("terminal", "send", "--terminal", terminal, "--text", "", "--enter"))
+        self.terminal_send_text(terminal, "")
 
     def check_wait(self, run_id: str, *, types: str, timeout_ms: int, ack: str | None) -> OrcaDelivery:
         """One blocking check; optionally acknowledge the prior delivery in the same call."""

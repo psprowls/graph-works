@@ -12,10 +12,12 @@ or `on=` and never looks it up itself.
 
 from __future__ import annotations
 
+import dataclasses
 import json
 import sys
 import time
 from datetime import UTC, date, datetime
+from functools import partial
 from pathlib import Path
 from typing import Any, Never, cast
 
@@ -24,6 +26,7 @@ from graph_works_core.archive.commands import run_archive, stranded_warnings
 from graph_works_core.orchestrate.accept_integration import run_accept_integration
 from graph_works_core.orchestrate.commands import run_orchestrate
 from graph_works_core.orchestrate.dispatch import run_dispatch
+from graph_works_core.orchestrate.gate import gate_wait_facts
 from graph_works_core.orchestrate.integrate import run_integrate
 from graph_works_core.orchestrate.merge_workspace import run_merge_workspace
 from graph_works_core.orchestrate.placement import (
@@ -34,7 +37,7 @@ from graph_works_core.orchestrate.placement import (
 )
 from graph_works_core.orchestrate.reroute import run_reroute
 from graph_works_core.orchestrate.stage_advance import ExpectedPhase, run_stage_advance
-from graph_works_core.orchestrate.wait import WaitClock, WaitFailed, run_wait
+from graph_works_core.orchestrate.wait import WAIT_FLOOR_S, WaitClock, WaitFailed, apply_wait_floor, run_wait
 from graph_works_core.orchestrate.workspace_prepare import run_prepare_workspace
 from graph_works_core.work import commands as work
 from graph_works_core.workspace.config import WorkspaceConfig, load_workspace_config
@@ -860,15 +863,26 @@ def wait(
         600.0,
         "--timeout-s",
         min=0,
-        help="Seconds before timeout; 0 reads pending questions only, without consuming or acknowledging deliveries.",
+        help=(
+            f"Seconds before timeout; values between 0 and {WAIT_FLOOR_S} are raised to {WAIT_FLOOR_S}; "
+            "0 reads pending questions only, without consuming or acknowledging deliveries."
+        ),
     ),
     workspace: str = typer.Option("", "--workspace", help="Workspace path."),
     json_output: bool = rendering.json_option("Emit the wait result as JSON."),
 ) -> None:
     """Wait for a real coordinator event; heartbeats and duplicate completions never wake it."""
-    resolve_workspace(workspace, json_mode=json_output, command="work wait")
+    layout = resolve_workspace(workspace, json_mode=json_output, command="work wait")
+    timeout_s, floor_warning = apply_wait_floor(timeout_s, exempt_zero=True, option="--timeout-s", default=600.0)
     try:
-        result = run_wait(orca_port(), run, ack=ack or None, timeout_s=timeout_s, clock=_wait_clock())
+        result = run_wait(
+            orca_port(),
+            run,
+            ack=ack or None,
+            timeout_s=timeout_s,
+            clock=_wait_clock(),
+            gate_waits=partial(gate_wait_facts, layout),
+        )
     except WaitFailed as exc:
         rendering.fail(
             f"work wait --run {run}: {exc}",
@@ -876,6 +890,8 @@ def wait(
             payload={"run_id": exc.run_id, "code": exc.code},
             cause=exc,
         )
+    if floor_warning is not None:
+        result = dataclasses.replace(result, warnings=(floor_warning, *result.warnings))
     payload = wire_work.wait_payload(result)
     if json_output:
         rendering.emit(payload)

@@ -41,8 +41,8 @@ from work_tracker_okf.results import render as render_results
 from work_tracker_okf.sources import upsert
 from work_tracker_okf.workflow import Blocker
 
-from graph_works_core.orchestrate import gate_git
-from graph_works_core.orchestrate.gate_receipts import GateMatch, find_satisfying
+from graph_works_core.orchestrate import gate_git, gate_units
+from graph_works_core.orchestrate.gate_receipts import GateEvidence, evaluate
 from graph_works_core.workspace import anchor, provenance
 from graph_works_core.workspace.bundle import load_workspace_bundle
 from graph_works_core.workspace.commits import WorkspaceCommit, commit_mode, item_stem
@@ -125,7 +125,7 @@ class StageAdvance:
     application: MutationApplication | None = None
     warnings: tuple[str, ...] = ()
     gate_bypass: GateBypass | None = None
-    gate_receipt: GateMatch | None = None
+    gate_receipt: GateEvidence | None = None
 
     @property
     def changed(self) -> bool:
@@ -547,7 +547,7 @@ def _advance(
     assert item is not None
     warnings: tuple[str, ...] = ()
     bypass: GateBypass | None = None
-    gate_receipt: GateMatch | None = None
+    gate_receipt: GateEvidence | None = None
     # D-014: the gate belongs to completing the stage that writes code; a path
     # without execute reaches finish ungated.
     completes_execute = old_phase == "execute" and outcome.plan.trigger == "complete" and new_phase != old_phase
@@ -928,7 +928,7 @@ class GateVerdict:
     detail: str = ""
     note: str | None = None
     root: Path | None = None
-    receipt: GateMatch | None = None
+    receipt: GateEvidence | None = None
 
 
 def _gate_placement(item: WorkItem, repo_name: str | None) -> tuple[str | None, str | None]:
@@ -1074,15 +1074,40 @@ def _receipt_gate(layout: WorkspaceLayout, item: WorkItem, root: Path, repo_name
         snap = gate_git.snapshot(root, git=git)
     except gate_git.GitUnavailable as exc:
         return GateVerdict("git-unavailable", str(exc))
-    lookup = find_satisfying(layout.bundle_dir, repo=repo_name, tree=snap.tree, command=gate.full)
-    if lookup.match is None:
+    try:
+        state = gate_units.resolve_unit_state(gate, root, snap.tree, git=git)
+        if gate.units is not None:
+            after = gate_git.snapshot(root, git=git)
+            if after.dirty:
+                return GateVerdict(
+                    "uncommitted-work", "manifest command left uncommitted changes: " + ", ".join(after.dirty)
+                )
+            if after.tree != snap.tree:
+                return GateVerdict(
+                    "git-unavailable", f"manifest command changed gated tree: expected {snap.tree}, found {after.tree}"
+                )
+    except gate_units.ManifestError as exc:
+        return GateVerdict(exc.reason, f"{repo_name}: {exc}")
+    except gate_git.GitUnavailable as exc:
+        return GateVerdict("git-unavailable", str(exc))
+    result = evaluate(
+        layout, repo=repo_name, tree=snap.tree, full_command=gate.full,
+        repo_wide_command=state.manifest.repo_wide, hashes=state.hashes,
+    )  # fmt: skip
+    if not result.satisfied or result.evidence is None:
+        missing: list[str] = []
+        if result.stale and not state.manifest.implicit:
+            missing.append(f"stale units: {', '.join(result.stale)}")
+        if not result.repo_wide_green:
+            missing.append("repo-wide checks not green on this tree")
+        what = "; ".join(missing) or f"no green `{gate.full}` receipt"
         return GateVerdict(
             "no-gate-receipt",
-            f"no green `{gate.full}` receipt for tree {snap.tree} in {repo_name}; run "
+            f"{what} for tree {snap.tree} in {repo_name}; run "
             f"`gw work gate run {item.path}` then `gw work gate wait {item.path}`",
         )
-    note = "; ".join((f"gate receipt: {lookup.match.owner} run {lookup.match.run.run_id}", *lookup.warnings))
-    return GateVerdict(None, note=note, receipt=lookup.match)
+    note = "; ".join((f"gate receipt: {result.evidence.owner} run {result.evidence.run_id}", *result.warnings))
+    return GateVerdict(None, note=note, receipt=result.evidence)
 
 
 def _effective_start_sha(

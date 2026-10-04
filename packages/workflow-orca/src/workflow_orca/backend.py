@@ -562,6 +562,7 @@ class OrcaSession:
             worktree_path=worktree_path,
             progress=progress,
             notes=tuple(notes),
+            terminal=self._agent_terminal(handle),
         )
 
     def _transcript_stamp(self, handle: str, now: datetime, notes: list[str]) -> tuple[str | None, int | None]:

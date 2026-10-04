@@ -7,6 +7,8 @@ anything real is returned unacked, and the caller acks it on its next wait (`ack
 The verb observes liveness only on timeout, never nudges, and never reads the clock:
 `WaitClock` is injected. Wall-minus-monotonic elapsed time is the time the host
 slept, because both macOS and Linux monotonic clocks exclude suspend.
+On timeout it can join each liveness row to a gate wait derived from the gate run
+index (`gate_waits`, injected), so a parked worker reads as waiting.
 """
 
 from __future__ import annotations
@@ -30,6 +32,10 @@ from graph_works_core.orchestrate.orca_port import (
 
 REAL_TYPES: tuple[str, ...] = ("worker_done", "escalation", "question")
 SLEEP_GAP_FLOOR_S = 60
+#: The shortest blocking wait either wait verb honours (epic D-011, D-015): about
+#: 60 s of tool time for an agent whose yield caps at 60 s, once CLI start-up is
+#: counted. The verbs cannot see the calling agent, so the lower floor is the one value.
+WAIT_FLOOR_S = 55
 _FENCED = "consumer_fenced"
 _SETTLED = frozenset({"succeeded", "failed", "stopped"})
 _REASON = "duplicate-completion"
@@ -73,6 +79,20 @@ class WaitFailed(RuntimeError):
         self.run_id = run_id
         self.code = code
         super().__init__(detail)
+
+
+def apply_wait_floor(requested: float, *, exempt_zero: bool, option: str, default: float) -> tuple[float, str | None]:
+    """Raise *requested* to `WAIT_FLOOR_S`, returning the effective timeout and a warning.
+
+    A short poll is clamped, never refused: a refusal is one more round trip the caller
+    retries around (D-015). `exempt_zero` keeps 0 as a non-blocking read where a verb
+    defines one.
+    """
+    if requested >= WAIT_FLOOR_S or (exempt_zero and requested == 0):
+        return requested, None
+    return float(WAIT_FLOOR_S), (
+        f"{option} {requested:g} raised to the {WAIT_FLOOR_S} s wait floor; the default is {default:g}"
+    )
 
 
 class _Fence:
@@ -165,7 +185,34 @@ def _pending_questions(port: OrcaPort, run_id: str) -> tuple[tuple[OrcaPendingQu
     return tuple(read["questions"]), tuple(warnings)
 
 
-def run_wait(port: OrcaPort, run_id: str, *, ack: str | None, timeout_s: float, clock: WaitClock) -> WaitResult:
+GateWaits = Callable[[datetime], Mapping[str, Mapping[str, Any]]]
+
+
+def _with_gate_waits(
+    rows: list[dict[str, Any]], gate_waits: GateWaits, now: datetime
+) -> tuple[list[dict[str, Any]], tuple[str, ...]]:
+    """Attach each row's gate wait, joined on its agent `terminal` (D-005). Facts only."""
+    try:
+        facts = gate_waits(now)
+    except (OSError, ValueError) as exc:
+        return [{**row, "gate_wait": None} for row in rows], (f"gate waits unavailable: {exc}",)
+    joined = []
+    for row in rows:
+        terminal = row.get("terminal")
+        fact = facts.get(terminal) if isinstance(terminal, str) else None
+        joined.append({**row, "gate_wait": dict(fact) if fact is not None else None})
+    return joined, ()
+
+
+def run_wait(
+    port: OrcaPort,
+    run_id: str,
+    *,
+    ack: str | None,
+    timeout_s: float,
+    clock: WaitClock,
+    gate_waits: GateWaits | None = None,
+) -> WaitResult:
     if timeout_s < 0:
         raise ValueError(f"timeout_s must be non-negative, got {timeout_s!r}")
     fence = _Fence(port, run_id)
@@ -215,6 +262,9 @@ def run_wait(port: OrcaPort, run_id: str, *, ack: str | None, timeout_s: float, 
         liveness = port.liveness(run_id, now=now) if status == "timeout" and timeout_s > 0 else None
     except BackendError as exc:
         raise WaitFailed(run_id, getattr(exc, "code", None), str(exc)) from exc
+    gate_warnings: tuple[str, ...] = ()
+    if liveness is not None and gate_waits is not None:
+        liveness, gate_warnings = _with_gate_waits(liveness, gate_waits, now)
     pending_questions, warnings = _pending_questions(port, run_id)
     return WaitResult(
         status=status,
@@ -228,5 +278,5 @@ def run_wait(port: OrcaPort, run_id: str, *, ack: str | None, timeout_s: float, 
         waited_s=int(mono_elapsed),
         liveness=liveness,
         pending_questions=pending_questions,
-        warnings=warnings,
+        warnings=gate_warnings + warnings,
     )

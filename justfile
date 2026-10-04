@@ -81,39 +81,22 @@ lint:
 # `--platform` overrides `[tool.mypy] platform` in pyproject.toml.
 #
 # Depends on `sync`: this is the recipe that fails without it.
+#
+# The 32 unit x arm jobs run concurrently (`GW_TYPES_JOBS`, default: host CPU
+# count), each with its own `--cache-dir .mypy_cache/<arm>/<unit>`: a shared
+# cache made the two arms invalidate each other every run, and concurrent mypy
+# processes must never share one. Each job stays its own `uv run --package`
+# so an undeclared import still fails. The unit table is
+# `scripts/package_units.py`; output is buffered per job and prefixed
+# `[<arm>/<unit>]`.
 types: sync
-    uv run mypy --strict --platform linux packages/okf-io/src packages/okf-ext/src
-    uv run --package code-graph-io mypy --strict --platform linux packages/code-graph-io/src
-    uv run --package code-wiki-okf mypy --strict --platform linux packages/code-wiki-okf/src
-    uv run --package work-tracker-okf mypy --strict --platform linux packages/work-tracker-okf/src
-    uv run --package config-io mypy --strict --platform linux packages/config-io/src
-    uv run --package plugin-fork-io mypy --strict --platform linux packages/plugin-fork-io/src
-    uv run --package models-io --extra bedrock --extra vercel mypy --strict --platform linux packages/models-io/src
-    uv run --package subagents-io mypy --strict --platform linux packages/subagents-io/src
-    uv run --package doc-wiki-okf mypy --strict --platform linux packages/doc-wiki-okf/src
-    uv run --package repositories-okf mypy --strict --platform linux packages/repositories-okf/src
-    uv run --package graph-works-core mypy --strict --platform linux packages/graph-works-core/src
-    uv run --package workflow-local mypy --strict --platform linux packages/workflow-local/src
-    uv run --package workflow-orca mypy --strict --platform linux packages/workflow-orca/src
-    uv run --package graph-works-wire mypy --strict --platform linux packages/graph-works-wire/src
-    uv run --package graph-works-cli mypy --strict --platform linux packages/graph-works-cli/src
-    uv run --package graph-works-serve mypy --strict --platform linux packages/graph-works-serve/src
-    uv run mypy --strict --platform win32 packages/okf-io/src packages/okf-ext/src
-    uv run --package code-graph-io mypy --strict --platform win32 packages/code-graph-io/src
-    uv run --package code-wiki-okf mypy --strict --platform win32 packages/code-wiki-okf/src
-    uv run --package work-tracker-okf mypy --strict --platform win32 packages/work-tracker-okf/src
-    uv run --package config-io mypy --strict --platform win32 packages/config-io/src
-    uv run --package plugin-fork-io mypy --strict --platform win32 packages/plugin-fork-io/src
-    uv run --package models-io --extra bedrock --extra vercel mypy --strict --platform win32 packages/models-io/src
-    uv run --package subagents-io mypy --strict --platform win32 packages/subagents-io/src
-    uv run --package doc-wiki-okf mypy --strict --platform win32 packages/doc-wiki-okf/src
-    uv run --package repositories-okf mypy --strict --platform win32 packages/repositories-okf/src
-    uv run --package graph-works-core mypy --strict --platform win32 packages/graph-works-core/src
-    uv run --package workflow-local mypy --strict --platform win32 packages/workflow-local/src
-    uv run --package workflow-orca mypy --strict --platform win32 packages/workflow-orca/src
-    uv run --package graph-works-wire mypy --strict --platform win32 packages/graph-works-wire/src
-    uv run --package graph-works-cli mypy --strict --platform win32 packages/graph-works-cli/src
-    uv run --package graph-works-serve mypy --strict --platform win32 packages/graph-works-serve/src
+    #!/usr/bin/env bash
+    set -euo pipefail
+    jobs="${GW_TYPES_JOBS:-$(uv run python -c 'import os; print(os.cpu_count() or 1)')}"
+    list=$(mktemp)
+    trap 'rm -f "$list"' EXIT
+    uv run python scripts/package_units.py mypy-jobs > "$list"
+    xargs -P "$jobs" -L 1 bash -c 'label=$1; shift; if out=$("$@" 2>&1); then st=0; else st=$?; fi; printf "%s\n" "$out" | sed "s|^|[$label] |"; exit "$st"' _ < "$list"
 
 # Internal package boundaries (okf-ext README, "Boundaries"). Opt-in until CI
 # exists: nothing enforces this but the person who runs it.
@@ -269,72 +252,89 @@ _cov-workflow-local:
 #
 # PKG is the package directory name under `packages/` (e.g. `code-graph-io`).
 # `okf-io` and `okf-ext` share one root suite, so either name runs both.
+# Units, paths and floors come from scripts/package_units.py; both type arms run concurrently with the same per-arm caches `types` uses.
 check-pkg PKG: preflight sync
+    just _check-pkg-body {{PKG}}
+
+# `check-pkg`'s body, without `preflight`/`sync`: `check-affected` runs it per unit after one sync.
+_check-pkg-body PKG:
     #!/usr/bin/env bash
     set -euo pipefail
-    case "{{PKG}}" in
-      okf-io|okf-ext)
-        MODULES="--cov=okf_io --cov=okf_ext"; SRC="packages/okf-io/src packages/okf-ext/src"
-        TESTPATH=""; PKGFLAG=""; FLOOR=95; EXTRA="" ;;
-      code-graph-io)
-        MODULES="--cov=code_graph_io"; SRC="packages/code-graph-io/src"
-        TESTPATH="packages/code-graph-io/tests"; PKGFLAG="--package code-graph-io"; FLOOR=90; EXTRA="" ;;
-      code-wiki-okf)
-        MODULES="--cov=code_wiki_okf"; SRC="packages/code-wiki-okf/src"
-        TESTPATH="packages/code-wiki-okf/tests"; PKGFLAG="--package code-wiki-okf"; FLOOR=95; EXTRA="" ;;
-      work-tracker-okf)
-        MODULES="--cov=work_tracker_okf"; SRC="packages/work-tracker-okf/src"
-        TESTPATH="packages/work-tracker-okf/tests"; PKGFLAG="--package work-tracker-okf"; FLOOR=95; EXTRA="" ;;
-      config-io)
-        MODULES="--cov=config_io"; SRC="packages/config-io/src"
-        TESTPATH="packages/config-io/tests"; PKGFLAG="--package config-io"; FLOOR=95; EXTRA="" ;;
-      plugin-fork-io)
-        MODULES="--cov=plugin_fork_io"; SRC="packages/plugin-fork-io/src"
-        TESTPATH="packages/plugin-fork-io/tests"; PKGFLAG="--package plugin-fork-io"; FLOOR=95; EXTRA="" ;;
-      models-io)
-        MODULES="--cov=models_io"; SRC="packages/models-io/src"
-        TESTPATH="packages/models-io/tests"; PKGFLAG="--package models-io"; FLOOR=95; EXTRA="--extra bedrock --extra vercel" ;;
-      subagents-io)
-        MODULES="--cov=subagents_io"; SRC="packages/subagents-io/src"
-        TESTPATH="packages/subagents-io/tests"; PKGFLAG="--package subagents-io"; FLOOR=95; EXTRA="" ;;
-      doc-wiki-okf)
-        MODULES="--cov=doc_wiki_okf"; SRC="packages/doc-wiki-okf/src"
-        TESTPATH="packages/doc-wiki-okf/tests"; PKGFLAG="--package doc-wiki-okf"; FLOOR=95; EXTRA="" ;;
-      repositories-okf)
-        MODULES="--cov=repositories_okf"; SRC="packages/repositories-okf/src"
-        TESTPATH="packages/repositories-okf/tests"; PKGFLAG="--package repositories-okf"; FLOOR=95; EXTRA="" ;;
-      graph-works-core)
-        MODULES="--cov=graph_works_core"; SRC="packages/graph-works-core/src"
-        TESTPATH="packages/graph-works-core/tests"; PKGFLAG="--package graph-works-core"; FLOOR=95; EXTRA="" ;;
-      workflow-local)
-        MODULES="--cov=workflow_local"; SRC="packages/workflow-local/src"
-        TESTPATH="packages/workflow-local/tests"; PKGFLAG="--package workflow-local"; FLOOR=95; EXTRA="" ;;
-      workflow-orca)
-        MODULES="--cov=workflow_orca"; SRC="packages/workflow-orca/src"
-        TESTPATH="packages/workflow-orca/tests"; PKGFLAG="--package workflow-orca"; FLOOR=95; EXTRA="" ;;
-      graph-works-wire)
-        MODULES="--cov=graph_works_wire"; SRC="packages/graph-works-wire/src"
-        TESTPATH="packages/graph-works-wire/tests"; PKGFLAG="--package graph-works-wire"; FLOOR=95; EXTRA="" ;;
-      graph-works-cli)
-        MODULES="--cov=graph_works_cli"; SRC="packages/graph-works-cli/src"
-        TESTPATH="packages/graph-works-cli/tests"; PKGFLAG="--package graph-works-cli"; FLOOR=95; EXTRA="" ;;
-      graph-works-serve)
-        MODULES="--cov=graph_works_serve"; SRC="packages/graph-works-serve/src"
-        TESTPATH="packages/graph-works-serve/tests"; PKGFLAG="--package graph-works-serve"; FLOOR=95; EXTRA="" ;;
-      *)
-        echo "unknown package '{{PKG}}' -- see packages/ for valid names" >&2
-        exit 1 ;;
-    esac
-    LINT_PATH="packages/{{PKG}}"
-    echo "--- lint ($LINT_PATH)"
-    uv run ruff check "$LINT_PATH"
-    uv run ruff format --check "$LINT_PATH"
-    echo "--- types (linux)"
-    uv run $PKGFLAG $EXTRA mypy --strict --platform linux $SRC
-    echo "--- types (win32)"
-    uv run $PKGFLAG $EXTRA mypy --strict --platform win32 $SRC
+    # Assign first, then eval: `eval "$(cmd)"` would swallow cmd's failure.
+    vars=$(uv run python scripts/package_units.py env "{{PKG}}")
+    eval "$vars"
+    echo "--- lint ($LINT)"
+    uv run ruff check $LINT
+    uv run ruff format --check $LINT
+    just _unit-types-cov {{PKG}}
+
+# Both mypy arms then the cov-gated suite for one unit (no lint, no sync).
+_unit-types-cov PKG:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    vars=$(uv run python scripts/package_units.py env "{{PKG}}")
+    eval "$vars"
+    tmp=$(mktemp -d)
+    trap 'rm -rf "$tmp"' EXIT
+    pids=()
+    for arm in linux win32; do
+      uv run $UVFLAGS mypy --strict --platform "$arm" --cache-dir ".mypy_cache/$arm/$UNIT" $SRC > "$tmp/$arm.log" 2>&1 &
+      pids+=("$!")
+    done
+    status=0
+    for i in 0 1; do
+      arm=$([ "$i" = 0 ] && echo linux || echo win32)
+      if wait "${pids[$i]}"; then rc=0; else rc=$?; fi
+      echo "--- types ($arm)"
+      cat "$tmp/$arm.log"
+      [ "$rc" = 0 ] || status=1
+    done
+    [ "$status" = 0 ] || exit 1
     echo "--- cov"
-    COVERAGE_FILE=".coverage.{{PKG}}" uv run $PKGFLAG $EXTRA pytest $TESTPATH $MODULES --cov-branch --cov-report=term-missing --cov-fail-under=$FLOOR -n auto
+    COVERAGE_FILE=".coverage.$UNIT" uv run $UVFLAGS pytest $TESTPATH $MODULES --cov-branch --cov-report=term-missing --cov-fail-under=$FLOOR -n auto
+
+# The repo-wide half of `check`, as the gw gate's repo_wide step.
+gate-repo-wide: preflight sync normalization text-io line-endings platform-declared lint contracts
+
+# One gw gate unit; the plugin unit uses `test-plugin` directly.
+_gate-unit UNIT:
+    just _unit-types-cov {{UNIT}}
+
+# Change-scoped gate -- what a branch touched, and everything that depends on it.
+#
+# `scripts/affected_packages.py` maps `git diff <base>` plus untracked files to
+# package units and their reverse-dependency closure; BASE defaults to
+# `git merge-base HEAD main`. A path outside `packages/`, `plugins/` and
+# non-package `*.md` (justfile, scripts/, root pyproject, uv.lock, ...) runs
+# the full `just check`. Otherwise: the cheap repo-wide checks always,
+# `test-plugin` when `plugins/` changed, and `check-pkg` for each selected unit
+# (`GW_COV_JOBS` at once, CPUs split as in `cov`).
+#
+# Use this while iterating. The stage-boundary gate is still `gw work gate`
+# running the full `just check`.
+check-affected BASE="": preflight
+    #!/usr/bin/env bash
+    set -euo pipefail
+    BASE="{{BASE}}"
+    sel=$(uv run python scripts/affected_packages.py ${BASE:+--base "$BASE"})
+    printf '%s\n' "$sel"
+    mode=$(printf '%s\n' "$sel" | sed -n 's/^mode: //p')
+    plugin=$(printf '%s\n' "$sel" | sed -n 's/^plugin: //p')
+    units=$(printf '%s\n' "$sel" | sed -n 's/^unit: //p')
+    case "$mode" in
+      none) echo "nothing changed"; exit 0 ;;
+      full) exec just check ;;
+    esac
+    just sync normalization text-io line-endings platform-declared contracts
+    if [ "$plugin" = yes ]; then just test-plugin; fi
+    if [ -n "$units" ]; then
+      jobs="${GW_COV_JOBS:-3}"
+      ncpu=$(uv run python -c "import os; print(os.cpu_count() or 1)")
+      workers=$(( ncpu / jobs )); [ "$workers" -ge 1 ] || workers=1
+      export PYTEST_XDIST_AUTO_NUM_WORKERS="$workers"
+      # The body, not `check-pkg`: one exact sync up front; per-unit syncs would race extras.
+      printf '%s\n' "$units" | xargs -P "$jobs" -I{} just _check-pkg-body {}
+    fi
 
 # Everything CI will run. `cov` runs every suite, so `test` is not repeated.
 #

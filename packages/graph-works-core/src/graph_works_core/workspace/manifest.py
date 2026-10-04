@@ -180,6 +180,21 @@ CATALOG: tuple[ConfigEntry, ...] = (
         description="Scoped gate command template; must contain `{name}` (a matched root's basename), no other field.",
     ),
     ConfigEntry(
+        key="repositories.*.gate.units",
+        type="str",
+        default=None,
+        description=(
+            "Command printing this repository's gate-unit manifest as JSON (run in the gated worktree). "
+            "Absent means the whole tree is one unit running `gate.full`."
+        ),
+    ),
+    ConfigEntry(
+        key="repositories.*.gate.extra_inputs",
+        type="list[str]",
+        default=None,
+        description="Repository-relative globs folded into every gate unit's input hash.",
+    ),
+    ConfigEntry(
         key="ignore",
         type="list[str]",
         default=[],
@@ -275,6 +290,21 @@ CATALOG: tuple[ConfigEntry, ...] = (
             "Off by default: auto-drive answers `merge` itself for a non-root "
             "child whose merge target is its owner's own integration branch "
             "(never the release base, never a root's own finish)."
+        ),
+    ),
+    ConfigEntry(
+        key="workflow.gate.unit_jobs",
+        type="int",
+        default=None,
+        description="Per-machine cap on how many gate units one run executes at once (min with the manifest's jobs).",
+    ),
+    ConfigEntry(
+        key="workflow.gate.max_concurrent",
+        type="int",
+        default=None,
+        description=(
+            "How many `gw work gate` runs may execute at once on this machine; unset is unlimited. "
+            "Set per machine in workspace.local.yaml."
         ),
     ),
     ConfigEntry(

@@ -83,7 +83,7 @@ def test_event_json_is_the_wire_projection(env):
 
 def test_timeout_human_line(env):
     layout, _port = env
-    result = invoke(layout, "--timeout-s", "1")
+    result = invoke(layout, "--timeout-s", "55")
     assert result.exit_code == 0, result.output
     assert result.stdout.startswith("timeout after ")
 
@@ -228,7 +228,7 @@ def test_timeout_json_liveness_through_real_adapter(env, monkeypatch, live):
         raise AssertionError(argv)
 
     monkeypatch.setattr(main, "orca_port", lambda: OrcaCliPort(run=transport))
-    result = invoke(layout, "--timeout-s", "1", "--json")
+    result = invoke(layout, "--timeout-s", "55", "--json")
     assert result.exit_code == 0, result.output
     rows = json.loads(result.stdout)["liveness"]
     assert isinstance(rows, list)
@@ -237,6 +237,8 @@ def test_timeout_json_liveness_through_real_adapter(env, monkeypatch, live):
         assert set(row) == {
             "key",
             "handle",
+            "terminal",
+            "gate_wait",
             "state",
             "heartbeat_at",
             "heartbeat_age_s",
@@ -294,7 +296,7 @@ def test_timeout_liveness_pages_and_retries(env, monkeypatch, scenario):
         lambda: WaitClock(wall=lambda: datetime(2026, 9, 27, tzinfo=UTC), monotonic=lambda: next(ticks)),
     )
     monkeypatch.setattr(main, "orca_port", lambda: OrcaCliPort(run=transport))
-    result = invoke(layout, "--timeout-s", "1", "--json")
+    result = invoke(layout, "--timeout-s", "55", "--json")
     payload = json.loads(result.stdout)
     if scenario == "later-failure":
         assert result.exit_code == exit_codes.GENERIC
@@ -339,7 +341,7 @@ def test_zero_timeout_json_pending_questions_is_a_pure_read(env, ack):
 def test_pending_read_failure_human_warning(env):
     layout, port = env
     port.fail["pending_questions"] = BackendError("x")
-    result = invoke(layout, "--timeout-s", "1")
+    result = invoke(layout, "--timeout-s", "55")
     assert result.exit_code == 0, result.output
     assert result.output.splitlines() == [
         "timeout after 0s",
@@ -350,8 +352,63 @@ def test_pending_read_failure_human_warning(env):
 def test_pending_read_failure_json_is_null_with_warning(env):
     layout, port = env
     port.fail["pending_questions"] = BackendError("x")
-    result = invoke(layout, "--timeout-s", "1", "--json")
+    result = invoke(layout, "--timeout-s", "55", "--json")
     assert result.exit_code == 0, result.output
     payload = json.loads(result.stdout)
     assert payload["pending_questions"] is None
     assert payload["warnings"] == ["pending questions unavailable: x"]
+
+
+def test_short_timeout_is_clamped_with_a_warning(env):
+    layout, port = env
+    result = invoke(layout, "--timeout-s", "1", "--json")
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.stdout)
+    assert payload["warnings"][0] == "--timeout-s 1 raised to the 55 s wait floor; the default is 600"
+    budgets = [kwargs["timeout_ms"] for name, _a, kwargs in port.calls if name == "check_wait"]
+    assert budgets and budgets[0] > 1000
+
+
+def test_short_timeout_warning_prints_as_a_human_warning_line(env):
+    layout, _port = env
+    result = invoke(layout, "--timeout-s", "1")
+    assert "warning: --timeout-s 1 raised to the 55 s wait floor; the default is 600" in result.output.splitlines()
+
+
+def test_zero_timeout_is_never_clamped(env):
+    layout, port = env
+    result = invoke(layout, "--timeout-s", "0", "--json")
+    payload = json.loads(result.stdout)
+    assert payload["warnings"] == []
+    assert "check_wait" not in port.names()
+
+
+def test_wait_floor_is_named_in_the_help():
+    result = runner.invoke(app, ["work", "wait", "--help"])
+    assert "55" in result.stdout
+
+
+def test_timeout_rows_carry_gate_wait_from_this_workspace(env):
+    layout, port = env
+    from graph_works_core.orchestrate.gate import runs_dir
+
+    runs = runs_dir(layout)
+    runs.mkdir(parents=True)
+    rid = "20260928T120000Z-0a1b2c3d"
+    record = {
+        "schema": "gw-gate-run", "version": 2, "run_id": rid, "requesters": ["work/a"],
+        "started": "2026-09-28T12:00:00Z", "runner_started": True, "status": "running",
+        "result": {"exit": 0}, "recorded": True,
+        "waiters": [{"path": "work/a", "terminal": "term_a", "registered_at": "2026-09-28T12:00:00Z",
+                     "woken": {"status": "failed", "at": "2026-09-28T12:01:00Z", "detail": "x"}}],
+    }  # fmt: skip
+    (runs / f"{rid}.json").write_text(json.dumps(record), encoding="utf-8", newline="\n")
+    port.liveness = lambda run_id, *, now: [
+        {"handle": "ctx_1", "terminal": "term_a"},
+        {"handle": "ctx_2", "terminal": None},
+    ]
+    result = invoke(layout, "--timeout-s", "60", "--json")
+    assert result.exit_code == 0, result.output
+    rows = json.loads(result.stdout)["liveness"]
+    assert rows[0]["gate_wait"]["state"] == "wake_failed" and rows[0]["gate_wait"]["run_id"] == rid
+    assert rows[1]["gate_wait"] is None

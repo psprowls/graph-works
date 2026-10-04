@@ -24,11 +24,11 @@ from code_wiki_okf.config import load_config
 from graph_works_core.scan.commands import build_scan_worklist
 from okf_io import load_bundle
 from okf_io import validate as okf_validate
-from scan_helpers import AT, REPO_NAME, TODAY, make_workspace, seed_graph
+from scan_helpers import AT, REPO_NAME, TODAY, ScanSeed, make_workspace, seed_graph
 
 
-async def test_a_scan_leaves_no_broken_links_into_the_mirror_lane(tmp_path: Path) -> None:
-    layout, repo = make_workspace(tmp_path)
+async def test_a_scan_leaves_no_broken_links_into_the_mirror_lane(tmp_path: Path, scan_seed: ScanSeed) -> None:
+    layout, repo = make_workspace(tmp_path, scan_seed)
     config = load_config(
         layout.bundle_dir,
         config_path=layout.manifest_path,
@@ -44,8 +44,8 @@ async def test_a_scan_leaves_no_broken_links_into_the_mirror_lane(tmp_path: Path
     assert broken == (), "\n".join(f"{finding.path}: {finding.message}" for finding in broken)
 
 
-async def test_a_scan_writes_a_page_for_every_tracked_file(tmp_path: Path) -> None:
-    layout, repo = make_workspace(tmp_path)
+async def test_a_scan_writes_a_page_for_every_tracked_file(tmp_path: Path, scan_seed: ScanSeed) -> None:
+    layout, repo = make_workspace(tmp_path, scan_seed)
     config = load_config(
         layout.bundle_dir,
         config_path=layout.manifest_path,
@@ -61,12 +61,12 @@ async def test_a_scan_writes_a_page_for_every_tracked_file(tmp_path: Path) -> No
         assert (mirror_root / f"{tracked}.md").exists(), f"no mirror page for {tracked}"
 
 
-async def test_a_dry_run_writes_no_mirror_page(tmp_path: Path) -> None:
+async def test_a_dry_run_writes_no_mirror_page(tmp_path: Path, scan_seed: ScanSeed) -> None:
     """`sync_mirror(dry_run=True)` plans and writes nothing, and
     `build_scan_worklist(dry_run=True)` writes nothing at all -- the mirror
     lane must not be the one thing that leaks a write through a preview.
     """
-    layout, repo = make_workspace(tmp_path)
+    layout, repo = make_workspace(tmp_path, scan_seed)
     config = load_config(
         layout.bundle_dir,
         config_path=layout.manifest_path,

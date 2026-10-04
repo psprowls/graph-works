@@ -238,8 +238,8 @@ def _answered(n: int, q: str, answer: str | None = "Yes.") -> str:
     return f"## D-{n:03d} — {q}\nstatus: answered\n{prose}\n"
 
 
-def _ledger_world(root: Path):
-    _item(root, EPIC, type="Epic")
+def _ledger_world(root: Path, epic_type: str = "Feature"):
+    _item(root, EPIC, type=epic_type)
     _item(root, LEAF)
     _item(root, "work/feature-overlap", affects=("packages/a/sub/",))
     _item(root, "work/feature-other-repo", repo="ui")
@@ -256,6 +256,42 @@ def _ledger_world(root: Path):
     bundle = load_bundle(root, ignore=IGNORE)
     items = tuple(load_items(bundle))
     return bundle, items, next(i for i in items if i.path == LEAF)
+
+
+def test_the_covered_epic_ledger_is_skipped(tmp_path: Path) -> None:
+    bundle, items, leaf = _ledger_world(tmp_path, epic_type="Epic")
+    got, warnings = ga.ledger_candidates(bundle.root, items, leaf)
+    assert [(c.entry.path, c.entry.why) for c in got] == [
+        (f"/{LEAF}/references/00-decisions.md", "own ledger"),
+        ("/work/feature-overlap/references/00-decisions.md", "affects overlap with work/feature-overlap"),
+    ]
+    assert warnings == ()  # the missing-answer entry lived in the epic ledger
+
+
+def test_the_covered_epic_does_not_return_through_affects_overlap(tmp_path: Path) -> None:
+    _item(tmp_path, EPIC, type="Epic", affects=("packages/a",))  # non-terminal, overlapping affects
+    _item(tmp_path, LEAF)
+    _ledger(tmp_path, EPIC, _answered(1, "Epic?"))
+    bundle = load_bundle(tmp_path, ignore=IGNORE)
+    items = tuple(load_items(bundle))
+    leaf = next(i for i in items if i.path == LEAF)
+    got, _ = ga.ledger_candidates(bundle.root, items, leaf)
+    assert [c.entry.path for c in got] == []
+
+
+def test_an_outer_epic_above_the_covered_one_still_contributes(tmp_path: Path) -> None:
+    outer = "work/epic-o"
+    inner = f"{outer}/children/epic-i"
+    leaf_path = f"{inner}/children/feature-l"
+    _item(tmp_path, outer, type="Epic", affects=())
+    _item(tmp_path, inner, type="Epic", affects=())
+    _item(tmp_path, leaf_path)
+    _ledger(tmp_path, outer, _answered(1, "Outer?"))
+    _ledger(tmp_path, inner, _answered(1, "Inner?"))
+    bundle = load_bundle(tmp_path, ignore=IGNORE)
+    items = tuple(load_items(bundle))
+    got, _ = ga.ledger_candidates(bundle.root, items, next(i for i in items if i.path == leaf_path))
+    assert [(c.entry.path, c.entry.why) for c in got] == [(f"/{outer}/references/00-decisions.md", "ancestor ledger")]
 
 
 def test_ledgers_are_own_then_ancestors_then_overlapping_items(tmp_path: Path) -> None:

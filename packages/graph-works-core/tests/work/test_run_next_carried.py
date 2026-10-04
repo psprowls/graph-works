@@ -87,20 +87,42 @@ def test_shipped_registry_at_plan_reports_no_spec_baseline(tmp_path: Path) -> No
     _write(layout, CHILD)
     result = work.run_next(layout, CHILD)
     assert [(s.name, s.fill) for s in result.carried.slots] == [
+        ("epic_brief", SlotFill()),
         (
             "landed_since",
             SlotFill(
                 lines=("No spec baseline recorded; landed-since unavailable.",),
                 data={"code_baseline": None, "workspace_baseline": None},
             ),
-        )
+        ),
     ]
 
 
-def test_design_stage_carries_no_slot(tmp_path: Path) -> None:
+def test_design_stage_carries_only_an_empty_epic_brief_without_an_epic(tmp_path: Path) -> None:
     layout = _layout(tmp_path)
     _write(layout, CHILD, phase="design")
-    assert work.run_next(layout, CHILD).carried == CarriedContext()
+    assert [(s.name, s.fill) for s in work.run_next(layout, CHILD).carried.slots] == [("epic_brief", SlotFill())]
+
+
+@pytest.mark.parametrize("phase", ["design", "plan", "execute"])
+def test_a_child_of_an_epic_carries_the_brief(tmp_path: Path, phase: str) -> None:
+    layout = _layout(tmp_path)
+    _write(layout, EPIC, type="Epic", phase="execute")
+    _write(layout, CHILD, phase=phase)
+    result = work.run_next(layout, CHILD)
+    brief = next(s for s in result.carried.slots if s.name == "epic_brief")
+    assert brief.title == "Epic brief"
+    assert brief.fill.lines[0].startswith(f"Epic: [{EPIC}](/{EPIC}.md)")
+    assert brief.fill.lines[-1].startswith("Read the full epic design")  # fixture epic has no index table
+    payload = next_payload(result, bundle_root=layout.bundle_dir)
+    assert payload["carried_context"]["slots"]["epic_brief"]["data"]["epic"] == EPIC
+
+
+def test_a_top_level_item_carries_an_empty_brief(tmp_path: Path) -> None:
+    layout = _layout(tmp_path)
+    _write(layout, "work/feature-top")
+    brief = next(s for s in work.run_next(layout, "work/feature-top").carried.slots if s.name == "epic_brief")
+    assert brief.fill == SlotFill()
 
 
 def test_descend_assembles_for_the_selected_leaf(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

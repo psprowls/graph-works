@@ -459,15 +459,39 @@ def render_prepare_workspace(payload: dict[str, Any]) -> None:
         )
 
 
+def _unit_lines(units: list[dict[str, Any]]) -> None:
+    for unit in units:
+        if unit["planned"]:
+            typer.echo(f"  {unit['name']}: run")
+        elif unit["reused_from"] is not None:
+            evidence = unit["reused_from"]
+            typer.echo(f"  {unit['name']}: reused from {evidence['owner']} run {evidence['run_id']}")
+
+
+def _queued(payload: dict[str, Any]) -> str:
+    return f"queued {payload['run_id']} (position {payload['position']})"
+
+
 def render_gate_run(payload: dict[str, Any]) -> None:
-    """One line for a `gw work gate run` result."""
+    """Render the run result and per-unit plans."""
     for warning in payload["warnings"]:
         warn(warning)
     match = payload["match"]
     if payload["status"] == "satisfied" and match is not None:
         typer.echo(f"satisfied by {match['owner']} run {match['run_id']}")
+    elif payload["status"] == "current":
+        typer.echo("current: every unit in scope is green on its current inputs")
+    elif payload["status"] == "queued":
+        typer.echo(f"{_queued(payload)}: {payload['command']} (log: {payload['log_path']})")
     else:
         typer.echo(f"{payload['status']} {payload['run_id']}: {payload['command']} (log: {payload['log_path']})")
+    notify = payload.get("notify")
+    if notify is not None:
+        if notify["registered"]:
+            typer.echo(f"notify: registered on {notify['terminal']}")
+        else:
+            typer.echo(f"notify: not registered ({notify['reason']})")
+    _unit_lines(payload["units"])
 
 
 def render_gate_wait(payload: dict[str, Any]) -> None:
@@ -475,10 +499,16 @@ def render_gate_wait(payload: dict[str, Any]) -> None:
     if payload["status"] == "finished":
         recorded = "recorded" if payload["recorded"] else "not recorded"
         typer.echo(f"finished exit {payload['exit']} ({recorded}) log: {payload['log_path']}")
+        for unit in payload["units"]:
+            typer.echo(f"  {unit['name']}: exit {unit['exit']}")
+        if payload["repo_wide_exit"] is not None:
+            typer.echo(f"  repo-wide: exit {payload['repo_wide_exit']}")
         if payload["exit"] != 0 and payload["log_tail"]:
             typer.echo(payload["log_tail"])
     elif payload["status"] == "running":
         typer.echo(f"running {payload['run_id']} log: {payload['log_path']}")
+    elif payload["status"] == "queued":
+        typer.echo(f"{_queued(payload)} log: {payload['log_path']}")
     else:
         typer.echo(f"{payload['status']} {payload['run_id']} log: {payload['log_path']}")
 
@@ -492,6 +522,8 @@ def render_gate_check(payload: dict[str, Any]) -> None:
         typer.echo(f"satisfied by {match['owner']} run {match['run_id']}")
     else:
         typer.echo(f"unsatisfied: {payload['reason']} (tree {payload['tree']})")
+        if payload["stale"]:
+            typer.echo(f"  stale: {', '.join(payload['stale'])}")
 
 
 def render_integrate(payload: dict[str, Any]) -> None:

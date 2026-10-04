@@ -61,8 +61,9 @@ def test_only_slots_for_the_stage_are_included_in_registry_order() -> None:
 
 
 def test_no_applicable_slot_is_the_empty_frame() -> None:
-    assert assemble_carried(_inp("design")) == CarriedContext()
-    assert assemble_carried(_inp("execute")) == CarriedContext()
+    other = (Slot("x", "X", frozenset({"plan"}), _fill("- x")),)  # type: ignore[arg-type]
+    assert assemble_carried(_inp("design"), slots=other) == CarriedContext()
+    assert assemble_carried(_inp("execute"), slots=other) == CarriedContext()
 
 
 @pytest.mark.parametrize("exc", [OSError("disk gone"), ValueError("bad sha")])
@@ -86,16 +87,17 @@ def test_any_other_exception_propagates() -> None:
 
 def test_registry_invariants() -> None:
     names = [slot.name for slot in carried.SLOTS]
-    assert names == ["landed_since", "finish_obligations"]
+    assert names == ["epic_brief", "landed_since", "finish_obligations"]
     assert len(set(names)) == len(names)
     assert all(re.fullmatch(r"[a-z][a-z0-9_]*", name) for name in names)
     stages = set(get_args(Stage))
     assert all(slot.phases and slot.phases <= stages for slot in carried.SLOTS)
     assert {slot.name: slot.phases for slot in carried.SLOTS} == {
+        "epic_brief": frozenset({"design", "plan", "execute"}),
         "landed_since": frozenset({"plan"}),
         "finish_obligations": frozenset({"finish"}),
     }
-    assert [slot.title for slot in carried.SLOTS] == ["Landed since your design", "Finish obligations"]
+    assert [slot.title for slot in carried.SLOTS] == ["Epic brief", "Landed since your design", "Finish obligations"]
 
 
 def _finish_input(tmp_path: Path) -> SlotInput:

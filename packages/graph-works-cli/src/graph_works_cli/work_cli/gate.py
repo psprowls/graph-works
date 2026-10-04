@@ -2,15 +2,17 @@
 
 Interface band only: parse arguments, resolve the workspace, call **one** core
 verb, project it with the wire, choose the exit code. The clock and the run
-token are read here and nowhere below.
+token are read here and nowhere below. `run --notify` registers `ORCA_TERMINAL_HANDLE` on the run
+record; the runner types a resume line into that terminal when the run finishes.
 
 Exit codes: `run` 0 started/running/satisfied, 3 refusal; `wait` 0 green,
-1 red, 2 still running, 3 orphaned or refusal; `check` 0 satisfied,
+1 red, 2 still running or queued, 3 orphaned or refusal; `check` 0 satisfied,
 1 unsatisfied, 3 refusal.
 """
 
 from __future__ import annotations
 
+import os
 import secrets
 import time
 from datetime import UTC, datetime
@@ -19,7 +21,7 @@ from typing import Any, Literal, NoReturn
 
 import typer
 from graph_works_core.orchestrate.gate import run_gate_check, run_gate_run, run_gate_wait, spawn_runner
-from graph_works_core.orchestrate.wait import WaitClock
+from graph_works_core.orchestrate.wait import WAIT_FLOOR_S, WaitClock, apply_wait_floor
 from graph_works_core.workspace.errors import WorkspaceError
 from graph_works_wire import work as wire_work
 
@@ -52,6 +54,14 @@ def _worktree(value: str) -> Path | None:
 @gate_app.command("run")
 def gate_run(
     path: str = _PATH,
+    fresh: bool = typer.Option(
+        False, "--fresh", help="Run every unit and the repo-wide step, ignoring green evidence."
+    ),
+    notify: bool = typer.Option(
+        False,
+        "--notify",
+        help="Register this terminal (ORCA_TERMINAL_HANDLE) to be woken with a resume line when the run finishes.",
+    ),
     scope: str = typer.Option("full", "--scope", help="Gate scope: full or scoped."),
     worktree: str = typer.Option("", "--worktree", help="Worktree path; default is the item's recorded worktree."),
     workspace: str = typer.Option("", "--workspace", help="Workspace path."),
@@ -67,10 +77,13 @@ def gate_run(
             layout,
             path,
             scope=chosen,
+            fresh=fresh,
             worktree=_worktree(worktree),
             now=datetime.now(UTC),
             token=secrets.token_hex(4),
             spawn=spawn_runner,
+            notify=notify,
+            environ=os.environ,
         )
     except WorkspaceError as exc:
         rendering.fail(str(exc), reason="workspace", code=exit_codes.SCHEMA_MISMATCH, cause=exc)
@@ -89,11 +102,19 @@ def gate_run(
 def gate_wait(
     path: str = _PATH,
     run_id: str = typer.Option("", "--run", help="Run id to wait for; default is the item's latest run."),
-    timeout: float = typer.Option(DEFAULT_WAIT_TIMEOUT, "--timeout", help="Seconds to wait before reporting running."),
+    timeout: float = typer.Option(
+        DEFAULT_WAIT_TIMEOUT,
+        "--timeout",
+        help=f"Seconds to wait before reporting running; values below {WAIT_FLOOR_S} are raised to {WAIT_FLOOR_S}.",
+    ),
     workspace: str = typer.Option("", "--workspace", help="Workspace path."),
     json_output: bool = rendering.json_option("Emit the wait result as JSON."),
 ) -> None:
     """Report a gate run's outcome, waiting up to --timeout seconds. Never starts a run."""
+    timeout, floor_warning = apply_wait_floor(
+        timeout, exempt_zero=False, option="--timeout", default=DEFAULT_WAIT_TIMEOUT
+    )
+    warnings = () if floor_warning is None else (floor_warning,)
     layout = resolve_workspace(workspace)
     clock = WaitClock(wall=lambda: datetime.now(UTC), monotonic=time.monotonic)
     try:
@@ -110,16 +131,18 @@ def gate_wait(
         rendering.fail(str(exc), reason="workspace", code=exit_codes.SCHEMA_MISMATCH, cause=exc)
     except OSError as exc:
         rendering.fail(str(exc), reason="io", cause=exc)
-    payload = wire_work.gate_wait_payload(result, path)
+    payload = wire_work.gate_wait_payload(result, path, warnings=warnings)
     if payload["refusal"] is not None:
         _refuse(path, payload)
     if json_output:
         rendering.emit(payload)
     else:
+        for warning in payload["warnings"]:
+            rendering.warn(warning)
         rendering.render_gate_wait(payload)
     if result.status == "finished":
         raise typer.Exit(0 if result.exit == 0 else 1)
-    raise typer.Exit(2 if result.status == "running" else REFUSED)
+    raise typer.Exit(2 if result.status in ("running", "queued") else REFUSED)
 
 
 @gate_app.command("check")

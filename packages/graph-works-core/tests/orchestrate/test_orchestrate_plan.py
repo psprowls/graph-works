@@ -1674,7 +1674,7 @@ def test_the_sub_dispatch_rule_names_orca_run_create_and_native_subagents() -> N
 
 
 def test_an_execute_dispatch_prompt_carries_the_coverage_obligation() -> None:
-    from graph_works_core.workspace.pipeline import EXECUTE_TAIL
+    from graph_works_core.workspace.pipeline import EXECUTE_TAIL, NOTIFY_LINE, WAIT_LINE
 
     prompt = orchestrate._prompt(
         path="work/feature-a",
@@ -1688,6 +1688,8 @@ def test_an_execute_dispatch_prompt_carries_the_coverage_obligation() -> None:
     )
     assert "/ws/okf/work/feature-a/references/03-execute-coverage.md" in prompt
     assert "{workspace}" not in prompt and "{path}" not in prompt
+    assert NOTIFY_LINE.replace("{path}", "work/feature-a") in prompt
+    assert WAIT_LINE.replace("{path}", "work/feature-a") in prompt
 
 
 @pytest.mark.parametrize("unknown", ["work/feature-a#plan", "gw-plan-a-00000000"])

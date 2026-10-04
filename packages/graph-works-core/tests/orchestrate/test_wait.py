@@ -7,7 +7,14 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
-from graph_works_core.orchestrate.wait import SLEEP_GAP_FLOOR_S, WaitClock, WaitFailed, run_wait
+from graph_works_core.orchestrate.wait import (
+    SLEEP_GAP_FLOOR_S,
+    WAIT_FLOOR_S,
+    WaitClock,
+    WaitFailed,
+    apply_wait_floor,
+    run_wait,
+)
 from subagents_io.backend import BackendError
 
 FakeOrcaPort = runpy.run_path(str(Path(__file__).with_name("fake_orca_port.py")))["FakeOrcaPort"]
@@ -584,3 +591,79 @@ def test_pending_truncation_and_derivation_warnings_are_merged():
     assert result.pending_questions == ()
     assert "question msg_d left out: ..." in result.warnings
     assert any("may be incomplete" in w for w in result.warnings)
+
+
+def test_wait_floor_is_55():
+    assert WAIT_FLOOR_S == 55
+
+
+@pytest.mark.parametrize("requested", [1, 45, 54.9])
+def test_below_floor_clamps_and_warns(requested):
+    effective, warning = apply_wait_floor(requested, exempt_zero=False, option="--timeout", default=540)
+    assert effective == 55
+    assert warning == f"--timeout {requested:g} raised to the 55 s wait floor; the default is 540"
+
+
+@pytest.mark.parametrize("requested", [55, 60, 540, 600])
+def test_at_floor_passes_silently(requested):
+    assert apply_wait_floor(requested, exempt_zero=False, option="--timeout", default=540) == (requested, None)
+
+
+def test_zero_clamps_when_not_exempt():
+    effective, warning = apply_wait_floor(0, exempt_zero=False, option="--timeout", default=540)
+    assert effective == 55
+    assert warning == "--timeout 0 raised to the 55 s wait floor; the default is 540"
+
+
+def test_zero_passes_when_exempt():
+    assert apply_wait_floor(0, exempt_zero=True, option="--timeout-s", default=600) == (0, None)
+
+
+def test_exempt_still_clamps_positive_values():
+    effective, warning = apply_wait_floor(1, exempt_zero=True, option="--timeout-s", default=600)
+    assert effective == 55
+    assert warning == "--timeout-s 1 raised to the 55 s wait floor; the default is 600"
+
+
+FACT = {"run_id": "r", "path": "work/a", "terminal": "term_a", "state": "running", "resume_line": None}
+
+
+def _rows(port, rows):
+    def observe(run_id, *, now):
+        port._record("liveness", run_id, now=now)
+        return rows
+
+    port.liveness = observe
+
+
+def test_timeout_rows_carry_their_gate_wait_joined_on_terminal():
+    port = FakeOrcaPort()
+    _rows(port, [{"handle": "ctx_1", "terminal": "term_a"}, {"handle": "ctx_2", "terminal": None}, {"handle": "ctx_3"}])
+    seen = []
+    result = run_wait(
+        port, "run_1", ack=None, timeout_s=600, clock=Clock().clock(),
+        gate_waits=lambda now: seen.append(now) or {"term_a": FACT},
+    )  # fmt: skip
+    assert [row["gate_wait"] for row in result.liveness] == [FACT, None, None]
+    assert seen == [T0] and result.liveness[0]["handle"] == "ctx_1"
+
+
+def test_a_failed_gate_wait_read_nulls_the_fact_and_warns():
+    port = FakeOrcaPort()
+    _rows(port, [{"handle": "ctx_1", "terminal": "term_a"}])
+
+    def broken(now):
+        raise OSError("disk gone")
+
+    result = run_wait(port, "run_1", ack=None, timeout_s=600, clock=Clock().clock(), gate_waits=broken)
+    assert result.liveness == [{"handle": "ctx_1", "terminal": "term_a", "gate_wait": None}]
+    assert "gate waits unavailable: disk gone" in result.warnings
+
+
+def test_an_event_never_reads_gate_waits():
+    port = FakeOrcaPort(deliveries=[delivery("d", msg("e", "question"))])
+
+    def never(now):
+        raise AssertionError("events must not read gate waits")
+
+    assert run_wait(port, "run_1", ack=None, timeout_s=600, clock=Clock().clock(), gate_waits=never).liveness is None

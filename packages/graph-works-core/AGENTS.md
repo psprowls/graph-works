@@ -113,10 +113,14 @@ then bundle locks and records a receipt using fresh post-merge content; nested c
 merge in their epic anchor instead. `finish_receipt.record_finish_in` uses an existing
 owner lock and never reacquires ownership. `gate.py` resolves a gate request
 (item, repository, worktree, clean tree), shares one pending run per
-`(repo, tree, scope)` under `cache_dir/gate-runs/`, and spawns `gate_runner.py`
-detached; the runner holds `<run>.lock` for its whole life (the only liveness
-signal) and appends to the owner's `03-gate-receipts.md` through
-`gate_receipts.record_gate_run`. `gate_git.py` is the gate's only git reader and
+`RunKey` (`repo`, `tree`, `scope`, `command`) across the whole workspace in the flat
+`cache_dir/gate/runs/`; a joining item is appended to the record's `requesters`, and join,
+queue order, recording progress and pruning are decided under `runs/.dir.lock`. It spawns
+`gate_runner.py` detached; the runner holds `<run>.lock` for its whole life (the only
+liveness signal), waits for a `gate/slots/slot-<i>.lock` when `workflow.gate.max_concurrent`
+is set, and appends the result to every requester's `03-gate-receipts.md` through
+`gate_receipts.record_gate_run`. With `--notify`, `gate run` registers the caller's `ORCA_TERMINAL_HANDLE` in the record's `waiters`; after every receipt the runner types `gate_wake.RESUME_LINE` into each waiter's terminal (`gate_wake.py`, one `orca terminal send`, never importing workflow-orca) and records `woken`. `gate_wait_facts` derives a per-terminal `running`/`woken`/`wake_failed`/`orphaned` fact from the runner lock and the record, which `gw work wait` joins onto timeout liveness rows by their `terminal`. Receipt lookups read through `gate_index.py`, a
+stat-validated cache at `cache_dir/gate/receipts.json`. With `gate.units` configured, `gate_units.py` validates the repository's unit manifest and hashes each unit's input closure from `git ls-tree`; `gate_receipts.evaluate` accepts a unit green recorded by any item for the same hash (only `ran: true` entries of clean, unchanged runs, D-004), and the runner executes setup, repo-wide, then the stale units on a pool with per-unit logs under `<git-dir>/gw-gate/<item>/<run_id>/`. Repositories without `gate.units` are one implicit `tree` unit running `gate.full`. `gate_git.py` is the gate's only git reader and
 is strict. `stage_advance._receipt_gate` refuses execute→finish without a
 satisfying receipt. See "The dispatch seam" in the README.
 

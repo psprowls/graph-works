@@ -25,6 +25,20 @@ def open_read_session(layout: WorkspaceLayout, *, reconcile: bool = True) -> Ite
         yield _open(layout, reconcile=reconcile, stack=stack)
 
 
+@contextmanager
+def borrow_read_session(layout: WorkspaceLayout, session: ReadSession | None) -> Iterator[ReadSession]:
+    """Yield the caller's *session*, or open (and reconcile) one when it is `None`.
+
+    The seam for display `run_*` reads: the CLI passes nothing, the sidecar
+    passes its memoized snapshot so a read never reconciles on its own.
+    """
+    if session is not None:
+        yield session
+        return
+    with open_read_session(layout) as owned:
+        yield owned
+
+
 def _open(layout: WorkspaceLayout, *, reconcile: bool, stack: ExitStack) -> ReadSession:
     root = layout.bundle_dir
     if not root.is_dir():

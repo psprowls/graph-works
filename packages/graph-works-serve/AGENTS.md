@@ -200,6 +200,10 @@ request began, a lower bound. Generations restart at 1 when the process restarts
 A display read is served from the memo by
 `with context.read_state.session(layout) as (generation, session): result = run_x(layout, …, session=session)`
 and returns `Reply(200, payload, generation)`. Mutation plan/apply, `next`,
-`orchestrate`, lint, code-graph, excerpts and query never take the memo. No
-production display `run_*` accepts `session=` yet; a test-only route pins the
-convention for the subsequent display-read conversions.
+`orchestrate`, lint, code-graph, excerpts and query never take the memo.
+`routes._memo` is that wrapper; the memo-served routes are `/v1/work/status`,
+`/v1/work/list`, `/v1/work/item`, `/v1/work/queue`, `/v1/work/decisions/open`,
+`/v1/wiki/page`, `/v1/wiki/tree` and `/v1/wiki/citations`
+(`tests/test_memo_routes.py`). A memo read sees an on-disk edit only after the
+watcher reconciles it or a write-through bumps the generation; it never
+reconciles on its own.

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from graph_works_core.read_session import open as read_session_open
 from graph_works_core.work import commands as work
 from test_run_dispatch_explain import _dispatch
 from test_run_next import CHILD, EPIC, _layout, _spec, _write
@@ -83,7 +84,7 @@ def test_the_session_and_the_dispatch_config_are_each_read_once(tmp_path: Path, 
     layout = _layout(tmp_path)
     _fixture(layout)
     calls = {"session": 0, "config": 0}
-    open_session, load_config = work.open_read_session, work.load_dispatch_config
+    open_session, load_config = read_session_open.open_read_session, work.load_dispatch_config
 
     def counting_session(*args, **kwargs):
         calls["session"] += 1
@@ -93,7 +94,7 @@ def test_the_session_and_the_dispatch_config_are_each_read_once(tmp_path: Path, 
         calls["config"] += 1
         return load_config(*args, **kwargs)
 
-    monkeypatch.setattr(work, "open_read_session", counting_session)
+    monkeypatch.setattr(read_session_open, "open_read_session", counting_session)
     monkeypatch.setattr(work, "load_dispatch_config", counting_config)
 
     work.run_work_queue(layout)

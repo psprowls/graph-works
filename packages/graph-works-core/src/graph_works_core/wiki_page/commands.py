@@ -19,7 +19,7 @@ from okf_io.bundle import INDEX_NAME
 from okf_io.index import IndexEntry, IndexHeading, outline
 from okf_io.links import Link, parse_destination, resolve_path
 
-from graph_works_core.read_session import ReadSession, open_read_session
+from graph_works_core.read_session import ReadSession, borrow_read_session
 from graph_works_core.wiki_page.declarations import load_declarations
 from graph_works_core.workspace.layout import WorkspaceLayout
 
@@ -106,9 +106,9 @@ def page_read(session: ReadSession, layout: WorkspaceLayout, page_id: str) -> Pa
     )
 
 
-def run_page_read(layout: WorkspaceLayout, page_id: str) -> PageRead:
+def run_page_read(layout: WorkspaceLayout, page_id: str, *, session: ReadSession | None = None) -> PageRead:
     """Read an extensionless, bundle-relative page id without writing state."""
-    with open_read_session(layout) as session:
+    with borrow_read_session(layout, session) as session:
         return page_read(session, layout, page_id)
 
 
@@ -214,7 +214,7 @@ def wiki_tree(session: ReadSession, layout: WorkspaceLayout) -> WikiTree:
     return WikiTree(tuple(sections))
 
 
-def run_wiki_tree(layout: WorkspaceLayout) -> WikiTree:
+def run_wiki_tree(layout: WorkspaceLayout, *, session: ReadSession | None = None) -> WikiTree:
     """The root `index.md` as sections of pages. Never writes. See `wiki_tree`."""
-    with open_read_session(layout) as session:
+    with borrow_read_session(layout, session) as session:
         return wiki_tree(session, layout)

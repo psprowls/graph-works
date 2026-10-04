@@ -20,7 +20,7 @@ from typing import Literal
 
 from okf_io import Document
 
-from graph_works_core.read_session import ReadSession, open_read_session
+from graph_works_core.read_session import ReadSession, borrow_read_session
 from graph_works_core.workspace import citations as shared
 from graph_works_core.workspace.citations import (
     Citation,
@@ -41,10 +41,10 @@ class WikiCitations:
     refusal: Literal["unknown-page"] | None
 
 
-def run_wiki_citations(layout: WorkspaceLayout, page_id: str) -> WikiCitations:
+def run_wiki_citations(layout: WorkspaceLayout, page_id: str, *, session: ReadSession | None = None) -> WikiCitations:
     """Extract and resolve a page's citations. Never writes the bundle; may write display.db."""
     member_id = f"{page_id}.md"
-    with open_read_session(layout) as session, open_display_cache(layout) as cache:
+    with borrow_read_session(layout, session) as session, open_display_cache(layout) as cache:
         row = session.member(member_id)
         if row is None or row.kind != "concept" or row.concept_id != page_id:
             return WikiCitations(page_id, (), "unknown-page")

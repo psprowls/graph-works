@@ -89,6 +89,9 @@ It defines the protocol and cache location helpers, the lazy `BundleSession`
 and pinned `IndexSession` backends, and the opener's admission and fallback logic.
 `materialize(session)` copies an open session into a connection-free `SnapshotSession`
 that preserves display reads and ignore overlays after the source closes.
+Display `run_*` reads take `session: ReadSession | None = None` and open through
+`borrow_read_session(layout, session)`: `None` opens and reconciles (the CLI path),
+a passed session is used as is and nothing else is opened (the sidecar's memo).
 
 `query/` — Query briefs and the retrieval front half of `run_query` read through `open_read_session`; `run_query`'s answer roles retain the loaded full bundle. On the persisted-index backend, `query/lexical_store.py` keeps BM25 postings in `search.db`: each query diffs the session's SHA-256 hashes against stored hashes, refreshes changed documents, then scores postings inside the verifying transaction. Bundle sessions and a busy lexical store use the in-memory `okf_ext.search` retrieval path. That path is also the equivalence oracle in `tests/query/test_query_session.py`; tokenizer or weight changes must bump `okf_ext.search.SCORING_VERSION`.
 

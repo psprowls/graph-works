@@ -4,7 +4,7 @@ from graph_works_core.read_session.bundle_backend import BundleSession
 from graph_works_core.read_session.index_backend import IndexSession
 from graph_works_core.read_session.location import SESSION_FORMAT, database_path, fingerprint
 from graph_works_core.read_session.model import Backend, FallbackReason, IndexRevision, ReadSession, index_revision
-from graph_works_core.read_session.open import open_read_session
+from graph_works_core.read_session.open import borrow_read_session, open_read_session
 from graph_works_core.read_session.snapshot import SnapshotSession, materialize
 
 __all__ = [
@@ -16,6 +16,7 @@ __all__ = [
     "IndexSession",
     "ReadSession",
     "SnapshotSession",
+    "borrow_read_session",
     "database_path",
     "fingerprint",
     "index_revision",

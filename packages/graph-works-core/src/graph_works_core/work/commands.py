@@ -100,7 +100,7 @@ from work_tracker_okf.vocabulary import PARENT_TYPES, SPEC_SOURCE_ID, TERMINAL_S
 from work_tracker_okf.workflow import RouteResult, RouteState, Transition, route, state_for
 
 from graph_works_core.guidance.assembly import Guidance, assemble_guidance, write_guidance
-from graph_works_core.read_session import open_read_session
+from graph_works_core.read_session import ReadSession, borrow_read_session, open_read_session
 from graph_works_core.work import carried as _carried
 from graph_works_core.work.carried import CarriedContext, SlotInput
 from graph_works_core.work.path_report import PathReport, StageArtifactReport, artifact_reports, path_report
@@ -339,20 +339,20 @@ class StatusReport:
     resume: ResumeSelection | None
 
 
-def run_status(layout: WorkspaceLayout) -> StatusReport:
+def run_status(layout: WorkspaceLayout, *, session: ReadSession | None = None) -> StatusReport:
     """Count the active items and name the one worth resuming. Never writes."""
-    with open_read_session(layout) as session:
+    with borrow_read_session(layout, session) as session:
         items = session.work_snapshot()
     return StatusReport(rollup=rollup(items), resume=select_resume(items))
 
 
-def run_work_list(layout: WorkspaceLayout) -> tuple[WorkItem, ...]:
+def run_work_list(layout: WorkspaceLayout, *, session: ReadSession | None = None) -> tuple[WorkItem, ...]:
     """Every active work item, sorted by canonical path. Never writes.
 
     Archived items are left out, the same population `rollup` counts, so a
     board built from this agrees with `gw work status`.
     """
-    with open_read_session(layout) as session:
+    with borrow_read_session(layout, session) as session:
         items = session.work_snapshot()
     return tuple(sorted((item for item in items if not item.archived), key=lambda item: item.path))
 
@@ -395,13 +395,13 @@ def _owned_references(bundle_root: Path, path: str) -> tuple[str, ...]:
     return tuple(sorted(file.relative_to(bundle_root).as_posix() for file in directory.rglob("*") if file.is_file()))
 
 
-def run_item_read(layout: WorkspaceLayout, path: str) -> ItemRead:
+def run_item_read(layout: WorkspaceLayout, path: str, *, session: ReadSession | None = None) -> ItemRead:
     """Read *path*'s work item and list its owned `references/`. Never writes.
 
     The session decides membership; every content field comes from one fresh
     parse, so frontmatter and body share the same version of the page (D-002).
     """
-    with open_read_session(layout) as session:
+    with borrow_read_session(layout, session) as session:
         known = path in item_index(session.work_snapshot())
         detail = None if known else session.diagnostics(ignore=IGNORE).unreadable.get(f"{path}.md")
     if not known:
@@ -1028,7 +1028,7 @@ class QueueEntry:
     result: NextResult
 
 
-def run_work_queue(layout: WorkspaceLayout) -> tuple[QueueEntry, ...]:
+def run_work_queue(layout: WorkspaceLayout, *, session: ReadSession | None = None) -> tuple[QueueEntry, ...]:
     """Route every active, non-terminal item as a dry-run `run_next` would. Never writes.
 
     The work items (through the read session) and dispatch config are each read once for the whole
@@ -1038,7 +1038,7 @@ def run_work_queue(layout: WorkspaceLayout) -> tuple[QueueEntry, ...]:
     Epics waiting on their children are included with that blocker, so no
     active item is silently dropped.
     """
-    with open_read_session(layout) as session:
+    with borrow_read_session(layout, session) as session:
         items = session.work_snapshot()
         unreadable = session.diagnostics(ignore=IGNORE).unreadable
     config = _load_config(layout)
@@ -1698,7 +1698,7 @@ class OpenDecision:
     decision: Decision
 
 
-def run_open_decisions(layout: WorkspaceLayout) -> tuple[OpenDecision, ...]:
+def run_open_decisions(layout: WorkspaceLayout, *, session: ReadSession | None = None) -> tuple[OpenDecision, ...]:
     """Every `status: open` entry in the ledger of every active item's decision owner. Never writes.
 
     Each owner's ledger is read once, and an absent ledger reads as empty, as
@@ -1707,7 +1707,7 @@ def run_open_decisions(layout: WorkspaceLayout) -> tuple[OpenDecision, ...]:
     own decision owner is this ledger's owner, in `affects` order: exactly the
     items `hold_for` would report this entry as holding.
     """
-    with open_read_session(layout) as session:
+    with borrow_read_session(layout, session) as session:
         items = session.work_snapshot()
     active = tuple(item for item in items if not item.archived)
     active_paths = {item.path for item in active}

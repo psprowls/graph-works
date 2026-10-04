@@ -11,6 +11,7 @@ from graph_works_core import apply_init, plan_init
 from graph_works_core.orchestrate import asks, gate, integrate, merge_workspace, placement, workspace_prepare
 from graph_works_core.orchestrate import commands as orchestrate
 from graph_works_core.read_session import BundleSession
+from graph_works_core.read_session import open as read_session_open
 from graph_works_core.work import commands as work
 from graph_works_core.work import reconcile
 from graph_works_core.workspace import bundle as bundle_mod
@@ -160,7 +161,7 @@ def test_the_projection_every_adopted_reader_consumes_is_identical(layout):
 )
 def test_work_display_results_match_legacy(layout, monkeypatch, call):
     seen = []
-    real = work.open_read_session
+    real = read_session_open.open_read_session
 
     @contextmanager
     def indexed(lay):
@@ -174,11 +175,11 @@ def test_work_display_results_match_legacy(layout, monkeypatch, call):
         yield BundleSession(lay.bundle_dir, fallback="disabled")
 
     with monkeypatch.context() as patch:
-        patch.setattr(work, "open_read_session", indexed)
+        patch.setattr(read_session_open, "open_read_session", indexed)
         result = call(layout)
         assert seen == [layout]
     with monkeypatch.context() as patch:
-        patch.setattr(work, "open_read_session", legacy)
+        patch.setattr(read_session_open, "open_read_session", legacy)
         assert call(layout) == result
     if call is work.run_open_decisions:
         assert len(result) == 1 and result[0].decision.id == "D-001"

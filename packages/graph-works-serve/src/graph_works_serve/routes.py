@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 import sys
 from collections.abc import AsyncIterator, Callable, Iterable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date
 from functools import partial
 from pathlib import Path
@@ -26,6 +26,7 @@ from graph_works_core.lint_drift.lint import run_mechanical
 from graph_works_core.orchestrate.commands import run_orchestrate
 from graph_works_core.proposals import PAGE_STATUSES, run_proposal_checks, run_proposal_preview, run_proposals_read
 from graph_works_core.query.commands import MAX_TOP_K, MIN_TOP_K, brief_embedder, plan_query_brief
+from graph_works_core.read_session import ReadSession
 from graph_works_core.util.commands import run_log_read
 from graph_works_core.wiki_page.citations import run_wiki_citations
 from graph_works_core.wiki_page.commands import run_page_read, run_wiki_tree
@@ -128,9 +129,20 @@ def _str(args: Mapping[str, object], name: str) -> str | None:
     return cast(str, value) if value else None
 
 
+def _memo(context: ServeContext, read: Callable[[WorkspaceLayout, ReadSession], Reply]) -> Reply:
+    """Serve a display read from the generation's snapshot, stamping that generation on the reply."""
+    layout = context.layout()
+    with context.read_state.session(layout) as (generation, session):
+        reply = read(layout, session)
+    return replace(reply, generation=generation)
+
+
 def _status(context: ServeContext, _args: Mapping[str, object]) -> Reply:
+    def read(layout: WorkspaceLayout, session: ReadSession) -> Reply:
+        return Reply(200, wire_work.status_payload(work.run_status(layout, session=session)))
+
     def run() -> Reply:
-        return Reply(200, wire_work.status_payload(work.run_status(context.layout())))
+        return _memo(context, read)
 
     return call("/v1/work/status", run, (*_LAYOUT, Catch(OSError, "io", 1), Catch(ValueError, "io", 1)))
 
@@ -177,23 +189,29 @@ def _decisions(context: ServeContext, args: Mapping[str, object]) -> Reply:
 
 
 def _item(context: ServeContext, args: Mapping[str, object]) -> Reply:
-    def run() -> Reply:
-        result = work.run_item_read(context.layout(), cast(str, args["path"]))
+    def read(layout: WorkspaceLayout, session: ReadSession) -> Reply:
+        result = work.run_item_read(layout, cast(str, args["path"]), session=session)
         payload = wire_work.item_payload(result)
         if result.refusal is not None:
             return refusal("/v1/work/item", "unresolved", f"{result.refusal}: {result.path}", payload=payload)
         return Reply(200, payload)
 
+    def run() -> Reply:
+        return _memo(context, read)
+
     return call("/v1/work/item", run, (*_LAYOUT, Catch(OSError, "io", 1)))
 
 
 def _page(context: ServeContext, args: Mapping[str, object]) -> Reply:
-    def run() -> Reply:
-        result = run_page_read(context.layout(), cast(str, args["id"]))
+    def read(layout: WorkspaceLayout, session: ReadSession) -> Reply:
+        result = run_page_read(layout, cast(str, args["id"]), session=session)
         payload = wire_wiki.page_payload(result)
         if result.refusal is not None:
             return refusal("/v1/wiki/page", "unresolved", f"{result.refusal}: {result.id}", payload=payload)
         return Reply(200, payload)
+
+    def run() -> Reply:
+        return _memo(context, read)
 
     return call("/v1/wiki/page", run, (*_LAYOUT, Catch(OSError, "io", 1)))
 
@@ -270,8 +288,11 @@ _READ = (*_LAYOUT, Catch(OSError, "io", 1))
 
 
 def _work_list(context: ServeContext, _args: Mapping[str, object]) -> Reply:
+    def read(layout: WorkspaceLayout, session: ReadSession) -> Reply:
+        return Reply(200, wire_work.work_list_payload(work.run_work_list(layout, session=session)))
+
     def run() -> Reply:
-        return Reply(200, wire_work.work_list_payload(work.run_work_list(context.layout())))
+        return _memo(context, read)
 
     return call("/v1/work/list", run, _READ)
 
@@ -301,15 +322,21 @@ def _proposals(context: ServeContext, args: Mapping[str, object]) -> Reply:
 
 
 def _work_queue(context: ServeContext, _args: Mapping[str, object]) -> Reply:
+    def read(layout: WorkspaceLayout, session: ReadSession) -> Reply:
+        return Reply(200, wire_work.work_queue_payload(work.run_work_queue(layout, session=session)))
+
     def run() -> Reply:
-        return Reply(200, wire_work.work_queue_payload(work.run_work_queue(context.layout())))
+        return _memo(context, read)
 
     return call("/v1/work/queue", run, _READ)
 
 
 def _open_decisions(context: ServeContext, _args: Mapping[str, object]) -> Reply:
+    def read(layout: WorkspaceLayout, session: ReadSession) -> Reply:
+        return Reply(200, wire_work.open_decisions_payload(work.run_open_decisions(layout, session=session)))
+
     def run() -> Reply:
-        return Reply(200, wire_work.open_decisions_payload(work.run_open_decisions(context.layout())))
+        return _memo(context, read)
 
     return call("/v1/work/decisions/open", run, _READ)
 
@@ -322,8 +349,11 @@ def _schema(context: ServeContext, _args: Mapping[str, object]) -> Reply:
 
 
 def _wiki_tree(context: ServeContext, _args: Mapping[str, object]) -> Reply:
+    def read(layout: WorkspaceLayout, session: ReadSession) -> Reply:
+        return Reply(200, wire_wiki.wiki_tree_payload(run_wiki_tree(layout, session=session)))
+
     def run() -> Reply:
-        return Reply(200, wire_wiki.wiki_tree_payload(run_wiki_tree(context.layout())))
+        return _memo(context, read)
 
     return call("/v1/wiki/tree", run, _READ)
 
@@ -370,12 +400,15 @@ def _proposal_preview(context: ServeContext, args: Mapping[str, object]) -> Repl
 
 
 def _citations(context: ServeContext, args: Mapping[str, object]) -> Reply:
-    def run() -> Reply:
-        result = run_wiki_citations(context.layout(), cast(str, args["id"]))
+    def read(layout: WorkspaceLayout, session: ReadSession) -> Reply:
+        result = run_wiki_citations(layout, cast(str, args["id"]), session=session)
         payload = wire_wiki.citations_payload(result)
         if result.refusal is not None:
             return refusal("/v1/wiki/citations", "unresolved", f"{result.refusal}: {result.id}", payload=payload)
         return Reply(200, payload)
+
+    def run() -> Reply:
+        return _memo(context, read)
 
     return call("/v1/wiki/citations", run, _READ)
 

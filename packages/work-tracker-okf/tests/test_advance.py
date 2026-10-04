@@ -96,6 +96,18 @@ def test_design_completion_with_effort_resolves_next_phase(effort: str, phase: s
     assert {change.key: change.after for change in plan.changes}["phase"] == phase
 
 
+def test_a_small_bug_leaving_design_lands_at_execute_accepted() -> None:
+    """Plan is skipped, so nothing else would mark the item `accepted`; left
+    `open`, orchestrate reads it as one whose execute stage already started."""
+    items = [make_item("bug", type="Bug", phase="design", work_status="open")]
+    plan = _plan_for(items, "bug", effort="xtra-small")
+    assert plan.refusal is None
+    document = parse("---\ntype: Bug\nwork_status: open\nphase: design\n---\n\nbody\n")
+    apply(document, plan)
+    data = document.fm_data()
+    assert (data["phase"], data["work_status"]) == ("execute", "accepted")
+
+
 def test_feature_with_open_children_cannot_finish_execute() -> None:
     child_path = "work/feature-x/children/bug-y"
     parent = make_item(

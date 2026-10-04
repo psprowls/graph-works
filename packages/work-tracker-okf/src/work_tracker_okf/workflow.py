@@ -465,9 +465,14 @@ def _emit(
         requires.append("effort")
     requires.extend(a for a in unset if a not in requires)
     requires.extend(_children_requires(state, stage_row))
+    work_status = effect.work_status
+    if work_status is None and next_phase == EXECUTE and stage != PLAN:
+        # A path that skips plan still enters execute as `accepted`, the state
+        # orchestrate reads as "no execute stage has started yet".
+        work_status = "accepted"
     on_complete = Transition(
         phase=next_phase,
-        work_status=effect.work_status,
+        work_status=work_status,
         document_status=effect.document_status,
         requires=tuple(requires),
         sync_plan_table=effect.sync_plan_table and not decomposing,

@@ -3,7 +3,9 @@
 Exclusions are by name, each asserting the difference is exactly the named one:
 X4 variant (stage compared, variant not), X5 PLAN_OR_EXECUTE (phase None plus
 path_candidates), X6 a hand-edited phase off a candidate path (legacy
-dispatched; the interpreter blocks). §7 item 1 (children-terminal) changes
+dispatched; the interpreter blocks), X7 a completion that enters execute from a
+stage other than plan (legacy left `work_status` unset; the interpreter marks it
+`accepted`, the state plan completion would have set). §7 item 1 (children-terminal) changes
 `advance`, not `route()`, so it needs no exclusion here.
 """
 
@@ -84,6 +86,16 @@ def _assert_parity(state: RouteState) -> str:
             ("design", "execute", "finish"),
         }
         return "x5"
+    stage = new.dispatch.stage if new.dispatch else None
+    if (
+        legacy.on_complete is not None
+        and legacy.on_complete.phase == "execute"
+        and legacy.on_complete.work_status is None
+        and stage not in (None, "plan")
+    ):
+        assert new.on_complete == dataclasses.replace(legacy.on_complete, work_status="accepted"), state
+        assert new.path_candidates == (), state
+        return "x7"
     assert new.on_complete == legacy.on_complete, state
     assert new.path_candidates == (), state
     return "equal"
@@ -91,7 +103,7 @@ def _assert_parity(state: RouteState) -> str:
 
 @pytest.mark.parametrize("phase", [None, *sorted(PHASES)])
 def test_interpreter_matches_legacy(phase: str | None) -> None:
-    tally = {"equal": 0, "x5": 0, "x6": 0}
+    tally = {"equal": 0, "x5": 0, "x6": 0, "x7": 0}
     for state in _states(phase):
         tally[_assert_parity(state)] += 1
     assert tally["equal"] > 0
@@ -99,7 +111,7 @@ def test_interpreter_matches_legacy(phase: str | None) -> None:
 
 def test_every_exclusion_is_exercised() -> None:
     seen = {_assert_parity(state) for phase in [None, *sorted(PHASES)] for state in _states(phase)}
-    assert seen == {"equal", "x5", "x6"}
+    assert seen == {"equal", "x5", "x6", "x7"}
 
 
 @pytest.mark.parametrize("phase", [None, "design", "plan", "execute", "finish"])

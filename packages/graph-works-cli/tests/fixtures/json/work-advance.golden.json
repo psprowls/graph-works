@@ -6,7 +6,7 @@
   "blocker_kinds": [],
   "on_complete": {
     "phase": "execute",
-    "work_status": null,
+    "work_status": "accepted",
     "document_status": "stable",
     "requires": [],
     "sync_plan_table": false,

@@ -2333,6 +2333,22 @@ def test_accepted_at_execute_is_the_state_no_execute_stage_has_started_from() ->
     assert RETURN_TO_EXECUTE.work_status == "in-progress"
 
 
+def test_a_small_bug_leaving_design_cold_starts_at_execute() -> None:
+    """The field report: a small bug-like item skips plan, so design is the
+    stage that enters execute. Left `open` there, the first execute dispatch
+    was refused `worktree-unprovable` instead of minting a worktree."""
+    designed = route(RouteState(type="Bug", work_status="open", phase="design", effort="xtra-small", has_spec_doc=True))
+    assert designed.on_complete is not None
+    assert designed.on_complete.phase == "execute"
+    item = _item("work/bug-x", type="Bug", phase="execute", work_status=designed.on_complete.work_status)
+
+    action, claimed = _cold_start(item, "execute", is_root=True)
+
+    assert isinstance(action, orchestrate.WorktreeAction)
+    assert action.action == "create-top-level"
+    assert claimed
+
+
 def test_a_child_design_dispatch_pins_the_epic_anchor_and_records_nothing() -> None:
     """The reproduction this item was filed from, at the `plan()` level: a
     `design` dispatch of a child against a stamped epic anchor pins a detached read

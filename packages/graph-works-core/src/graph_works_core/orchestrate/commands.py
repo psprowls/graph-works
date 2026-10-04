@@ -684,7 +684,8 @@ def _code_work_may_exist(item: WorkItem, phase: str) -> bool:
     """Whether a stage that writes code could already have run for *item*.
 
     A read-only phase cannot have produced a commit (see `READ_ONLY_PHASES`).
-    Neither can an `execute` still at `work_status: accepted`: plan completion
+    Neither can an `execute` still at `work_status: accepted`: completion of
+    the stage before `execute` (plan, or design on a path that skips plan)
     enters `execute` as `accepted`, and every execute dispatch flips it to
     `in-progress` (`work_tracker_okf.workflow`, pinned by
     `test_accepted_at_execute_is_the_state_no_execute_stage_has_started_from`).

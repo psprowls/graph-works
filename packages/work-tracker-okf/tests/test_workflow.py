@@ -341,6 +341,27 @@ def test_small_bug_like_work_skips_planning_and_larger_does_not():
     assert large is not None and large.phase == "plan"
 
 
+def test_design_completing_into_execute_marks_the_item_accepted():
+    """Skipping plan must still enter execute as `accepted`, the state the
+    orchestrator reads as "no execute stage has started" and cold-starts."""
+    small = route(_state(type="Bug", phase="design", effort="xtra-small")).on_complete
+    assert small is not None
+    assert (small.phase, small.work_status) == ("execute", "accepted")
+
+
+def test_design_completing_into_plan_leaves_the_status_to_plan():
+    design = route(_state(type="Bug", phase="design", effort="medium")).on_complete
+    plan = route(_state(type="Bug", phase="plan", effort="medium")).on_complete
+    assert design is not None and (design.phase, design.work_status) == ("plan", None)
+    assert plan is not None and (plan.phase, plan.work_status) == ("execute", "accepted")
+
+
+def test_an_unresolved_design_fork_sets_no_status():
+    forked = route(_state(type="Bug", phase="design")).on_complete
+    assert forked is not None
+    assert (forked.phase, forked.work_status) == (None, None)
+
+
 def test_an_epic_sized_small_still_routes_to_plan():
     """Decomposition happens at plan and is mandatory for an epic. An epic
     that skipped planning would reach execute with no children and hit the

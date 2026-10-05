@@ -121,6 +121,42 @@ def test_corrupt_search_db_recovers_and_reembeds(make_workspace) -> None:
     assert brief == _oracle(layout, "token", embedder=FakeEmbedder(), top_k=5)
 
 
+@pytest.mark.parametrize("loss", ["database", "table"])
+def test_session_retrieval_recovers_lost_embedding_store(make_workspace, loss) -> None:
+    layout = make_workspace("synthetic")
+    expected = q.plan_query_brief("token", layout, embedder=FakeEmbedder(), top_k=5)
+    bundle = load_workspace_bundle(layout)
+    db = q._search_db(layout.cache_dir)
+    lexical_tables = ("lex_docs", "lex_postings", "lex_meta")
+    with sqlite3.connect(db) as conn:
+        schemas = conn.execute("SELECT name, sql FROM sqlite_master WHERE name LIKE 'lex_%' ORDER BY name").fetchall()
+        rows = {name: conn.execute(f"SELECT * FROM {name} ORDER BY 1, 2").fetchall() for name in lexical_tables}
+        if loss == "table":
+            conn.execute("DROP TABLE pages")
+    if loss == "database":
+        db.unlink()
+
+    # Session retrieval synchronizes the actual lexical store before refreshing
+    # embeddings, so database deletion reaches the missing-pages branch too.
+    embedder = FakeEmbedder()
+    brief = q.plan_query_brief("token", layout, embedder=embedder, top_k=5)
+    assert brief.retrieval == "hybrid"
+    assert brief.warnings == ()
+    assert brief == expected
+    assert len(embedder.calls) == len(bundle.concepts) + 1
+    assert set(embedder.calls[:-1]) == {doc.raw_text for doc in bundle.concepts.values()}
+    assert embedder.calls[-1] == "token"
+    with sqlite3.connect(db) as conn:
+        assert (
+            conn.execute("SELECT name, sql FROM sqlite_master WHERE name LIKE 'lex_%' ORDER BY name").fetchall()
+            == schemas
+        )
+        assert {name: conn.execute(f"SELECT * FROM {name} ORDER BY 1, 2").fetchall() for name in lexical_tables} == rows
+    embedder.calls.clear()
+    assert q.plan_query_brief("token", layout, embedder=embedder, top_k=5) == brief
+    assert embedder.calls == ["token"]
+
+
 def test_busy_store_with_stale_rows_falls_back_to_the_oracle(make_workspace, monkeypatch, caplog) -> None:
     layout = make_workspace("synthetic")
     q.plan_query_brief("token", layout, embedder=None, top_k=5)

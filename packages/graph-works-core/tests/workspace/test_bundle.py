@@ -15,6 +15,7 @@ from graph_works_core.workspace.bundle import (
     load_bundle_at,
     load_work_bundle,
     load_workspace_bundle,
+    wiki_scope,
     with_clone_ignore,
     with_clone_prune,
     work_scope,
@@ -130,6 +131,49 @@ def _mixed_bundle(tmp_path: Path) -> Path:
     _write(root / "code-graph" / "repo" / "entities" / "packages" / "p.md", _DOC)
     _write(root / "sources" / "2026-10-s.md", _DOC)
     return root
+
+
+def test_wiki_scope_keeps_mirrored_references_and_root_ownership(tmp_path: Path) -> None:
+    root = _mixed_bundle(tmp_path)
+    mirrored = "code-graph/repo/file-system/skills/demo/references/example.md"
+    _write(root / mirrored, _DOC)
+    _write(root / "sources/references/nested/raw.md", _DOC)
+    _write(root / "work/epic/children/a/references/01-design.md", _DOC)
+    _write(root / "work/_archive/a/references/01-design.md", _DOC)
+    scope = wiki_scope()
+    bundle = load_bundle_at(root, ignore=scope.as_ignore(), prune=scope.prune)
+    assert scope.prune == ()
+    assert "*/references/*" not in scope.ignore
+    assert {mirrored.removesuffix(".md"), "sources/2026-10-s", "docs/page"} <= set(bundle.concepts)
+    assert not any(key.startswith("work/") or key.startswith("sources/references/") for key in bundle.concepts)
+    for member in (
+        "work/bug-a.md",
+        "work/epic/children/a/references/01-design.md",
+        "work/_archive/a/references/01-design.md",
+        "sources/references/nested/raw.md",
+    ):
+        assert member in bundle.ignored
+        assert bundle.has_member(member)
+    assert "index.md" not in bundle.ignored
+    assert "log.md" not in bundle.ignored
+    assert bundle.has_member("index.md")
+    assert bundle.has_member("log.md")
+    work = load_work_bundle(_layout(root))
+    assert {"index.md", "log.md"} <= set(work.ignored)
+
+
+def test_wiki_scope_preserves_declaration_exclusions_and_clone_pruning(tmp_path: Path) -> None:
+    root = _bundle(tmp_path)
+    excluded = ("schema/type.md", "nested/schema/type.md", "sections/type.md", "nested/sections/type.md", "x/.DS_Store")
+    for member in excluded:
+        _write(root / member, _DOC)
+    scope = wiki_scope()
+    bundle = load_bundle_at(root, ignore=scope.as_ignore(), prune=scope.prune)
+    assert set(excluded) <= set(bundle.ignored)
+    assert "repositories/demo" in bundle.concepts
+    assert bundle.pruned == frozenset({"repositories/demo/references/git"})
+    assert bundle.has_member("repositories/demo/references/git/README.md")
+    assert not any("references/git/" in member for member in bundle.ignored)
 
 
 def test_with_clone_prune_appends_once_and_keeps_order() -> None:

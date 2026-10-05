@@ -37,7 +37,6 @@ from pathlib import Path
 from typing import Literal
 
 import repositories_okf
-import work_tracker_okf
 from code_graph_io import GraphReader
 from code_wiki_okf.about import about_rule
 from code_wiki_okf.config import Config, ConfigError
@@ -60,7 +59,7 @@ from repositories_okf.lifecycle import lane_pages
 from repositories_okf.repository import repository_rule
 from work_tracker_okf.compose import rule_set
 
-from graph_works_core.workspace.bundle import work_scope
+from graph_works_core.workspace.bundle import wiki_scope, work_scope
 from graph_works_core.workspace.dispatch_config import load_dispatch_config
 from graph_works_core.workspace.errors import WorkspaceError
 from graph_works_core.workspace.lane_facts import gather_lane_facts, has_lane_pages, runner
@@ -235,21 +234,6 @@ def _wiki_rules(
     return tuple(rules)
 
 
-def _wiki_ignore() -> tuple[str, ...]:
-    """The wiki lane's `ignore=`: the declaration directories, plus the work
-    lane's own directory.
-
-    The work lane's directory comes from `work_tracker_okf.WORK_DIR`, not from
-    a literal here: lane directories are bundle-declared (constraint 5), so the
-    capability that owns the lane is the one that names it. okf-io's `*`
-    crosses `/`, so one pattern covers `work/` and `work/_archive/` alike.
-
-    Ignoring is not hiding: `Bundle.has_member` counts ignored members, so a
-    wiki page linking into `work/` still has a working link.
-    """
-    return (f"{work_tracker_okf.WORK_DIR}/*", *work_tracker_okf.IGNORE)
-
-
 def _compose_wiki(
     layout: WorkspaceLayout,
     config: Config,
@@ -259,10 +243,11 @@ def _compose_wiki(
     repo_roots: tuple[Path, ...] = (),
     repository_git: Git | None = None,
 ) -> Lane:
+    scope = wiki_scope()
     return Lane(
         name=WIKI_LANE,
         root=layout.bundle_dir,
-        ignore=_wiki_ignore(),
+        ignore=scope.as_ignore(),
         rules=_wiki_rules(layout, config, reader, at=at, repo_roots=repo_roots, repository_git=repository_git),
     )
 
@@ -292,7 +277,7 @@ def _compose_work(
 
     Its scope comes from `graph_works_core.workspace.bundle.work_scope`, the
     one definition `run_lint` shares. Both use `BundleScope.as_ignore` to
-    ignore the other directories and root files, symmetric with `_wiki_ignore`
+    ignore the other directories and root files, symmetric with `wiki_scope`
     naming `work/`. Lint retains ignored-member identity until the separate
     okf-io pruned resolver issue is fixed; clone-only pruning remains in the
     shared loader.

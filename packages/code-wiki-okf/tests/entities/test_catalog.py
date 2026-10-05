@@ -5,15 +5,17 @@ from __future__ import annotations
 from datetime import date
 from pathlib import Path
 
+import pytest
 from code_wiki_okf.entities.catalog import (
     CatalogEntry,
     catalog_pages,
+    plan_catalogs,
     reconcile_catalogs,
     render_contents,
 )
 from code_wiki_okf.entities.delete import prune_entities
 from code_wiki_okf.init import install_bundle
-from okf_io import load_bundle
+from okf_io import load_bundle, update_index
 
 
 def test_an_empty_catalog_renders_the_none_placeholder():
@@ -92,6 +94,78 @@ def _write(root: Path, member: str, text: str) -> None:
     path = root / member
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text, encoding="utf-8")
+
+
+@pytest.mark.parametrize("dependency", ["present", "absent", "retained"])
+@pytest.mark.parametrize("legacy", ["fresh", "baseline", "wiki-modified"])
+def test_entities_catalog_and_real_index_reconciliation_agree(tmp_path: Path, dependency: str, legacy: str) -> None:
+    """Missing immediate catalog links must not cause alternating writer churn."""
+    root = tmp_path / "bundle"
+    today = date(2026, 1, 1)
+    install_bundle(root, today=today, dry_run=False)
+    _write(root, "code-graph/one.md", _canonical_page("Repository", "one", "repo:acme/one"))
+    _write(
+        root,
+        "code-graph/one/entities/packages/widgets.md",
+        _canonical_page("Package", "widgets", "pkg:acme/one/widgets"),
+    )
+    directory = "code-graph/one/entities"
+    if dependency == "present":
+        _write(
+            root,
+            f"{directory}/dependencies/pypi/httpx.md",
+            _canonical_page("Dependency", "httpx", "dependency:acme/one/pypi/httpx"),
+        )
+    elif dependency == "retained":
+        _write(root, f"{directory}/dependencies/index.md", "# Dependencies\n\nRetained navigation.\n")
+    lanes = ["agent-plugins", "apps", "packages", "test-suites"]
+    if dependency != "absent":
+        lanes.insert(2, "dependencies")
+    if legacy != "fresh":
+        ecosystem = f"- [pypi](/{directory}/dependencies/pypi/index.md)\n" if dependency == "present" else "_(none)_\n"
+        _write(
+            root,
+            f"{directory}/index.md",
+            "# Entities\n\nA human introduction.\n\n## Dependencies\n\n"
+            + ecosystem
+            + "\n## Notes\n\nKeep this prose.\n",
+        )
+        for lane in lanes:
+            if lane != "dependencies" or dependency == "present":
+                _write(root, f"{directory}/{lane}/index.md", f"# {lane}\n")
+        if legacy == "wiki-modified":
+            update_index(load_bundle(root), directories=[directory], create_missing=True, dry_run=False)
+
+    # A scoped scan must leave another repository's existing index byte-exact.
+    _write(root, "code-graph/two.md", _canonical_page("Repository", "two", "repo:acme/two"))
+    other = "code-graph/two/entities/index.md"
+    _write(root, other, "# Other entities\n\nAuthored navigation.\n")
+    other_before = (root / other).read_bytes()
+    assert reconcile_catalogs(load_bundle(root), today=today, repos=["one"]).ok
+    assert (root / other).read_bytes() == other_before
+    index = root / directory / "index.md"
+    before = index.read_bytes()
+    text = before.decode("utf-8")
+    assert "## Directories\n" in text
+    directories = text.split("## Directories\n", 1)[1].split("\n## ", 1)[0]
+    assert directories.strip().splitlines() == [f"- [{lane}](/{directory}/{lane}/index.md)" for lane in lanes]
+    assert f"/{directory}/packages/widgets.md" in text
+    dependencies = text.split("## Dependencies\n", 1)[1].split("\n## ", 1)[0]
+    assert (f"/{directory}/dependencies/pypi/index.md" in dependencies) == (dependency == "present")
+    assert all(f"/{directory}/{lane}/index.md" not in dependencies for lane in lanes)
+    if legacy != "fresh":
+        assert "A human introduction." in text
+        assert "## Notes\n\nKeep this prose." in text
+    if dependency == "absent":
+        assert not (root / directory / "dependencies").exists()
+    plan = plan_catalogs(load_bundle(root), repos=["one"])
+    assert plan.created == ()
+    assert plan.updated == ()
+    updates = update_index(load_bundle(root), directories=[directory], create_missing=True, dry_run=False)
+    assert not any(update.changed for update in updates)
+    assert reconcile_catalogs(load_bundle(root), today=today, repos=["one"]).ok
+    assert index.read_bytes() == before
+    assert (root / other).read_bytes() == other_before
 
 
 def test_reconcile_catalogs_creates_every_invariant_catalog_from_actual_disk(tmp_path: Path) -> None:

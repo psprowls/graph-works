@@ -9,8 +9,10 @@ detector (and repairer) for that gap.
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
+import pytest
 from graph_works_core.util.commands import run_line_endings
 from graph_works_core.workspace.layout import layout_for
 
@@ -124,3 +126,69 @@ def test_fix_is_idempotent(tmp_path: Path) -> None:
 
     assert second.findings == ()
     assert target.read_bytes() == b"a\nb\n"
+
+
+@pytest.mark.parametrize("fix", [False, True])
+def test_clone_members_are_neither_listed_nor_repaired(tmp_path, monkeypatch, fix):
+    layout = _layout(tmp_path)
+    root = layout.bundle_dir
+    originals = {
+        "index.md": b"index\r\n",
+        "notes.txt": b"notes\r\n",
+        "work/bug/references/probe.md": b"probe\r\n",
+        "repositories/demo/references/git/page.md": b"clone\r\n",
+        "repositories/demo/references/git/notes.txt": b"clone asset\r\n",
+        ".git/config": b"git\r\n",
+    }
+    for member, data in originals.items():
+        path = root / member
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(data)
+    clone = root / "repositories/demo/references/git"
+    scandir = os.scandir
+
+    def guarded_scandir(path):
+        candidate = Path(path) if not isinstance(path, int) else None
+        if candidate is not None and candidate.is_relative_to(root):
+            assert not candidate.is_relative_to(clone), "enumerated clone subtree"
+        return scandir(path)
+
+    monkeypatch.setattr(os, "scandir", guarded_scandir)
+    report = run_line_endings(layout, fix=fix)
+    assert [f.member for f in report.findings] == ["index.md", "notes.txt", "work/bug/references/probe.md"]
+    assert report.fixed is fix
+    for member, data in originals.items():
+        wanted = (
+            data.replace(b"\r\n", b"\n")
+            if fix and member in {"index.md", "notes.txt", "work/bug/references/probe.md"}
+            else data
+        )
+        assert (root / member).read_bytes() == wanted
+
+
+def test_mixed_bundle_keeps_raw_bytes_and_all_member_kinds(tmp_path):
+    layout = _layout(tmp_path)
+    originals = {
+        "index.md": b"root\r\n",
+        "log.md": b"log\r\n",
+        "nested/index.md": b"nested\r\n",
+        "nested/log.md": b"log\r\n",
+        "malformed.md": b"---\r\nbad: [\r\n---\r\n",
+        "invalid.md": b"\xfftext\r\n",
+        "asset.txt": b"text\r\n",
+        "binary.bin": b"\x00binary\r\n",
+    }
+    for member, data in originals.items():
+        path = layout.bundle_dir / member
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(data)
+    expected = ["asset.txt", "index.md", "invalid.md", "log.md", "malformed.md", "nested/index.md", "nested/log.md"]
+    assert [f.member for f in run_line_endings(layout).findings] == expected
+    for member, data in originals.items():
+        assert (layout.bundle_dir / member).read_bytes() == data
+    assert [f.member for f in run_line_endings(layout, fix=True).findings] == expected
+    for member, data in originals.items():
+        assert (layout.bundle_dir / member).read_bytes() == (
+            data if member == "binary.bin" else data.replace(b"\r\n", b"\n")
+        )
+    assert run_line_endings(layout, fix=True).findings == ()

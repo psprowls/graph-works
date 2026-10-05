@@ -18,7 +18,7 @@ import tempfile
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
-from typing import Literal
+from typing import Literal, cast
 
 from code_graph_io.tokens import count_tokens
 from code_wiki_okf.provenance import tokens_value
@@ -116,7 +116,13 @@ def run_line_endings(layout: WorkspaceLayout, *, fix: bool = False) -> LineEndin
     its own preflight would refuse this repair.
     """
     findings: list[LineEndingFinding] = []
-    for path in sorted(layout.bundle_dir.rglob("*")):
+    bundle = load_workspace_bundle(layout)
+    # Keep raw disk paths: authored identifiers may have a normalized spelling.
+    members = set(bundle.assets) | set(bundle.ignored) | set(bundle.unreadable)
+    for documents in (bundle.concepts, bundle.indexes, bundle.logs):
+        members.update(cast(Path, doc.path).relative_to(bundle.root).as_posix() for doc in documents.values())
+    for member in sorted(members):
+        path = bundle.root / member
         if not path.is_file():
             continue
         data = path.read_bytes()

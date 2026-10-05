@@ -9,6 +9,8 @@ graph-works-serve imports `okf_io.load_bundle` instead of calling these.
 to prune every other top-level directory without listing it; lint uses
 `BundleScope.as_ignore` to retain exact-case, NFC-insensitive member identity.
 `tests/test_work_scope_allowlist.py` pins which functions may use the scope.
+`wiki_scope` retains mirrored code pages beneath `references/`, while keeping
+work artifacts and raw source reference copies opaque.
 """
 
 from __future__ import annotations
@@ -76,6 +78,23 @@ def load_workspace_bundle(layout: WorkspaceLayout, *, ignore: Sequence[str] = ()
     return load_bundle_at(layout.bundle_dir, ignore=ignore, prune=prune)
 
 
+def wiki_scope() -> BundleScope:
+    """Ignore work and raw sources, retaining exact cross-lane member identity.
+
+    okf-io's `*` crosses `/`: the work lane's broad references glob would also
+    hide mirrored repository files. Narrow only that inherited exclusion.
+    Clone pruning remains the shared loader's responsibility.
+    """
+    return BundleScope(
+        ignore=(
+            f"{work_tracker_okf.WORK_DIR}/*",
+            "sources/references/*",
+            *(pattern for pattern in work_tracker_okf.IGNORE if pattern != "*/references/*"),
+        ),
+        prune=(),
+    )
+
+
 def work_scope(layout: WorkspaceLayout) -> BundleScope:
     """Every top-level directory except `work/` pruned; every root-level file ignored.
 
@@ -112,6 +131,7 @@ __all__ = [
     "load_bundle_at",
     "load_work_bundle",
     "load_workspace_bundle",
+    "wiki_scope",
     "with_clone_ignore",
     "with_clone_prune",
     "work_scope",

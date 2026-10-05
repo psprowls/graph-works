@@ -43,3 +43,34 @@ def test_a_bad_baseline_is_undetermined_with_a_cause(tmp_path: Path) -> None:
     repo, base, _ = _repo(tmp_path)
     got = compare_to_baseline(repo, base, "e" * 40)
     assert got.new is None and not got.missing and got.cause is not None
+
+
+def _side_commit(repo: Path, branch: str) -> str:
+    """A commit on *branch*, off the first commit, leaving HEAD where it was."""
+    head = _git(repo, "rev-parse", "--abbrev-ref", "HEAD")
+    _git(repo, "checkout", "-q", "-b", branch, "HEAD~1")
+    _git(repo, "commit", "-q", "--allow-empty", "-m", branch)
+    sha = _git(repo, "rev-parse", "HEAD")
+    _git(repo, "checkout", "-q", head)
+    return sha
+
+
+def test_a_commit_no_ref_contains_is_unreachable(tmp_path: Path) -> None:
+    repo, _, later = _repo(tmp_path)
+    orphan = _side_commit(repo, "gone")
+    _git(repo, "branch", "-q", "-D", "gone")
+    assert compare_to_baseline(repo, orphan, later) == BaselineComparison(None, unreachable=True)
+
+
+def test_a_commit_on_a_live_branch_is_new(tmp_path: Path) -> None:
+    repo, _, later = _repo(tmp_path)
+    side = _side_commit(repo, "epic")
+    assert compare_to_baseline(repo, side, later) == BaselineComparison(True)
+
+
+def test_a_commit_reachable_only_from_a_tag_is_new(tmp_path: Path) -> None:
+    repo, _, later = _repo(tmp_path)
+    tagged = _side_commit(repo, "tagged")
+    _git(repo, "tag", "keep", tagged)
+    _git(repo, "branch", "-q", "-D", "tagged")
+    assert compare_to_baseline(repo, tagged, later) == BaselineComparison(True)

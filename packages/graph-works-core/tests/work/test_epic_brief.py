@@ -195,6 +195,18 @@ def test_a_failed_probe_omits_the_marker_warns_and_still_flags(tmp_path: Path, m
     assert SIB in brief.lines[-1]
 
 
+def test_an_unreachable_sibling_commit_warns_and_does_not_flag(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    layout, items, child = _world(tmp_path, baseline=True)
+    _no_git(monkeypatch, new={SHA_B: BaselineComparison(None, unreachable=True)})
+    brief = eb.epic_brief(layout, items, child)
+    assert any(line.startswith(f"- [{SIB}]") and line.endswith("affects overlap: yes") for line in brief.lines)
+    assert (
+        f"epic_brief: {SIB} resolved_in {SHA_B[:12]} is not reachable from any ref in /repo "
+        "(history rewritten or branch deleted)" in brief.warnings
+    )
+    assert brief.lines[-1] == eb.NO_FLAGS_LINE
+
+
 def test_a_missing_sibling_commit_warns(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     layout, items, child = _world(tmp_path, baseline=True)
     _no_git(monkeypatch, new={SHA_B: BaselineComparison(None, missing=True)})

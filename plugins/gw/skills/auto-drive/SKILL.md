@@ -894,8 +894,9 @@ One call waits, and acknowledges the previous event first. The result carries
 `status` (`event` or `timeout`), `delivery_id`, `messages[]`, `absorbed[]`,
 `self_acked`, `rebound`, `sleep_gap` (`{seconds}` or null), `waited_s`,
 `pending_questions` (null when the read failed), `warnings`, and `liveness`
-(rows on timeout only, else null). Heartbeats never wake it, and a
-heartbeat-only or absorbed-only delivery is acked by the verb itself.
+(rows on positive timeout only, else null). A positive-timeout wait strips
+heartbeats and self-acks heartbeat-only or absorbed-only deliveries. A zero
+timeout preserves the entire probe delivery unacked, including heartbeats.
 
 - **Carried state: the delivery id to ack.** This is
   the one named exception to §2's self-contained-iteration rule. Carry `delivery_id` into the next
@@ -1018,8 +1019,11 @@ heartbeat-only or absorbed-only delivery is acked by the verb itself.
 - **On both delivery and timeout, display pending before restarting.**
   After the handling above, refresh the pending set:
   `gw work wait --run <run_id> --timeout-s 0 --json` — a zero
-  timeout makes no Orca `check` call and acks nothing; it only derives the
-  Run's unanswered questions from Orca. A timeout whose triage sent, stopped
+  timeout probes binding without waiting, acks nothing, and derives the Run's
+  unanswered questions. If the refresh returns an event, process its entire
+  batch under the handling rules above and retain its delivery ID for later
+  ack; display that result's pending set without another recursive refresh.
+  A timeout whose triage sent, stopped
   or replied to nothing may display its own result's `pending_questions`
   instead. Print its `pending_questions` as
   §4.3 step 1a says, and show its `warnings`. A failed read prints the refresh
@@ -1035,12 +1039,17 @@ heartbeat-only or absorbed-only delivery is acked by the verb itself.
   coordinator terminal is noise. Do not run `check` or `inbox` in response;
   the next `gw work wait` receives the messages (stablyai/orca#14910,
   stablyai/orca#16822).
-- Under a fence, `inbox --terminal` returns `count: 0`
-  (stablyai/orca#21226). A zero-timeout `gw work wait` makes no `check` call
-  and so never rebinds: an empty `pending_questions` or an empty reply-proof
-  `inbox` read is "unknown", not "none". Only a full wait detects the fence
-  and rebinds. The fail-closed rules above (no ack without positive evidence)
-  already prevent a wrong ack; this note keeps the display honest.
+- A zero-timeout `gw work wait` probes the Run binding with a non-blocking
+  `check`, recovers a reported consumer fence once, and fences the pending
+  read too. `pending_questions: null` plus warnings means unknown; a successful
+  empty read is `[]`. This is bounded recovery, not an atomic snapshot across
+  the independent check and inbox calls.
+- A zero-timeout refresh can return a delivery, including heartbeat or duplicate
+  completion messages. Handle its entire batch under the rules above before
+  later ack; the refresh preserves every message and ignores any supplied ack.
+- Raw reply-proof `inbox --terminal` reads can still return `count: 0` under
+  a fence (stablyai/orca#21226). An empty raw read is "unknown", not "none"; retain the
+  positive-evidence safeguards above before ack.
 
 ## 3. Dispatch mechanics
 

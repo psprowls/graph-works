@@ -513,13 +513,16 @@ def test_check_wait_empty_batch_has_no_delivery_id():
     ],
     ids=["undecodable-string", "string-non-object", "non-string-scalar", "null", "historical-mapping"],
 )
-def test_check_wait_payload_decoding(raw, payload, payload_raw):
+@pytest.mark.parametrize("nowait", [False, True])
+def test_check_payload_decoding(raw, payload, payload_raw, nowait):
     def batch(argv):
         message = {"id": "m1", "type": "worker_done", "payload": raw}
         result = {"deliveryId": "dlv_1", "messages": [message]}
         return OrcaResult(0, json.dumps({"ok": True, "result": result}), "")
 
-    [message] = OrcaCliPort(run=batch).check_wait("r", types="t", timeout_ms=1, ack=None)["messages"]
+    port = OrcaCliPort(run=batch)
+    result = port.check_nowait("r") if nowait else port.check_wait("r", types="t", timeout_ms=1, ack=None)
+    [message] = result["messages"]
     assert (message["payload"], message["payload_raw"]) == (payload, payload_raw)
     assert (message["subject"], message["body"], message["from_"], message["created_at"]) == (None, None, None, None)
 
@@ -762,3 +765,39 @@ def test_terminal_send_text_types_a_prompt():
     assert runner.calls[-1] == (
         "orca", "terminal", "send", "--terminal", "term_1", "--text", "Gate run r finished.", "--enter", "--json",
     )  # fmt: skip
+
+
+def test_check_nowait_argv_and_string_payload():
+    calls = []
+
+    def response(argv):
+        calls.append(tuple(argv))
+        return OrcaResult(
+            0,
+            json.dumps(
+                {
+                    "ok": True,
+                    "result": {
+                        "deliveryId": "d",
+                        "messages": [{"id": "m", "type": "question", "payload": '{"taskId":"t"}'}],
+                    },
+                }
+            ),
+            "",
+        )
+
+    result = OrcaCliPort(run=response).check_nowait("r")
+    assert calls == [("orca", "orchestration", "check", "--run", "r", "--json")]
+    assert result["delivery_id"] == "d"
+    assert result["messages"][0]["payload"] == {"taskId": "t"}
+
+
+@pytest.mark.parametrize(
+    "result", [{}, {"deliveryId": "d"}, {"messages": None}, {"messages": {}}, {"messages": ["bad"]}]
+)
+def test_check_nowait_refuses_malformed_messages(result):
+    def response(argv):
+        return OrcaResult(0, json.dumps({"ok": True, "result": result}), "")
+
+    with pytest.raises(OrcaCliError, match="malformed check messages"):
+        OrcaCliPort(run=response).check_nowait("r")

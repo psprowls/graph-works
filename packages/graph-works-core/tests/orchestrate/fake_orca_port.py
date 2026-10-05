@@ -139,6 +139,14 @@ class FakeOrcaPort:
     def terminal_send_enter(self, terminal):
         self._record("terminal_send_enter", terminal)
 
+    def check_nowait(self, run_id):
+        self._record("check_nowait", run_id)
+        if self.wait_errors:
+            raise self.wait_errors.pop(0)
+        if not self.deliveries:
+            return {"delivery_id": None, "messages": []}
+        return self.deliveries.pop(0)
+
     def check_wait(self, run_id, *, types, timeout_ms, ack):
         self._record("check_wait", run_id, types=types, timeout_ms=timeout_ms, ack=ack)
         if self.wait_errors:

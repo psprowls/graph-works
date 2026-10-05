@@ -6269,7 +6269,7 @@
             "--timeout-s"
           ],
           "secondary_opts": [],
-          "help": "Seconds before timeout; values between 0 and 55 are raised to 55; 0 reads pending questions only, without consuming or acknowledging deliveries.",
+          "help": "Seconds before timeout; values between 0 and 55 are raised to 55; 0 probes binding and returns any delivery without acknowledging it.",
           "required": false,
           "default": 600.0,
           "is_flag": false

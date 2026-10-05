@@ -865,7 +865,7 @@ def wait(
         min=0,
         help=(
             f"Seconds before timeout; values between 0 and {WAIT_FLOOR_S} are raised to {WAIT_FLOOR_S}; "
-            "0 reads pending questions only, without consuming or acknowledging deliveries."
+            "0 probes binding and returns any delivery without acknowledging it."
         ),
     ),
     workspace: str = typer.Option("", "--workspace", help="Workspace path."),

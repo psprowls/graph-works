@@ -469,11 +469,18 @@ class OrcaCliPort:
     def terminal_send_enter(self, terminal: str) -> None:
         self.terminal_send_text(terminal, "")
 
+    def check_nowait(self, run_id: str) -> OrcaDelivery:
+        """Probe binding and return the whole FIFO delivery without waiting or ack."""
+        return self._check_delivery(["check", "--run", run_id])
+
     def check_wait(self, run_id: str, *, types: str, timeout_ms: int, ack: str | None) -> OrcaDelivery:
         """One blocking check; optionally acknowledge the prior delivery in the same call."""
         argv = ["check", "--run", run_id, "--wait", "--types", types, "--timeout-ms", str(timeout_ms)]
         if ack is not None:
             argv.extend(("--ack", ack))
+        return self._check_delivery(argv)
+
+    def _check_delivery(self, argv: list[str]) -> OrcaDelivery:
         result = self._call(argv)
         rows = result.get("messages")
         if not isinstance(rows, list) or any(not isinstance(row, dict) for row in rows):

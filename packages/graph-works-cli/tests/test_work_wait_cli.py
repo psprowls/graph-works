@@ -31,7 +31,7 @@ def test_wait_help_explains_zero_timeout_does_not_ack():
     assert result.exit_code == 0, result.output
     options = {option["name"]: option["help"] for option in json.loads(result.output)["options"]}
     assert "ignored when --timeout-s is 0" in options["ack"]
-    assert "0 reads pending questions only, without consuming or acknowledging deliveries" in options["timeout_s"]
+    assert "0 probes binding and returns any delivery without acknowledging it" in options["timeout_s"]
 
 
 class Refused(BackendError):
@@ -324,7 +324,7 @@ QUESTION = {
 
 
 @pytest.mark.parametrize("ack", [(), ("--ack", "dlv_prev")])
-def test_zero_timeout_json_pending_questions_is_a_pure_read(env, ack):
+def test_zero_timeout_json_probes_before_pending_questions(env, ack):
     layout, port = env
     port.pending = {"questions": [QUESTION], "truncated": False, "warnings": []}
     result = invoke(layout, "--timeout-s", "0", "--json", *ack)
@@ -335,7 +335,7 @@ def test_zero_timeout_json_pending_questions_is_a_pure_read(env, ack):
     assert payload["warnings"] == [] and payload["liveness"] is None
     assert payload["status"] == "timeout" and payload["delivery_id"] is None
     assert payload["self_acked"] == 0 and payload["rebound"] is False
-    assert port.calls == [("pending_questions", ("run_1",), {})]
+    assert port.calls == [("check_nowait", ("run_1",), {}), ("pending_questions", ("run_1",), {})]
 
 
 def test_pending_read_failure_human_warning(env):

@@ -30,8 +30,6 @@ from typing import Any
 
 from okf_ext.proposals import HEADER, Mode
 
-from doc_wiki_okf.proposals.lanes import Lane
-
 #: The legacy's explicit "nothing was captured" lines, kept verbatim. An empty
 #: heading tells a reviewer nothing; these tell them the reasoner had nothing.
 _NO_EVIDENCE = "- No source evidence was captured."
@@ -80,15 +78,15 @@ def _label(source: Mapping[str, Any]) -> str:
 
 @dataclass(frozen=True, slots=True)
 class ReviewRenderer:
-    """A `BodyRenderer` closed over the resolved target and its lane."""
+    """A `BodyRenderer` closed over the resolved target and its page type."""
 
-    lane: Lane
+    type_name: str
     target: str
     mode: Mode
 
     def _suggested_action(self) -> str:
         verb = "Update existing" if self.mode == "update" else "Create new"
-        return f"{verb} {self.lane.type_name} page `{self.target}`."
+        return f"{verb} {self.type_name} page `{self.target}`."
 
     def __call__(
         self,

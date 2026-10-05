@@ -3,5 +3,24 @@
   "$ref": "_base.schema.json",
   "unevaluatedProperties": false,
   "properties": { "type": { "const": "TechDebt" } },
+  "x-okf-accept-proposals": true,
+  "x-okf-proposal-guidance": {
+    "summary": "working code whose shape costs more than it should to change, understand or run.",
+    "question": "Does the source show working code whose structure makes every nearby change expensive?",
+    "signals": [
+      "duplication, a leaky boundary or a standing workaround is named",
+      "behaviour stays the same after the change",
+      "the cost is paid again on every future change near it"
+    ],
+    "anti_signals": [
+      "users see wrong behaviour",
+      "the change adds a capability",
+      "the problem is untested code rather than its shape"
+    ],
+    "title_pattern": "Names the debt: `Consolidate ...`, `Remove the ... workaround`, `Untangle ... from ...`"
+  },
+  "x-okf-proposal-promotion": {
+    "frontmatter": { "work_status": "open", "opened": "{on}", "updated": "{on}" }
+  },
   "x-okf-directory": "work/"
 }

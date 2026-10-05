@@ -37,12 +37,12 @@ def _lanes(tmp_path: Path):
     Not `tmp_path / "okf"` -- that is `_bundle`'s, and `_bundle` calls
     `mkdir(parents=True)` without `exist_ok`, so seeding over it raises.
     """
-    from doc_wiki_okf.proposals.lanes import lane_set
+    from doc_wiki_okf.proposals.pool import proposal_pool
     from ingest_helpers import declarations
     from suggest_fixtures import make_bundle
 
     schema_set, _ = declarations(make_bundle(tmp_path / "lanes"))
-    return lane_set(schema_set)
+    return proposal_pool(schema_set)
 
 
 def test_the_caps_carry_the_tuned_values():
@@ -151,7 +151,7 @@ async def test_a_clean_run_returns_ok(tmp_path, monkeypatch):
     result = await run_proposal_reasoner(
         bundle=_bundle(tmp_path),
         lanes=("docs/explanations",),
-        lane_set=_lanes(tmp_path),
+        pool=_lanes(tmp_path),
         material=Path("/tmp/thing.md"),
         source_text="short",
         source_page="sources/2026-08-thing.md",
@@ -173,7 +173,7 @@ async def test_an_empty_response_is_a_failure(tmp_path, monkeypatch):
     result = await run_proposal_reasoner(
         bundle=_bundle(tmp_path),
         lanes=("docs/explanations",),
-        lane_set=_lanes(tmp_path),
+        pool=_lanes(tmp_path),
         material=Path("/tmp/thing.md"),
         source_text="short",
         source_page="sources/2026-08-thing.md",

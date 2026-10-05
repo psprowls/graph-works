@@ -138,11 +138,11 @@ def test_file_payload_never_projects_create_text() -> None:
         refusals=(),
     )
     run = ProposalFileRun(
-        lane="explanation", target=plan.target, proposal=plan.proposal, plan=plan, refusals=(), result=None
+        type_name="Explanation", target=plan.target, proposal=plan.proposal, plan=plan, refusals=(), result=None
     )
     payload = proposal_file_payload(run)
     assert set(payload) == {
-        "lane",
+        "type",
         "target",
         "proposal",
         "ok",
@@ -324,7 +324,7 @@ def test_ingest_payload_has_exact_keys_and_omits_internal_proposal_status() -> N
         frontmatter_parsed=False,
         proposals=(
             {
-                "lane": "adrs",
+                "type": "Adr",
                 "title": "Keep",
                 "target": "adrs/demo.md",
                 "proposal": "text",
@@ -336,6 +336,7 @@ def test_ingest_payload_has_exact_keys_and_omits_internal_proposal_status() -> N
             "error": "model unavailable",
             "failed": ["Keep: mkdir-error", "Merge: write-error"],
             "errored": ["Explain: RuntimeError"],
+            "pool_refused": ["Memo: missing-guidance"],
         },
     )
 
@@ -358,7 +359,7 @@ def test_ingest_payload_has_exact_keys_and_omits_internal_proposal_status() -> N
     }
     assert "proposal_status" not in payload
     assert payload["proposals"] == [
-        {"lane": "adrs", "title": "Keep", "target": "adrs/demo.md", "proposal": "text", "status": "filed"}
+        {"type": "Adr", "title": "Keep", "target": "adrs/demo.md", "proposal": "text", "status": "filed"}
     ]
     assert payload["warnings"] == [
         "ingestor response frontmatter was not parsed; fallback values were used",
@@ -366,6 +367,7 @@ def test_ingest_payload_has_exact_keys_and_omits_internal_proposal_status() -> N
         "suggestion apply failed: Keep: mkdir-error",
         "suggestion apply failed: Merge: write-error",
         "suggestion apply errored: Explain: RuntimeError",
+        "proposal type refused: Memo: missing-guidance",
     ]
 
 
@@ -466,6 +468,9 @@ def test_stats_and_proposal_payloads_have_exact_keys() -> None:
     assert set(proposal_result) == {
         "member",
         "target",
+        "target_type",
+        "type",
+        "type_refusal",
         "title",
         "description",
         "page_status",
@@ -531,6 +536,7 @@ def test_proposal_payload_places_mode_after_page_status() -> None:
     proposal = ns(
         member="proposals/a.md",
         target="adrs/a.md",
+        target_type="Adr",
         title="A",
         description="",
         page_status="approved",
@@ -545,6 +551,9 @@ def test_proposal_payload_places_mode_after_page_status() -> None:
     assert list(payload) == [
         "member",
         "target",
+        "target_type",
+        "type",
+        "type_refusal",
         "title",
         "description",
         "page_status",
@@ -561,6 +570,7 @@ def test_proposals_payload_projects_each_listing() -> None:
     proposal = ns(
         member="proposals/a.md",
         target="concepts/a.md",
+        target_type=None,
         title="A",
         description="",
         page_status="proposed",
@@ -569,9 +579,9 @@ def test_proposals_payload_projects_each_listing() -> None:
         superseded_by=None,
         malformed=None,
     )
-    listing = ns(proposal=proposal, mode="create")
+    listing = ns(proposal=proposal, mode="create", type_name="Runbook", type_refusal=None)
 
-    assert wiki.proposals_payload([listing]) == [wiki.proposal_payload(proposal, mode="create")]
+    assert wiki.proposals_payload([listing]) == [wiki.proposal_payload(proposal, mode="create", type_name="Runbook")]
     assert wiki.proposals_payload([]) == []
 
 
@@ -673,3 +683,47 @@ def test_scan_warning_payload_parity_and_apply_isolation(warnings: tuple[str, ..
     assert normal["ok"] is True
     assert normal["entity_errors"] == emitted["entity_errors"] == []
     assert scan_apply_payload(ApplyResult()).get("warnings", []) == []
+
+
+@pytest.mark.parametrize("refused", [[], ["Memo: missing-guidance"]])
+def test_ingest_payload_warns_when_no_proposal_types_are_eligible(refused: list[str]) -> None:
+    result = IngestResult(
+        ok=True,
+        page="sources/demo.md",
+        copy="sources/references/demo.md",
+        title="Demo",
+        source_kind="reference",
+        proposal_status={"pool": "empty", "pool_refused": refused},
+    )
+    assert ingest_payload(result)["warnings"] == [
+        *[f"proposal type refused: {entry}" for entry in refused],
+        "no eligible proposal types; suggestion phase skipped",
+    ]
+
+
+def test_listing_payload_retains_raw_type_and_projects_resolution_refusal() -> None:
+    from graph_works_core.proposals import ProposalListing
+    from okf_ext.proposals import Refusal
+
+    proposal = Proposal(
+        member="proposals/p.md",
+        concept_id="proposals/p",
+        target="runbooks/p.md",
+        target_type="Source",
+        title="P",
+        description="d",
+        page_status="proposed",
+        raw_page_status="proposed",
+        sources=(),
+        verified=(),
+    )
+    listing = ProposalListing(
+        proposal=proposal,
+        mode="create",
+        type_name=None,
+        type_refusal=Refusal(path="proposals/p.md", kind="type-unavailable", detail="Source: locked"),
+    )
+    [payload] = wiki.proposals_payload([listing])
+    assert payload["target_type"] == "Source"
+    assert payload["type"] is None
+    assert payload["type_refusal"] == {"path": "proposals/p.md", "kind": "type-unavailable", "detail": "Source: locked"}

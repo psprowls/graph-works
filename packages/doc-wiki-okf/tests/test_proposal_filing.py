@@ -1,18 +1,19 @@
-"""Filing: the lane resolves the target, the capability owns the merge."""
+"""Filing: the pool resolves the target, the capability owns the merge."""
 
 import unicodedata
 
 import pytest
 from doc_wiki_okf.proposals.filing import plan_file
+from doc_wiki_okf.proposals.pool import PoolError
 from okf_ext.proposals import apply
-from proposal_helpers import AT, BY, build_bundle, lanes, source
+from proposal_helpers import AT, BY, build_bundle, pool, source
 
 
-def _file(bundle, *, title="Bulk Write Staging Protocol", entry=None, lane="adr"):
+def _file(bundle, *, title="Bulk Write Staging Protocol", entry=None, type_name="Adr"):
     return plan_file(
         bundle,
-        lanes(),
-        lane=lane,
+        pool(),
+        type_name=type_name,
         title=title,
         description="Two sources argue for one page.",
         source=entry or source("src-a", "sources/2026-08-spec.md", rationale="It settles it."),
@@ -67,9 +68,9 @@ def test_refiling_an_identical_source_plans_nothing(tmp_path) -> None:
     assert plan.is_empty
 
 
-def test_an_unknown_lane_raises(tmp_path) -> None:
+def test_an_unknown_type_raises(tmp_path) -> None:
     with pytest.raises(KeyError):
-        _file(build_bundle(tmp_path / "b"), lane="concept")
+        _file(build_bundle(tmp_path / "b"), type_name="concept")
 
 
 def test_an_existing_target_files_in_update_mode(tmp_path) -> None:
@@ -78,8 +79,8 @@ def test_an_existing_target_files_in_update_mode(tmp_path) -> None:
     bundle = build_bundle(root, {"docs/reference/flags": page})
     plan = plan_file(
         bundle,
-        lanes(),
-        lane="reference",
+        pool(),
+        type_name="Reference",
         title="Flags",
         description="",
         source=source("src-a", "sources/x.md"),
@@ -95,15 +96,15 @@ def test_a_non_ascii_target_files_in_update_mode_against_the_raw_disk_id(tmp_pat
     see work/tech-debt-has-member-callers-raw-id."""
     nfd = unicodedata.normalize("NFD", "café")
     nfc = unicodedata.normalize("NFC", "café")
-    monkeypatch.setattr("doc_wiki_okf.proposals.lanes.slugify", lambda title: nfc)
+    monkeypatch.setattr("doc_wiki_okf.proposals.pool.slugify", lambda title: nfc)
     root = tmp_path / "b"
     page = "---\ntype: Reference\ntitle: Café\n---\n\n# Café\n"
     bundle = build_bundle(root, {f"docs/reference/{nfd}": page})
 
     plan = plan_file(
         bundle,
-        lanes(),
-        lane="reference",
+        pool(),
+        type_name="Reference",
         title="Café",
         description="",
         source=source("src-a", "sources/x.md"),
@@ -113,3 +114,29 @@ def test_a_non_ascii_target_files_in_update_mode_against_the_raw_disk_id(tmp_pat
 
     assert plan.target == f"docs/reference/{nfd}.md"
     assert f"Update existing Reference page `docs/reference/{nfd}.md`." in plan.writes[0].text
+
+
+def test_filing_records_the_type_in_target_type(tmp_path) -> None:
+    bundle = build_bundle(tmp_path / "b")
+    plan = plan_file(
+        bundle,
+        pool(),
+        type_name="explanation",
+        title="Byte Fidelity",
+        description="d",
+        source=source("s1", "sources/2026-08-spec.md"),
+        by=BY,
+        at=AT,
+    )
+    (write,) = plan.writes
+    assert write.member == "proposals/docs-explanations-byte-fidelity.md"
+    assert "target_type: Explanation" in write.text
+
+
+@pytest.mark.parametrize(
+    ("asked", "fragment"), [("Source", "x-okf-accept-proposals: false"), ("explanation-ish", "expected one of")]
+)
+def test_filing_into_a_type_outside_the_pool_raises_naming_why(tmp_path, asked, fragment) -> None:
+    bundle = build_bundle(tmp_path / "b")
+    with pytest.raises(PoolError, match=fragment):
+        plan_file(bundle, pool(), type_name=asked, title="T", description="d", source=source("s1", "r"), by=BY, at=AT)

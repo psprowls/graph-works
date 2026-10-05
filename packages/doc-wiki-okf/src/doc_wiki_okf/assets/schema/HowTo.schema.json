@@ -18,5 +18,22 @@
     }
   },
   "x-okf-directory": "docs/how-tos/",
+  "x-okf-accept-proposals": true,
+  "x-okf-proposal-guidance": {
+    "summary": "the reader already has the goal and needs a task-shaped recipe.",
+    "question": "Does the reader already understand the problem and need to solve it?",
+    "signals": [
+      "the reader arrives with a goal and baseline knowledge",
+      "the page states what it assumes",
+      "the steps end in one expected result",
+      "alternatives are noted where they exist"
+    ],
+    "anti_signals": [
+      "the reader is meeting the subject for the first time",
+      "the page teaches concepts before acting on them",
+      "there is no single task being completed"
+    ],
+    "title_pattern": "Names the task: `How to configure ...`, `How to deploy ... to ...`"
+  },
   "x-okf-about": {}
 }

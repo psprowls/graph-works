@@ -45,12 +45,14 @@ from code_wiki_okf.placement import placement_rule as code_wiki_placement_rule
 from code_wiki_okf.sync.rule import sync_rule
 from code_wiki_okf.sync.snapshot import snapshot_bundle
 from config_io import PROJECTION_FILENAME
+from doc_wiki_okf.proposals.adr import adr_directory
+from doc_wiki_okf.proposals.pool import refused_type_rule
 from doc_wiki_okf.sources import drain_rule, entry_keys_from
 from okf_ext.bundle import SCHEMA_DIRNAME, SECTIONS_DIRNAME
 from okf_ext.health import health_rule
 from okf_ext.placement import placement_rule
 from okf_ext.render import render_rule
-from okf_ext.schemas import SchemaError, SchemaSet, declared_about, load_schemas, schema_rule
+from okf_ext.schemas import SchemaError, SchemaSet, declared_about, declared_proposables, load_schemas, schema_rule
 from okf_ext.sections import section_rule
 from okf_ext.shape import SectionError, load_sections
 from okf_ext.tags import VOCABULARY_FILENAME, VocabularyError, load_vocabulary, vocabulary_rule
@@ -177,6 +179,19 @@ def wiki_entry_keys(config: Config) -> dict[str, str] | None:
     return None if schema_set is None else _entry_keys(schema_set)
 
 
+def wiki_adr_directory(config: Config) -> str | None:
+    """The `Adr` schema's `x-okf-directory`, or None.
+
+    None when there is no `schema/`, no `Adr` schema, or the declarations are
+    malformed -- never a raise, the contract `wiki_entry_keys` states.
+    """
+    try:
+        schema_set = _wiki_schema_set(config)
+    except _DECLARATION_ERRORS:
+        return None
+    return None if schema_set is None else adr_directory(schema_set)
+
+
 def _wiki_rules(
     layout: WorkspaceLayout,
     config: Config,
@@ -186,7 +201,7 @@ def _wiki_rules(
     repo_roots: tuple[Path, ...] = (),
     repository_git: Git | None = None,
 ) -> tuple[Rule, ...]:
-    """The wiki lane's rule set: three unconditional, six declaration-gated,
+    """The wiki lane's rule set: three unconditional, seven declaration-gated,
     one reader-gated, one lane-gated.
 
     `health` and `render` read only the bundle, so they are always on. The
@@ -201,6 +216,8 @@ def _wiki_rules(
     placement rides the schema gate: its directories come from
     `x-okf-directory`, allow-listed to the lane's two types so code-wiki's own
     placement stays the only authority over its types.
+    The proposal pool's refused-type warning rides the schema gate: refusals
+    are a fact about the declared schemas.
     The `repository.*` rules are lane-gated: composed only when `repositories/`
     holds a page, with git resolved up front so a missing executable is one
     lane error rather than a finding per page.
@@ -210,6 +227,7 @@ def _wiki_rules(
     schema_set = _wiki_schema_set(config)
     if schema_set is not None:
         rules.append(schema_rule(schema_set))
+        rules.append(refused_type_rule(declared_proposables(schema_set)))
         rules.append(about_rule(declared_about(schema_set), repo_roots=repo_roots, severity=CONTRACT_SEVERITY))
         rules.append(drain_rule(_entry_keys(schema_set)))
         rules.append(
@@ -368,4 +386,13 @@ def compose_lanes(
     return LaneSet(lanes=tuple(lanes), errors=tuple(errors))
 
 
-__all__ = ["CONTRACT_SEVERITY", "WIKI_LANE", "WORK_LANE", "Lane", "LaneSet", "compose_lanes", "wiki_entry_keys"]
+__all__ = [
+    "CONTRACT_SEVERITY",
+    "WIKI_LANE",
+    "WORK_LANE",
+    "Lane",
+    "LaneSet",
+    "compose_lanes",
+    "wiki_adr_directory",
+    "wiki_entry_keys",
+]

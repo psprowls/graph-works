@@ -53,7 +53,7 @@ def _decide_run(*, plan_ok: bool = True, result_ok: bool = True, written: tuple[
 def _file_run(*, plan_ok: bool = True, result_ok: bool = True, written: tuple[str, ...] = ()) -> SimpleNamespace:
     refusals = () if plan_ok else (SimpleNamespace(path="proposals/a.md", kind="refused", detail="no"),)
     return SimpleNamespace(
-        lane="explanation",
+        type_name="Explanation",
         target="docs/explanations/typed-cli.md",
         proposal="proposals/docs-explanations-typed-cli.md",
         ok=plan_ok and result_ok,
@@ -68,8 +68,8 @@ def _file_args(workspace: Path) -> list[str]:
         "wiki",
         "proposal",
         "file",
-        "--lane",
-        "explanation",
+        "--type",
+        "Explanation",
         "--title",
         "Typed CLI",
         "--id",
@@ -342,13 +342,16 @@ def test_proposal_file_reports_core_io_and_echoes_written_members(
 
 
 @pytest.mark.parametrize(
-    ("missing", "value"), (("--lane", "explanation"), ("--title", "T"), ("--id", "s1"), ("--resource", "r"))
+    ("missing", "value"), (("--type", "Explanation"), ("--title", "T"), ("--id", "s1"), ("--resource", "r"))
 )
 def test_proposal_file_requires_each_filing_identity_field(missing: str, value: str) -> None:
-    options = {"--lane": "explanation", "--title": "T", "--id": "s1", "--resource": "r"}
+    options = {"--type": "Explanation", "--title": "T", "--id": "s1", "--resource": "r"}
     options.pop(missing)
     result = runner.invoke(app, ["wiki", "proposal", "file", *[part for pair in options.items() for part in pair]])
-    assert result.exit_code == 2 and missing in result.stderr
+    if missing == "--type":
+        assert result.exit_code != 0 and "pass exactly one of --type or --lane" in result.stderr
+    else:
+        assert result.exit_code == 2 and missing in result.stderr
 
 
 @pytest.mark.parametrize("flag", ("--kind", "--target-slug", "--origin"))
@@ -363,7 +366,7 @@ def test_file_json_dry_run_writes_nothing_and_projects(initialized_workspace: Pa
     result = runner.invoke(app, [*_file_args(initialized_workspace), "--dry-run", "--json"])
     assert result.exit_code == 0, result.output
     doc = json.loads(result.stdout)
-    assert doc["lane"] == "explanation" and doc["target"] == "docs/explanations/typed-cli.md"
+    assert doc["type"] == "Explanation" and doc["target"] == "docs/explanations/typed-cli.md"
     assert doc["applied"] is False and doc["writes"][0]["mode"] == "create"
     assert sorted(path.as_posix() for path in bundle.rglob("*")) == before
 
@@ -404,3 +407,55 @@ def test_decide_dry_run_without_json_prints_planned_members(initialized_workspac
         ],
     )
     assert result.exit_code == 0 and result.stdout.strip() == "proposals/docs-explanations-typed-cli.md"
+
+
+def test_the_deprecated_lane_maps_to_its_type_and_warns(
+    monkeypatch: pytest.MonkeyPatch, initialized_workspace: Path
+) -> None:
+    captured: list[dict[str, object]] = []
+    monkeypatch.setattr(
+        proposals_module, "run_proposal_file", lambda _layout, **kwargs: captured.append(kwargs) or _file_run()
+    )
+    result = runner.invoke(
+        app,
+        [
+            "wiki",
+            "proposal",
+            "file",
+            "--lane",
+            "how-to",
+            "--title",
+            "T",
+            "--id",
+            "s1",
+            "--resource",
+            "r",
+            "--workspace",
+            str(initialized_workspace),
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    assert captured[0]["type_name"] == "HowTo"
+    assert "--lane is deprecated" in result.stderr
+
+
+@pytest.mark.parametrize("argv", [["--lane", "concepts"], ["--type", "Explanation", "--lane", "explanation"], []])
+def test_type_and_lane_misuse_is_a_usage_error(argv: list[str], initialized_workspace: Path) -> None:
+    result = runner.invoke(
+        app,
+        [
+            "wiki",
+            "proposal",
+            "file",
+            *argv,
+            "--title",
+            "T",
+            "--id",
+            "s1",
+            "--resource",
+            "r",
+            "--workspace",
+            str(initialized_workspace),
+        ],
+    )
+    assert result.exit_code != 0

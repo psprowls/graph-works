@@ -26,7 +26,7 @@ _SUGGESTIONS = json.dumps(
     {
         "suggestions": [
             {
-                "lane": "explanation",
+                "type": "Explanation",
                 "title": "Why the thing",
                 "rationale": "The source argues for it.",
                 "description": "Why.",
@@ -612,7 +612,7 @@ async def test_a_refused_suggestion_is_reported_in_the_log_by_kind(workspace, mo
         {
             "suggestions": [
                 {
-                    "lane": "explanation",
+                    "type": "Explanation",
                     "title": "Blocked",
                     "rationale": "The source argues for it.",
                     "description": "Why.",
@@ -644,7 +644,7 @@ async def test_a_raising_suggestion_is_recorded_and_the_next_one_still_files(wor
         {
             "suggestions": [
                 {
-                    "lane": "explanation",
+                    "type": "Explanation",
                     "title": "Why the thing",
                     "rationale": "The source argues for it.",
                     "description": "Why.",
@@ -652,7 +652,7 @@ async def test_a_raising_suggestion_is_recorded_and_the_next_one_still_files(wor
                     "confidence": "high",
                 },
                 {
-                    "lane": "explanation",
+                    "type": "Explanation",
                     "title": "How the thing works",
                     "rationale": "The source explains it.",
                     "description": "How.",

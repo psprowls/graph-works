@@ -675,6 +675,7 @@ def test_the_documented_proposals_surface_is_present() -> None:
         "verified",
         "malformed",
         "superseded_by",
+        "target_type",
     }
     assert proposals.Write.__dataclass_fields__.keys() == {"member", "mode", "text", "frontmatter", "body", "digest"}
     assert proposals.PageRender.__dataclass_fields__.keys() == {"type", "body", "frontmatter"}

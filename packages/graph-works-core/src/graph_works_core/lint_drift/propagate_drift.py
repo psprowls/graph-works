@@ -36,7 +36,7 @@ from typing import Any, Protocol
 from code_wiki_okf.config import Config
 from code_wiki_okf.git_state import changed_files_since
 from doc_wiki_okf.actors import producer_actor
-from doc_wiki_okf.proposals import is_adr
+from doc_wiki_okf.proposals.adr import is_adr
 from langchain_core.messages import HumanMessage, SystemMessage
 from models_io.pricing import cost_for_usage
 from okf_ext.body import find_section
@@ -51,6 +51,7 @@ from graph_works_core.lint_drift.drift_propagator import (
     build_drift_propagator_prompt,
     parse_drift_propagator_verdict,
 )
+from graph_works_core.lint_drift.lanes import wiki_adr_directory
 from graph_works_core.workspace.bundle import load_workspace_bundle
 from graph_works_core.workspace.layout import WorkspaceLayout
 
@@ -204,20 +205,22 @@ def _is_drift_target(concept_id: str, document: Document) -> bool:
     return document.fm.resource is None and (document.fm.type or "").strip() != PROPOSAL_TYPE
 
 
-def _target_kind(concept_id: str, document: Document) -> str:
+def _target_kind(concept_id: str, document: Document, *, adr_directory: str | None) -> str:
     """`"adr"` for an `Adr` in the ADR lane's directory, else
     `"concept"` — the judge rubric's key.
 
-    The two-part test itself lives in `doc_wiki_okf.proposals.is_adr`: the
-    package that owns the vocabulary owns the test of it.
+    The two-part test lives in `doc_wiki_okf.proposals.adr.is_adr`, and the
+    directory is the `Adr` schema's own.
     """
-    return "adr" if is_adr(concept_id, document.fm.type or "") else "concept"
+    return "adr" if is_adr(concept_id, document.fm.type or "", directory=adr_directory) else "concept"
 
 
 def drift_targets(
     candidates: Sequence[Candidate],
     bundle: Bundle,
     links: LinkGraph,
+    *,
+    adr_directory: str | None,
 ) -> tuple[Target, ...]:
     """The curated pages backlinked by *candidates*, one entry per page.
 
@@ -237,7 +240,7 @@ def drift_targets(
             concept_id=concept_id,
             title=(bundle.concepts[concept_id].fm.title or concept_id),
             body=bundle.concepts[concept_id].body,
-            kind=_target_kind(concept_id, bundle.concepts[concept_id]),
+            kind=_target_kind(concept_id, bundle.concepts[concept_id], adr_directory=adr_directory),
             candidates=tuple(found),
         )
         for concept_id, found in sorted(grouped.items())
@@ -603,7 +606,7 @@ async def run_propagate_drift(
     bundle = load_workspace_bundle(layout)
     anchors = read_anchors(layout.cache_dir)
     candidates = propagation_candidates(bundle, reader, anchors, config=config, repo_root=repo_root)
-    targets = drift_targets(candidates, bundle, build_link_graph(bundle))
+    targets = drift_targets(candidates, bundle, build_link_graph(bundle), adr_directory=wiki_adr_directory(config))
     narrowed = _narrow(bundle, candidates, targets, only)
     if narrowed.error is not None:
         return PropagateResult(errors=(narrowed.error,), dry_run=dry_run)
@@ -703,7 +706,7 @@ def plan_drift_brief(
     bundle = load_workspace_bundle(layout)
     anchors = read_anchors(layout.cache_dir)
     candidates = propagation_candidates(bundle, reader, anchors, config=config, repo_root=repo_root)
-    targets = drift_targets(candidates, bundle, build_link_graph(bundle))
+    targets = drift_targets(candidates, bundle, build_link_graph(bundle), adr_directory=wiki_adr_directory(config))
     return DriftBrief(targets=targets)
 
 

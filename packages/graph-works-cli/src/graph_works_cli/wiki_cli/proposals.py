@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
+from types import MappingProxyType
 from typing import Any
 
 import typer
@@ -16,6 +17,11 @@ from graph_works_cli.errors import fail
 from graph_works_cli.json_output import encode
 from graph_works_cli.wiki_cli.errors import exit_error
 from graph_works_cli.workspace_resolution import resolve_workspace
+
+#: --lane's five names remain a deprecated alias for one minor version.
+_LEGACY_LANES: Mapping[str, str] = MappingProxyType(
+    {"tutorial": "Tutorial", "how-to": "HowTo", "reference": "Reference", "explanation": "Explanation", "adr": "Adr"}
+)
 
 
 def proposals(
@@ -116,7 +122,8 @@ def _decide(
 
 
 def file_proposal(
-    lane: str = typer.Option(..., "--lane"),
+    type_name: str = typer.Option("", "--type", help="The page type the proposal argues for, e.g. Explanation."),
+    lane: str = typer.Option("", "--lane", help="Deprecated: tutorial|how-to|reference|explanation|adr. Use --type."),
     title: str = typer.Option(..., "--title"),
     description: str = typer.Option("", "--description"),
     identifier: str = typer.Option(..., "--id"),
@@ -127,8 +134,20 @@ def file_proposal(
     json_output: bool = typer.Option(False, "--json", help="Print the proposal projection instead of text."),
     workspace: str = typer.Option("", "--workspace"),
 ) -> None:
-    """File or merge one source's proposal for a lane target."""
+    """File or merge one source's proposal for a page of one type."""
     command = "wiki proposal file"
+    if bool(type_name) == bool(lane):
+        fail("pass exactly one of --type or --lane", reason="usage", json_mode=json_output, command=command)
+    if lane:
+        if lane not in _LEGACY_LANES:
+            fail(
+                f"--lane {lane!r}: expected one of {list(_LEGACY_LANES)}; prefer --type",
+                reason="usage",
+                json_mode=json_output,
+                command=command,
+            )
+        type_name = _LEGACY_LANES[lane]
+        typer.echo(f"warning: --lane is deprecated; use --type {type_name}", err=True)
     layout = resolve_workspace(workspace, json_mode=json_output, command=command)
     source: dict[str, Any] = {"id": identifier, "resource": resource}
     if rationale:
@@ -139,7 +158,7 @@ def file_proposal(
     try:
         run = run_proposal_file(
             layout,
-            lane=lane,
+            type_name=type_name,
             title=title,
             description=description,
             source=source,

@@ -639,3 +639,159 @@ def test_render_write_returns_a_create_writes_text():
     plan = plan_propose(bundle, "pages/brand-new.md", [NEW_SOURCE], title="Brand new", description="why", by=BY, at=AT)
     (write,) = plan.writes
     assert render_write(bundle, write) == write.text
+
+
+LIVE_SOURCE = {"id": "src-a", "resource": "/sources/a.md", "title": "Claude path skill ingest guidance"}
+LIVE_DESCRIPTION = "A proposal still open, whose target does not exist."
+
+
+def test_a_new_proposal_records_its_target_type():
+    bundle = ext_helpers.proposed_bundle()
+    plan = plan_propose(
+        bundle,
+        "pages/brand-new.md",
+        [NEW_SOURCE],
+        title="Brand new",
+        description="why",
+        by=BY,
+        at=AT,
+        target_type="Explanation",
+    )
+    (write,) = plan.writes
+    assert "target_type: Explanation" in write.text
+
+
+def test_no_target_type_writes_no_key():
+    bundle = ext_helpers.proposed_bundle()
+    plan = plan_propose(bundle, "pages/brand-new.md", [NEW_SOURCE], title="Brand new", description="why", by=BY, at=AT)
+    (write,) = plan.writes
+    assert "target_type" not in write.text
+
+
+def test_a_live_proposal_with_no_type_gets_the_incoming_one():
+    bundle = ext_helpers.proposed_bundle()
+    plan = plan_propose(
+        bundle,
+        "pages/live.md",
+        [LIVE_SOURCE],
+        title="Live",
+        description=LIVE_DESCRIPTION,
+        by=BY,
+        at=AT,
+        target_type="Explanation",
+    )
+    assert plan.ok
+    (write,) = plan.writes
+    assert write.frontmatter["target_type"] == "Explanation"
+
+
+def test_re_filing_the_recorded_type_is_idempotent(tmp_path):
+    root = ext_helpers.proposed_copy(tmp_path)
+    bundle = load_bundle(root)
+    first = plan_propose(
+        bundle,
+        "pages/live.md",
+        [LIVE_SOURCE],
+        title="Live",
+        description=LIVE_DESCRIPTION,
+        by=BY,
+        at=AT,
+        target_type="Explanation",
+    )
+    assert apply(bundle, first).ok
+    again = plan_propose(
+        load_bundle(root),
+        "pages/live.md",
+        [LIVE_SOURCE],
+        title="Live",
+        description=LIVE_DESCRIPTION,
+        by=BY,
+        at=AT,
+        target_type="Explanation",
+    )
+    assert again.ok and again.is_empty
+
+
+def test_a_conflicting_type_refuses_and_writes_nothing(tmp_path):
+    root = ext_helpers.proposed_copy(tmp_path)
+    bundle = load_bundle(root)
+    assert apply(
+        bundle,
+        plan_propose(
+            bundle,
+            "pages/live.md",
+            [LIVE_SOURCE],
+            title="Live",
+            description=LIVE_DESCRIPTION,
+            by=BY,
+            at=AT,
+            target_type="Explanation",
+        ),
+    ).ok
+    plan = plan_propose(
+        load_bundle(root),
+        "pages/live.md",
+        [NEW_SOURCE],
+        title="Live",
+        description="why",
+        by=BY,
+        at=AT,
+        target_type="Reference",
+    )
+    assert [refusal.kind for refusal in plan.refusals] == ["target-type-conflict"]
+    assert plan.writes == ()
+    assert "Explanation" in plan.refusals[0].detail and "Reference" in plan.refusals[0].detail
+
+
+def test_list_proposals_reads_target_type_back(tmp_path):
+    root = ext_helpers.proposed_copy(tmp_path)
+    bundle = load_bundle(root)
+    assert apply(
+        bundle,
+        plan_propose(
+            bundle,
+            "pages/brand-new.md",
+            [NEW_SOURCE],
+            title="Brand new",
+            description="why",
+            by=BY,
+            at=AT,
+            target_type="HowTo",
+        ),
+    ).ok
+    found = {p.target: p for p in list_proposals(load_bundle(root))}
+    assert found["pages/brand-new.md"].target_type == "HowTo"
+    assert found["pages/live.md"].target_type is None
+
+
+@pytest.mark.parametrize(
+    "raw_type, expected", [("  Reference  ", "Reference"), ("   ", None), (17, None), (["Reference"], None)]
+)
+def test_target_type_reader_accepts_only_nonblank_strings(tmp_path, raw_type, expected):
+    root = ext_helpers.proposed_copy(tmp_path)
+    bundle = load_bundle(root)
+    document = bundle.concepts["proposals/live"]
+    document.set("target_type", raw_type)
+    ext_helpers.write(root / "proposals/live.md", document.serialize())
+    live = next(p for p in list_proposals(load_bundle(root)) if p.target == "pages/live.md")
+    assert live.target_type == expected
+
+
+@pytest.mark.parametrize("target_type", ["", "   ", "  Explanation  "])
+def test_target_type_is_trimmed_when_filing(target_type):
+    bundle = ext_helpers.proposed_bundle()
+    plan = plan_propose(
+        bundle,
+        "pages/brand-new.md",
+        [NEW_SOURCE],
+        title="Brand new",
+        description="why",
+        by=BY,
+        at=AT,
+        target_type=target_type,
+    )
+    (write,) = plan.writes
+    if target_type.strip():
+        assert "target_type: Explanation\n" in write.text
+    else:
+        assert "target_type" not in write.text

@@ -226,13 +226,14 @@ def test_load_decisions_lets_an_explicit_decision_win(tmp_path: Path) -> None:
     assert resolved[("concepts/a.md", "diataxis-type")] == "Explanation"
 
 
-def test_load_decisions_refuses_an_illegal_decision_rather_than_defaulting(tmp_path: Path) -> None:
+@pytest.mark.parametrize("chosen", ["Wharrgarbl", "Adr", "Source", "Feature"])
+def test_load_decisions_refuses_an_illegal_decision_rather_than_defaulting(tmp_path: Path, chosen: str) -> None:
     from migrate_vault import load_decisions
 
     path = tmp_path / "decisions.yaml"
     path.write_text(
         "version: 1\nrows:\n"
-        "  - member: concepts/a.md\n    question: diataxis-type\n    proposed: Reference\n    decision: Wharrgarbl\n",
+        f"  - member: concepts/a.md\n    question: diataxis-type\n    proposed: Reference\n    decision: {chosen}\n",
         encoding="utf-8",
         newline="",
     )

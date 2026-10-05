@@ -189,7 +189,7 @@ def test_targets_are_curated_backlinkers_with_entities_and_proposals_excluded(bu
     bundle = load_bundle(bundle_root)
     monkeypatch.setattr(pd, "changed_files_since", lambda repo, since, paths=(): [])
     candidates = pd.propagation_candidates(bundle, reader, {}, config=config, repo_root=config.repos[0].path)
-    targets = pd.drift_targets(candidates, bundle, build_link_graph(bundle))
+    targets = pd.drift_targets(candidates, bundle, build_link_graph(bundle), adr_directory="adrs/")
     assert {t.concept_id for t in targets} == {"concepts/byte-fidelity", "adrs/0001-two-layer"}
 
 
@@ -197,7 +197,10 @@ def test_a_target_in_the_adr_lane_judges_as_an_adr(bundle_root, reader, config, 
     bundle = load_bundle(bundle_root)
     monkeypatch.setattr(pd, "changed_files_since", lambda repo, since, paths=(): [])
     candidates = pd.propagation_candidates(bundle, reader, {}, config=config, repo_root=config.repos[0].path)
-    kinds = {t.concept_id: t.kind for t in pd.drift_targets(candidates, bundle, build_link_graph(bundle))}
+    kinds = {
+        t.concept_id: t.kind
+        for t in pd.drift_targets(candidates, bundle, build_link_graph(bundle), adr_directory="adrs/")
+    }
     assert kinds["adrs/0001-two-layer"] == "adr"
     assert kinds["concepts/byte-fidelity"] == "concept"
 
@@ -214,7 +217,9 @@ def test_two_entities_backlinking_one_page_produce_one_target_with_two_candidate
     bundle = load_bundle(bundle_root)
     monkeypatch.setattr(pd, "changed_files_since", lambda repo, since, paths=(): [])
     candidates = pd.propagation_candidates(bundle, reader, {}, config=config, repo_root=config.repos[0].path)
-    targets = {t.concept_id: t for t in pd.drift_targets(candidates, bundle, build_link_graph(bundle))}
+    targets = {
+        t.concept_id: t for t in pd.drift_targets(candidates, bundle, build_link_graph(bundle), adr_directory="adrs/")
+    }
     assert len(targets["concepts/byte-fidelity"].candidates) == 2
 
 
@@ -603,3 +608,31 @@ def test_plan_drift_brief_returns_targets_with_no_judge_call(layout, config, rea
     assert isinstance(brief, pd.DriftBrief)
     for target in brief.targets:
         assert target.candidates
+
+
+def test_with_no_adr_schema_nothing_judges_as_an_adr(bundle_root, reader, config, monkeypatch):
+    bundle = load_bundle(bundle_root)
+    monkeypatch.setattr(pd, "changed_files_since", lambda repo, since, paths=(): [])
+    candidates = pd.propagation_candidates(bundle, reader, {}, config=config, repo_root=config.repos[0].path)
+    kinds = {
+        t.concept_id: t.kind for t in pd.drift_targets(candidates, bundle, build_link_graph(bundle), adr_directory=None)
+    }
+    assert kinds["adrs/0001-two-layer"] == "concept"
+
+
+def test_drift_brief_uses_the_adr_schema_directory(layout, config, reader, monkeypatch):
+    _write(
+        config.declarations_dir,
+        "schema/Adr.schema.json",
+        json.dumps({"properties": {"type": {"const": "Adr"}}, "x-okf-directory": "decisions/"}),
+    )
+    _write(
+        layout.bundle_dir,
+        "decisions/chosen.md",
+        "---\ntype: Adr\ntitle: Chosen\n---\nSee [okf-io](/packages/okf-io.md).\n",
+    )
+    monkeypatch.setattr(pd, "changed_files_since", lambda repo, since, paths=(): [])
+    brief = pd.plan_drift_brief(layout, config, reader, repo_root=config.repos[0].path)
+    kinds = {t.concept_id: t.kind for t in brief.targets}
+    assert kinds["decisions/chosen"] == "adr"
+    assert kinds["adrs/0001-two-layer"] == "concept"

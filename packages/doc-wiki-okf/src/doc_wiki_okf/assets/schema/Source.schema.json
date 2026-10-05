@@ -57,5 +57,6 @@
       }
     }
   },
+  "x-okf-accept-proposals": false,
   "x-okf-directory": "sources/"
 }

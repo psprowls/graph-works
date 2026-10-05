@@ -33,7 +33,7 @@ from types import MappingProxyType
 
 from code_graph_io import GraphReader
 from code_wiki_okf.config import Config
-from doc_wiki_okf.proposals import is_adr
+from doc_wiki_okf.proposals.adr import is_adr
 from doc_wiki_okf.sources import DrainStatus, drain_statuses
 from langchain_core.messages import HumanMessage, SystemMessage
 from models_io.pricing import cost_for_usage
@@ -44,7 +44,7 @@ from subagents_io import SubagentPool, TaskResult
 from subagents_io.roles import RoleBinding
 
 from graph_works_core.agent_substrate.roles import role_binding
-from graph_works_core.lint_drift.lanes import WIKI_LANE, Lane, compose_lanes, wiki_entry_keys
+from graph_works_core.lint_drift.lanes import WIKI_LANE, Lane, compose_lanes, wiki_adr_directory, wiki_entry_keys
 from graph_works_core.lint_drift.linter import (
     build_linter_adr_chain_system,
     build_linter_page_quality_system,
@@ -524,7 +524,9 @@ def _page_quality_window(bundle: Bundle, ids: tuple[str, ...], *, today: date) -
     return tuple(window)
 
 
-def _group_pages(bundle: Bundle, *, today: date) -> dict[str, tuple[tuple[str, Document], ...]]:
+def _group_pages(
+    bundle: Bundle, *, today: date, adr_directory: str | None
+) -> dict[str, tuple[tuple[str, Document], ...]]:
     """The three groups' page sets, re-derived from the rebuild's own dialect.
 
     Not ported: the old selectors read `key.startswith("adrs/")` and
@@ -544,7 +546,9 @@ def _group_pages(bundle: Bundle, *, today: date) -> dict[str, tuple[tuple[str, D
     window = _page_quality_window(bundle, ids, today=today)
     return {
         "page_quality": tuple((concept_id, bundle.concepts[concept_id]) for concept_id in window),
-        "adr_chain": tuple((cid, doc) for cid, doc in ordered if is_adr(cid, doc.fm.type or "")),
+        "adr_chain": tuple(
+            (cid, doc) for cid, doc in ordered if is_adr(cid, doc.fm.type or "", directory=adr_directory)
+        ),
         "stale_claims": tuple((cid, doc) for cid, doc in ordered if doc.fm.sources),
     }
 
@@ -644,6 +648,7 @@ async def _semantic_pass(
     binding: RoleBinding,
     *,
     today: date,
+    adr_directory: str | None,
     trace_dir: Path,
     project_context: str,
 ) -> tuple[tuple[SemanticFinding, ...], tuple[str, ...]]:
@@ -654,7 +659,7 @@ async def _semantic_pass(
     dispatching it is the honest way to say so.
     """
     systems = _systems(project_context)
-    grouped = _group_pages(bundle, today=today)
+    grouped = _group_pages(bundle, today=today, adr_directory=adr_directory)
     items = [(name, systems[name], grouped[name]) for name in SEMANTIC_GROUPS if grouped[name]]
     if not items:
         return (), ()
@@ -734,6 +739,7 @@ async def run_lint(
         bundle,
         binding,
         today=today,
+        adr_directory=wiki_adr_directory(config),
         trace_dir=layout.cache_dir / "traces",
         project_context=render_project_context(layout),
     )

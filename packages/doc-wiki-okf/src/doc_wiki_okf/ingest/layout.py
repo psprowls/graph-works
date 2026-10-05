@@ -9,7 +9,7 @@ hand.
 This package is tier 3 -- the tier allowed to carry vault vocabulary -- so the
 rule that lower bands never know a directory name does not bind here. What the
 injection buys is that the name is a value you can replace rather than a
-constant you must edit, the shape `DIATAXIS_LANES` already ships in. One field
+constant you must edit, the shape `x-okf-directory` declarations already ship in. One field
 is still worth a dataclass rather than a bare constant, for exactly that reason.
 
 `raw/` is gone. Material is ingested from outside the workspace, so

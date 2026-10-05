@@ -49,8 +49,8 @@ def file_item(workspace: Path, title: str, *, kind: str = "Feature") -> str:
                 "wiki",
                 "proposal",
                 "file",
-                "--lane",
-                "explanation",
+                "--type",
+                "Explanation",
                 "--title",
                 "T",
                 "--id",
@@ -338,8 +338,8 @@ def test_proposal_approve_json_already_approved_carries_not_proposed_refusal(wor
             "wiki",
             "proposal",
             "file",
-            "--lane",
-            "explanation",
+            "--type",
+            "Explanation",
             "--title",
             "Typed CLI",
             "--id",
@@ -361,14 +361,14 @@ def test_proposal_approve_json_already_approved_carries_not_proposed_refusal(wor
     assert error["payload"]["refusals"][0]["kind"] == "not-proposed"
 
 
-def test_proposal_file_json_unknown_lane_has_a_usage_envelope(workspace: Path) -> None:
+def test_proposal_file_json_unknown_type_has_a_usage_envelope(workspace: Path) -> None:
     result = runner.invoke(
         app,
         [
             "wiki",
             "proposal",
             "file",
-            "--lane",
+            "--type",
             "nope",
             "--title",
             "Typed CLI",

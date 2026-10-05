@@ -17,13 +17,12 @@ SCHEMA_ASSET_DIRNAME = "schema"
 
 #: Every file this package owns, bundle-relative posix, in write order.
 #:
-#: Fourteen: `sections/_fragments.doc_wiki.yaml` is a member like any other, and
-#: an installed `sections/` without it cannot resolve a single `placeholder_ref`;
-#: `Source` and `Adr` ship a schema and a sections file like every other declared
-#: type, even though neither sits in `RUBRIC` (`Adr` is the ADR lane's type, in
-#: `adrs/`). `index.md`, `log.md` and `tags.yaml` are absent because they belong to
-#: `okf_ext.bundle`'s scaffold, which any tier-3 package sharing a bundle may be
-#: the first to run.
+#: Fifteen: `sections/_fragments.doc_wiki.yaml` is a member like any other, and
+#: an installed `sections/` without it cannot resolve a single `placeholder_ref`.
+#: `Source`, `Adr` and `Proposal` ship a schema like every other declared type;
+#: `Proposal` ships no sections file -- its body is the review renderer's, and
+#: an installed `sections/Proposal.yaml` stays workspace-owned. `index.md`,
+#: `log.md` and `tags.yaml` belong to `okf_ext.bundle`'s shared scaffold.
 SEED_RELATIVE_PATHS: tuple[str, ...] = (
     "schema/_base-diataxis.schema.json",
     "schema/Tutorial.schema.json",
@@ -32,6 +31,7 @@ SEED_RELATIVE_PATHS: tuple[str, ...] = (
     "schema/Explanation.schema.json",
     "schema/Source.schema.json",
     "schema/Adr.schema.json",
+    "schema/Proposal.schema.json",
     "sections/_fragments.doc_wiki.yaml",
     "sections/Tutorial.yaml",
     "sections/HowTo.yaml",

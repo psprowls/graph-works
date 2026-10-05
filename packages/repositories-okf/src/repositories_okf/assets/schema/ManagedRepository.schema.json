@@ -3,5 +3,6 @@
   "$ref": "_base-repository.schema.json",
   "unevaluatedProperties": false,
   "properties": { "type": { "const": "ManagedRepository" } },
+  "x-okf-accept-proposals": false,
   "x-okf-directory": "repositories/"
 }

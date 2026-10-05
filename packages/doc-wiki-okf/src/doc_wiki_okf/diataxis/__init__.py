@@ -1,6 +1,8 @@
-"""The four Diátaxis types: the taxonomy, the validated decision, placement, retyping.
+"""The Diátaxis vertical: the validated decision, placement, retyping.
 
-    from doc_wiki_okf.diataxis import RUBRIC, TYPE_NAMES, brief
+The taxonomy itself lives in the shipped schemas' `x-okf-proposal-guidance`.
+
+    from doc_wiki_okf.diataxis import classify, plan_retype
 
 `diataxis/` may import `doc_wiki_okf.reading`; `reading/` may not import this.
 That direction is `tests/test_reading_boundaries.py`'s, and it needs no edit here.
@@ -23,21 +25,16 @@ from doc_wiki_okf.diataxis.retype import (
     apply_retype,
     plan_retype,
 )
-from doc_wiki_okf.diataxis.rubric import RUBRIC, TYPE_NAMES, TypeRubric, brief
 
 __all__ = [
-    "RUBRIC",
-    "TYPE_NAMES",
     "Classification",
     "RetypePlan",
     "RetypeRefusal",
     "RetypeRefusalKind",
     "RetypeResult",
-    "TypeRubric",
     "Unclassified",
     "UnclassifiedReason",
     "apply_retype",
-    "brief",
     "classify",
     "default_concept_id",
     "directory_for",

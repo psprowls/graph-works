@@ -4,6 +4,7 @@ still pass if one factory were swapped for another."""
 
 from __future__ import annotations
 
+import json
 from datetime import UTC, date, datetime
 
 import pytest
@@ -11,6 +12,7 @@ import work_tracker_okf
 from code_wiki_okf.config import load_config
 from graph_works_core import apply_init, plan_init
 from graph_works_core.lint_drift.lanes import LaneSet, compose_lanes
+from graph_works_core.lint_drift.lint import run_mechanical
 from okf_ext.bundle import SCHEMA_DIRNAME, SECTIONS_DIRNAME
 from okf_ext.tags import VOCABULARY_FILENAME
 from okf_io import Bundle, RuleContext, build_link_graph, load_bundle, validate
@@ -171,7 +173,9 @@ def test_the_wiki_lane_carries_every_declared_capability(workspace):
     test. Here the weaker but still load-bearing claim: the composer built a
     rule for each capability whose declarations are present."""
     wiki, _work = _compose(workspace).lanes
-    assert len(wiki.rules) == 9  # health, render, schema, about, drain, repos placement, section, tags, placement
+    assert (
+        len(wiki.rules) == 10
+    )  # health, render, schema, pool, about, drain, repos placement, section, tags, placement
 
 
 def test_the_wiki_lane_accepts_canonical_nested_code_wiki_placement(workspace):
@@ -253,7 +257,7 @@ def test_a_reader_adds_the_sync_rule(workspace, monkeypatch):
 
     monkeypatch.setattr(lanes_module, "snapshot_bundle", lambda *a, **k: _EmptySnapshot())
     wiki, _work = _compose(workspace, reader=_Reader()).lanes
-    assert len(wiki.rules) == 10
+    assert len(wiki.rules) == 11
 
 
 class _EmptySnapshot:
@@ -483,6 +487,31 @@ def test_the_drain_rule_rides_the_schema_gate(workspace):
     assert not [f for f in report.findings if f.code.startswith("sources.")]
 
 
+def _refused_type_findings(workspace):
+    layout = workspace.layout
+    report = run_mechanical(layout, _config(workspace), today=TODAY, repo_root=layout.repo_root)
+    return [f for lane in report.mechanical for f in lane.report.findings if f.code == "proposals.refused-type"]
+
+
+def test_mechanical_lint_reports_a_flagged_type_with_missing_guidance_once(workspace):
+    schema = {
+        "type": "object",
+        "properties": {"type": {"const": "Runbook"}},
+        "x-okf-directory": "runbooks/",
+        "x-okf-accept-proposals": True,
+    }
+    (workspace.layout.config_dir / SCHEMA_DIRNAME / "Runbook.schema.json").write_text(
+        json.dumps(schema), encoding="utf-8", newline=""
+    )
+    (finding,) = _refused_type_findings(workspace)
+    assert finding.severity == "warn" and finding.path is None
+    assert "Runbook" in finding.message and "missing-guidance" in finding.message
+
+
+def test_mechanical_lint_accepts_the_shipped_proposal_declarations(workspace):
+    assert _refused_type_findings(workspace) == []
+
+
 def _config(workspace):
     layout = workspace.layout
     return load_config(
@@ -555,3 +584,32 @@ def test_lane_reports_retains_ignored_members_and_prunes_only_clones(workspace):
     assert "concepts/byte-fidelity.md" in bundles["work"].ignored
     assert bundles["work"].member_id("concepts/byte-fidelity.md") == "concepts/byte-fidelity.md"
     assert "work/bug-example" in bundles["work"].concepts
+
+
+@pytest.mark.parametrize(
+    ("declaration", "expected"),
+    [
+        (None, None),
+        ({}, None),
+        ("malformed", None),
+        ({"properties": {"type": {"const": "Adr"}}, "x-okf-directory": "decisions/"}, "decisions/"),
+    ],
+)
+def test_adr_directory_is_read_from_the_workspace_schema_set(tmp_path, declaration, expected):
+    from code_wiki_okf.config import Config, StateGateConfig
+    from graph_works_core.lint_drift import lanes
+
+    root = tmp_path / "config"
+    if declaration is not None:
+        schemas = root / "schema"
+        schemas.mkdir(parents=True)
+        (schemas / "Adr.schema.json").write_text(
+            "[broken" if declaration == "malformed" else json.dumps(declaration), encoding="utf-8", newline="\n"
+        )
+    config = Config(
+        graph_dir=tmp_path / "cache",
+        declarations_dir=root,
+        repos=(),
+        state_gate=StateGateConfig(enabled=False, branches=("main",)),
+    )
+    assert lanes.wiki_adr_directory(config) == expected

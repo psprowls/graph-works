@@ -99,6 +99,7 @@ def _read(concept_id: str, document: Any) -> Proposal:  # noqa: ANN401 -- an okf
         malformed = f"`page_status` {raw_status!r} is outside {list(PAGE_STATUSES)}"
 
     raw_replacement = data.get("superseded_by")
+    raw_type = data.get("target_type")
     return Proposal(
         member=f"{concept_id}.md",
         concept_id=concept_id,
@@ -111,6 +112,7 @@ def _read(concept_id: str, document: Any) -> Proposal:  # noqa: ANN401 -- an okf
         verified=_entries(data.get("verified")),
         malformed=malformed,
         superseded_by=raw_replacement if isinstance(raw_replacement, str) and raw_replacement else None,
+        target_type=raw_type.strip() if isinstance(raw_type, str) and raw_type.strip() else None,
     )
 
 
@@ -274,6 +276,7 @@ def plan_propose(
     by: str,
     at: datetime,
     render: BodyRenderer = render_body,
+    target_type: str | None = None,
 ) -> ProposalPlan:
     """Plan filing a proposal for *target*, or merging into the live one.
 
@@ -285,6 +288,10 @@ def plan_propose(
     Idempotence surfaces as an empty plan: incoming sources already present,
     with the title and description unchanged, plan nothing at all.
 
+    *target_type*, when given, is written to the proposal's frontmatter. A
+    live proposal with no recorded type takes it (a metadata change); one
+    recording a different type refuses with `target-type-conflict`.
+
     *render* defaults to this capability's own `render_body`. Both create
     and replacement bodies use the merged/deduped `sources[]`. On a
     changed merge, it is first called with the old description and sources
@@ -295,6 +302,7 @@ def plan_propose(
     is not proof that a renderer can reproduce a body.
     """
     stamp = _require_aware(at)
+    wanted_type = (target_type or "").strip() or None
     normalized = _normalize_target(target)
     root = bundle.root
     proposals = list_proposals(bundle)
@@ -349,22 +357,40 @@ def plan_propose(
             ),
         )
 
+    if live is not None and wanted_type and live.target_type and live.target_type != wanted_type:
+        return ProposalPlan(
+            root=root,
+            target=normalized,
+            proposal=live.member,
+            writes=(),
+            refusals=(
+                Refusal(
+                    path=live.member,
+                    kind="target-type-conflict",
+                    detail=(
+                        f"`{live.member}` records target_type `{live.target_type}`; this filing names "
+                        f"`{wanted_type}`. One target is one page of one type -- retype it under review"
+                    ),
+                ),
+            ),
+        )
+
     if live is None:
         member = proposal_path(bundle, normalized)
         deduped, _changed = _merge_sources((), sources)
         body = render(description=description, sources=deduped)
-        text = _render_document(
-            body=body,
-            frontmatter={
-                "type": PROPOSAL_TYPE,
-                "title": title,
-                "description": description,
-                "generated": {"by": by, "at": stamp},
-                "sources": deduped,
-                "target": normalized,
-                "page_status": "proposed",
-            },
-        )
+        frontmatter_out: dict[str, Any] = {
+            "type": PROPOSAL_TYPE,
+            "title": title,
+            "description": description,
+            "generated": {"by": by, "at": stamp},
+            "sources": deduped,
+            "target": normalized,
+        }
+        if wanted_type:
+            frontmatter_out["target_type"] = wanted_type
+        frontmatter_out["page_status"] = "proposed"
+        text = _render_document(body=body, frontmatter=frontmatter_out)
         return ProposalPlan(
             root=root,
             target=normalized,
@@ -377,7 +403,8 @@ def plan_propose(
     metadata_changed = (title.strip() and title.strip() != live.title) or (
         description.strip() and description.strip() != live.description
     )
-    if not changed and not metadata_changed:
+    type_changed = bool(wanted_type) and live.target_type is None
+    if not changed and not metadata_changed and not type_changed:
         return ProposalPlan(root=root, target=normalized, proposal=live.member, writes=(), refusals=())
 
     document = bundle.concepts[live.concept_id]
@@ -403,6 +430,8 @@ def plan_propose(
         )
 
     frontmatter: dict[str, Any] = {"sources": merged}
+    if type_changed:
+        frontmatter["target_type"] = wanted_type
     if title.strip():
         frontmatter["title"] = title.strip()
     if description.strip():

@@ -16,7 +16,7 @@
   ],
   "proposals": [
     {
-      "lane": "concepts",
+      "type": "Explanation",
       "title": "Demo concept",
       "target": "concepts/demo.md",
       "proposal": "Add the concept",

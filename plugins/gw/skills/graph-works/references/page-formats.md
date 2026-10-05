@@ -174,8 +174,7 @@ What choosing this costs, and the alternatives.
   ADR it draws on, with a dated `## How this synthesis has changed` log.
 - *Comparison* — `docs/explanations/<a>-vs-<b>.md`, or `<topic>-options.md` for n-way.
 
-Tags must exist in `.gw/tags.yaml`; curated lanes enforce it. Do not add a tag to the
-vocabulary to make a page pass — pick an existing concept tag.
+Tags must exist in `.gw/tags.yaml`; curated types enforce it. Do not add a tag to the vocabulary to make a page pass — pick an existing concept tag.
 
 ### Curated-page claims
 
@@ -348,12 +347,7 @@ Adopt short-lived JWTs signed by Cognito. Validate in middleware; refresh on the
 
 ## 7. Proposal page
 
-A proposed curated page, filed in `proposals/` by `gw ingest` and disposed of with
-`/gw:proposals`. Required frontmatter: `type: Proposal`, `title`, `target` (the
-bundle-relative path the page would land at), `page_status`
-(`proposed | created | rejected`), and `sources` (each `id`, `resource`, and optional
-`rationale` and `evidence[]`). Optional: `description`, `verified` (`by`, `at`),
-`generated`, `tags`.
+A proposed destination page or work item, filed in `proposals/` by `gw ingest` and disposed of with `/gw:proposals`. Required frontmatter: `type: Proposal`, `title`, `target` (the bundle-relative advisory destination path), `page_status` (`proposed | approved | created | rejected`), and `sources` (each `id`, `resource`, and optional `rationale` and `evidence[]`). Fresh notes also record `target_type`, the schema type named by the filer; legacy notes may omit it. Optional: `description`, `verified` (`by`, `at`), `generated`, `tags`. Destination types come from schemas with `x-okf-accept-proposals: true`; listing JSON resolves the type and reports refusals before disposition. Work types are filed through `gw work file`, with the successful new item's canonical path replacing the advisory target; existing targets are preserved.
 
 Required headings: `Suggested Action`, `Reasoning Summary`, `Evidence From Source`,
 `Existing Pages Considered`, `Potential Conflicts`, `Implementation Notes`, `Origins`.

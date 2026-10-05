@@ -33,5 +33,25 @@
     }
   },
   "x-okf-directory": "adrs/",
+  "x-okf-accept-proposals": true,
+  "x-okf-proposal-guidance": {
+    "summary": "a dated, consequential decision the source records or strongly implies.",
+    "question": "Does the source record a dated, citable decision, with the context that forced it and the consequences that follow?",
+    "signals": [
+      "a choice between named alternatives was made and the source says which",
+      "the decision constrains later work and is worth citing",
+      "both the context and the consequences can be stated"
+    ],
+    "anti_signals": [
+      "the page would explain how something works without recording a choice",
+      "the options are still open and nothing was decided",
+      "the choice governs one task and constrains nothing after it"
+    ],
+    "title_pattern": "States the decision: `<Subject> is <decided shape>`, `Use ... for ...`"
+  },
+  "x-okf-proposal-promotion": {
+    "dated": true,
+    "frontmatter": { "decision_date": "{on}", "status": "stable" }
+  },
   "x-okf-about": { "entries": "decisions" }
 }

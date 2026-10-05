@@ -60,15 +60,12 @@ If the user declines specific pages from the list, do not drop them — file eac
 declined page to the proposals ledger instead:
 
 ```bash
-gw wiki proposal file --lane <explanation|reference|how-to|tutorial|adr> --title "<title>" \
+gw wiki proposal file --type <TypeName> --title "<title>" \
   --id "<YYYY-MM>-<slug>" --resource "sources/<YYYY-MM>-<slug>.md" \
   --rationale "<why>" --evidence "<claim>" [--evidence "<claim>" ...]
 ```
 
-`--lane`, `--title`, `--id` and `--resource` are all required. There is no `--target-slug`: the
-target is derived from the lane and the title, so one page proposed twice under the same title
-merges rather than forking. `--id` and `--resource` identify the **source making the argument** —
-the source page's slug and its bundle-relative path — and are what a re-fired proposal merges on.
+`--type`, `--title`, `--id` and `--resource` are all required. `--type` is any type in the proposal pool — a schema under `.gw/schema/` that sets `x-okf-accept-proposals: true` (shipped: Tutorial, HowTo, Reference, Explanation, Adr, Bug, Feature, TechDebt, Spike, TestGap, Epic, Release). There is no `--target-slug`: the target is derived from the type's `x-okf-directory` and the title, so one page proposed twice under the same title merges rather than forking. `--id` and `--resource` identify the **source making the argument** — the source page's slug and its bundle-relative path — and are what a re-fired proposal merges on. `--lane` survives one minor version as a deprecated alias for the five original names.
 
 ### 4. Create / merge the source summary page
 

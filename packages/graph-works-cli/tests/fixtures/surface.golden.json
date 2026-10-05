@@ -2382,22 +2382,33 @@
     },
     {
       "name": "gw wiki proposal file",
-      "help": "File or merge one source's proposal for a lane target.",
-      "short_help": "File or merge one source's proposal for a lane target.",
+      "help": "File or merge one source's proposal for a page of one type.",
+      "short_help": "File or merge one source's proposal for a page of one type.",
       "usage": [
         "[OPTIONS]"
       ],
       "arguments": [],
       "options": [
         {
+          "name": "type_name",
+          "opts": [
+            "--type"
+          ],
+          "secondary_opts": [],
+          "help": "The page type the proposal argues for, e.g. Explanation.",
+          "required": false,
+          "default": "",
+          "is_flag": false
+        },
+        {
           "name": "lane",
           "opts": [
             "--lane"
           ],
           "secondary_opts": [],
-          "help": "",
-          "required": true,
-          "default": null,
+          "help": "Deprecated: tutorial|how-to|reference|explanation|adr. Use --type.",
+          "required": false,
+          "default": "",
           "is_flag": false
         },
         {

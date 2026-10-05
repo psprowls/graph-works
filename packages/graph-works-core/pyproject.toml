@@ -20,8 +20,8 @@ requires-python = ">=3.12"
 # node path through it. `doc-wiki-okf` arrived with C4: the ingest vertical
 # calls `ingest.plan_document_brief`, `sources.plan_ingest`,
 # `proposals.plan_file` and `diataxis.classify`; C6 reads it again for
-# `proposals.lanes.ADR_TYPE`, the ADR group's selector, which is that lane's
-# declaration and not this package's to restate. `code-wiki-okf` was already
+# `proposals.adr.is_adr`, the ADR group's selector, with the directory read
+# from the workspace's `Adr` schema. `code-wiki-okf` was already
 # here for C1 and now also supplies `git_state.compute_state_gate` and the
 # `entities.pages` naming rule. The other three arrived for C2: `langchain-core`
 # because `agent_loop` constructs `ToolMessage` and takes `BaseTool` for real,

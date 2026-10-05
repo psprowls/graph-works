@@ -84,6 +84,8 @@ RefusalKind = Literal[
     "unknown-replacement",
     "self-replacement",
     "unexpected-replacement",
+    "target-type-conflict",
+    "type-unavailable",
 ]
 
 _EMPTY_FM: Mapping[str, Any] = MappingProxyType({})
@@ -112,6 +114,9 @@ class Proposal:
     same proposal and merge. `member` is placement, and is where a refusal
     points a human.
 
+    `target_type` is the caller's type for the target, recorded because a
+    directory may host several types.
+
     `page_status` is `None` exactly when the raw value is outside
     `PAGE_STATUSES`; `raw_page_status` keeps what was on disk so a refusal can
     name it. `malformed` carries the reason a proposal could not be read
@@ -131,6 +136,9 @@ class Proposal:
     verified: tuple[Mapping[str, Any], ...]
     malformed: str | None = None
     superseded_by: str | None = None
+    #: The page type the filer named, when it named one. Plain data: this
+    #: capability never interprets it -- the caller's schema set does.
+    target_type: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

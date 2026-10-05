@@ -10,7 +10,7 @@ from migrate_helpers import IGNORE, fixture_bundle, fixture_bytes, fixture_membe
 from okf_ext import moves
 from okf_ext.proposals import list_proposals
 from okf_io import Document
-from proposal_helpers import AT, BY, build_bundle, lanes, source
+from proposal_helpers import AT, BY, build_bundle, pool, source
 
 
 @pytest.fixture(params=fixture_paths(), ids=lambda path: path.name)
@@ -173,8 +173,8 @@ def test_filing_and_migrating_agree_on_the_path(tmp_path) -> None:
     the same file, which is the whole reason it became public."""
     filed = plan_file(
         build_bundle(tmp_path / "filed"),
-        lanes(),
-        lane="adr",
+        pool(),
+        type_name="Adr",
         title="Bulk Write Staging Protocol",
         description="",
         source=source("src-a", "sources/a.md"),

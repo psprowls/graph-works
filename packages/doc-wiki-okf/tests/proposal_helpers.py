@@ -1,4 +1,4 @@
-"""Synthetic bundles and lane sets for the proposals subpackage's tests."""
+"""Synthetic bundles and proposal pools for the proposals subpackage's tests."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ from collections.abc import Mapping
 from datetime import UTC, date, datetime
 from pathlib import Path
 
-from doc_wiki_okf.proposals.lanes import LaneSet, lane_set
+from doc_wiki_okf.proposals.pool import ProposalPool, proposal_pool
 from doc_wiki_okf.resources import seed_files
 from okf_ext.schemas import SchemaSet, load_schemas
 from okf_ext.shape import SectionSet, load_sections
@@ -26,8 +26,8 @@ def section_set() -> SectionSet:
     return load_sections(str(importlib.resources.files("doc_wiki_okf") / "assets" / "sections"))
 
 
-def lanes() -> LaneSet:
-    return lane_set(schema_set())
+def pool() -> ProposalPool:
+    return proposal_pool(schema_set())
 
 
 def seeded_root(root: Path) -> Path:

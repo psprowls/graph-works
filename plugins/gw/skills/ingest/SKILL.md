@@ -93,8 +93,7 @@ If the user declines specific pages from the list, do not drop them — file eac
 declined page to the proposals ledger instead:
 
 ```bash
-gw wiki proposal file \
-  --lane <explanation|reference|how-to|tutorial|adr> --title "<title>" \
+gw wiki proposal file --type <TypeName> --title "<title>" \
   --id "<YYYY-MM>-<slug>" --resource "sources/<YYYY-MM>-<slug>.md" \
   --rationale "<why>" --evidence "<claim>" [--evidence "<claim>" ...]
 ```

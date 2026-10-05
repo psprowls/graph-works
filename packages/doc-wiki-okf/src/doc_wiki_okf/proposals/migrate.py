@@ -1,7 +1,7 @@
 """Rewrite an old-dialect proposal into `okf_ext.proposals` shape.
 
 **A pure frontmatter rewriter.** It never touches a body, never needs a
-`LaneSet`, and never moves a file itself.
+proposal pool, and never moves a file itself.
 
 **The trigger is `target_slug`.** A document is old-dialect exactly when its
 frontmatter carries `target_slug` and does not carry `type`. `okf_io.migrate`'s

@@ -1,33 +1,16 @@
-"""The extractor system prompt: reasoner analysis in, strict JSON suggestions out.
+"""The extractor system prompt, rendered from pool guidance.
 
-The output contract is spec §4.5's: the extractor proposes a `lane`, one of
-five, and no `concept_kind` — the Diataxis type *is* the kind. `mode`,
-`existing_slug` and `slug` are derived downstream rather than proposed here.
-
-**A `rationale` is required, not optional.** `doc_wiki_okf.diataxis.classify`
-refuses a blank one with `reason="no-rationale"`, so a suggestion without one
-is dropped rather than filed. Saying that here is cheaper than dropping it
-there.
-
-**The lane list is rendered, not written down.** `render_lane_lines` takes the
-loaded `LaneSet`, so a lane this prompt does not name is unrepresentable. That
-makes this a `build_extractor_system(lane_set=…)` renderer rather than a
-module-level constant, following `build_ingestor_system`'s precedent -- and,
-like it, keeping no backward-compat constant, which could not be built without
-its argument.
-
-**JSON, not YAML.** This package's declared dependencies (spec §6.9) include no
-general YAML reader, and `json.loads` is stdlib. JSON is also a closed grammar,
-so a parse miss is unambiguous rather than a guess about indentation.
+The extractor uses summary bullets and the reasoner the full rubric, so the two
+prompts cannot name different types.
 """
 
 from __future__ import annotations
 
 from textwrap import indent
 
-from doc_wiki_okf.proposals.lanes import LaneSet
+from doc_wiki_okf.proposals.pool import ProposalPool
 
-from graph_works_core.prompts._fragments.lane_list import render_lane_lines
+from graph_works_core.prompts._fragments.type_list import render_type_summaries
 
 _PREAMBLE = """\
 You normalize source-backed proposal context into strict JSON.
@@ -37,13 +20,13 @@ Output ONE JSON object with a single key, `suggestions`, whose value is a list. 
 code fence, nothing before or after the object.
 
 Each suggestion is an object with these keys:
-- lane: exactly one of these names.
+- type: exactly one of these page types, spelled as written.
 """
 
 _TAIL = """\
 - title: the page's title. Its slug is derived from it; do not propose one.
-- rationale: one sentence saying WHY this lane, not merely why this page. Required.
-  A suggestion whose rationale is blank is discarded, not defaulted into a lane.
+- rationale: one sentence saying WHY this type, not merely why this page. Required.
+  A suggestion whose rationale is blank is discarded, not defaulted into a type.
 - description: one line, what the proposed page would say.
 - rank: integer starting at 1.
 - confidence: high, medium, or low.
@@ -62,13 +45,12 @@ Rules:
 """
 
 
-def build_extractor_system(*, lane_set: LaneSet) -> str:
-    """The extractor system prompt for one workspace's lanes.
+def build_extractor_system(*, pool: ProposalPool) -> str:
+    """The extractor system prompt for one workspace's proposal pool.
 
-    The lane bullets are indented under the `lane:` key they describe, which is
-    where they sat when they were written out by hand.
+    The type bullets are indented under the `type:` key they describe.
     """
-    return f"{_PREAMBLE}{indent(render_lane_lines(lane_set), '    ')}\n{_TAIL}"
+    return f"{_PREAMBLE}{indent(render_type_summaries(pool.types), '    ')}\n{_TAIL}"
 
 
 __all__ = ["build_extractor_system"]

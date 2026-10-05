@@ -198,7 +198,7 @@ def ingest_result(ctx: Ctx) -> None:
             indexes_updated=("index.md",),
             proposals=(
                 {
-                    "lane": "concepts",
+                    "type": "Explanation",
                     "title": "Demo concept",
                     "target": "concepts/demo.md",
                     "proposal": "Add the concept",

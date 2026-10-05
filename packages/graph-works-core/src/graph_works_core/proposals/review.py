@@ -13,7 +13,7 @@ from datetime import UTC, date, datetime, time
 from typing import Literal
 
 from doc_wiki_okf.actors import human_actor
-from doc_wiki_okf.proposals import lane_set
+from doc_wiki_okf.proposals import proposal_pool
 from doc_wiki_okf.proposals.promote import plan_promotion
 from okf_ext.bundle import SCHEMA_DIRNAME, SECTIONS_DIRNAME
 from okf_ext.proposals import PagePlan, Proposal, render_write
@@ -83,7 +83,7 @@ def _promotion(layout: WorkspaceLayout, bundle: Bundle, proposal: Proposal, *, t
     schemas = load_schemas(config.declarations_dir / SCHEMA_DIRNAME)
     return plan_promotion(
         bundle,
-        lane_set(schemas),
+        proposal_pool(schemas),
         replace(proposal, page_status="approved"),
         section_set=load_sections(config.declarations_dir / SECTIONS_DIRNAME),
         by=human_actor(layout.root),
@@ -186,8 +186,8 @@ def run_proposal_preview(layout: WorkspaceLayout, target: str, *, today: date) -
         return ProposalPreview(
             proposal.target, proposal.member, plan.mode, None, None, None, None, lift_refusals(plan.refusals), None
         )
-    # Promotion writes to a path built from the title (dated for ADRs), not `proposal.target`, so the
-    # page write's own mode and member are the truth; the target's existence is not.
+    # A new dated promotion may derive a different target. The page write's own
+    # mode and member are the truth for both dated creates and recorded updates.
     write = plan.writes[0]
     mode, member = write.mode, write.member
     if mode == "create":

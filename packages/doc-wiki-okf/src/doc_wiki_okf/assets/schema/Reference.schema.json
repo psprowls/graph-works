@@ -16,5 +16,22 @@
     }
   },
   "x-okf-directory": "docs/reference/",
+  "x-okf-accept-proposals": true,
+  "x-okf-proposal-guidance": {
+    "summary": "the reader is looking up a fact -- one repeatable format per entry, facts not instruction.",
+    "question": "Is the reader looking up a technical fact?",
+    "signals": [
+      "one repeatable format per entry",
+      "facts, with instruction kept to a minimal usage example",
+      "a reader finds one fact in under a minute without reading around it",
+      "it is true of a named version or component"
+    ],
+    "anti_signals": [
+      "the page walks the reader through anything",
+      "the page explains why something is the way it is",
+      "reading it end to end is the intended use"
+    ],
+    "title_pattern": "Names the thing: `Configuration options`, `API endpoints`, `CLI flags`"
+  },
   "x-okf-about": {}
 }

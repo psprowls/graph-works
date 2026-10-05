@@ -3,5 +3,24 @@
   "$ref": "_base.schema.json",
   "unevaluatedProperties": false,
   "properties": { "type": { "const": "Bug" } },
+  "x-okf-accept-proposals": true,
+  "x-okf-proposal-guidance": {
+    "summary": "a defect: the code does something other than what it is meant to do.",
+    "question": "Does the source show the code behaving wrongly against a known intended behaviour?",
+    "signals": [
+      "a concrete input or state produces a wrong output, a crash or data loss",
+      "the intended behaviour is known and the actual one differs",
+      "it can be reproduced or pinned to a code path"
+    ],
+    "anti_signals": [
+      "the code works as designed and the design itself is in question",
+      "the work adds a capability rather than repairing one",
+      "the gap is missing test coverage, not wrong behaviour"
+    ],
+    "title_pattern": "Names the defect: `<Component> <does the wrong thing> when <condition>`"
+  },
+  "x-okf-proposal-promotion": {
+    "frontmatter": { "work_status": "open", "opened": "{on}", "updated": "{on}" }
+  },
   "x-okf-directory": "work/"
 }

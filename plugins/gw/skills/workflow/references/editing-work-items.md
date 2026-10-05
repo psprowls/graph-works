@@ -2,29 +2,15 @@
 
 ## When to read this
 
-Read this before changing an existing work item's frontmatter or body when the
-change is not one of the pipeline's own writes (`gw work file`,
-`gw work advance`, a stage skill saving its artifact). Typical requests:
-backfill `affects`, retitle, re-size `effort`, discard an item as `wontfix`,
-mark it `superseded`, repair a field a bug left wrong.
+Read this before changing an existing work item's frontmatter or body when the change is not one of the pipeline's own writes (`gw work file`, `gw work advance`, a stage skill saving its artifact). Typical requests: backfill `affects`, retitle, re-size `effort`, discard an item as `wontfix`, mark it `superseded`, repair a field a bug left wrong.
 
-There is no `gw work edit` verb, by design. You edit the file directly, then
-run the checks in [Procedure](#procedure-mandatory) — `gw work lint` and
-`gw work regen-index` are the safety net, and skipping them is how a hand edit
-goes wrong silently.
+There is no `gw work edit` verb, by design. You edit the file directly, then run the checks in [Procedure](#procedure-mandatory) — `gw work lint` and `gw work regen-index` are the safety net, and skipping them is how a hand edit goes wrong silently.
 
 ## Where the item lives
 
-- The page: `<workspace>/okf/<work-path>.md` — for example
-  `<workspace>/okf/work/feature-example.md`, or
-  `<workspace>/okf/work/epic-example/children/feature-example.md` for a child.
-- Its owned directory: `<workspace>/okf/<work-path>/`, with managed artifacts
-  under `references/`.
-- The format itself — declared headings, the example page, `depends_on` and
-  `sources[]` shapes — is in
-  [page-formats.md §8](../../graph-works/references/page-formats.md) and
-  [wiki-schema.md, "Work pages"](../../graph-works/references/wiki-schema.md).
-  This guide does not restate it; it says what editing each field *does*.
+- The page: `<workspace>/okf/<work-path>.md` — for example `<workspace>/okf/work/feature-example.md`, or `<workspace>/okf/work/epic-example/children/feature-example.md` for a child.
+- Its owned directory: `<workspace>/okf/<work-path>/`, with managed artifacts under `references/`.
+- The format itself — declared headings, the example page, `depends_on` and `sources[]` shapes — is in [page-formats.md §8](../../graph-works/references/page-formats.md) and [wiki-schema.md, "Work pages"](../../graph-works/references/wiki-schema.md). This guide does not restate it; it says what editing each field *does*.
 
 ## Accepted values
 
@@ -42,8 +28,7 @@ per key, each value in backticks. -->
 
 ## Field table
 
-Every edit ends with the [Procedure](#procedure-mandatory). The "Also" column
-is what that field adds on top of it.
+Every edit ends with the [Procedure](#procedure-mandatory). The "Also" column is what that field adds on top of it.
 
 ### Safe
 
@@ -64,8 +49,7 @@ is what that field adds on top of it.
 
 ### Has consequences
 
-Tell the user the consequence in your report — they asked for an edit, not
-necessarily for what it does to the pipeline.
+Tell the user the consequence in your report — they asked for an edit, not necessarily for what it does to the pipeline.
 
 | Key | Meaning / accepted values | Also |
 |---|---|---|
@@ -76,7 +60,7 @@ necessarily for what it does to the pipeline.
 | `phase` | One of the `phase` values above | Overrides the routing table; the lane index shows it: run `gw work regen-index`. Say what `gw work next` will now dispatch. Must stay coherent with `work_status` (see that row). Absent = not started: the item enters at `design` (a `TestGap` enters at `plan`/`execute` by effort under the packaged path; `gw work next` shows the resolved path) through the dispatch transition. Do not hand-add `phase: design` to an unstarted item — that skips the dispatch transition and moves any entry hold. |
 | `status` | Document status, one of the `status` values above — independent of `work_status` | Routing does not read it. Leaving `draft` makes `effort` and `affects` required (`schemas.invalid`, error) |
 | `work_status` → terminal | Any `terminal work_status` value | `wontfix` requires `rationale` (warn). `superseded` requires `superseded_by: <canonical path of the replacement>` (extensionless, e.g. `work/feature-replacement`). Set `phase: done` alongside. Hand-setting `resolved` skips the finish stage's merge evidence (`resolved_in`) — say so, and prefer `/gw:workflow <work-path>` when the work really was merged. Afterwards: for `resolved`, ingest the design (`gw:ingest` on the `design` source) as the workflow skill's Terminal handling does; for any terminal status, say that `/gw:archive <work-path>` archives it later |
-| `sources[]` | Owned-artifact registry | `id` is the stage artifact's fixed source id from `pipeline.artifacts` (`design`, `plan`), never derived from a filename; `resource` is root-absolute within the bundle, e.g. `/work/feature-example/references/<design artifact>` — `gw work next --json` reports each stage artifact's configured `file` and `path` |
+| `sources[]` | Stage artifacts and source citations | For owned stage artifacts, `id` is the fixed source id from `pipeline.artifacts` (`design`, `plan`), never derived from a filename; `resource` is root-absolute within the bundle, e.g. `/work/feature-example/references/<design artifact>` — `gw work next --json` reports each stage artifact's configured `file` and `path`. Proposal citation entries retain their original `id` and `resource` (and any rationale/evidence); do not rename citations to stage ids or replace their resources with artifact paths. Append citations alongside existing entries, preserving the owned-artifact records |
 | `worktree`, `branch`, `resolved_in`, `released_at` | Provenance the pipeline stamps | Edit only to correct a wrong value; never invent one |
 
 ### Not a frontmatter edit
@@ -89,38 +73,20 @@ necessarily for what it does to the pipeline.
 
 ## Body edits
 
-The declared headings per `type` are the table in
-[page-formats.md §8](../../graph-works/references/page-formats.md). Every type
-requires `## Plan`, and it must stay a Markdown table with its header row
-(`| Action | Done when | Rationale |` and the `| --- |` separator) even when it
-has no rows. Append to `## Notes / log` rather than rewriting history in it;
-date a new entry (`**YYYY-MM-DD** — …`).
+The declared headings per `type` are the table in [page-formats.md §8](../../graph-works/references/page-formats.md). Every type requires `## Plan`, and it must stay a Markdown table with its header row (`| Action | Done when | Rationale |` and the `| --- |` separator) even when it has no rows. Append to `## Notes / log` rather than rewriting history in it; date a new entry (`**YYYY-MM-DD** — …`).
 
 ## Procedure (mandatory)
 
-1. **Read the item** before editing — the whole page, not just the key you
-   were asked about.
+1. **Read the item** before editing — the whole page, not just the key you were asked about.
 2. **Make the edit.**
 3. **Set `updated:`** to today (`YYYY-MM-DD`).
 4. **If `title`, `work_status` or `phase` changed:** run `gw work regen-index`.
-5. **Run `gw work lint <work-path>`.** Fix every finding it reports before
-   reporting done. Run a whole-lane `gw work lint` only when the edit could
-   affect other items (a title, a `depends_on`); relay findings on other items,
-   do not fix them.
-6. **Commit only what you edited.** No gw verb commits a hand edit. Follow the
-   workspace `AGENTS.md` rule: stage and commit only the paths you changed, by
-   pathspec, with a single-line `workspace:` subject and no trailers — never
-   `git add -A` or `git commit -a`.
+5. **Run `gw work lint <work-path>`.** Fix every finding it reports before reporting done. Run a whole-lane `gw work lint` only when the edit could affect other items (a title, a `depends_on`); relay findings on other items, do not fix them.
+6. **Commit only what you edited.** No gw verb commits a hand edit. Follow the workspace `AGENTS.md` rule: stage and commit only the paths you changed, by pathspec, with a single-line `workspace:` subject and no trailers — never `git add -A` or `git commit -a`.
 7. **Report** the edit and, for a consequence-class field, its consequence.
 
 ## Gotchas
 
-- **Do not hand-edit while another `gw` write is in flight** for the same
-  workspace (an advance, a filing, an archive). Its mutation checks a digest
-  precondition taken before your edit and will refuse. Wait for it to finish,
-  then re-read the item and retry.
-- **Never add `parent` or `children` frontmatter.** Placement is ownership;
-  those keys do not exist, and lint fires `schemas.invalid` (error) on them
-  like any other unknown key.
-- **Do not edit an item's owned `references/` artifacts from here.** A design
-  or plan is rewritten by its stage (`/gw:workflow`), not by a field edit.
+- **Do not hand-edit while another `gw` write is in flight** for the same workspace (an advance, a filing, an archive). Its mutation checks a digest precondition taken before your edit and will refuse. Wait for it to finish, then re-read the item and retry.
+- **Never add `parent` or `children` frontmatter.** Placement is ownership; those keys do not exist, and lint fires `schemas.invalid` (error) on them like any other unknown key.
+- **Do not edit an item's owned `references/` artifacts from here.** A design or plan is rewritten by its stage (`/gw:workflow`), not by a field edit.

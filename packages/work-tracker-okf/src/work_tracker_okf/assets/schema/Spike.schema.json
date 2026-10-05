@@ -3,5 +3,24 @@
   "$ref": "_base.schema.json",
   "unevaluatedProperties": false,
   "properties": { "type": { "const": "Spike" } },
+  "x-okf-accept-proposals": true,
+  "x-okf-proposal-guidance": {
+    "summary": "a time-boxed investigation that answers a question before work can be designed.",
+    "question": "Is there an open question whose answer decides what to build?",
+    "signals": [
+      "the right approach is unknown and alternatives need comparing",
+      "the output is a finding or a recommendation, not shipped code",
+      "later work depends on the answer"
+    ],
+    "anti_signals": [
+      "the approach is already known",
+      "the work ships behaviour directly",
+      "the wiki already answers the question"
+    ],
+    "title_pattern": "Names the question: `Evaluate ... for ...`, `Investigate whether ...`"
+  },
+  "x-okf-proposal-promotion": {
+    "frontmatter": { "work_status": "open", "opened": "{on}", "updated": "{on}" }
+  },
   "x-okf-directory": "work/"
 }

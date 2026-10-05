@@ -1,8 +1,7 @@
 """The typing decision, validated rather than made.
 
-The package owns the vocabulary, the validation and the placement, and never
-the judgment (spec §4). An agent decides which of `RUBRIC`'s four a page is and
-says why; this turns that decision into a `Classification` or refuses it.
+An agent decides which of the caller's types a page is and says why; this
+turns that decision into a `Classification` or refuses it.
 
 Nothing here raises. A bad type is a value, matching okf-io's posture on the
 content path.
@@ -17,7 +16,6 @@ from typing import Literal
 from okf_ext.schemas import SchemaSet
 
 from doc_wiki_okf.diataxis.pages import default_concept_id
-from doc_wiki_okf.diataxis.rubric import TYPE_NAMES
 
 #: Why a decision was refused. Closed: every refusal is one of these five.
 UnclassifiedReason = Literal[
@@ -60,14 +58,13 @@ def classify(
     title: str,
     rationale: str,
     decided_by: str,
-    allowed_types: Sequence[str] = TYPE_NAMES,
+    allowed_types: Sequence[str],
 ) -> Classification | Unclassified:
     """Validate a typing decision and derive where the page goes.
 
-    *allowed_types* is the closed vocabulary the type must come from: the four
-    Diátaxis types by default. A caller that files into a lane with its own type
-    (the ADR lane's `Adr`) passes that type too, rather than teaching the rubric
-    a type it does not classify.
+    *allowed_types* is the closed vocabulary the type must come from, and it
+    is always the caller's -- the proposal pool's names for ingest, a migration
+    script's own list for a legacy vault. No type list ships in code.
 
     An empty or whitespace-only *type_name* is the caller **declining to
     choose**, and comes back as `undecided`. An agent that cannot tell a
@@ -82,7 +79,7 @@ def classify(
     if not wanted:
         return Unclassified(
             reason="undecided",
-            detail=f"no type chosen; expected one of {list(TYPE_NAMES)} or an explicit decline",
+            detail=f"no type chosen; expected one of {list(allowed_types)} or an explicit decline",
         )
     if wanted not in allowed_types:
         return Unclassified(

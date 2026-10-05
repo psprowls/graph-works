@@ -144,7 +144,7 @@ ADR_PROMOTED = "adrs/2026-08-23-amend-typed-cli.md"
 def _adr_layout(root: Path) -> WorkspaceLayout:
     """An ADR proposal filed under an undated target, so promotion writes the dated member instead."""
     built = _layout(root)
-    _file(built, lane="adr", title=ADR_TITLE)
+    _file(built, type_name="Adr", title=ADR_TITLE)
     return built
 
 
@@ -155,13 +155,13 @@ def _write_page(layout: WorkspaceLayout, member: str, text: str) -> str:
     return text
 
 
-def test_preview_create_when_the_filed_target_exists_but_promotion_writes_a_new_member(tmp_path: Path) -> None:
+def test_preview_updates_the_recorded_existing_dated_type_target(tmp_path: Path) -> None:
     built = _adr_layout(tmp_path / "create")
     _write_page(built, ADR_FILED, "---\ntype: Adr\ntitle: Old\ndescription: d\n---\n\nold\n")
     preview = run_proposal_preview(built, ADR_FILED, today=TODAY)
     assert preview.refusal is None and not preview.refusals
-    assert (preview.mode, preview.member) == ("create", ADR_PROMOTED)
-    assert preview.base is None and preview.diff is None and preview.rendered is not None
+    assert (preview.mode, preview.member) == ("update", ADR_FILED)
+    assert preview.base is not None and preview.diff is not None and preview.rendered is not None
 
 
 def test_preview_update_when_promotion_updates_a_page_the_filed_target_is_not(tmp_path: Path) -> None:
@@ -176,3 +176,14 @@ def test_preview_update_when_promotion_updates_a_page_the_filed_target_is_not(tm
     assert preview.diff is not None
     changed = [line for line in preview.diff.splitlines() if line[:1] in "+-" and line[:3] not in ("+++", "---")]
     assert any(line.startswith("-") for line in changed) and any(line.startswith("+") for line in changed)
+
+
+def test_work_preview_refuses_without_rendering_or_writing(tmp_path) -> None:
+    layout = _layout(tmp_path)
+    _file(layout, type_name="Bug", title="Investigate queue")
+    before = _snapshot(layout.bundle_dir)
+    preview = run_proposal_preview(layout, "work/investigate-queue.md", today=TODAY)
+    assert preview.rendered is None
+    assert [refusal.kind for refusal in preview.refusals] == ["type-unavailable"]
+    assert "gw work file" in preview.refusals[0].detail
+    assert _snapshot(layout.bundle_dir) == before

@@ -67,6 +67,7 @@ PlacementRefusal = Literal[
     "invalid-baseline",
     "baseline-conflict",
     "baseline-missing",
+    "git-unavailable",
 ]
 
 PLACEMENT_REFUSALS: frozenset[str] = frozenset(get_args(PlacementRefusal))
@@ -210,6 +211,27 @@ class PlacementPlan:
         return bool(self.changes)
 
 
+@dataclass(frozen=True, slots=True)
+class BaselineAncestry:
+    """The caller's proof about the selected stamp's recorded baseline and the destination's HEAD.
+
+    `ancestor=None` means the evidence could not be read; `detail` says why.
+    A proof about any other commit than the recorded baseline proves nothing.
+    """
+
+    start_sha: str
+    ancestor: bool | None
+    detail: str = ""
+
+
+def selected_baseline(item: WorkItem, repo: str | None) -> tuple[tuple[str | None, str | None], str | None]:
+    """The (worktree, branch) pair and `start_sha` a placement for *repo* replaces."""
+    if repo is None:
+        return (item.worktree, item.branch), item.start_sha
+    stamp = item.repo_stamps.get(repo)
+    return ((stamp.worktree, stamp.branch), stamp.start_sha) if stamp is not None else ((None, None), None)
+
+
 def plan_placement(
     items: Sequence[WorkItem],
     path: str,
@@ -222,15 +244,18 @@ def plan_placement(
     repo: str | None = None,
     start_sha: str | None = None,
     require_start_sha: bool = False,
+    ancestry: BaselineAncestry | None = None,
     definition: PipelineDefinition = PACKAGED_DEFINITION,
 ) -> PlacementPlan:
     """Plan recording (*worktree*, *branch*) on *path* for a *phase* dispatch
     of the subtree rooted at *root*. Mutates nothing, reads no clock.
 
     The pair travels with its execute baseline (`start_sha`). With the pair
-    unchanged and no *start_sha* given, a recorded baseline is kept; with the
-    pair changed and none given, the recorded baseline is dropped (a changed
-    placement never retains the prior SHA). A given *start_sha* equal to the
+    unchanged and no *start_sha* given, a recorded baseline is kept. With the
+    pair changed (including no pair to a first pair) and none given, the
+    recorded baseline is kept only when *ancestry* proves it an ancestor of the
+    destination's HEAD; a proved non-ancestor, or no proof, drops it; unreadable
+    evidence refuses `git-unavailable` and drops nothing. A given *start_sha* equal to the
     recorded one is a no-op, one filling an absent baseline is written, and one
     differing from a recorded baseline on an unchanged pair refuses
     `baseline-conflict`. A malformed one refuses `invalid-baseline`.
@@ -239,13 +264,12 @@ def plan_placement(
     """
     index = {item.path: item for item in items}
     item = index.get(path)
-    if item is None or repo is None:
-        before = (item.worktree, item.branch) if item is not None else (None, None)
-        start_before = item.start_sha if item is not None else None
+    before: tuple[str | None, str | None]
+    start_before: str | None
+    if item is None:
+        before, start_before = (None, None), None
     else:
-        stamp = item.repo_stamps.get(repo)
-        before = (stamp.worktree, stamp.branch) if stamp is not None else (None, None)
-        start_before = stamp.start_sha if stamp is not None else None
+        before, start_before = selected_baseline(item, repo)
     after = (worktree, branch)
 
     def refused(reason: PlacementRefusal, detail: str, current: str | None = None) -> PlacementPlan:
@@ -309,7 +333,19 @@ def plan_placement(
         )
     pair_changed = before != after
     if start_sha is None:
-        start_after = None if pair_changed else start_before
+        if not pair_changed or start_before is None:
+            start_after = start_before
+        elif ancestry is None or ancestry.start_sha != start_before:
+            start_after = None
+        elif ancestry.ancestor is None:
+            return refused(
+                "git-unavailable",
+                f"{path} records start_sha {start_before}; whether it is an ancestor of {worktree}'s HEAD "
+                f"could not be proved ({ancestry.detail}) -- nothing was dropped",
+                current,
+            )
+        else:
+            start_after = start_before if ancestry.ancestor else None
     elif not pair_changed and start_before is not None and start_before != start_sha:
         return refused(
             "baseline-conflict",
@@ -390,6 +426,8 @@ BaselineRefusal = Literal[
     "no-repo",
     "outside-repository",
     "git-unavailable",
+    "wrong-checkout",
+    "already-started",
 ]
 BASELINE_REFUSALS: frozenset[str] = frozenset(get_args(BaselineRefusal))
 
@@ -397,7 +435,7 @@ BASELINE_REFUSALS: frozenset[str] = frozenset(get_args(BaselineRefusal))
 @dataclass(frozen=True, slots=True)
 class BaselinePlan:
     """Recording the scalar execute baseline for an attended execute stage.
-    The last three refusals are produced one band up, by the git-reading shell."""
+    The last five refusals are produced one band up, by the git-reading shell."""
 
     path: str
     before: str | None
@@ -524,6 +562,7 @@ __all__ = [
     "PLACEMENT_REFUSALS",
     "READER_PHASES",
     "READER_REFUSALS",
+    "BaselineAncestry",
     "BaselinePlan",
     "BaselineRefusal",
     "PlacementPlan",
@@ -536,4 +575,5 @@ __all__ = [
     "plan_baseline",
     "plan_placement",
     "plan_reader_receipt",
+    "selected_baseline",
 ]

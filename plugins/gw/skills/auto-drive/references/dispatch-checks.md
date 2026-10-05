@@ -368,6 +368,7 @@ matches or resolves rules. Treat model IDs and effort strings as opaque.
       - `invalid-baseline` — the observed `--start-sha` is not a full lowercase commit OID; re-read it from the checkout, never abbreviate it.
       - `baseline-conflict` — the item already records a different `start_sha` for this same worktree and branch; inspect which commit this stage's work started from before recording again.
       - `baseline-missing` — a code placement would end up with no `start_sha` and none was proved; re-run preparation from a checkout still at its base tip, or record one explicitly.
+      - `git-unavailable` — the pair changed over a recorded `start_sha` and gw could not prove (git, repository identity, a missing destination or an unreadable commit) whether that baseline is an ancestor of the new checkout's HEAD; nothing was dropped or written. Repair the cause and record again, or record the observed `--start-sha` explicitly.
 
    6. **Application failed or other non-success.** Every other non-success,
       including when `refusal: null`, enters inspection: a failed application,

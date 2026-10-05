@@ -339,6 +339,6 @@ def test_execute_baseline_preview_matches_legacy(layout, monkeypatch):
         layout,
         monkeypatch,
         placement,
-        lambda lay: placement.run_record_baseline(lay, ITEM, cwd=lay.root.parent / "source", today=TODAY),
+        lambda lay: placement.run_record_baseline(lay, ITEM, cwd=lay.root.parent / "code", today=TODAY),
     )
     assert result.plan.refusal is None and result.plan.changed and not result.written

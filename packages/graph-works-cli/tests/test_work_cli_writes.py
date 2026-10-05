@@ -1450,3 +1450,67 @@ def test_record_baseline_refusal_is_an_envelope(workspace: Path, tmp_path: Path)
     doc = json.loads(result.stdout)
     assert doc["error"]["reason"] == "refused"
     assert doc["error"]["payload"]["refusal"]["reason"] == "outside-repository"
+
+
+def _with_frontmatter(workspace: Path, path: str, lines: str) -> None:
+    page = workspace / "okf" / f"{path}.md"
+    text = page.read_text(encoding="utf-8")
+    page.write_text(
+        text.replace("phase: execute", "phase: execute\n" + lines.rstrip("\n")), encoding="utf-8", newline=""
+    )
+
+
+def test_record_baseline_wrong_checkout_is_an_envelope(workspace: Path, tmp_path: Path) -> None:
+    path, repo, _head = _executing_item_in_a_declared_repo(workspace, tmp_path)
+    mine = tmp_path / "mine"
+    subprocess.run(["git", "worktree", "add", "-q", "-b", "mine", str(mine)], cwd=repo, check=True, capture_output=True)
+    _with_frontmatter(workspace, path, f"worktree: {mine.as_posix()}\nbranch: mine\n")
+    result = runner.invoke(
+        app, ["work", "record-baseline", path, "--cwd", str(repo), "--workspace", str(workspace), "--json"]
+    )
+    assert result.exit_code != 0
+    assert json.loads(result.stdout)["error"]["payload"]["refusal"]["reason"] == "wrong-checkout"
+
+
+def test_record_baseline_already_started_is_an_envelope(workspace: Path, tmp_path: Path) -> None:
+    path, repo, _head = _executing_item_in_a_declared_repo(workspace, tmp_path)
+    subprocess.run(["git", "checkout", "-q", "-b", "work"], cwd=repo, check=True, capture_output=True)
+    subprocess.run(
+        ["git", "-c", "user.name=T", "-c", "user.email=t@example.com", "commit", "-q", "--allow-empty", "-m", "w"],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+    )
+    result = runner.invoke(
+        app, ["work", "record-baseline", path, "--cwd", str(repo), "--workspace", str(workspace), "--json"]
+    )
+    assert result.exit_code != 0
+    assert json.loads(result.stdout)["error"]["payload"]["refusal"]["reason"] == "already-started"
+
+
+def test_record_placement_unprovable_ancestry_is_an_envelope(workspace: Path, tmp_path: Path) -> None:
+    path, _repo, head = _executing_item_in_a_declared_repo(workspace, tmp_path)
+    _with_frontmatter(workspace, path, f"worktree: {(tmp_path / 'old').as_posix()}\nbranch: old\nstart_sha: {head}\n")
+    before = _fm(workspace, path)
+    result = runner.invoke(
+        app,
+        [
+            "work",
+            "record-placement",
+            path,
+            "--root",
+            path,
+            "--phase",
+            "execute",
+            "--worktree",
+            str(tmp_path / "gone"),
+            "--branch",
+            "new",
+            "--workspace",
+            str(workspace),
+            "--json",
+        ],
+    )
+    assert result.exit_code != 0
+    assert json.loads(result.stdout)["error"]["payload"]["refusal"]["reason"] == "git-unavailable"
+    assert _fm(workspace, path) == before

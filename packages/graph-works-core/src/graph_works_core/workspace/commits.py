@@ -171,6 +171,44 @@ def _pathspec(toplevel: Path, candidates: Sequence[str]) -> tuple[tuple[str, ...
     return commit_paths, add_paths, None
 
 
+def commit_candidates(
+    layout: WorkspaceLayout,
+    commit: WorkspaceCommit,
+    plan_paths: Sequence[str],
+    toplevel: Path,
+) -> tuple[tuple[str, ...], str | None]:
+    """Resolve the exact staging candidates, or the existing containment refusal.
+
+    Publication owners use this same resolver to capture the index footprint
+    before effects. Root members resolve symlinks; bundle members retain Git's
+    existing pathspec semantics. This function neither stages nor commits.
+    """
+    bundle = layout.bundle_dir.resolve()
+    if not bundle.is_relative_to(toplevel):
+        return (), "bundle is outside the git work tree"
+    members = {*plan_paths, *commit.extra_paths, *(references_dir(item).rel for item in commit.items)}
+    for member in members:
+        relative = Path(member)
+        if not member or member == "." or relative.is_absolute() or ".." in relative.parts:
+            return (), f"path is outside bundle: {member!r}"
+    root = layout.root.resolve()
+    for member in commit.root_paths:
+        relative = Path(member)
+        if (
+            not member
+            or member == "."
+            or relative.is_absolute()
+            or ".." in relative.parts
+            or not (root / member).resolve().is_relative_to(toplevel)
+        ):
+            return (), f"path is outside the workspace: {member!r}"
+    candidates = sorted(
+        {(bundle / member).relative_to(toplevel).as_posix() for member in members}
+        | {(root / member).resolve().relative_to(toplevel).as_posix() for member in commit.root_paths}
+    )
+    return tuple(candidates), None
+
+
 def commit_workspace(
     layout: WorkspaceLayout,
     commit: WorkspaceCommit,
@@ -188,29 +226,9 @@ def commit_workspace(
     if toplevel is None:
         status: Literal["skipped", "failed"] = "skipped" if skip in {"disabled", *NOTE_REASONS} else "failed"
         return CommitOutcome(status, None, commit.subject, (), skip)
-    bundle = layout.bundle_dir.resolve()
-    if not bundle.is_relative_to(toplevel):
-        return CommitOutcome("failed", None, commit.subject, (), "bundle is outside the git work tree")
-    members = {*plan_paths, *commit.extra_paths, *(references_dir(item).rel for item in commit.items)}
-    for member in members:
-        relative = Path(member)
-        if not member or member == "." or relative.is_absolute() or ".." in relative.parts:
-            return CommitOutcome("failed", None, commit.subject, (), f"path is outside bundle: {member!r}")
-    root = layout.root.resolve()
-    for member in commit.root_paths:
-        relative = Path(member)
-        if (
-            not member
-            or member == "."
-            or relative.is_absolute()
-            or ".." in relative.parts
-            or not (root / member).resolve().is_relative_to(toplevel)
-        ):
-            return CommitOutcome("failed", None, commit.subject, (), f"path is outside the workspace: {member!r}")
-    candidates = sorted(
-        {(bundle / member).relative_to(toplevel).as_posix() for member in members}
-        | {(root / member).resolve().relative_to(toplevel).as_posix() for member in commit.root_paths}
-    )
+    candidates, candidate_error = commit_candidates(layout, commit, plan_paths, toplevel)
+    if candidate_error is not None:
+        return CommitOutcome("failed", None, commit.subject, (), candidate_error)
     pathspec, add_paths, discovery_error = _pathspec(toplevel, candidates) if candidates else ((), (), None)
     if discovery_error is not None:
         return CommitOutcome("failed", None, commit.subject, (), discovery_error)
@@ -243,6 +261,7 @@ __all__ = [
     "CommitMode",
     "CommitOutcome",
     "WorkspaceCommit",
+    "commit_candidates",
     "commit_mode",
     "commit_target",
     "commit_workspace",

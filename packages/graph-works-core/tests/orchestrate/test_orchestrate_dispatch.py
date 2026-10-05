@@ -5,10 +5,11 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+from dataclasses import replace
 from datetime import UTC, date, datetime
 
 import pytest
-from fake_orca_port import FakeOrcaPort
+from fake_orca_port import FakeOrcaPort, read
 from graph_works_core import apply_init, plan_init
 from graph_works_core.orchestrate import dispatch as d
 from graph_works_core.orchestrate import dispatch_record as dr
@@ -103,6 +104,201 @@ def record(env):
     return dr.load_record(dr.record_file(env[0], "work/x", KEY))
 
 
+def receipt_line(env, *, task="task_1", dispatch="ctx_1"):
+    token = record(env).attempts[-1].steps["encode"].result["receipt"]["token"]
+    return f"GW-RECEIPT v1 task={task} dispatch={dispatch} key={KEY} token={token}"
+
+
+def receipt_sleep(env):
+    def sleeping(_):
+        env[2].reads = [read(messages=[{"role": "assistant", "text": receipt_line(env)}])]
+
+    return sleeping
+
+
+def test_first_reply_receipt_verifies_delivery(env):
+    result = run(env, sleep=receipt_sleep(env))
+    assert result.ok and result.probe == "submitted-transcript" and result.delivery == "verified"
+    assert record(env).attempts[-1].steps["probe"].result == {"probe": "submitted-transcript", "delivery": "verified"}
+    assert "terminal_send_enter" not in env[2].names()
+    reads = [kwargs["limit"] for name, _, kwargs in env[2].calls if name == "worker_read"]
+    assert reads == [5, 200]
+
+
+def test_worker_asking_for_its_brief_is_submitted_but_unverified(env):
+    env[2].reads = [read(messages=[{"role": "assistant", "text": "TASK block missing"}])]
+    sleeps = []
+    result = run(env, sleep=sleeps.append, settle_seconds=2)
+    assert result.ok and result.probe == "submitted-transcript" and result.delivery == "unverified"
+    assert "terminal_send_enter" not in env[2].names()
+    reads = [kwargs["limit"] for name, _, kwargs in env[2].calls if name == "worker_read"]
+    assert reads == [5, 200, 200, 200]
+    assert sleeps == [2, 2, 2]
+
+
+def test_delivery_receipt_can_arrive_on_last_bounded_read(env):
+    def sleeping(_):
+        if env[2].names().count("worker_read") == 3:
+            env[2].reads = [read(messages=[{"role": "assistant", "text": receipt_line(env)}])]
+
+    result = run(env, sleep=sleeping)
+    assert result.delivery == "verified"
+    assert env[2].names().count("worker_read") == 4
+
+
+def test_heartbeat_only_worker_delivery_is_unverified_and_never_nudged(env):
+    env[2].show["last_heartbeat_at"] = "now"
+    env[2].reads = [read()]
+    result = run(env)
+    assert result.probe == "submitted-heartbeat" and result.delivery == "unverified"
+    assert "terminal_send_enter" not in env[2].names()
+    assert env[2].names().count("worker_read") == 3
+
+
+@pytest.mark.parametrize("case", ["terminal", "clipped", "error"])
+def test_untrustworthy_delivery_reads_are_inconclusive(env, monkeypatch, case):
+    if case == "terminal":
+        env[2].reads = [read(count=1), read(source="terminal")]
+    elif case == "clipped":
+        env[2].reads = [read(messages=[{"role": "assistant", "text": "hi"}], window_complete=False)]
+    else:
+        worker_read = env[2].worker_read
+
+        def failing(dispatch_id, *, limit):
+            if limit == 200:
+                env[2].fail["worker_read"] = BackendError("unavailable")
+            return worker_read(dispatch_id, limit=limit)
+
+        monkeypatch.setattr(env[2], "worker_read", failing)
+    result = run(env)
+    assert result.ok and result.probe == "submitted-transcript" and result.delivery == "inconclusive"
+    assert "terminal_send_enter" not in env[2].names()
+    assert env[2].names().count("worker_read") == 2
+
+
+def test_previous_attempts_receipt_does_not_verify_delivery(env):
+    assert run(env).ok
+    env[2].reads = [read(messages=[{"role": "assistant", "text": receipt_line(env, dispatch="ctx_0")}])]
+    before = record(env)
+    start = len(env[2].calls)
+    again = run(env)
+    assert again.status == "existing" and again.delivery == "unverified"
+    assert env[2].names()[start:] == ["task_list", "worker_read"]
+    assert record(env) == before
+
+
+@pytest.mark.parametrize("initial", ["unverified", "inconclusive"])
+def test_rerun_upgrades_a_later_delivery_receipt_without_launching(env, initial):
+    env[2].reads = [read(count=1, window_complete=initial == "unverified")]
+    assert run(env).delivery == initial
+    env[2].reads = [read(messages=[{"role": "assistant", "text": receipt_line(env)}])]
+    start = len(env[2].calls)
+    again = run(env)
+    assert again.status == "existing" and again.delivery == "verified"
+    assert env[2].names()[start:] == ["task_list", "worker_read"]
+    assert env[2].names().count("worker_start") == 1
+    assert record(env).attempts[-1].steps["probe"].result == {"probe": "submitted-transcript", "delivery": "verified"}
+
+
+def test_rerun_never_downgrades_verified_delivery(env):
+    assert run(env, sleep=receipt_sleep(env)).delivery == "verified"
+    env[2].fail["worker_read"] = BackendError("unavailable")
+    before = record(env)
+    start = len(env[2].calls)
+    assert run(env).delivery == "verified"
+    assert env[2].names()[start:] == ["task_list"]
+    assert record(env) == before
+
+
+@pytest.mark.parametrize("previous", ["unverified", "verified"])
+def test_disabled_existing_probe_preserves_delivery_without_reads(env, previous):
+    first = run(env, sleep=receipt_sleep(env)) if previous == "verified" else run(env)
+    assert first.delivery == previous
+    env[2].reads = [read(messages=[{"role": "assistant", "text": receipt_line(env)}])]
+    before = record(env)
+    start = len(env[2].calls)
+    again = run(env, probe=False)
+    assert again.ok and again.status == "existing" and again.delivery == previous
+    assert env[2].names()[start:] == ["task_list"]
+    assert record(env) == before
+
+
+def test_other_existing_task_never_inherits_verified_delivery(env):
+    assert run(env, sleep=receipt_sleep(env)).delivery == "verified"
+    env[2].tasks[0]["id"] = "another_task"
+    before = record(env)
+    start = len(env[2].calls)
+    result = run(env)
+    assert result.ok and result.status == "existing" and result.task_id == "another_task"
+    assert result.delivery == "unverified" and result.dispatch_id is None
+    assert env[2].names()[start:] == ["task_list"]
+    assert record(env) == before
+
+
+def test_delivery_recheck_requires_exact_dispatch_identity(env):
+    result = run(env)
+    saved = record(env)
+    context = d._Dispatch(
+        env[0],
+        env[2],
+        TODAY,
+        lambda: datetime(2026, 9, 26, tzinfo=UTC),
+        replace(result, dispatch_id="another_dispatch"),
+        record=saved,
+        persisted=saved,
+    )
+    start = len(env[2].calls)
+    d._recheck_delivery(context)
+    assert env[2].calls[start:] == []
+    assert record(env) == saved and context.result.delivery == "unverified"
+
+
+def test_delivery_recheck_does_not_downgrade_inconclusive(env):
+    env[2].reads = [read(count=1, window_complete=False)]
+    assert run(env).delivery == "inconclusive"
+    env[2].reads = [read(count=1)]
+    before = record(env)
+    assert run(env).delivery == "inconclusive"
+    assert record(env) == before
+
+
+def test_no_terminal_still_verifies_delivery_from_transcript(env, monkeypatch):
+    env[2].start["terminal"] = None
+    # The no-terminal branch has no submission sleep; install the receipt at the seam.
+    worker_read = env[2].worker_read
+
+    def with_receipt(dispatch_id, *, limit):
+        env[2].reads = [read(messages=[{"role": "assistant", "text": receipt_line(env)}])]
+        return worker_read(dispatch_id, limit=limit)
+
+    monkeypatch.setattr(env[2], "worker_read", with_receipt)
+    result = run(env)
+    assert result.ok and result.probe == "no-terminal" and result.delivery == "verified"
+    assert "terminal_send_enter" not in env[2].names()
+
+
+@pytest.mark.parametrize("legacy_probe", ["submitted-transcript", "inconclusive"])
+@pytest.mark.parametrize("recovery", ["existing", "resume"])
+def test_legacy_attempt_reports_unverified_delivery_without_reads(env, legacy_probe, recovery):
+    assert run(env).ok
+    path = dr.record_file(env[0], "work/x", KEY)
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    steps = payload["attempts"][-1]["steps"]
+    steps["encode"].pop("result")
+    steps["probe"]["result"] = {"probe": legacy_probe}
+    if recovery == "resume":
+        del steps["task-update"]
+    dr.write_json_atomic(path, payload)
+    before = path.read_bytes()
+    start = len(env[2].calls)
+    again = run(env)
+    assert again.ok and again.status == ("existing" if recovery == "existing" else "resumed")
+    assert again.delivery == "unverified"
+    assert env[2].names()[start:] == (["task_list"] if recovery == "existing" else ["task_list", "task_update"])
+    if recovery == "existing":
+        assert path.read_bytes() == before
+
+
 def failure(result, step, reason, task=None, dispatch=None):
     assert not result.ok and result.status is None
     assert (result.failure.step, result.failure.reason) == (step, reason)
@@ -128,6 +324,9 @@ def test_happy_path_runs_every_step_in_order(env):
         "worktree_show",
         "worker_list",
         "worker_show",
+        "worker_read",
+        "worker_read",
+        "worker_read",
         "worker_read",
         "task_update",
     ]
@@ -160,7 +359,97 @@ def test_the_spec_is_v2_and_carries_the_prompt(env):
         "mode": "autonomous",
         "worktree_path": None,
     }
-    assert prompt == "Run /gw:workflow work/x.\n"
+    token = "010afd8d2c29bcb9"
+    assert prompt == (
+        "Run /gw:workflow work/x.\n\n"
+        "Delivery receipt: before any other action, your first reply must contain this line on its own, "
+        "with the task ID and dispatch ID from your Orca instructions above filled in:\n"
+        f"GW-RECEIPT v1 task=<task ID> dispatch=<dispatch ID> key={KEY} token={token}\n"
+    )
+    assert record(env).attempts[-1].steps["encode"].result == {"receipt": {"version": 1, "token": token}}
+
+
+def test_receipt_token_is_stable_across_resume(env):
+    env[2].fail["task_create"] = BackendError("down")
+    failure(run(env), "create", "task-create-failed")
+    first = record(env).attempts[-1].steps["encode"].result
+    assert first == {"receipt": {"version": 1, "token": "010afd8d2c29bcb9"}}
+    env[2].fail.pop("task_create")
+    assert run(env).status == "resumed"
+    assert record(env).attempts[-1].steps["encode"].result == first
+    specs = [kwargs["spec"] for name, _, kwargs in env[2].calls if name == "task_create"]
+    headers, briefs = zip(*(spec.split("\n", 1) for spec in specs), strict=True)
+    assert json.loads(headers[0].removeprefix("GW_LAUNCH_V1 ")) == json.loads(headers[1].removeprefix("GW_LAUNCH_V1 "))
+    assert briefs[0] == briefs[1]
+    assert specs[1].endswith(f"key={KEY} token=010afd8d2c29bcb9\n")
+    assert len(record(env).attempts) == 1
+
+
+@pytest.mark.parametrize("changed", ["Run different instructions.\n", "Run /gw:workflow work/x.\n\n"])
+def test_receipt_bound_brief_change_refuses_uncertain_create_retry(env, changed):
+    env[2].fail["task_create"] = BackendError("down")
+    failure(run(env), "create", "task-create-failed")
+    env[2].fail.pop("task_create")
+    encoded = record(env).attempts[-1].steps["encode"]
+    env[1]["dispatches"][0]["prompt"] = changed
+    result = run(env)
+    failure(result, "create", "recovery-inspection")
+    assert "planned brief changed" in result.failure.detail
+    assert env[2].names().count("task_create") == 1
+    assert "worker_start" not in env[2].names()
+    assert record(env).attempts[-1].steps["encode"] == encoded
+    assert len(record(env).attempts) == 1
+
+
+@pytest.mark.parametrize(
+    "bad",
+    [
+        {"receipt": {"version": 2, "token": "0" * 16}},
+        {"receipt": {"version": True, "token": "0" * 16}},
+        {"receipt": {"version": 1.0, "token": "0" * 16}},
+        {"receipt": {"version": 1, "token": "XYZ"}},
+        {"receipt": {"version": 1, "token": "A" * 16}},
+        {"receipt": {"version": 1, "token": "0" * 16 + "\n"}},
+        {"receipt": {"version": 1, "token": 7}},
+        {"receipt": {"version": 1}},
+        {"receipt": {"token": "0" * 16}},
+        {"receipt": {"version": 1, "token": "0" * 16, "extra": 1}},
+        {"receipt": None},
+        {"receipt": []},
+        {"other": 1},
+    ],
+)
+def test_invalid_persisted_receipt_is_record_invalid(env, bad):
+    env[2].fail["task_create"] = BackendError("down")
+    failure(run(env), "create", "task-create-failed")
+    env[2].fail.pop("task_create")
+    path = dr.record_file(env[0], "work/x", KEY)
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    payload["attempts"][-1]["steps"]["encode"]["result"] = bad
+    dr.write_json_atomic(path, payload)
+    before = path.read_bytes()
+    start = len(env[2].calls)
+    failure(run(env), "validate", "record-invalid")
+    assert env[2].calls[start:] == []
+    assert path.read_bytes() == before
+
+
+@pytest.mark.parametrize("encoded", [None, {}])
+def test_legacy_receipt_free_attempt_resumes_without_appending_instruction(env, encoded):
+    env[2].fail["task_create"] = BackendError("down")
+    failure(run(env), "create", "task-create-failed")
+    env[2].fail.pop("task_create")
+    path = dr.record_file(env[0], "work/x", KEY)
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    step = payload["attempts"][-1]["steps"]["encode"]
+    if encoded is None:
+        step.pop("result", None)
+    else:
+        step["result"] = encoded
+    dr.write_json_atomic(path, payload)
+    assert run(env).status == "resumed"
+    assert env[2].tasks[0]["spec"].split("\n", 1)[1] == "Run /gw:workflow work/x.\n"
+    assert record(env).attempts[-1].steps["encode"].result == encoded
 
 
 def test_the_record_never_stores_the_prompt(env):
@@ -168,6 +457,7 @@ def test_the_record_never_stores_the_prompt(env):
     assert run(env).ok
     text = dr.record_file(env[0], "work/x", KEY).read_text(encoding="utf-8")
     assert "Unique private instruction" not in text and "dcap_" not in text
+    assert "GW-RECEIPT" not in text and "Delivery receipt:" not in text
     assert "Unique private instruction" in env[2].tasks[0]["spec"]
 
 
@@ -337,7 +627,13 @@ def test_known_failed_start_ids_are_preserved_without_carriers(env):
     assert result.terminal == "term_failed"
     assert record(env).attempts[-1].dispatch_id == "ctx_failed"
     text = dr.record_file(env[0], "work/x", KEY).read_text(encoding="utf-8")
-    assert "private" not in text and "launchRequest" not in text and "receipt" not in text
+    assert "private" not in text and "launchRequest" not in text and "preamble" not in text and "prompt" not in text
+    assert record(env).attempts[-1].steps["launch"].result == {
+        "dispatch_id": "ctx_failed",
+        "terminal": "term_failed",
+        "worktree_id": None,
+    }
+    assert record(env).attempts[-1].steps["encode"].result == {"receipt": {"version": 1, "token": "010afd8d2c29bcb9"}}
 
 
 @pytest.mark.parametrize("case", ["repo", "directory", "base", "branch", "main", "parent", "claimed", "row", "wid"])
@@ -390,6 +686,110 @@ def test_two_dispatches_with_one_key_create_one_task(env):
     assert env[2].names().count("task_create") == 1
 
 
+def returned_execute(env):
+    """Model the active intent and reused checkout after a successful return."""
+    layout, plan, _port, _repo, wt = env
+    page = layout.bundle_dir / "work/x.md"
+    page.write_text(
+        page.read_text(encoding="utf-8").replace(
+            "affects: []\n",
+            "affects: []\n"
+            "execute_return:\n"
+            "  id: ret-20260926-1a2b3c4d\n"
+            "  recorded: 2026-09-26\n"
+            "  state: active\n"
+            "  coverage: /work/x/references/03-execute-coverage.md\n"
+            "  scope:\n"
+            "    - {id: R1, text: Implement the newly returned task}\n",
+            1,
+        ),
+        encoding="utf-8",
+        newline="\n",
+    )
+    plan["dispatches"][0]["worktree"].update(action="reuse", path=str(wt), exists=True)
+
+
+def test_returned_execute_key_with_settled_task_is_existing_until_rerouted(env):
+    from graph_works_core.orchestrate.reroute import run_reroute
+
+    first = run(env)
+    assert first.ok, first.failure
+    port = env[2]
+    port.tasks[0]["status"] = "completed"
+    port.workers[0].update(state="succeeded", dispatch_status="completed")
+    returned_execute(env)
+    before = record(env)
+    start = len(port.calls)
+
+    existing = run(env)
+
+    assert existing.ok and existing.status == "existing"
+    assert (existing.task_id, existing.dispatch_id) == (first.task_id, first.dispatch_id)
+    assert port.names()[start:] == ["task_list", "worker_read"]
+    assert record(env) == before
+
+    reason = "execute return ret-20260926-1a2b3c4d"
+    rerouted = run_reroute(
+        env[0], KEY, run_id="run_1", reason=reason, port=port, clock=lambda: datetime(2026, 9, 26, tzinfo=UTC)
+    )
+    assert rerouted.ok and rerouted.status == "rerouted"
+    assert (rerouted.superseded_task_id, rerouted.superseded_dispatch_id) == (first.task_id, first.dispatch_id)
+    assert rerouted.overrides == dr.Overrides()
+    assert record(env).reroutes[-1].reason == reason
+    assert port.tasks[0]["status"] == "blocked"
+    port.start["dispatch_id"] = "ctx_2"
+
+    fresh = run(env)
+
+    assert fresh.ok and fresh.status == "dispatched", fresh.failure
+    assert fresh.task_id != first.task_id and fresh.dispatch_id != first.dispatch_id
+    saved = record(env)
+    assert len(saved.attempts) == 2 and saved.attempts[-1].complete
+    for field in ("agent", "model", "reasoning_effort"):
+        assert saved.attempts[-1].envelope[field] == saved.attempts[0].envelope[field]
+    assert port.names().count("task_create") == port.names().count("worker_start") == 2
+
+
+def test_returned_execute_key_without_prior_task_dispatches_directly(env):
+    returned_execute(env)
+    assert not env[2].tasks and record(env) is None
+
+    result = run(env)
+
+    assert result.ok and result.status == "dispatched", result.failure
+    saved = record(env)
+    assert len(saved.attempts) == 1 and saved.attempts[-1].complete
+    assert not saved.reroutes and not saved.superseded
+    assert env[2].names().count("task_create") == env[2].names().count("worker_start") == 1
+
+
+def test_reroute_refuses_live_attempt_for_returned_key(env):
+    from graph_works_core.orchestrate.reroute import run_reroute
+    from test_reroute import worker
+
+    first = run(env)
+    assert first.ok, first.failure
+    env[2].workers = [worker(dispatch_id=first.dispatch_id, task_id=first.task_id, state="running")]
+    returned_execute(env)
+    before = record(env)
+    start = len(env[2].calls)
+
+    result = run_reroute(
+        env[0],
+        KEY,
+        run_id="run_1",
+        reason="execute return ret-20260926-1a2b3c4d",
+        port=env[2],
+        clock=lambda: datetime(2026, 9, 26, tzinfo=UTC),
+    )
+
+    assert not result.ok and result.status is None
+    assert (result.failure.step, result.failure.reason) == ("reroute", "reroute-live")
+    assert (result.failure.task_id, result.failure.dispatch_id) == (first.task_id, first.dispatch_id)
+    assert record(env) == before
+    assert env[2].names()[start:] == ["task_list", "task_list", "worker_list"]
+
+
 def crash(env, monkeypatch, step):
     save = dr.compare_and_swap_record
 
@@ -432,6 +832,7 @@ def test_a_task_from_the_old_primitives_counts_as_existing(env):
     env[2].tasks = [{"id": "old", "title": KEY, "display_name": "old name", "status": "dispatched", "spec": "old"}]
     result = run(env)
     assert result.status == "existing" and result.task_id == "old"
+    assert result.delivery == "unverified"
     assert env[2].names() == ["task_list"]
 
 
@@ -462,7 +863,7 @@ def test_skipped_dispatch_can_be_called_again(env, skipped_step):
     second = run(env, probe=skipped_step != "probe")
 
     assert second.ok and second.status == "existing"
-    assert env[2].names()[start:] == ["task_list"]
+    assert env[2].names()[start:] == (["task_list", "worker_read"] if skipped_step == "record" else ["task_list"])
 
 
 @pytest.mark.parametrize("recovery", ["existing", "resume"])
@@ -491,7 +892,12 @@ def test_persisted_skipped_step_without_result_is_valid(env, skipped_step, recov
         assert result.recorded == "skipped:read-only-descendant"
     else:
         assert result.probe == "skipped"
-    assert env[2].names()[start:] == (["task_list"] if recovery == "existing" else ["task_list", "task_update"])
+    expected = ["task_list"]
+    if recovery == "resume":
+        expected.append("task_update")
+    elif skipped_step == "record":
+        expected.append("worker_read")
+    assert env[2].names()[start:] == expected
     assert env[2].names().count("task_create") == 1
     assert env[2].names().count("worker_start") == 1
 
@@ -513,11 +919,11 @@ def test_attend_error_is_a_warning(env):
 @pytest.mark.parametrize("case", ["degraded", "failed", "reread-degraded", "reread-failed"])
 def test_probe_never_nudges_a_degraded_or_unreadable_read(env, case):
     if case == "degraded":
-        env[2].reads = [{"source": "terminal", "message_count": 0}]
+        env[2].reads = [read("terminal")]
     elif case == "failed":
         env[2].fail["worker_read"] = BackendError("unreadable")
     else:
-        env[2].reads = [{"source": "transcript", "message_count": 0}, {"source": "terminal", "message_count": 0}]
+        env[2].reads = [read(), read("terminal")]
         if case == "reread-failed":
 
             def sleeping(_):
@@ -528,12 +934,14 @@ def test_probe_never_nudges_a_degraded_or_unreadable_read(env, case):
     if case != "reread-failed":
         result = run(env)
     assert result.ok and result.probe == "inconclusive"
+    assert result.delivery == "inconclusive"
+    assert env[2].names().count("worker_read") == (2 if case.startswith("reread") else 1)
     assert env[2].names().count("terminal_send_enter") == (1 if case.startswith("reread") else 0)
 
 
 @pytest.mark.parametrize("after_read", [0, 1, 2])
 def test_heartbeat_vetoes_every_nudge(env, monkeypatch, after_read):
-    env[2].reads = [{"source": "transcript", "message_count": 0}]
+    env[2].reads = [read()]
     show = env[2].worker_show
 
     def heartbeat(dispatch):
@@ -545,18 +953,24 @@ def test_heartbeat_vetoes_every_nudge(env, monkeypatch, after_read):
     monkeypatch.setattr(env[2], "worker_show", heartbeat)
     result = run(env)
     assert result.ok and result.probe == "submitted-heartbeat"
+    assert result.delivery == "unverified"
     assert env[2].names().count("terminal_send_enter") == max(0, after_read - 1)
 
 
 def test_unsent_after_exactly_two_nudges(env):
-    env[2].reads = [{"source": "transcript", "message_count": 0}]
-    failure(run(env), "probe", "unsent", "task_1", "ctx_1")
+    env[2].reads = [read()]
+    result = run(env)
+    failure(result, "probe", "unsent", "task_1", "ctx_1")
+    assert result.delivery is None
+    assert env[2].names().count("worker_read") == 3
     assert env[2].names().count("terminal_send_enter") == 2
 
 
 def test_recovered_submission_is_nudged(env):
-    env[2].reads = [{"source": "transcript", "message_count": 0}, {"source": "transcript", "message_count": 1}]
-    assert run(env).probe == "nudged"
+    env[2].reads = [read(), read(count=1)]
+    result = run(env)
+    assert result.probe == "nudged" and result.delivery == "unverified"
+    assert env[2].names().count("terminal_send_enter") == 1
 
 
 @pytest.mark.parametrize("case", ["disabled", "terminal"])
@@ -565,7 +979,8 @@ def test_no_probe_and_no_terminal(env, case):
         env[2].start["terminal"] = None
     result = run(env, probe=case != "disabled")
     assert result.ok and result.probe == ("skipped" if case == "disabled" else "no-terminal")
-    assert "worker_read" not in env[2].names()
+    assert result.delivery == ("skipped" if case == "disabled" else "unverified")
+    assert env[2].names().count("worker_read") == (0 if case == "disabled" else 3)
 
 
 def test_reuse_places_by_path_without_an_orca_call(env):
@@ -751,7 +1166,7 @@ def test_record_write_and_verification_failures(env, monkeypatch, case):
 
 @pytest.mark.parametrize("call", ["worker_show", "terminal_send_enter"])
 def test_probe_errors_are_inconclusive(env, call):
-    env[2].reads = [{"source": "transcript", "message_count": 0}]
+    env[2].reads = [read()]
     env[2].fail[call] = BackendError("unavailable")
     result = run(env)
     assert result.ok and result.probe == "inconclusive"

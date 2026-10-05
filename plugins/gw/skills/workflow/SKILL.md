@@ -266,6 +266,7 @@ another stage, same as the stock skill it replaces.
   `--skip-gate` on your own. Unchecked coverage lines need no instruction: the
   `execute -> finish` advance records them as finish obligations, and the
   finish brief's `## Carried context` block lists them.
+- **Returned execute.** When `carried_context.slots.execute_return` has lines, the item came back from finish: an existing coverage file is not evidence that execute is done. Implement the returned rows (reading the canonical plan it names) before advancing; the `execute -> finish` advance refuses `return-evidence-missing`, `return-evidence-stale`, `return-evidence-incomplete` or `return-plan-changed` until the returned section is reported against the current plan.
 - **Stage directives (riders).** Look `action.skill` up in the rider table
   below, keyed on its **last segment** — the part after the colon in a qualified
   `superpowers:brainstorming`. If a rider exists, open
@@ -319,6 +320,8 @@ its lines as-is, and if any line is `- [ ]` (a marker scan, not comprehension)
 ask the user whether to stay in `execute` rather than advance; on *stay*, do not
 run step 5. The unattended equivalent is `auto-drive` §4.1's Coverage read.
 
+When `carried_context.slots.execute_return` has lines, read the coverage location that block names and verify its current `## Returned scope <id>` section too. Keep the heading and row ids, report every row `- [x]` or `- [ ]` with a one-line justification, and set `Report state: reported`. A missing or older report does not satisfy the return; completion enforces the current returned section even when the original design coverage is fully checked.
+
 ### 5. Advance
 
 For a finish dispatch, include the complete `next.finish_targets` list in
@@ -338,6 +341,8 @@ A same-phase completion (`--from plan` landing at `plan`) is normal for a plan-s
 Under a supervised dispatch (step 2), add `--no-infer-worktree`; this applies to the finish-outcome rows below too.
 
 **Gate refusals.** The `execute -> finish` advance fails closed. It refuses with `no-affects`, `no-repo`, `worktree-missing`, `git-unavailable`, `uncommitted-work`, `no-start-sha`, `range-unreadable`, `no-commits`, `no-affects-touched`, `no-gate-receipt`, `no-gate-configured`, `units-invalid` or `units-command-failed`, and its `refusal.detail` says what is missing. Fix the cause when you can (commit the work, restore the worktree, configure `toolchain.git`, run `gw work gate run <work-path>` and `gw work gate wait <work-path>` for `no-gate-receipt`, configure `repositories.<name>.gate.full` for `no-gate-configured`, repair the repository's `gate.units` manifest command for `units-invalid` / `units-command-failed` (its `refusal.detail` carries the validation message or the command's stderr tail)) and advance again. Only a human may bypass one: in an attended session, show the refusal and ask the user whether to bypass exactly that code; on a yes, run `gw work advance <work-path> --from execute --skip-gate <code> --reason "<their reason>" --actor <their handle>`, which records an answered decision in the ledger. A supervised worker must never pass `--skip-gate`: it sends `worker_done --outcome failed` with subject `gate refused: <code>` and the refusal detail in its body, and stops.
+
+**Returned-scope refusals.** `return-evidence-missing`, `return-evidence-stale`, `return-evidence-incomplete`, `return-plan-changed` and `return-metadata-invalid` are non-bypassable. Fix the report or return again; never `--skip-gate`.
 
 **Schema drift.** Any advance refuses `schema-drift` when the workspace's installed work schemas differ from the packaged ones; its detail names each file. It is not a gate code and `--skip-gate` cannot bypass it. Preview with `gw config sync --schemas --workspace <workspace>`, and apply with `--apply` (add `--force` only after a human reviewed the diff of an edited or unrecorded copy). A supervised worker does not refresh: it sends `worker_done --outcome failed` with subject `advance refused: schema-drift` and the detail in its body.
 

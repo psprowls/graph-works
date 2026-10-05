@@ -76,6 +76,33 @@
         }
       }
     },
+    "execute_return": {
+      "type": "object",
+      "required": ["id", "recorded", "state", "coverage", "scope"],
+      "additionalProperties": false,
+      "dependentRequired": { "plan": ["plan_sha256"], "plan_sha256": ["plan"] },
+      "properties": {
+        "id": { "type": "string", "pattern": "^ret-[0-9]{8}-[0-9a-f]{8}$" },
+        "recorded": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$", "format": "date" },
+        "state": { "enum": ["active", "completed"] },
+        "coverage": { "type": "string", "pattern": "^/" },
+        "plan": { "type": "string", "pattern": "^/" },
+        "plan_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "scope": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "required": ["id", "text"],
+            "additionalProperties": false,
+            "properties": {
+              "id": { "type": "string", "pattern": "^R[1-9][0-9]*$" },
+              "text": { "type": "string", "pattern": "\\S", "not": { "pattern": "[\\r\\n]" } }
+            }
+          }
+        }
+      }
+    },
     "superseded_by": { "type": "string", "minLength": 1 },
     "mitigation": { "type": "string", "minLength": 1 },
     "rationale": { "type": "string", "minLength": 1 },

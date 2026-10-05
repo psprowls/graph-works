@@ -560,7 +560,7 @@ def test_pending_questions_on_event_timeout_and_sleep_gap(event, slept):
 
 
 @pytest.mark.parametrize("ack", [None, "dlv_prev"])
-def test_zero_timeout_is_a_pure_pending_read_even_with_ack(ack):
+def test_zero_timeout_probes_before_pending_read_even_with_ack(ack):
     port = FakeOrcaPort()
     port.pending = {"questions": [QUESTION], "truncated": False, "warnings": []}
     result = wait(port, Clock(), timeout_s=0, ack=ack)
@@ -568,20 +568,20 @@ def test_zero_timeout_is_a_pure_pending_read_even_with_ack(ack):
     assert result.delivery_id is None and result.messages == () and result.absorbed == ()
     assert result.self_acked == 0 and not result.rebound and result.waited_s == 0
     assert result.liveness is None
-    assert port.calls == [("pending_questions", ("run_1",), {})]
+    assert port.calls == [("check_nowait", ("run_1",), {}), ("pending_questions", ("run_1",), {})]
 
 
 @pytest.mark.parametrize("timeout_s", [0, 5])
 @pytest.mark.parametrize("event", [False, True])
-def test_failed_pending_read_is_null_plus_warning_without_fence_retry(timeout_s, event):
+def test_failed_pending_read_is_null_plus_warning_after_bounded_fence_retry(timeout_s, event):
     port = FakeOrcaPort(deliveries=[delivery("d", msg("e", "question"))] if event else [])
     port.fail["pending_questions"] = Fenced("inbox refused")
     result = wait(port, Clock(), timeout_s=timeout_s)
-    assert result.status == ("event" if event and timeout_s else "timeout")
+    assert result.status == ("event" if event else "timeout")
     assert result.pending_questions is None
     assert result.warnings == ("pending questions unavailable: inbox refused",)
-    assert port.names().count("pending_questions") == 1
-    assert "run_use" not in port.names() and "check_ack" not in port.names()
+    assert port.names().count("pending_questions") == 2
+    assert port.names().count("run_use") == 1 and "check_ack" not in port.names()
 
 
 def test_pending_truncation_and_derivation_warnings_are_merged():
@@ -667,3 +667,115 @@ def test_an_event_never_reads_gate_waits():
         raise AssertionError("events must not read gate waits")
 
     assert run_wait(port, "run_1", ack=None, timeout_s=600, clock=Clock().clock(), gate_waits=never).liveness is None
+
+
+def test_zero_timeout_recovers_silently_empty_fenced_inbox():
+    port = FakeOrcaPort(wait_errors=[Fenced("wrong consumer")])
+
+    def pending(run_id):
+        port._record("pending_questions", run_id)
+        return {"questions": [QUESTION] if "run_use" in port.names() else [], "truncated": False, "warnings": []}
+
+    port.pending_questions = pending
+    result = wait(port, Clock(), timeout_s=0, ack="previous")
+    assert result.pending_questions == (QUESTION,) and result.rebound
+    assert port.names() == ["check_nowait", "run_use", "check_nowait", "pending_questions"]
+
+
+@pytest.mark.parametrize(
+    "errors,rebind_failure,want_rebound",
+    [
+        ([Fenced("fence")], True, False),
+        ([Fenced("fence"), Fenced("still fenced")], False, True),
+        ([Refused("unavailable")], False, False),
+        ([BackendError("malformed check messages")], False, False),
+    ],
+)
+def test_zero_timeout_failed_probe_never_claims_empty_pending(errors, rebind_failure, want_rebound):
+    port = FakeOrcaPort(wait_errors=errors)
+    if rebind_failure:
+        port.fail["run_use"] = Refused("cannot bind")
+    result = wait(port, Clock(), timeout_s=0, ack="previous")
+    assert result.pending_questions is None and result.warnings
+    assert "probe" in result.warnings[0]
+    assert result.rebound is want_rebound
+    assert port.names().count("check_nowait") <= 2
+    assert not set(port.names()) & {"pending_questions", "check_ack", "check_wait", "liveness"}
+
+
+@pytest.mark.parametrize(
+    "kinds",
+    [[], ["question"], ["escalation"], ["worker_done"], ["heartbeat"], ["heartbeat", "question", "worker_done"]],
+)
+@pytest.mark.parametrize("pending_fails", [False, True])
+def test_zero_timeout_keeps_whole_probe_delivery(kinds, pending_fails):
+    batch = [msg(str(i), kind) for i, kind in enumerate(kinds)]
+    port = FakeOrcaPort(deliveries=[delivery("replayable", *batch)])
+    if pending_fails:
+        port.fail["pending_questions"] = Refused("read failed")
+    result = wait(port, Clock(), timeout_s=0, ack="previous")
+    assert result.status == "event" and result.delivery_id == "replayable"
+    assert result.messages == tuple(batch)
+    assert result.absorbed == () and result.self_acked == 0
+    assert result.pending_questions == (None if pending_fails else ())
+    assert port.names() == ["check_nowait", "pending_questions"]
+
+
+@pytest.mark.parametrize("timeout_s", [0, 5])
+@pytest.mark.parametrize("event", [False, True])
+def test_pending_fence_recovers_on_event_and_timeout(timeout_s, event):
+    port = FakeOrcaPort(deliveries=[delivery("d", msg("m", "question"))] if event else [])
+
+    def pending(run_id):
+        port._record("pending_questions", run_id)
+        if port.names().count("pending_questions") == 1:
+            raise Fenced("inbox fenced")
+        return {"questions": [QUESTION], "truncated": True, "warnings": ["derivation warning"]}
+
+    port.pending_questions = pending
+    result = wait(port, Clock(), timeout_s=timeout_s)
+    assert result.rebound and result.pending_questions == (QUESTION,)
+    assert result.status == ("event" if event else "timeout")
+    assert "derivation warning" in result.warnings and any("incomplete" in w for w in result.warnings)
+    assert port.names().count("run_use") == 1 and "check_ack" not in port.names()
+
+
+@pytest.mark.parametrize("timeout_s", [0, 5])
+def test_pending_rebind_failure_keeps_delivery(timeout_s):
+    port = FakeOrcaPort(deliveries=[delivery("d", msg("m", "question"))])
+    port.fail["pending_questions"] = Fenced("inbox fenced")
+    port.fail["run_use"] = Refused("cannot bind")
+    result = wait(port, Clock(), timeout_s=timeout_s)
+    assert result.pending_questions is None and result.warnings
+    assert result.delivery_id == "d" and len(result.messages) == 1
+    assert not result.rebound and "check_ack" not in port.names()
+
+
+def test_zero_timeout_message_without_delivery_id_is_an_event():
+    port = FakeOrcaPort(deliveries=[delivery(None, hb("m"))])
+    result = wait(port, Clock(), timeout_s=0)
+    assert result.status == "event" and result.messages == (hb("m"),)
+    assert result.delivery_id is None and result.self_acked == 0
+
+
+def test_zero_timeout_probe_delivery_replays_until_ack():
+    port = FakeOrcaPort()
+
+    def probe(run_id):
+        port._record("check_nowait", run_id)
+        return delivery("same", hb("m"))
+
+    port.check_nowait = probe
+    first = wait(port, Clock(), timeout_s=0)
+    second = wait(port, Clock(), timeout_s=0, ack=first.delivery_id)
+    assert first.delivery_id == second.delivery_id == "same"
+    assert first.messages == second.messages == (hb("m"),)
+    assert "check_ack" not in port.names()
+
+
+def test_zero_timeout_does_not_absorb_proven_duplicate_completion():
+    port = FakeOrcaPort(**settled_run(), deliveries=[delivery("duplicate", done())])
+    result = wait(port, Clock(), timeout_s=0)
+    assert result.status == "event" and result.messages == (done(),)
+    assert result.delivery_id == "duplicate" and result.absorbed == () and result.self_acked == 0
+    assert port.names() == ["check_nowait", "pending_questions"]

@@ -1,13 +1,15 @@
-"""The coordinator's one wait (`gw work wait`): return only for a real event.
+"""The coordinator's one wait (`gw work wait`): events and non-blocking refreshes.
 
 Decisions only. Every Orca call goes through `OrcaPort`, whose argv lives in
-`workflow_orca.port`. Heartbeats never wake the caller. A delivery holding nothing
-real is acked here and the wait resumes for the remaining time. A delivery holding
+`workflow_orca.port`. With a positive timeout, heartbeats never wake the caller.
+A delivery holding nothing real is acked here and the wait resumes for the remaining time. A delivery holding
 anything real is returned unacked, and the caller acks it on its next wait (`ack=`).
 The verb observes liveness only on timeout, never nudges, and never reads the clock:
 `WaitClock` is injected. Wall-minus-monotonic elapsed time is the time the host
 slept, because both macOS and Linux monotonic clocks exclude suspend.
-On timeout it can join each liveness row to a gate wait derived from the gate run
+Zero timeout probes binding and preserves the whole delivery without ack, including
+heartbeats and duplicate completions. Failed binding proof yields unknown pending
+questions. On positive timeout it can join each liveness row to a gate wait derived from the gate run
 index (`gate_waits`, injected), so a parked worker reads as waiting.
 """
 
@@ -173,10 +175,10 @@ def _absorb(messages: Sequence[OrcaMessage], *, run_id: str, fence: _Fence) -> t
     return kept, absorbed
 
 
-def _pending_questions(port: OrcaPort, run_id: str) -> tuple[tuple[OrcaPendingQuestion, ...] | None, tuple[str, ...]]:
+def _pending_questions(fence: _Fence, run_id: str) -> tuple[tuple[OrcaPendingQuestion, ...] | None, tuple[str, ...]]:
     """Re-derive questions on every return; failed reads are unknown, never empty."""
     try:
-        read = port.pending_questions(run_id)
+        read = fence.call(lambda: fence.port.pending_questions(run_id))
     except BackendError as exc:
         return None, (f"pending questions unavailable: {exc}",)
     warnings = list(read["warnings"])
@@ -224,8 +226,17 @@ def run_wait(
     status: Literal["event", "timeout"] = "timeout"
     delivery_id: str | None = None
     messages: tuple[OrcaMessage, ...] = ()
+    probe_warning: tuple[str, ...] = ()
+    if timeout_s == 0:
+        try:
+            probe_delivery = fence.call(lambda: port.check_nowait(run_id))
+            delivery_id, messages = probe_delivery["delivery_id"], tuple(probe_delivery["messages"])
+            if delivery_id is not None or messages:
+                status = "event"
+        except BackendError as exc:
+            probe_warning = (f"pending questions unavailable: non-blocking binding probe failed: {exc}",)
     try:
-        # Zero is a pure pending-question read, even when the caller supplied an ack.
+        # Zero preserves the probe's entire delivery, even when ack was supplied.
         while timeout_s > 0:
             sent_ack = pending_ack
 
@@ -265,7 +276,7 @@ def run_wait(
     gate_warnings: tuple[str, ...] = ()
     if liveness is not None and gate_waits is not None:
         liveness, gate_warnings = _with_gate_waits(liveness, gate_waits, now)
-    pending_questions, warnings = _pending_questions(port, run_id)
+    pending_questions, warnings = (None, probe_warning) if probe_warning else _pending_questions(fence, run_id)
     return WaitResult(
         status=status,
         run_id=run_id,

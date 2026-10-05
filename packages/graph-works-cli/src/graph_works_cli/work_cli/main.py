@@ -403,6 +403,12 @@ def advance(
         "", "--start-sha", help="Where this phase started; required for a finish-stage results stub."
     ),
     return_: bool = typer.Option(False, "--return", help="Send an item at `finish` back to `execute`."),
+    return_scope: list[str] = typer.Option(  # noqa: B008 - Typer declares options in defaults
+        [],
+        "--return-scope",
+        help="With --return: one line of work execute must do (repeatable). "
+        "Omit to return the item's coverage obligations.",
+    ),
     skip_gate: str = typer.Option(
         "", "--skip-gate", help="Bypass exactly this execute -> finish gate refusal code (humans only)."
     ),
@@ -436,6 +442,10 @@ def advance(
     later stage-gate sends back. It is refused from any other phase, and is
     mutually exclusive with `--resolved-in`.
 
+    `--return-scope TEXT` (repeatable) names the work the returned execute must
+    do; without it the item's `origin: coverage` finish obligations are
+    returned, and a return with neither is refused.
+
     `--skip-gate CODE --reason TEXT --actor HANDLE` bypasses exactly the refusal
     this advance's execute -> finish gate returns, and records an answered
     decision in the item's decision ledger in the same write. Supervised
@@ -458,6 +468,7 @@ def advance(
             infer_worktree=not no_infer_worktree,
             start_sha=start_sha or None,
             return_=return_,
+            return_scope=tuple(return_scope),
             skip_gate=skip_gate or None,
             skip_reason=reason or None,
             actor=actor or None,
@@ -865,7 +876,7 @@ def wait(
         min=0,
         help=(
             f"Seconds before timeout; values between 0 and {WAIT_FLOOR_S} are raised to {WAIT_FLOOR_S}; "
-            "0 reads pending questions only, without consuming or acknowledging deliveries."
+            "0 probes binding and returns any delivery without acknowledging it."
         ),
     ),
     workspace: str = typer.Option("", "--workspace", help="Workspace path."),

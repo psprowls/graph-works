@@ -79,9 +79,10 @@ def decision_context(layout: WorkspaceLayout, path: str) -> DecisionContext:
 def locked_decision_owner(layout: WorkspaceLayout, path: str) -> Iterator[DecisionContext]:
     """Take *path*'s decision-owner lock and yield a projection read inside it.
 
-    The one lock hold filing and stage advance share, first in the total
-    order (owner lock -> `apply_mutation`'s bundle-root lock -> its executor
-    lock). A caller applies its writes before leaving the block. The owner is
+    The one lock hold filing and stage advance share, before bundle/executor
+    locks. Return/dispatch admission and dispatch-key ownership, where used,
+    are acquired outside this lock. A caller applies its writes before leaving
+    the block. The owner is
     re-resolved under the lock; a change (a reparent) retries, at most
     `MAX_OWNER_ATTEMPTS` times, and nothing is written when the bound is hit.
     """

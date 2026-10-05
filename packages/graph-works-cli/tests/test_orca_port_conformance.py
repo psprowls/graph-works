@@ -19,6 +19,7 @@ PAIRS = (
     "OrcaWorker",
     "OrcaWorkerShow",
     "OrcaRead",
+    "OrcaTranscriptText",
     "OrcaPendingQuestion",
     "OrcaPendingQuestions",
     "OrcaMessage",

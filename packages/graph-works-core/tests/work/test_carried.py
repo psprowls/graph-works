@@ -10,6 +10,7 @@ from types import SimpleNamespace
 from typing import cast, get_args
 
 import pytest
+from _transaction_helpers import _git, _init_git
 from graph_works_core.work import carried
 from graph_works_core.work import commands as work
 from graph_works_core.work.carried import (
@@ -23,7 +24,7 @@ from graph_works_core.work.carried import (
 )
 from graph_works_core.workspace import provenance
 from graph_works_core.workspace.landed import stale_spec_for
-from okf_io import load_bundle
+from okf_io import load, load_bundle
 from test_dispatch_reporting import _init_git_repo
 from test_run_next_carried import CHILD, _layout, _write
 from work_tracker_okf.items import SpecBaseline, load_items
@@ -87,17 +88,204 @@ def test_any_other_exception_propagates() -> None:
 
 def test_registry_invariants() -> None:
     names = [slot.name for slot in carried.SLOTS]
-    assert names == ["epic_brief", "landed_since", "finish_obligations"]
+    assert names == ["epic_brief", "execute_return", "landed_since", "finish_obligations"]
     assert len(set(names)) == len(names)
     assert all(re.fullmatch(r"[a-z][a-z0-9_]*", name) for name in names)
     stages = set(get_args(Stage))
     assert all(slot.phases and slot.phases <= stages for slot in carried.SLOTS)
     assert {slot.name: slot.phases for slot in carried.SLOTS} == {
         "epic_brief": frozenset({"design", "plan", "execute"}),
+        "execute_return": frozenset({"execute"}),
         "landed_since": frozenset({"plan"}),
         "finish_obligations": frozenset({"finish"}),
     }
-    assert [slot.title for slot in carried.SLOTS] == ["Epic brief", "Landed since your design", "Finish obligations"]
+    assert [slot.title for slot in carried.SLOTS] == [
+        "Epic brief",
+        "Returned scope",
+        "Landed since your design",
+        "Finish obligations",
+    ]
+
+
+RETURN_ID = "ret-20261005-3f9a1c2b"
+RETURN_COVERAGE = f"/{CHILD}/references/03-execute-coverage.md"
+RETURN_PLAN = f"/{CHILD}/references/02-plan.md"
+RETURN_DESIGN = f"/{CHILD}/references/01-design.md"
+RETURN_SHA = "a" * 64
+
+
+def _execute_return_input(tmp_path: Path, *, record: object = "active", design: bool = True) -> SlotInput:
+    layout = _layout(tmp_path)
+    _write(layout, CHILD, phase="execute")
+    doc = load(layout.bundle_dir / f"{CHILD}.md")
+    if record in ("active", "completed"):
+        record = {
+            "id": RETURN_ID,
+            "recorded": "2026-10-05",
+            "state": record,
+            "coverage": RETURN_COVERAGE,
+            "plan": RETURN_PLAN,
+            "plan_sha256": RETURN_SHA,
+            "scope": [
+                {"id": "R1", "text": "Implement Task 4 in the canonical plan"},
+                {"id": "R2", "text": "Verify the new acceptance"},
+            ],
+        }
+    if record is not None:
+        doc.set("execute_return", record)
+    if design:
+        doc.set("sources", [{"id": "design", "resource": RETURN_DESIGN}])
+    doc.save()
+    bundle = load_bundle(layout.bundle_dir)
+    (item,) = load_items(bundle)
+    return SlotInput(layout, bundle, (item,), item, "execute")
+
+
+def _execute_return_fill(inp: SlotInput) -> SlotFill:
+    frame = assemble_carried(inp)
+    slot = next(slot for slot in frame.slots if slot.name == "execute_return")
+    assert slot.title == "Returned scope"
+    return slot.fill
+
+
+def test_execute_return_carries_scope_canonical_plan_and_destination(tmp_path: Path) -> None:
+    inp = _execute_return_input(tmp_path)
+    fill = _execute_return_fill(inp)
+    plan_path = inp.layout.bundle_dir / RETURN_PLAN.lstrip("/")
+    coverage_path = inp.layout.bundle_dir / RETURN_COVERAGE.lstrip("/")
+    assert fill.lines == (
+        f"Return `{RETURN_ID}` sent this item back from finish. Execute is not done until every row below is reported.",
+        "- [ ] R1: Implement Task 4 in the canonical plan",
+        "- [ ] R2: Verify the new acceptance",
+        f"Canonical plan: {RETURN_PLAN} (sha256 `aaaaaaaaaaaa`), read it in the main workspace "
+        f"({plan_path}) even if your content root's copy is older.",
+        f"Design: {RETURN_DESIGN}",
+        f"Report in: {coverage_path} under `## Returned scope {RETURN_ID}`; "
+        "keep the row ids and set `Report state: reported`.",
+    )
+    assert fill.data == {
+        "return_id": RETURN_ID,
+        "scope": [
+            {"id": "R1", "text": "Implement Task 4 in the canonical plan"},
+            {"id": "R2", "text": "Verify the new acceptance"},
+        ],
+        "plan": RETURN_PLAN,
+        "plan_sha256": RETURN_SHA,
+        "design": RETURN_DESIGN,
+        "coverage": {"resource": RETURN_COVERAGE, "path": str(coverage_path), "worktree": None, "branch": None},
+    }
+    assert fill.warnings == ()
+
+
+@pytest.fixture
+def execute_return_checkout(tmp_path: Path) -> tuple[SlotInput, Path]:
+    inp = _execute_return_input(tmp_path)
+    plan_path = inp.layout.bundle_dir / RETURN_PLAN.lstrip("/")
+    plan_path.parent.mkdir(parents=True, exist_ok=True)
+    plan_path.write_text("# Older plan\n", encoding="utf-8", newline="\n")
+    _init_git(inp.layout.root)
+    content = tmp_path / "content"
+    _git(inp.layout.root, "worktree", "add", "-b", "returned-execute", str(content))
+    plan_path.write_text("# New canonical plan\n", encoding="utf-8", newline="\n")
+    doc = load(inp.layout.bundle_dir / f"{CHILD}.md")
+    doc.set("repo_stamps", {"_workspace": {"worktree": str(content), "branch": "returned-execute"}})
+    doc.save()
+    _git(inp.layout.root, "add", ".")
+    _git(inp.layout.root, "commit", "-m", "canonical plan and placement")
+    bundle = load_bundle(inp.layout.bundle_dir)
+    (item,) = load_items(bundle)
+    return replace(inp, bundle=bundle, items=(item,), item=item), content
+
+
+def test_execute_return_uses_verified_checkout_for_report_and_main_bundle_for_plan(execute_return_checkout) -> None:
+    inp, content = execute_return_checkout
+    before = tuple(_git(root, "rev-parse", "HEAD") for root in (inp.layout.root, content))
+    fill = _execute_return_fill(inp)
+    coverage_path = content / "okf" / RETURN_COVERAGE.lstrip("/")
+    assert fill.data["coverage"] == {
+        "resource": RETURN_COVERAGE,
+        "path": str(coverage_path),
+        "worktree": str(content),
+        "branch": "returned-execute",
+    }
+    assert fill.lines[3].find(str(inp.layout.bundle_dir / RETURN_PLAN.lstrip("/"))) > 0
+    assert str(content) not in fill.lines[3]
+    assert fill.lines[-1].startswith(f"Report in: {coverage_path} under `## Returned scope {RETURN_ID}`")
+    assert fill.warnings == ()
+    assert tuple(_git(root, "rev-parse", "HEAD") for root in (inp.layout.root, content)) == before
+    assert all(not _git(root, "status", "--porcelain").strip() for root in (inp.layout.root, content))
+
+
+@pytest.mark.parametrize("damage", ["dirty", "missing"])
+def test_execute_return_keeps_scope_when_destination_is_unverified(execute_return_checkout, damage: str) -> None:
+    inp, content = execute_return_checkout
+    if damage == "dirty":
+        (content / "untracked").write_text("dirty\n", encoding="utf-8", newline="\n")
+    else:
+        doc = load(inp.layout.bundle_dir / f"{CHILD}.md")
+        doc.set("repo_stamps", {"_workspace": {"worktree": str(content / "missing"), "branch": "returned-execute"}})
+        doc.save()
+        bundle = load_bundle(inp.layout.bundle_dir)
+        (item,) = load_items(bundle)
+        inp = replace(inp, bundle=bundle, items=(item,), item=item)
+    fill = _execute_return_fill(inp)
+    assert fill.lines[1:3] == (
+        "- [ ] R1: Implement Task 4 in the canonical plan",
+        "- [ ] R2: Verify the new acceptance",
+    )
+    assert fill.data["return_id"] == RETURN_ID
+    assert fill.data["coverage"] == {"resource": RETURN_COVERAGE, "path": None, "worktree": None, "branch": None}
+    assert fill.warnings and "execute_return" in fill.warnings[0]
+    assert not any(line.startswith("Report in:") for line in fill.lines)
+
+
+@pytest.mark.parametrize("record", [None, "completed"])
+def test_execute_return_absent_or_completed_is_empty(tmp_path: Path, record: object) -> None:
+    assert _execute_return_fill(_execute_return_input(tmp_path, record=record)) == SlotFill()
+
+
+def test_execute_return_malformed_metadata_warns_before_execution(tmp_path: Path) -> None:
+    fill = _execute_return_fill(_execute_return_input(tmp_path, record={"state": "active"}))
+    assert fill == SlotFill(warnings=("execute_return: malformed; repair before executing",))
+
+
+@pytest.mark.parametrize("stage", ["design", "plan", "finish"])
+def test_execute_return_slot_is_absent_outside_execute(tmp_path: Path, stage: str) -> None:
+    frame = assemble_carried(replace(_execute_return_input(tmp_path), stage=stage))
+    assert "execute_return" not in [slot.name for slot in frame.slots]
+
+
+def test_execute_return_without_plan_or_design_still_carries_report_instructions(tmp_path: Path) -> None:
+    inp = _execute_return_input(tmp_path, design=False)
+    doc = load(inp.layout.bundle_dir / f"{CHILD}.md")
+    record = doc.fm_data()["execute_return"]
+    del record["plan"]
+    del record["plan_sha256"]
+    doc.set("execute_return", record)
+    doc.save()
+    bundle = load_bundle(inp.layout.bundle_dir)
+    (item,) = load_items(bundle)
+    fill = _execute_return_fill(replace(inp, bundle=bundle, items=(item,), item=item))
+    assert fill.data["plan"] is None and fill.data["plan_sha256"] is None and fill.data["design"] is None
+    assert not any(line.startswith(("Canonical plan:", "Design:")) for line in fill.lines)
+    assert fill.lines[-1].startswith("Report in:")
+
+
+@pytest.mark.parametrize("field", ["coverage", "plan"])
+def test_execute_return_keeps_scope_when_resource_path_escapes_bundle(tmp_path: Path, field: str) -> None:
+    inp = _execute_return_input(tmp_path)
+    doc = load(inp.layout.bundle_dir / f"{CHILD}.md")
+    record = doc.fm_data()["execute_return"]
+    record[field] = "/../outside.md"
+    doc.set("execute_return", record)
+    doc.save()
+    bundle = load_bundle(inp.layout.bundle_dir)
+    (item,) = load_items(bundle)
+    fill = _execute_return_fill(replace(inp, bundle=bundle, items=(item,), item=item))
+    assert "- [ ] R1: Implement Task 4 in the canonical plan" in fill.lines
+    assert fill.warnings and "member outside bundle" in fill.warnings[0]
+    unsafe_line = "Report in:" if field == "coverage" else "Canonical plan:"
+    assert not any(line.startswith(unsafe_line) for line in fill.lines)
 
 
 def _finish_input(tmp_path: Path) -> SlotInput:

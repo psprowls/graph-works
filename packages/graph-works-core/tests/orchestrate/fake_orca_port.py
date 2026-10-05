@@ -7,6 +7,23 @@ from dataclasses import dataclass, field
 from typing import Any
 
 
+def read(
+    source: str = "transcript",
+    count: int = 0,
+    messages: list[dict[str, Any]] | None = None,
+    *,
+    window_complete: bool = True,
+) -> dict[str, Any]:
+    msgs = messages if messages is not None else [{"role": "user", "text": "prompt"}] * count
+    return {
+        "source": source,
+        "message_count": len(msgs),
+        "source_exact": source == "transcript",
+        "window_complete": window_complete,
+        "messages": msgs,
+    }
+
+
 @dataclass
 class FakeOrcaPort:
     repos: list[dict[str, Any]] = field(default_factory=lambda: [{"id": "repo1", "path": "/repo"}])
@@ -33,7 +50,7 @@ class FakeOrcaPort:
             "last_heartbeat_at": None,
         }
     )
-    reads: list[dict[str, Any]] = field(default_factory=lambda: [{"source": "transcript", "message_count": 1}])
+    reads: list[dict[str, Any]] = field(default_factory=lambda: [read(count=1)])
     pending: dict[str, Any] = field(default_factory=lambda: {"questions": [], "truncated": False, "warnings": []})
     #: Deliveries `check_wait` returns in order; an exhausted script returns an empty batch.
     deliveries: list[dict[str, Any]] = field(default_factory=list)
@@ -138,6 +155,14 @@ class FakeOrcaPort:
 
     def terminal_send_enter(self, terminal):
         self._record("terminal_send_enter", terminal)
+
+    def check_nowait(self, run_id):
+        self._record("check_nowait", run_id)
+        if self.wait_errors:
+            raise self.wait_errors.pop(0)
+        if not self.deliveries:
+            return {"delivery_id": None, "messages": []}
+        return self.deliveries.pop(0)
 
     def check_wait(self, run_id, *, types, timeout_ms, ack):
         self._record("check_wait", run_id, types=types, timeout_ms=timeout_ms, ack=ack)

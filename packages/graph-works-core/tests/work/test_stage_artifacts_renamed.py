@@ -223,7 +223,9 @@ def test_a_return_from_finish_never_runs_the_gate(tmp_path: Path) -> None:
     _write(layout, "work/feature-x", phase="finish", work_status="accepted", extra="owner: pat\n")
     assert work.run_regen_indexes(layout, dry_run=False).application.ok
 
-    result = stage.run_stage_advance(layout, "work/feature-x", today=TODAY, dry_run=False, cwd=repo, return_=True)
+    result = stage.run_stage_advance(
+        layout, "work/feature-x", today=TODAY, dry_run=False, cwd=repo, return_=True, return_scope=("Rework",)
+    )
 
     assert result.outcome.written, result.outcome.plan
     assert load(layout.bundle_dir / "work/feature-x.md").fm_raw["phase"] == "execute"

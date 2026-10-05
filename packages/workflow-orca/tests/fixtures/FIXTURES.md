@@ -20,6 +20,7 @@ Re-capture with these commands, replacing the ids with live ones:
 | `worker_show_settled.json` | `orca orchestration worker-show --dispatch <settled ctx> --json` |
 | `worker_read_transcript.json` | `orca orchestration worker-read --dispatch <ctx> --limit 1 --json` |
 | `worker_read_empty.json` | as above, against a worker that has not spoken |
+| `worker_read_receipt.json` | Hand-authored delivery receipt regression: synthetic ids and content, exact-source metadata, payload clipping, and user/assistant/tool blocks. No live worker delivery is claimed. |
 | `check_batch.json` | `orca orchestration check --run <run> --wait --types worker_done,escalation,question,heartbeat --timeout-ms 1000 --json` |
 | `check_timeout.json` | as above, with no traffic on the Run |
 | `check_heartbeat_only.json` | `orca orchestration check --run <run> --wait --types worker_done,escalation,question --timeout-ms 1000 --json` with only heartbeat traffic (hand-authored) |

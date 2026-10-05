@@ -17,13 +17,15 @@ at the start of the session it prepares.
 from __future__ import annotations
 
 import hashlib
+import secrets
 from collections.abc import Callable, Sequence
+from contextlib import nullcontext
 from dataclasses import dataclass, replace
 from datetime import date
 from pathlib import Path
 from types import MappingProxyType
 
-from okf_io import Bundle
+from okf_io import Bundle, parse
 from work_tracker_okf import decisions as _decisions
 from work_tracker_okf.advance import COMMIT_GATE_REFUSALS as COMMIT_GATE_REFUSALS
 from work_tracker_okf.advance import ExpectedPhase as ExpectedPhase
@@ -38,9 +40,11 @@ from work_tracker_okf.obligations import KEY, apply_obligations, plan_derive
 from work_tracker_okf.paths import MANAGED_ARTIFACTS, artifact_ref, item_page
 from work_tracker_okf.pipeline import PipelineDefinition, results_phases
 from work_tracker_okf.results import render as render_results
+from work_tracker_okf.returns import apply_execute_return
 from work_tracker_okf.sources import upsert
 from work_tracker_okf.workflow import Blocker
 
+from graph_works_core.orchestrate import execute_return as returns
 from graph_works_core.orchestrate import gate_git, gate_units
 from graph_works_core.orchestrate.anchors import Anchor, AnchorRefusal, enclosing_owner, reader_anchor
 from graph_works_core.orchestrate.gate_receipts import GateEvidence, evaluate
@@ -57,6 +61,7 @@ from graph_works_core.workspace.decision_owner import (
 from graph_works_core.workspace.dispatch_artifacts import routing_items
 from graph_works_core.workspace.dispatch_config import load_dispatch_config
 from graph_works_core.workspace.errors import WorkspaceError
+from graph_works_core.workspace.execute_return import return_dispatch_admission
 from graph_works_core.workspace.finish import finish_read_guard, inspect_finish
 from graph_works_core.workspace.gate_config import repo_gate
 from graph_works_core.workspace.landed import stale_spec_for
@@ -129,6 +134,7 @@ class StageAdvance:
     warnings: tuple[str, ...] = ()
     gate_bypass: GateBypass | None = None
     gate_receipt: GateEvidence | None = None
+    execute_return: returns.ReturnPlan | None = None
 
     @property
     def changed(self) -> bool:
@@ -169,6 +175,7 @@ def run_stage_advance(
     repo_name: str | None = None,
     start_sha: str | None = None,
     return_: bool = False,
+    return_scope: Sequence[str] = (),
     skip_gate: str | None = None,
     skip_reason: str | None = None,
     actor: str | None = None,
@@ -276,15 +283,15 @@ def run_stage_advance(
         and (item.repo_stamps or "repo_stamps" in item.invalid_optional_fields)
         for item in items
     )
-    if (dry_run and not receipt_finish) or not any(item.path == path for item in items):
-        return _advance(
+    if (dry_run and (return_ or not receipt_finish)) or return_ or not any(item.path == path for item in items):
+        preview = _advance(
             layout,
             bundle,
             items,
             path,
             definition=definition,
             hold=hold_for(items, bundle.root, path) if dry_run else None,
-            dry_run=dry_run,
+            dry_run=dry_run or return_,
             today=today,
             expected_phase=expected_phase,
             effort=effort,
@@ -299,46 +306,82 @@ def run_stage_advance(
             repo_name=repo_name,
             start_sha=start_sha,
             return_=return_,
+            return_scope=return_scope,
             skip_gate=skip_gate,
             skip_reason=skip_reason,
             actor=actor,
             decision_owner_=None,
             before_apply=before_apply,
         )
+        if dry_run or not return_ or preview.outcome.plan.refusal is not None:
+            return preview
+    # A live return previews without writes, then re-plans under admission and
+    # decision ownership. Admission precedes the decision lock: dispatch retains
+    # it across Orca effects while its short placement/journal writers take the
+    # decision lock independently. The read-only preview keeps ordinary input
+    # refusals free of admission files.
     # The whole read -> route -> gate -> write sequence shares hold filing's
     # owner lock. A waiting writer sees the hold or phase the first committed.
     # Release only after apply_mutation (and the pointer write) returns.
     if not dry_run:
         commit_mode(layout)
-    with locked_decision_owner(layout, path) as context:
-        return _advance(
-            layout,
-            context.bundle,
-            context.items,
-            path,
-            definition=definition,
-            hold=hold_in(context, path),
-            dry_run=dry_run,
-            today=today,
-            expected_phase=expected_phase,
-            effort=effort,
-            owner=owner,
-            resolved_in=resolved_in,
-            released_at=released_at,
-            worktree=worktree,
-            branch=branch,
-            infer_worktree=infer_worktree,
-            cwd=cwd,
-            repo=repo,
-            repo_name=repo_name,
-            start_sha=start_sha,
-            return_=return_,
-            skip_gate=skip_gate,
-            skip_reason=skip_reason,
-            actor=actor,
-            decision_owner_=context.owner,
-            before_apply=before_apply,
+    needs_admission = return_ or any(
+        item.path == path and item.execute_return is not None and item.execute_return.active for item in items
+    )
+    admission = return_dispatch_admission(layout, path) if needs_admission and not dry_run else nullcontext()
+    with admission, locked_decision_owner(layout, path) as context:
+        current_item = context.items.by_path.get(path)
+        if (
+            not dry_run
+            and not needs_admission
+            and current_item is not None
+            and current_item.execute_return is not None
+            and current_item.execute_return.active
+        ):
+            raise WorkspaceError("execute return admission changed; inspect and retry")
+        completion_lock = (
+            returns.completion_locks(layout, context.items.by_path, context.items.by_path[path])
+            if not dry_run and not return_
+            else nullcontext(None)
         )
+        with completion_lock as locked_destination:
+            if locked_destination is not None:
+                # Reload after acquiring both evidence locks; the decision owner
+                # remains held, and every preimage now belongs to this snapshot.
+                fresh_context = decision_context(layout, path)
+                if fresh_context.owner != context.owner:
+                    raise WorkspaceError("decision owner changed; inspect and retry")
+                context = fresh_context
+            return _advance(
+                layout,
+                context.bundle,
+                context.items,
+                path,
+                definition=definition,
+                hold=hold_in(context, path),
+                dry_run=dry_run,
+                today=today,
+                expected_phase=expected_phase,
+                effort=effort,
+                owner=owner,
+                resolved_in=resolved_in,
+                released_at=released_at,
+                worktree=worktree,
+                branch=branch,
+                infer_worktree=infer_worktree,
+                cwd=cwd,
+                repo=repo,
+                repo_name=repo_name,
+                start_sha=start_sha,
+                return_=return_,
+                return_scope=return_scope,
+                skip_gate=skip_gate,
+                skip_reason=skip_reason,
+                actor=actor,
+                decision_owner_=context.owner,
+                before_apply=before_apply,
+                locked_completion_destination=locked_destination,
+            )
 
 
 _NO_CODE_BASELINE = "spec baseline: no code sha resolvable; landed-since will be unavailable"
@@ -404,12 +447,14 @@ def _advance(
     repo_name: str | None,
     start_sha: str | None,
     return_: bool,
+    return_scope: Sequence[str],
     skip_gate: str | None,
     skip_reason: str | None,
     actor: str | None,
     decision_owner_: DecisionOwner | None,
     dry_run: bool,
     before_apply: Callable[[StageAdvance], None] | None,
+    locked_completion_destination: returns.ReturnDestination | None = None,
 ) -> StageAdvance:
     item = next((candidate for candidate in items if candidate.path == path), None)
     old_phase = item.phase if item is not None else None
@@ -482,6 +527,43 @@ def _advance(
         routing_items=routing_items(bundle.root, items, definition=definition),
         dry_run=True,
     )
+    if return_scope and not return_:
+        return StageAdvance(outcome=_refuse(outcome, "return-scope-invalid", "--return-scope needs --return"))
+    pending = returns.pending_return(layout, path) if item is not None else None
+    if pending is not None and return_ and item is not None and item.phase == "execute":
+        recovered = (
+            returns.published(layout, pending, item, scope=return_scope)
+            if dry_run
+            else returns.recover_publication(layout, pending, scope=return_scope)
+        )
+        if recovered:
+            return StageAdvance(
+                outcome=replace(
+                    outcome, plan=replace(outcome.plan, refusal=None, changes=(), detail="return already published")
+                )
+            )
+        return StageAdvance(outcome=_refuse(outcome, "return-pending", "pending return publication needs inspection"))
+    if pending is not None and not return_:
+        return StageAdvance(
+            outcome=_refuse(outcome, "return-pending", "pending return needs inspection before advancing")
+        )
+    return_plan: returns.ReturnPlan | None = None
+    if outcome.plan.trigger == "return" and outcome.plan.refusal is None and item is not None:
+        if "execute_return" in item.invalid_optional_fields:
+            return StageAdvance(outcome=_refuse(outcome, "return-metadata-invalid", "repair malformed execute_return"))
+        planned_return = returns.plan_return(
+            layout,
+            bundle,
+            {i.path: i for i in items},
+            item,
+            scope=return_scope,
+            definition=definition,
+            today=today,
+            new_id=lambda: f"ret-{today:%Y%m%d}-{secrets.token_hex(4)}",
+        )
+        if isinstance(planned_return, tuple):
+            return StageAdvance(outcome=_refuse(outcome, *planned_return))
+        return_plan = planned_return
     if outcome.plan.trigger == "repair" and inferred:
         # Moving off a removed stage does not claim the caller's checkout or
         # discard the recorded baseline. Explicit placement remains authored.
@@ -529,7 +611,10 @@ def _advance(
     if outcome.plan.stamp_baseline and outcome.plan.refusal is None and item is not None:
         stamp, baseline_warnings = _baseline_stamp(layout, item, resolved_repo, cwd, bundle.root, definition=definition)
     candidate = StageAdvance(
-        outcome=outcome, repo_note=repo_note, warnings=inference_warnings + drift_warnings + baseline_warnings
+        outcome=outcome,
+        repo_note=repo_note,
+        warnings=inference_warnings + drift_warnings + baseline_warnings,
+        execute_return=return_plan,
     )
     if not dry_run and before_apply is not None:
         before_apply(candidate)
@@ -624,6 +709,27 @@ def _advance(
                 repo_note=repo_note,
                 warnings=inference_warnings + drift_warnings + baseline_warnings + warnings,
             )
+    returned_coverage: str | None = None
+    completion_destination: returns.ReturnDestination | None = None
+    active_return = completes_execute and item.execute_return is not None and item.execute_return.active
+    if completes_execute:
+        item_map = {entry.path: entry for entry in items}
+        returned_coverage, refusal, detail = returns.verify_completion(layout, item_map, item, definition)
+        if refusal is not None:
+            return replace(candidate, outcome=_refuse(outcome, refusal, detail), gate_receipt=gate_receipt)
+        if active_return:
+            destination = returns.resolve_destination(layout, item_map, item)
+            if isinstance(destination, tuple):
+                return replace(candidate, outcome=_refuse(outcome, *destination), gate_receipt=gate_receipt)
+            completion_destination = destination
+            if not dry_run and destination != locked_completion_destination:
+                return replace(
+                    candidate,
+                    outcome=_refuse(
+                        outcome, "return-destination-unverified", "return destination changed during locking"
+                    ),
+                    gate_receipt=gate_receipt,
+                )
     owner_ctx = decision_owner_
     ledger_plan: _decisions.DecisionPlan | None = None
     if bypass is not None:
@@ -649,8 +755,14 @@ def _advance(
     if dry_run:
         return replace(candidate, warnings=candidate.warnings + warnings, gate_bypass=bypass, gate_receipt=gate_receipt)
 
-    document = load_workspace_bundle(layout, ignore=IGNORE).concepts[path]
+    document = (
+        parse(bundle.concepts[path].serialize(), path=bundle.root / item_page(path).rel)
+        if return_plan is not None
+        else load_workspace_bundle(layout, ignore=IGNORE).concepts[path]
+    )
     apply_advance(document, outcome.plan)
+    if return_plan is not None:
+        apply_execute_return(document, return_plan.record)
     if stamp:
         document.set("spec_baseline", stamp)
     if outcome.stamped is not None and outcome.stamp_title is not None:
@@ -695,15 +807,16 @@ def _advance(
     if completes_execute:
         coverage_ref = stage_artifact_ref(path, definition.artifacts["execute"])
         coverage_path = coverage_ref.path(bundle.root)
-        coverage_text: str | None = None
+        coverage_text: str | None = returned_coverage if active_return else None
         coverage_readable = True
         if coverage_path.exists():
             upsert(document, coverage_ref, title="Execute coverage")
-            try:
-                coverage_text = coverage_path.read_text(encoding="utf-8")
-            except (OSError, UnicodeDecodeError) as exc:
-                coverage_readable = False
-                warnings = (*warnings, f"finish_obligations: coverage unreadable: {exc}")
+            if not active_return:
+                try:
+                    coverage_text = coverage_path.read_text(encoding="utf-8")
+                except (OSError, UnicodeDecodeError) as exc:
+                    coverage_readable = False
+                    warnings = (*warnings, f"finish_obligations: coverage unreadable: {exc}")
         # Advancing accepts caveats; a return leaves the current list intact,
         # then re-advancing replaces only coverage-derived entries.
         if coverage_readable:
@@ -718,8 +831,15 @@ def _advance(
                 )
                 outcome = replace(outcome, plan=replace(outcome.plan, changes=(*outcome.plan.changes, change)))
 
+        if active_return and item.execute_return is not None:
+            apply_execute_return(document, replace(item.execute_return, state="completed"))
+
     page_member = item_page(path).rel
-    page_before = (bundle.root / page_member).read_bytes()
+    page_before = (
+        bundle.concepts[path].serialize().encode("utf-8")
+        if return_plan is not None
+        else (bundle.root / page_member).read_bytes()
+    )
     writes: list[PlannedWrite] = []
     mkdirs: tuple[str, ...] = ()
     conditions: tuple[DirectoryPrecondition, ...] = ()
@@ -740,6 +860,12 @@ def _advance(
         mkdirs = (parent,)
         if not (bundle.root / parent).exists():
             conditions = (DirectoryPrecondition(parent, None),)
+
+    if return_plan is not None and return_plan.destination.same_root:
+        coverage = returns.coverage_mutation(return_plan)
+        writes.extend(coverage.writes)
+        mkdirs = (*mkdirs, *coverage.mkdirs)
+        conditions = (*conditions, *coverage.directory_preconditions)
 
     # The bypass entry rides in the same mutation as the phase change: one
     # apply writes both or neither.
@@ -819,16 +945,72 @@ def _advance(
         subject += f" (gate bypass {bypass.code})"
         if owner_ctx is not None and owner_ctx.owner_path != path:
             commit_items = (path, owner_ctx.owner_path)
-    workspace_commit = WorkspaceCommit(subject + (" (resolved)" if resolved else ""), items=commit_items)
-    application = apply_mutation(
-        layout,
-        mutation,
-        repo_root=resolved_repo,
-        repo_roots=declared,
-        baseline_bundle=bundle,
-        validate_read_set=validate_read_set,
-        commit=workspace_commit,
+    workspace_commit = WorkspaceCommit(
+        subject + (" (resolved)" if resolved else ""),
+        items=() if return_plan is not None else commit_items,
     )
+    return_op: returns.ReturnOperation | None = None
+    if return_plan is not None and not return_plan.destination.same_root:
+        return_op = returns.apply_content(layout, return_plan)
+        return_op = returns.mark_publication(layout, return_op, writes[0].after)
+
+    def validate_reads() -> None:
+        if active_return:
+            fresh_items = {i.path: i for i in load_items(load_workspace_bundle(layout, ignore=IGNORE))}
+            fresh_item = fresh_items.get(path)
+            if fresh_item is None or fresh_item.execute_return != item.execute_return:
+                raise WorkspaceError("execute return metadata changed; inspect and retry")
+            text, refusal, detail = returns.verify_completion(layout, fresh_items, fresh_item, definition)
+            destination = returns.resolve_destination(layout, fresh_items, fresh_item)
+            if refusal is not None or text != returned_coverage or destination != completion_destination:
+                raise WorkspaceError(detail or "execute return evidence changed; inspect and retry")
+        validate_read_set()
+        if return_op is not None:
+            returns.publish_guard(layout, return_op)()
+        elif return_plan is not None:
+            if (
+                returns.digest(returns.read_member(layout.bundle_dir, return_plan.plan_member))
+                != return_plan.plan_sha256
+            ):
+                raise WorkspaceError("return plan changed; inspect and retry")
+            fresh_items = {i.path: i for i in load_items(load_workspace_bundle(layout, ignore=IGNORE))}
+            if path not in fresh_items:
+                raise WorkspaceError("return item disappeared; inspect")
+            fresh = returns.resolve_destination(layout, fresh_items, fresh_items[path])
+            if fresh != return_plan.destination:
+                raise WorkspaceError("return destination changed; inspect and retry")
+
+    def publish() -> MutationApplication:
+        return apply_mutation(
+            layout,
+            mutation,
+            repo_root=resolved_repo,
+            repo_roots=declared,
+            baseline_bundle=bundle,
+            validate_read_set=validate_reads,
+            commit=workspace_commit,
+        )
+
+    if return_op is not None:
+        application = returns.apply_publication(layout, return_op, page_before, publish)
+    elif return_plan is not None or active_return:
+        publication_record = return_plan.record if return_plan is not None else item.execute_return
+        if publication_record is None:
+            raise WorkspaceError("return publication has no record; inspect")
+        application = returns.apply_local_publication(
+            layout,
+            path,
+            publication_record,
+            stage_artifact_ref(path, definition.artifacts["plan"]).rel,
+            mutation,
+            workspace_commit,
+            publish,
+            completion=bool(active_return),
+        )
+    else:
+        application = publish()
+    if return_op is not None and returns.pending_return(layout, path) is not None:
+        warnings = (*warnings, f"execute return {return_op.return_id} is pending; rerun the same return to resume")
     if application.ok:
         outcome = replace(outcome, written=True)
         if result_member is not None:
@@ -850,6 +1032,7 @@ def _advance(
         warnings=inference_warnings + drift_warnings + baseline_warnings + warnings,
         gate_bypass=bypass if application.ok else None,
         gate_receipt=gate_receipt,
+        execute_return=return_plan,
     )
 
 

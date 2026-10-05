@@ -5,6 +5,7 @@ import copy
 import os
 from pathlib import Path
 import subprocess
+import shutil
 import sys
 import tempfile
 import time
@@ -15,6 +16,7 @@ from unittest.mock import patch
 
 PLUGIN = Path(__file__).resolve().parents[2]
 HEADER = "You are working inside Orca, a multi-agent IDE. You are a dispatched worker."
+WRAPPER = "Please carry out this task from my Orca coordinator by following the brief I pasted below."
 TASK = "task_example"
 WORKER = "term_worker-123"
 DISPATCH = "ctx_example"
@@ -30,6 +32,10 @@ PREAMBLE = (
     "  orca orchestration ask --from term_worker-123 --question \"<question>\"\n"
     "```\n\n=== SUB-DISPATCH ===\nWorker guidance.\n\n=== TASK ===\n"
 )
+ASK_CUT = PREAMBLE[:PREAMBLE.index("--question")]
+# Sanitized historical cutoff: transport stopped inside the ask explanation.
+ASK_COMMENT_CUT = (PREAMBLE[:PREAMBLE.index("  orca orchestration ask")]
+                   + "  # If the ask call times out or disconnect")
 FULL = PREAMBLE + ENVELOPE + "\nReturn the exact result: café \\ path \"quoted\".\n=== TASK ===\nEnd of body.\n"
 
 
@@ -38,6 +44,7 @@ class GuardTest(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)
+        self.plugin = PLUGIN
         self.calls = self.root / "calls.jsonl"
         self.response = self.root / "response.json"
         self.cli = self.root / "fake orca"
@@ -71,7 +78,7 @@ class GuardTest(unittest.TestCase):
         if raw is None:
             raw = json.dumps({"hook_event_name": event, "prompt": prompt})
         result = subprocess.run(
-            ["bash", str(PLUGIN / "hooks/run-hook.cmd"), "dispatch-prompt-guard"],
+            ["bash", str(self.plugin / "hooks/run-hook.cmd"), "dispatch-prompt-guard"],
             input=raw.encode(), capture_output=True, env=self.env, cwd=self.root, timeout=10,
         )
         self.assertEqual(result.returncode, 0, result.stderr.decode())
@@ -87,6 +94,7 @@ class GuardTest(unittest.TestCase):
         self.calls.unlink(missing_ok=True)
 
     def assert_recovery(self, output, full=FULL):
+        self.assertIsInstance(output, dict)
         self.assertEqual(set(output), {"hookSpecificOutput"})
         context = output["hookSpecificOutput"]
         self.assertEqual(context["hookEventName"], "UserPromptSubmit")
@@ -165,6 +173,92 @@ class GuardTest(unittest.TestCase):
         self.assert_calls(1)
         self.assertIsNone(self.run_guard('<pasted_content id="1">\n' + fragment + '\n</pasted_content id="2">'))
         self.assert_calls(0)
+
+    def test_observed_orca_wrapper_with_ask_cut_recovers(self):
+        for separator in (" ", " \n\n", "\n\n", " \r\n\r\n"):
+            for cut in (ASK_CUT, ASK_COMMENT_CUT):
+                with self.subTest(separator=repr(separator), cut=cut[-45:]):
+                    self.assert_recovery(self.run_guard(WRAPPER + separator + cut))
+                    self.assert_calls(1)
+        pasted = '<pasted_content id="a1">\n' + ASK_CUT + '\n</pasted_content id="a1">'
+        self.assert_recovery(self.run_guard(WRAPPER + " \n\n" + pasted))
+        self.assert_calls(1)
+
+    def test_wrapper_ask_cuts_recover_from_complete_send_without_environment(self):
+        del self.env["ORCA_TERMINAL_HANDLE"]
+        for cut in (ASK_CUT, ASK_COMMENT_CUT):
+            self.assert_recovery(self.run_guard(WRAPPER + " " + cut))
+            self.assert_calls(1)
+
+    def test_wrapper_is_recognized_once_and_only_at_start(self):
+        for prompt in (WRAPPER + " " + WRAPPER + " " + ASK_CUT,
+                       "Note: " + WRAPPER + " " + ASK_CUT,
+                       "> " + WRAPPER + " " + ASK_CUT,
+                       WRAPPER + " Also see:\n" + ASK_CUT,
+                       WRAPPER + " \n> " + ASK_CUT,
+                       WRAPPER + ASK_CUT, WRAPPER.lower() + " " + ASK_CUT,
+                       " " + WRAPPER + " " + ASK_CUT):
+            with self.subTest(prompt=prompt[:40]):
+                self.assertIsNone(self.run_guard(prompt))
+                self.assert_calls(0)
+
+    def test_wrapped_intact_prompt_stays_quiet(self):
+        self.assertIsNone(self.run_guard(WRAPPER + " " + FULL))
+        self.assert_calls(1)
+
+    def test_wrapper_does_not_rescue_conflicting_identity(self):
+        for cut in (ASK_CUT.replace(WORKER, "term_other"),
+                    ASK_CUT.replace(DISPATCH, "ctx_other")):
+            self.assert_declined(self.run_guard(WRAPPER + " " + cut))
+            self.assert_calls(0 if "term_other" in cut else 1)
+
+    def test_wrapper_preserves_incomplete_identity_and_task_prefix_guards(self):
+        del self.env["ORCA_TERMINAL_HANDLE"]
+        cut = PREAMBLE[:PREAMBLE.index(WORKER) + len(WORKER)]
+        self.assert_declined(self.run_guard(WRAPPER + " " + cut))
+        self.assert_calls(0)
+        self.assert_declined(self.run_guard(WRAPPER + " " + FULL.replace("exact result", "different result")))
+        self.assert_calls(1)
+
+    def test_emitted_context_names_guard_version_and_root(self):
+        version = json.loads((PLUGIN / ".claude-plugin/plugin.json").read_text(encoding="utf-8"))["version"]
+        stamp = f"(guard: gw {version} at {PLUGIN})"
+        for full in (FULL, FULL + "x" * 11000):
+            self.data["result"]["preamble"] = full
+            out = self.run_guard(FULL[:1016])
+            paragraph = out["hookSpecificOutput"]["additionalContext"].split("\n\n", 1)[0]
+            self.assertTrue(paragraph.endswith(stamp), paragraph)
+            self.assert_calls(1)
+        del self.env["ORCA_TERMINAL_HANDLE"]
+        out = self.run_guard(HEADER + "\nYour task ID is: task_example\n")
+        self.assertTrue(out["systemMessage"].endswith(stamp), out)
+        self.assert_calls(0)
+
+    def test_isolated_plugin_metadata_is_nonfatal_and_stamped(self):
+        self.plugin = self.root / "plugin copy"
+        shutil.copytree(PLUGIN / "hooks", self.plugin / "hooks")
+        metadata = self.plugin / ".claude-plugin/plugin.json"
+        metadata.parent.mkdir()
+        cases = [(None, "unknown"), (b"{bad", "unknown"), (b"[]", "unknown"),
+                 (b"null", "unknown"), (b'{"version":12}', "unknown"),
+                 (b"{}", "unknown"), (b"\xff", "unknown"),
+                 (b'{"version":"fixture-version"}', "fixture-version")]
+        for raw, expected in cases:
+            with self.subTest(metadata=raw):
+                metadata.unlink(missing_ok=True)
+                if raw is not None:
+                    metadata.write_bytes(raw)
+                stamp = f"(guard: gw {expected} at {self.plugin})"
+                output = self.run_guard(WRAPPER + " " + ASK_COMMENT_CUT)
+                self.assert_recovery(output)
+                self.assertTrue(output["hookSpecificOutput"]["additionalContext"].split("\n\n", 1)[0].endswith(stamp))
+                self.assert_calls(1)
+                env_worker = self.env.pop("ORCA_TERMINAL_HANDLE")
+                output = self.run_guard(HEADER + "\nYour task ID is: task_example\n")
+                self.assert_declined(output)
+                self.assertTrue(output["systemMessage"].endswith(stamp))
+                self.assert_calls(0)
+                self.env["ORCA_TERMINAL_HANDLE"] = env_worker
 
     def test_transport_final_line_ending_is_ignored(self):
         for delivered in (FULL[:-1], FULL[:-1] + "\r\n"):

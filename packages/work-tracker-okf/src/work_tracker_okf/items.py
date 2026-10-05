@@ -16,6 +16,8 @@ from okf_io import Bundle, Source
 from work_tracker_okf.dependencies import DependencyEdge, DependencyIssue, parse_dependencies
 from work_tracker_okf.obligations import Obligation, parse_obligations
 from work_tracker_okf.paths import ItemLocation
+from work_tracker_okf.returns import KEY as RETURN_KEY
+from work_tracker_okf.returns import ExecuteReturn, parse_execute_return
 from work_tracker_okf.vocabulary import PLAN_SOURCE_ID, SPEC_SOURCE_ID, TYPES
 
 if TYPE_CHECKING:
@@ -118,6 +120,10 @@ class WorkItem:
     `finish_obligations` projects the well-formed `{text, origin, recorded}`
     entries in stored order (`work_tracker_okf.obligations`); a non-list or any
     malformed entry names `finish_obligations` in `invalid_optional_fields`.
+
+    `execute_return` records returned execution scope. Malformed values,
+    including explicit null, project as `None` and name `execute_return` in
+    `invalid_optional_fields`, so readers can distinguish them from absence.
     """
 
     path: str
@@ -159,6 +165,7 @@ class WorkItem:
     start_sha: str | None = None
     finish_obligations: tuple[Obligation, ...] = ()
     spec_baseline: SpecBaseline | None = None
+    execute_return: ExecuteReturn | None = None
 
 
 def _text(value: object) -> str:
@@ -225,6 +232,9 @@ def _project(
     obligations, obligations_malformed = parse_obligations(data.get("finish_obligations"))
     if "finish_obligations" in data and data["finish_obligations"] is None:
         obligations_malformed = True
+    execute_return, return_malformed = parse_execute_return(data.get(RETURN_KEY))
+    if RETURN_KEY in data and data[RETURN_KEY] is None:
+        return_malformed = True
     return WorkItem(
         path=location.path,
         page_path=location.page,
@@ -263,6 +273,7 @@ def _project(
         repo_stamps=repo_stamps,
         finish_obligations=obligations,
         spec_baseline=spec_baseline,
+        execute_return=execute_return,
         start_sha=data.get("start_sha") if is_commit_oid(data.get("start_sha")) else None,
         invalid_optional_fields=(
             *(
@@ -273,6 +284,7 @@ def _project(
             *(("spec_baseline",) if baseline_malformed else ()),
             *(("repo_stamps",) if stamps_malformed else ()),
             *(("finish_obligations",) if obligations_malformed else ()),
+            *((RETURN_KEY,) if return_malformed else ()),
             *(("start_sha",) if data.get("start_sha") is not None and not is_commit_oid(data.get("start_sha")) else ()),
         ),
     )

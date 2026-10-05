@@ -12,6 +12,11 @@ import sys
 
 
 HEADER = "You are working inside Orca, a multi-agent IDE. You are a dispatched worker."
+# One observed Orca transport sentence, once at the start only. Never search
+# arbitrary prose for a worker header.
+ORCA_WRAPPER = "Please carry out this task from my Orca coordinator by following the brief I pasted below."
+WRAPPED = re.compile(re.escape(ORCA_WRAPPER) + r"(?: ?\r?\n\r?\n| )")
+PLUGIN_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 TASK_MARKER = re.compile(r"^=== TASK ===(?:\r?\n|$)", re.MULTILINE)
 PASTE = re.compile(r'<pasted_content id="([^"\r\n]+)">\r?\n(.*?)\r?\n</pasted_content id="\1">(?:\r?\n)?', re.DOTALL)
 TASK_ID = re.compile(r"^Your task ID is: (task_[A-Za-z0-9_-]+)\r?\n", re.MULTILINE)
@@ -23,6 +28,16 @@ V2_FIELDS = V1_FIELDS | {"mode", "worktree_path"}
 
 class Unverified(Exception):
     """A bounded diagnostic, without CLI output or prompt content."""
+
+
+def guard_stamp():
+    try:
+        with open(os.path.join(PLUGIN_ROOT, ".claude-plugin", "plugin.json"), encoding="utf-8") as stream:
+            metadata = json.load(stream)
+        version = metadata.get("version") if isinstance(metadata, dict) else None
+    except (OSError, ValueError):
+        version = None
+    return f"(guard: gw {version if isinstance(version, str) else 'unknown'} at {PLUGIN_ROOT})"
 
 
 def require(condition, reason):
@@ -161,9 +176,10 @@ def recover(prompt):
             "task text conflicts with the stored dispatch")
     note = (f"The submitted Orca dispatch was truncated (task {task_id}, dispatch {dispatch_id}). "
             "The complete intended task follows.")
-    if len(note) + 2 + len(full) > 10000:
+    stamp = " " + guard_stamp()
+    if len(note) + len(stamp) + 2 + len(full) > 10000:
         note += " Please read the full hook-output file supplied by Claude before acting; the preview is incomplete."
-    emit(note + "\n\n" + full)
+    emit(note + stamp + "\n\n" + full)
 
 
 def emit(context, diagnostic=False):
@@ -183,6 +199,9 @@ def main():
     prompt = data.get("prompt")
     if not isinstance(prompt, str):
         return
+    wrapped = WRAPPED.match(prompt)
+    if wrapped:
+        prompt = prompt[wrapped.end():]
     wrapper = PASTE.fullmatch(prompt)
     if wrapper:
         prompt = wrapper[2]
@@ -191,7 +210,7 @@ def main():
     try:
         recover(prompt)
     except Unverified as error:
-        emit(f"Dispatch recovery was not verified: {error}. Do not guess incomplete work; request the full task.", True)
+        emit(f"Dispatch recovery was not verified: {error}. Do not guess incomplete work; request the full task. {guard_stamp()}", True)
 
 
 if __name__ == "__main__":

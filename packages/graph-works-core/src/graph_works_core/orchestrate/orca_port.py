@@ -63,9 +63,17 @@ class OrcaWorkerShow(TypedDict):
     last_heartbeat_at: str | None
 
 
+class OrcaTranscriptText(TypedDict):
+    role: str | None
+    text: str
+
+
 class OrcaRead(TypedDict):
     source: str | None
     message_count: int
+    source_exact: bool
+    window_complete: bool
+    messages: list[OrcaTranscriptText]
 
 
 class OrcaPendingQuestion(TypedDict):
@@ -124,6 +132,8 @@ class OrcaPort(Protocol):
     def worker_read(self, dispatch_id: str, *, limit: int) -> OrcaRead: ...
     def pending_questions(self, run_id: str) -> OrcaPendingQuestions: ...
     def terminal_send_enter(self, terminal: str) -> None: ...
+    def check_nowait(self, run_id: str) -> OrcaDelivery: ...
+
     def check_wait(self, run_id: str, *, types: str, timeout_ms: int, ack: str | None) -> OrcaDelivery: ...
     def check_ack(self, run_id: str, delivery_id: str) -> None: ...
     def run_use(self, run_id: str) -> None: ...

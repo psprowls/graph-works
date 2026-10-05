@@ -894,8 +894,9 @@ One call waits, and acknowledges the previous event first. The result carries
 `status` (`event` or `timeout`), `delivery_id`, `messages[]`, `absorbed[]`,
 `self_acked`, `rebound`, `sleep_gap` (`{seconds}` or null), `waited_s`,
 `pending_questions` (null when the read failed), `warnings`, and `liveness`
-(rows on timeout only, else null). Heartbeats never wake it, and a
-heartbeat-only or absorbed-only delivery is acked by the verb itself.
+(rows on positive timeout only, else null). A positive-timeout wait strips
+heartbeats and self-acks heartbeat-only or absorbed-only deliveries. A zero
+timeout preserves the entire probe delivery unacked, including heartbeats.
 
 - **Carried state: the delivery id to ack.** This is
   the one named exception to §2's self-contained-iteration rule. Carry `delivery_id` into the next
@@ -1018,8 +1019,11 @@ heartbeat-only or absorbed-only delivery is acked by the verb itself.
 - **On both delivery and timeout, display pending before restarting.**
   After the handling above, refresh the pending set:
   `gw work wait --run <run_id> --timeout-s 0 --json` — a zero
-  timeout makes no Orca `check` call and acks nothing; it only derives the
-  Run's unanswered questions from Orca. A timeout whose triage sent, stopped
+  timeout probes binding without waiting, acks nothing, and derives the Run's
+  unanswered questions. If the refresh returns an event, process its entire
+  batch under the handling rules above and retain its delivery ID for later
+  ack; display that result's pending set without another recursive refresh.
+  A timeout whose triage sent, stopped
   or replied to nothing may display its own result's `pending_questions`
   instead. Print its `pending_questions` as
   §4.3 step 1a says, and show its `warnings`. A failed read prints the refresh
@@ -1035,12 +1039,17 @@ heartbeat-only or absorbed-only delivery is acked by the verb itself.
   coordinator terminal is noise. Do not run `check` or `inbox` in response;
   the next `gw work wait` receives the messages (stablyai/orca#14910,
   stablyai/orca#16822).
-- Under a fence, `inbox --terminal` returns `count: 0`
-  (stablyai/orca#21226). A zero-timeout `gw work wait` makes no `check` call
-  and so never rebinds: an empty `pending_questions` or an empty reply-proof
-  `inbox` read is "unknown", not "none". Only a full wait detects the fence
-  and rebinds. The fail-closed rules above (no ack without positive evidence)
-  already prevent a wrong ack; this note keeps the display honest.
+- A zero-timeout `gw work wait` probes the Run binding with a non-blocking
+  `check`, recovers a reported consumer fence once, and fences the pending
+  read too. `pending_questions: null` plus warnings means unknown; a successful
+  empty read is `[]`. This is bounded recovery, not an atomic snapshot across
+  the independent check and inbox calls.
+- A zero-timeout refresh can return a delivery, including heartbeat or duplicate
+  completion messages. Handle its entire batch under the rules above before
+  later ack; the refresh preserves every message and ignores any supplied ack.
+- Raw reply-proof `inbox --terminal` reads can still return `count: 0` under
+  a fence (stablyai/orca#21226). An empty raw read is "unknown", not "none"; retain the
+  positive-evidence safeguards above before ack.
 
 ## 3. Dispatch mechanics
 
@@ -1121,6 +1130,8 @@ dispatched <key> -> <observed path> detached at <start_sha>
 
 `probe: inconclusive` can mean either the heartbeat read or transcript read
 failed. Run the manual probe below; the result alone never authorizes Enter.
+
+`delivery` is separate from `probe`. `verified` means this attempt's worker echoed its receipt line (task, dispatch, key and the token from the end of its frozen brief) in assistant text. `unverified` means no matching receipt was seen in a complete transcript window, including a worker that asked for its brief, a heartbeat-only worker, or a legacy attempt without a token; `inconclusive` means the read could not prove absence (terminal source, clipped window, failed read). A new attempt with `--no-probe` reports `skipped`; an existing dispatch invoked with `--no-probe` skips the transcript re-read and preserves its prior journal observation. None of these authorizes Enter, a re-paste, a replacement dispatch or cleanup: report `delivery unverified for <key> (<dispatch_id>)` and follow the missing-receipt runbook in `references/dispatch-checks.md`. For a completed, previously probed attempt with a persisted token and `unverified` or `inconclusive` delivery, re-running the same `gw work dispatch <key>` with probing enabled reads the transcript once and can upgrade a later matching receipt to `verified` without launching anything. An originally skipped probe, a tokenless legacy attempt, or an already verified observation keeps its recorded facts and is not re-read.
 
 ### Manual ordered probe (timeout or inconclusive)
 
@@ -1581,13 +1592,14 @@ step is what makes the report worth writing.
    anyway*. No retry option: a dispatch that succeeded is not a recovery case,
    and the failure question's Retry is authorized only by Orca's failure
    response.
-   - **Send it back**: run `gw work next <path> --json` and capture `phase`.
-     Proceed only when it is `finish`; then run
-     `gw work advance <path> --from finish --return --no-infer-worktree`. The
-     next cycle's plan (§2.2) redispatches `execute` naturally: the task mirror
-     already records the settled dispatch, and §2.6's diff re-proposes the key
-     once the phase moves back. If the item is not at `finish`, report that
-     plainly and do not advance.
+   - **Send it back**:
+     1. Run `gw work next <path> --json` and require `phase: finish`. If the item is not at `finish`, report that plainly and do not advance.
+     2. If the send-back is for work beyond the unchecked coverage lines (for example new plan tasks or review findings), name each piece with `--return-scope "<one line>"`. Otherwise omit it to return the coverage obligations.
+     3. Run `gw work advance <path> --from finish --return [--return-scope …] --no-infer-worktree` and require success. On `return-scope-required`, ask for scope. On `return-pending`, inspect and do not retry with different scope. After success, run `gw work next <path> --json` and read `carried_context.slots.execute_return.data.return_id` for `<return-id>`.
+     4. Read the execute key's attempt state fresh using §2.1. If a settled Task exists for the key, run `gw work reroute <key> --run <run_id> --reason "execute return <return-id>"` with no agent, model or effort overrides and require success. If there is no prior Task, skip the reroute. On a live, outcome-unknown or ambiguous attempt, stop and report.
+     5. Replan (§2.2) and dispatch.
+
+     A phase change alone never relaunches execute.
    - **Accept anyway**: continue; the coverage file stands as the record. The
      advance already recorded each unchecked line as an `origin: coverage`
      entry in the item's `finish_obligations`, and the finish question lists

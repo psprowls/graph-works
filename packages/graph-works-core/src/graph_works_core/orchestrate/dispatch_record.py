@@ -39,8 +39,9 @@ class DispatchRecordConflict(ValueError):
 def execution_owner(layout: WorkspaceLayout, key: str) -> Iterator[None]:
     """Own this key across dispatch/reroute decisions, effects and journal writes.
 
-    This is a separate, non-reentrant OS lock, held *before* any short item
-    owner lock, which in turn precedes placement's bundle/executor locks.
+    This is a separate, non-reentrant OS lock, held before return/dispatch
+    admission (when dispatching) and any short item owner lock, which in turn
+    precedes placement's bundle/executor locks.
     No item owner lock is held across an Orca call or record-placement call.
     The key is workspace-wide (not Run-specific), so another Run cannot bypass
     ownership. Never unlink the lock file: process death releases its descriptor.
@@ -62,7 +63,7 @@ class OverrideInvalid(ValueError):
 
 @dataclass(frozen=True, slots=True)
 class StepState:
-    state: Literal["attempted", "done", "skipped"]
+    state: Literal["attempted", "done", "skipped", "failed"]
     at: str | None = None
     result: Mapping[str, Any] | None = None
     reason: str | None = None
@@ -86,7 +87,9 @@ class Attempt:
 
     @property
     def complete(self) -> bool:
-        return all(name in self.steps and self.steps[name].state in ("done", "skipped") for name in STEPS)
+        return all(name in self.steps and self.steps[name].state in ("done", "skipped") for name in STEPS) and not any(
+            step.state == "failed" for step in self.steps.values()
+        )
 
     def pending(self) -> str | None:
         return next((name for name in STEPS if name in self.steps and self.steps[name].state == "attempted"), None)
@@ -342,14 +345,16 @@ def _parse_record(value: object, path: str) -> DispatchRecord:
                 if optional_name in step and step[optional_name] is None:
                     raise _error(path, f"{state_loc}.{optional_name}", "omit null field")
             state = _string(step["state"], path, f"{state_loc}.state")
-            if state not in ("attempted", "done", "skipped"):
+            if state not in ("attempted", "done", "skipped") and not (name == "reroute" and state == "failed"):
                 raise _error(path, f"{state_loc}.state", "invalid state")
             at = _string(step.get("at"), path, f"{state_loc}.at", nullable=True)
             reason = _string(step.get("reason"), path, f"{state_loc}.reason", nullable=True)
             result = step.get("result")
             if result is not None:
                 result = _mapping(result, path, f"{state_loc}.result")
-            parsed_steps[name] = StepState(cast(Literal["attempted", "done", "skipped"], state), at, result, reason)
+            parsed_steps[name] = StepState(
+                cast(Literal["attempted", "done", "skipped", "failed"], state), at, result, reason
+            )
         assert display_name is not None
         attempts.append(Attempt(task_id, dispatch_id, display_name, envelope, placement, parsed_steps))
     reroutes: list[Reroute] = []

@@ -609,6 +609,67 @@ def test_return_refuses_an_item_that_is_not_at_finish(workspace: Path) -> None:
     assert "return-not-available" in result.stderr
 
 
+@pytest.mark.parametrize(
+    ("scope_args", "expected"),
+    [([], ()), (["--return-scope", "A", "--return-scope", "B"], ("A", "B"))],
+    ids=["omitted", "repeated"],
+)
+def test_advance_forwards_return_scope_as_a_tuple(
+    workspace: Path, monkeypatch: pytest.MonkeyPatch, scope_args: list[str], expected: tuple[str, ...]
+) -> None:
+    captured: dict[str, object] = {}
+
+    def spy(*_args: object, **kwargs: object) -> object:
+        captured.update(kwargs)
+        raise SystemExit(0)
+
+    monkeypatch.setattr(work_main, "run_stage_advance", spy)
+    result = runner.invoke(
+        app,
+        [
+            "work",
+            "advance",
+            "work/feature-returned",
+            "--from",
+            "finish",
+            "--return",
+            *scope_args,
+            "--workspace",
+            str(workspace),
+            "--json",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    assert captured["return_"] is True
+    assert captured["return_scope"] == expected
+
+
+def test_return_scope_without_return_uses_the_core_refusal(workspace: Path) -> None:
+    path = file_item(workspace, "Scope without return")
+    page = workspace / "okf" / f"{path}.md"
+    before = page.read_bytes()
+    result = runner.invoke(
+        app,
+        ["work", "advance", path, "--return-scope", "A", "--workspace", str(workspace), "--json"],
+    )
+    assert result.exit_code == exit_codes.GENERIC, result.output
+    error = json.loads(result.stdout)["error"]
+    assert error["reason"] == "refused"
+    assert error["payload"]["refusal"]["reason"] == "return-scope-invalid"
+    assert "return-scope-invalid" in result.stderr
+    assert page.read_bytes() == before
+
+
+def test_return_scope_help_explains_repeatability() -> None:
+    result = runner.invoke(app, ["help", "work", "advance", "--json"])
+    assert result.exit_code == 0, result.output
+    options = json.loads(result.stdout)["options"]
+    option = next((entry for entry in options if "--return-scope" in entry["opts"]), None)
+    assert option is not None
+    assert "repeatable" in option["help"]
+    assert "--return" in option["help"]
+
+
 def _fm(workspace: Path, path: str) -> dict[str, object]:
     return load(workspace / "okf" / f"{path}.md").fm_data()
 

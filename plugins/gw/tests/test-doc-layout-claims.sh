@@ -463,7 +463,7 @@ assert_contains "skills/auto-drive/SKILL.md" \
     'any line is `- [ ]`' \
     "auto-drive's Coverage read scans for unchecked items"
 assert_contains "skills/auto-drive/SKILL.md" \
-    "--from finish --return --no-infer-worktree" \
+    "--from finish --return [--return-scope …] --no-infer-worktree" \
     "auto-drive's Coverage read sends an item back with a guarded return"
 assert_contains "skills/auto-drive/SKILL.md" \
     "run the coverage read" \

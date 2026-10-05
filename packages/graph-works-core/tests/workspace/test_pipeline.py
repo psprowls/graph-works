@@ -171,6 +171,18 @@ def test_the_execute_tail_names_the_artifact_and_its_placeholders():
     assert "## Acceptance" in pipeline.EXECUTE_TAIL
 
 
+def test_execute_tail_requires_the_current_returned_scope_report() -> None:
+    tail = pipeline.EXECUTE_TAIL
+    assert (
+        "When your brief carries a `Returned scope` block, that file's `## Returned scope <id>` section "
+        "is part of the report: read the canonical plan it names, keep its heading and row ids, "
+        "report every row `- [x]` or `- [ ]` with a one-line justification, and set its `Report state:` "
+        "line to `reported`. Write it in the coverage location the block names. "
+        "A fully checked older report is not evidence for a return.\n"
+    ) in tail
+    assert tail.index("Returned scope") < tail.index("Deferred to finish")
+
+
 def test_execute_tail_names_the_gate_verbs():
     assert "gw work gate run {path}" in pipeline.EXECUTE_TAIL
     assert "gw work gate wait {path}" in pipeline.EXECUTE_TAIL

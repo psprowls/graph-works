@@ -12,7 +12,15 @@ from work_tracker_okf.items import WorkItem
 from graph_works_core.workspace.finish import enclosing_owner as enclosing_owner
 from graph_works_core.workspace.repo_context import RepositoryContext
 from graph_works_core.workspace.repos import ItemRepo
-from graph_works_core.workspace.workspace_branch import WORKSPACE_REPO
+from graph_works_core.workspace.workspace_placement import (
+    AnchorRefusal as AnchorRefusal,
+)
+from graph_works_core.workspace.workspace_placement import (
+    WorkspacePlacement as WorkspacePlacement,
+)
+from graph_works_core.workspace.workspace_placement import (
+    verify_workspace_stamp as verify_workspace_stamp,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -29,12 +37,6 @@ class AnchorPreparation:
 class Anchor:
     worktree: str
     branch: str
-
-
-@dataclass(frozen=True, slots=True)
-class AnchorRefusal:
-    kind: str
-    reason: str
 
 
 def integration_branch(owner_path: str, owner_type: str) -> str:
@@ -161,12 +163,6 @@ def select_anchor(
 
 
 @dataclass(frozen=True, slots=True)
-class WorkspacePlacement:
-    worktree: str
-    branch: str
-
-
-@dataclass(frozen=True, slots=True)
 class WorkspacePreparation:
     owner_path: str
     owner_phase: str | None
@@ -190,29 +186,6 @@ def workspace_worktree_path(worktrees_dir: str, path: str, type_: str) -> str:
     from .commands import _stable_stem
 
     return str(Path(worktrees_dir) / "workspace" / _stable_stem(path, type_))
-
-
-def verify_workspace_stamp(owner: WorkItem, context: RepositoryContext) -> WorkspacePlacement | AnchorRefusal | None:
-    """Prove the owner's workspace stamp against observed repository state."""
-    if "repo_stamps" in owner.invalid_optional_fields:
-        return AnchorRefusal("worktree-unprovable", f"repair malformed repo_stamps on {owner.path}")
-    stamp = owner.repo_stamps.get(WORKSPACE_REPO)
-    if stamp is None:
-        return None
-    matches = context.inventory.get(stamp.branch, ())
-    if len(matches) > 1:
-        return AnchorRefusal(
-            "worktree-ambiguous", f"repair ambiguous workspace branch {stamp.branch!r} on {owner.path}"
-        )
-    if matches != (stamp.worktree,) or context.path_exists.get(stamp.worktree) is not True:
-        return AnchorRefusal(
-            "worktree-unprovable", f"repair workspace stamp on {owner.path}: path and branch are not verified"
-        )
-    if context.checkout_usable_by_path.get(stamp.worktree) is not True:
-        return AnchorRefusal(
-            "worktree-unprovable", f"workspace checkout {stamp.worktree!r} for {owner.path} is dirty or unreadable"
-        )
-    return WorkspacePlacement(stamp.worktree, stamp.branch)
 
 
 def select_workspace(

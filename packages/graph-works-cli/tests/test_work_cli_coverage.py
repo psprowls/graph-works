@@ -165,7 +165,26 @@ def test_next_advance_and_orchestrate_map_failures(
         ("run_next", lambda: main.next_stage("work/a", False, "", False)),
         (
             "run_stage_advance",
-            lambda: main.advance("work/a", "", "", "", "", "", "", False, "", False, "", "", "", False, "", False),
+            lambda: main.advance(
+                path="work/a",
+                effort="",
+                owner="",
+                resolved_in="",
+                released_at="",
+                worktree="",
+                branch="",
+                no_infer_worktree=False,
+                start_sha="",
+                return_=False,
+                return_scope=[],
+                skip_gate="",
+                reason="",
+                actor="",
+                dry_run=False,
+                workspace="",
+                json_output=False,
+                expected_phase=None,
+            ),
         ),
         ("run_orchestrate", lambda: main.orchestrate("work/a", "", "", False)),
     ):
@@ -198,14 +217,71 @@ def test_advance_output_policy_branches(monkeypatch: pytest.MonkeyPatch, capsys:
         "commit": None,
     }
     monkeypatch.setattr(wire_work, "advance_payload", lambda *args: payload)
-    main.advance("work/a", "", "", "", "", "", "", False, "", False, "", "", "", False, "", True)
+    main.advance(
+        path="work/a",
+        effort="",
+        owner="",
+        resolved_in="",
+        released_at="",
+        worktree="",
+        branch="",
+        no_infer_worktree=False,
+        start_sha="",
+        return_=False,
+        return_scope=[],
+        skip_gate="",
+        reason="",
+        actor="",
+        dry_run=False,
+        workspace="",
+        json_output=True,
+        expected_phase=None,
+    )
     assert "note" in capsys.readouterr().err
-    main.advance("work/a", "", "", "", "", "", "", False, "", False, "", "", "", True, "", False)
+    main.advance(
+        path="work/a",
+        effort="",
+        owner="",
+        resolved_in="",
+        released_at="",
+        worktree="",
+        branch="",
+        no_infer_worktree=False,
+        start_sha="",
+        return_=False,
+        return_scope=[],
+        skip_gate="",
+        reason="",
+        actor="",
+        dry_run=True,
+        workspace="",
+        json_output=False,
+        expected_phase=None,
+    )
     assert "preview" in capsys.readouterr().out
     payload["refusal"] = {"reason": "bad", "detail": "why"}
     assert (
         _exit_code(
-            lambda: main.advance("work/a", "", "", "", "", "", "", False, "", False, "", "", "", False, "", False)
+            lambda: main.advance(
+                path="work/a",
+                effort="",
+                owner="",
+                resolved_in="",
+                released_at="",
+                worktree="",
+                branch="",
+                no_infer_worktree=False,
+                start_sha="",
+                return_=False,
+                return_scope=[],
+                skip_gate="",
+                reason="",
+                actor="",
+                dry_run=False,
+                workspace="",
+                json_output=False,
+                expected_phase=None,
+            )
         )
         == 1
     )
@@ -401,7 +477,26 @@ def test_advance_forwards_start_sha_to_core(monkeypatch: pytest.MonkeyPatch) -> 
             "repo_note": None,
         },
     )
-    main.advance("work/a", "", "", "", "", "", "", False, "abc1234", False, True, "", False)
+    main.advance(
+        path="work/a",
+        effort="",
+        owner="",
+        resolved_in="",
+        released_at="",
+        worktree="",
+        branch="",
+        no_infer_worktree=False,
+        start_sha="abc1234",
+        return_=False,
+        return_scope=[],
+        skip_gate="",
+        reason="",
+        actor="",
+        dry_run=True,
+        workspace="",
+        json_output=False,
+        expected_phase=None,
+    )
     assert seen["start_sha"] == "abc1234"
 
 
@@ -429,5 +524,24 @@ def test_advance_forwards_no_start_sha_as_none(monkeypatch: pytest.MonkeyPatch) 
             "repo_note": None,
         },
     )
-    main.advance("work/a", "", "", "", "", "", "", False, "", False, "", "", "", True, "", False)
+    main.advance(
+        path="work/a",
+        effort="",
+        owner="",
+        resolved_in="",
+        released_at="",
+        worktree="",
+        branch="",
+        no_infer_worktree=False,
+        start_sha="",
+        return_=False,
+        return_scope=[],
+        skip_gate="",
+        reason="",
+        actor="",
+        dry_run=True,
+        workspace="",
+        json_output=False,
+        expected_phase=None,
+    )
     assert seen["start_sha"] is None

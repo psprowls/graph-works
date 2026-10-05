@@ -809,14 +809,26 @@ for doc in "skills/graph-works/references/proposal-disposition.md" "skills/propo
     assert_contains "$doc" 'editing-work-items.md' "$doc follows the work-item editing protocol"
     # First-page custom Runbooks may forbid about and require service from
     # promotion metadata. Existing pages cannot be the declaration source.
-    for contract in '.gw/schema/<type>.schema.json' '.gw/sections/<type>.yaml' 'including `$ref`/`allOf`' 'first page of a custom type' 'x-okf-proposal-promotion' '`frontmatter`' '`{on}`' '`dated` defaults to `false`' 'Only a new page with `dated: true`' 'preserve the recorded `target`' 'only when the applicable declarations mandate them' 'original `id` and `resource`' 'citation entries' 'stage artifacts'; do
+    for contract in '.gw/schema/<type>.schema.json' '.gw/sections/<type>.yaml' 'including `$ref`/`allOf`' 'first page of a custom type' 'x-okf-proposal-promotion' '`frontmatter`' '`{on}`' '`dated` defaults to `false`' 'Only a new page with `dated: true`' 'preserve the recorded `target`' 'only when the applicable declarations mandate them'; do
         assert_contains "$doc" "$contract" "$doc covers schema-driven custom authoring: $contract"
     done
     assert_not_matches "$doc" 'requires the destination page.s `about:`|reads an existing page of the same type as the format template|ADR numbers|ADRs are dated, never numbered' \
         "$doc avoids universal curated fields, first-page templates, and type-specific dating"
+    # A work-type landing cites its Sources in the item body: frontmatter
+    # sources[] is confined to owned stage artifacts (structure.source-escape),
+    # and drain.py rejects a work item as a landed ref.
+    for contract in '## Notes / log' 'structure.source-escape' 'owned stage artifacts' 'writes no `drain:` entry'; do
+        assert_contains "$doc" "$contract" "$doc cites work-type Sources in the item body: $contract"
+    done
 done
-assert_contains "skills/workflow/references/editing-work-items.md" 'original `id` and `resource`' \
-    "the editing guide preserves proposal citation identities alongside stage artifacts"
+for doc in "skills/graph-works/references/proposal-disposition.md" "skills/proposals/SKILL.md" "skills/workflow/references/editing-work-items.md"; do
+    assert_not_matches "$doc" 'citation entries|original `id` and `resource`|item.s frontmatter `sources:`|(append|add) (the note.s|its) `sources\[\]`' \
+        "$doc no longer copies proposal citations into a work item's frontmatter sources[]"
+done
+for contract in 'structure.source-escape' 'owned stage artifacts' '## Notes / log'; do
+    assert_contains "skills/workflow/references/editing-work-items.md" "$contract" \
+        "the editing guide confines sources[] to stage artifacts: $contract"
+done
 assert_contains "skills/graph-works/references/page-formats.md" 'target_type' \
     "page formats records the proposal destination type"
 

@@ -290,3 +290,140 @@ def test_reroute_rejects_snapshot_superseded_before_execution_ownership(env, mon
     assert result.failure.reason == "recovery-inspection"
     assert record(env) == durable[0]
     assert env[2].names().count("task_update") == 1
+
+
+class CodedRefusal(BackendError):
+    def __init__(self, code):
+        self.code = code
+        super().__init__("task_not_startable: private diagnostic")
+
+
+def test_definitive_refusal_is_durable_and_retry_uses_requested_overrides(env):
+    env[2].fail["task_update"] = CodedRefusal("task_not_startable")
+    first = run(env, agent="codex")
+    assert first.failure.reason == "task-update-failed"
+    saved = record(env)
+    assert saved.attempts[-1].steps["reroute"] == dr.StepState(
+        "failed", at="2026-09-26T00:00:00+00:00", reason="task_not_startable"
+    )
+    assert not saved.reroutes and not saved.superseded
+    assert env[2].tasks[0]["status"] == "failed"
+    env[2].fail.clear()
+    second = run(env, reason="cause cleared", agent="codex", model="gpt", effort="high")
+    assert second.ok
+    assert env[2].names().count("task_update") == 2
+    assert record(env).reroutes[-1].overrides == dr.Overrides("codex", "gpt", "high")
+    env[2].next_task = 2
+    assert dispatch_run((env[0], env[1], env[2]), probe=False).ok
+    assert record(env).attempts[-1].envelope["model"] == "gpt"
+    assert record(env).attempts[-1].envelope["reasoning_effort"] == "high"
+
+
+@pytest.mark.parametrize("code", [None, "other", " task_not_startable", 1, [], {}])
+def test_unproven_refusal_retains_inspection_only_evidence(env, code):
+    env[2].fail["task_update"] = CodedRefusal(code)
+    assert run(env).failure.reason == "task-update-failed"
+    assert record(env).attempts[-1].steps["reroute"].state == "attempted"
+    env[2].fail.clear()
+    assert run(env).failure.reason == "recovery-inspection"
+    assert env[2].names().count("task_update") == 1
+
+
+@pytest.mark.parametrize("status", ["blocked", "failed", "unknown", None])
+def test_stale_attempted_never_uses_task_status_as_effect_proof(env, status):
+    env[2].fail["task_update"] = BackendError("task_not_startable")
+    assert run(env).failure.reason == "task-update-failed"
+    env[2].fail.clear()
+    env[2].tasks[0]["status"] = status
+    assert run(env).failure.reason == "recovery-inspection"
+    assert env[2].names().count("task_update") == 1
+
+
+@pytest.mark.parametrize("guard", ["live", "unknown", "identity", "override"])
+def test_failed_retry_still_checks_worker_identity_and_overrides(env, guard):
+    env[2].fail["task_update"] = CodedRefusal("task_not_startable")
+    assert run(env).failure.reason == "task-update-failed"
+    env[2].fail.clear()
+    kwargs = {}
+    expected = "recovery-inspection"
+    if guard == "live":
+        env[2].workers = [worker(state="running")]
+        expected = "reroute-live"
+    elif guard == "unknown":
+        env[2].workers = [worker(state="outcome_unknown")]
+    elif guard == "identity":
+        kwargs["run_id"] = "other_run"
+        expected = "record-invalid"
+    else:
+        kwargs.update(agent="codex", effort="high")
+        expected = "override-invalid"
+    assert run(env, **kwargs).failure.reason == expected
+    assert record(env).attempts[-1].steps["reroute"].state == "failed"
+    assert env[2].names().count("task_update") == 1
+
+
+def test_refusal_cannot_overwrite_a_changed_claim(env, monkeypatch):
+    durable = []
+    original = env[2].task_update
+
+    def changed_claim(*args):
+        original(*args)
+        saved = record(env).with_step(0, "reroute", dr.StepState("attempted", at="winner"))
+        dr.save_record(env[0], saved)
+        durable.append(saved)
+        raise CodedRefusal("task_not_startable")
+
+    monkeypatch.setattr(env[2], "task_update", changed_claim)
+    result = run(env)
+    assert result.failure.reason == "recovery-inspection"
+    assert record(env) == durable[0]
+    assert run(env).failure.reason == "recovery-inspection"
+    assert env[2].names().count("task_update") == 1
+
+
+@pytest.mark.parametrize("error", [OSError, KeyboardInterrupt])
+@pytest.mark.parametrize("after_write", [False, True])
+def test_failed_marker_write_failure_preserves_durable_evidence(env, monkeypatch, error, after_write):
+    env[2].fail["task_update"] = CodedRefusal("task_not_startable")
+    write = dr.write_json_atomic
+
+    def fail_write(path, payload):
+        if payload["attempts"][-1]["steps"]["reroute"]["state"] == "failed":
+            if after_write:
+                write(path, payload)
+            raise error("failed marker write interrupted")
+        write(path, payload)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(dr, "write_json_atomic", fail_write)
+        if error is KeyboardInterrupt:
+            with pytest.raises(KeyboardInterrupt):
+                run(env)
+        else:
+            assert run(env).failure.reason == "recovery-inspection"
+    assert env[2].names().count("task_update") == 1
+    assert record(env).attempts[-1].steps["reroute"].state == ("failed" if after_write else "attempted")
+    env[2].fail.clear()
+    retry = run(env)
+    assert retry.ok if after_write else retry.failure.reason == "recovery-inspection"
+    assert env[2].names().count("task_update") == (2 if after_write else 1)
+
+
+def test_dispatch_does_not_repeat_effects_after_failed_reroute(env):
+    # Start with a genuinely completed dispatch rather than a synthetic
+    # reroute-only attempt, then refuse a reroute at the backend boundary.
+    env[2].tasks.clear()
+    env[2].workers.clear()
+    assert dispatch_run((env[0], env[1], env[2]), probe=False).ok
+    env[2].workers = [worker()]
+    env[2].tasks[0]["status"] = "failed"
+    env[2].fail["task_update"] = CodedRefusal("task_not_startable")
+    assert run(env).failure.reason == "task-update-failed"
+    env[2].fail.clear()
+    before = record(env)
+    calls = env[2].names().copy()
+    result = dispatch_run((env[0], env[1], env[2]), probe=False)
+    assert result.ok
+    assert record(env) == before
+    for name in ("task_create", "worker_start", "task_update"):
+        assert env[2].names().count(name) == calls.count(name)

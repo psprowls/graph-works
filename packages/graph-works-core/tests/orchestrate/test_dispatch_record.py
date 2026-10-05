@@ -317,3 +317,29 @@ def test_compare_and_swap_reads_and_writes_with_one_owner_lock(workspace_layout,
     path = dr.compare_and_swap_record(workspace_layout, base(), expected=None)
     assert not held and operations == ["read", "write"]
     assert load(path) == base()
+
+
+@pytest.mark.parametrize("state", ["attempted", "done", "skipped", "failed"])
+def test_reroute_step_states_round_trip(tmp_path, state):
+    attempt = dr.Attempt("task_1", "ctx_1", "d", {}, None, {"reroute": dr.StepState(state, at="t", reason="code")})
+    record = base().with_attempt(attempt)
+    path = tmp_path / "states.json"
+    dr.write_json_atomic(path, dr.to_json(record))
+    assert dr.load_record(path) == record
+    assert not dr.load_record(path).attempts[0].complete
+
+
+@pytest.mark.parametrize("name", dr.STEPS)
+def test_failed_is_invalid_on_dispatch_steps(tmp_path, name):
+    attempt = dr.Attempt("task_1", "ctx_1", "d", {}, None, {name: dr.StepState("failed")})
+    path = tmp_path / "invalid.json"
+    dr.write_json_atomic(path, dr.to_json(base().with_attempt(attempt)))
+    with pytest.raises(dr.DispatchRecordError, match="invalid state"):
+        dr.load_record(path)
+
+
+def test_failed_reroute_keeps_a_completed_dispatch_attempt_incomplete():
+    steps = {name: dr.StepState("done") for name in dr.STEPS}
+    steps["reroute"] = dr.StepState("failed", reason="task_not_startable")
+    attempt = dr.Attempt("task_1", "ctx_1", "d", {}, None, steps)
+    assert not attempt.complete

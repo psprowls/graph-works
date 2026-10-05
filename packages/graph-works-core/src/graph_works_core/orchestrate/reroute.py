@@ -207,6 +207,14 @@ def run_reroute(
             try:
                 port.task_update(run_id, task_id, "blocked")
             except BackendError as exc:
+                code = getattr(exc, "code", None)
+                # Orca's task-status precondition refusal proves no mutation.
+                # Transport errors and unclassified codes remain uncertain.
+                if type(code) is str and code == "task_not_startable":
+                    failed = record.with_step(
+                        index, "reroute", dr.StepState("failed", at=clock().isoformat(), reason=code)
+                    )
+                    dr.compare_and_swap_record(layout, failed, expected=record)
                 raise _Refusal("task-update-failed", str(exc)) from exc
             entry = dr.Reroute(at, reason, task_id, dispatch_id, requested)
             completed = record.with_step(index, "reroute", dr.StepState("done", at=clock().isoformat()))

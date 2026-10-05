@@ -10,6 +10,7 @@ import typer
 from graph_works_cli import exit_codes
 from graph_works_cli.work_cli import decision, main, reconcile, rendering
 from graph_works_core.workspace.errors import WorkspaceConfigError, WorkspaceError
+from graph_works_core.workspace.lint_repos import LintRepositories
 from graph_works_wire import work as wire_work
 
 LAYOUT = SimpleNamespace(bundle_dir=Path("/tmp/bundle"), repo_root=Path("/tmp/repo"))
@@ -132,7 +133,7 @@ def test_file_output_and_incomplete_paths(monkeypatch: pytest.MonkeyPatch, capsy
 def test_read_commands_map_io_failures(monkeypatch: pytest.MonkeyPatch, name: str) -> None:
     monkeypatch.setattr(main, "resolve_workspace", lambda workspace: LAYOUT)
     monkeypatch.setattr(main, "_config", lambda layout: object())
-    monkeypatch.setattr(main, "resolve_repos", lambda layout: ())
+    monkeypatch.setattr(main, "lint_repositories", lambda layout: LintRepositories({}))
     monkeypatch.setattr(main.work, f"run_{name}", lambda *args, **kwargs: (_ for _ in ()).throw(OSError("io")))
     call = (lambda: main.status("", False)) if name == "status" else (lambda: main.lint(False, "", False))
     assert _exit_code(call) == 1
@@ -141,7 +142,7 @@ def test_read_commands_map_io_failures(monkeypatch: pytest.MonkeyPatch, name: st
 def test_lint_non_ok_and_json(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(main, "resolve_workspace", lambda workspace: LAYOUT)
     monkeypatch.setattr(main, "_config", lambda layout: object())
-    monkeypatch.setattr(main, "resolve_repos", lambda layout: ())
+    monkeypatch.setattr(main, "lint_repositories", lambda layout: LintRepositories({}))
     report = SimpleNamespace(ok=False, findings=())
     monkeypatch.setattr(main.work, "run_lint", lambda *args, **kwargs: report)
     assert _exit_code(lambda: main.lint(False, "", True)) == exit_codes.GENERIC
@@ -450,7 +451,7 @@ def test_archive_maps_workspace_and_io_failures(monkeypatch: pytest.MonkeyPatch,
 def test_lint_maps_workspace_and_io_failures(monkeypatch: pytest.MonkeyPatch, error: Exception, code: int) -> None:
     monkeypatch.setattr(main, "resolve_workspace", lambda workspace: LAYOUT)
     monkeypatch.setattr(main, "_config", lambda layout: object())
-    monkeypatch.setattr(main, "resolve_repos", lambda layout: (_ for _ in ()).throw(error))
+    monkeypatch.setattr(main, "lint_repositories", lambda layout: (_ for _ in ()).throw(error))
     assert _exit_code(lambda: main.lint(False, "", False)) == code
 
 

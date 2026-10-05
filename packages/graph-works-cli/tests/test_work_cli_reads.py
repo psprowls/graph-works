@@ -103,6 +103,24 @@ def test_lint_projects_findings_explicitly(workspace: Path) -> None:
     assert all(set(item) == {"code", "severity", "message", "spec", "path", "line"} for item in payload["findings"])
 
 
+def test_work_lint_refuses_a_missing_repository_checkout(workspace: Path) -> None:
+    manifest = workspace / "workspace.yaml"
+    manifest.write_text(
+        manifest.read_text(encoding="utf-8").replace(
+            "repositories: {}\n", "repositories:\n  code:\n    path: ../absent\n"
+        ),
+        encoding="utf-8",
+        newline="\n",
+    )
+    result = runner.invoke(app, ["work", "lint", "--json", "--workspace", str(workspace)])
+
+    assert result.exit_code != 0
+    error = json.loads(result.stdout)["error"]
+    assert error["reason"] == "workspace"
+    assert error["payload"] is None
+    assert "repositories.code" in error["message"]
+
+
 def test_lint_path_scopes_to_one_item(workspace: Path) -> None:
     alpha = file_item(workspace, "Alpha")
     file_item(workspace, "Beta")

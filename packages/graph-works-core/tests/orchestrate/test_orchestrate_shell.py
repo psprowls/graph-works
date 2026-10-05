@@ -16,6 +16,7 @@ from graph_works_core.orchestrate import stage_advance as stage
 from graph_works_core.workspace.errors import WorkspaceError
 from graph_works_core.workspace.layout import layout_for
 from graph_works_core.workspace.repos import ItemRepo
+from graph_works_core.workspace.work_schemas import declarations_dir_for, packaged_schemas
 from okf_io import load
 from work_tracker_okf.pipeline import PACKAGED_DEFINITION
 
@@ -52,6 +53,12 @@ def _workspace(tmp_path: Path, manifest: str = "version: 1\n"):
     layout = layout_for(tmp_path)
     (layout.bundle_dir / "work").mkdir(parents=True, exist_ok=True)
     layout.cache_dir.mkdir(parents=True, exist_ok=True)
+    # Advances require current work schemas even in this minimal shell workspace.
+    declarations = declarations_dir_for(layout)
+    for relative, content in packaged_schemas().items():
+        destination = declarations / relative
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_bytes(content)
     return layout
 
 

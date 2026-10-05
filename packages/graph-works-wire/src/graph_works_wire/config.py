@@ -17,6 +17,7 @@ from graph_works_core.hooks import HooksResult
 from graph_works_core.workspace.dispatch import DispatchRule
 from graph_works_core.workspace.dispatch_config import DispatchRuleSet
 from graph_works_core.workspace.schema_read import SchemaRead
+from graph_works_core.workspace.work_schemas import SchemaRefreshPlan, SchemaRefreshResult
 
 from graph_works_wire._jsonable import jsonable
 
@@ -66,6 +67,27 @@ def hooks_payload(result: HooksResult) -> dict[str, object]:
 def projection_payload(path: Path) -> dict[str, object]:
     """Where `gw config sync` wrote the projection."""
     return {"projection": str(path)}
+
+
+def schema_refresh_payload(plan: SchemaRefreshPlan, result: SchemaRefreshResult | None) -> dict[str, object]:
+    """`gw config sync --schemas`: the refresh plan, and what an apply wrote."""
+    commit = None if result is None else result.commit
+    return {
+        "declarations_dir": str(plan.declarations_dir),
+        "applied": result is not None,
+        "force": plan.force,
+        "writes": [
+            {"path": write.relative, "diff": write.diff, "created": write.before is None} for write in plan.writes
+        ],
+        "refusals": [
+            {"path": refusal.relative, "reason": refusal.reason, "detail": refusal.detail, "diff": refusal.diff}
+            for refusal in plan.refusals
+        ],
+        "skipped": list(plan.skipped),
+        "provenance": plan.provenance is not None,
+        "written": [] if result is None else list(result.written),
+        "commit": None if commit is None else {"status": commit.status, "sha": commit.sha, "reason": commit.reason},
+    }
 
 
 def _constraint(value: object) -> object:

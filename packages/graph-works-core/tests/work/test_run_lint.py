@@ -4,6 +4,7 @@ set `lint_drift`'s work lane now uses too."""
 from __future__ import annotations
 
 from datetime import date
+from pathlib import Path
 
 import pytest
 from code_wiki_okf.config import Config, StateGateConfig
@@ -100,6 +101,18 @@ def test_a_conformant_bundle_reports_no_errors(tmp_path):
     report = work.run_lint(layout, _config(layout), today=TODAY)
     assert report.ok
     assert report.findings == ()
+
+
+@pytest.mark.parametrize("path", [None, "work/feature-a"])
+@pytest.mark.parametrize("strict", [False, True])
+def test_schema_drift_is_reported_with_and_without_a_path(tmp_path, path, strict) -> None:
+    from graph_works_core.workspace import work_schemas as ws
+
+    layout = _workspace(tmp_path)
+    _write(layout, "feature-a", _FEATURE)
+    (ws.declarations_dir_for(layout) / "schema/_base.schema.json").write_bytes(b"{}\n")
+    report = work.run_lint(layout, _config(layout), today=TODAY, path=path, strict=strict)
+    assert ws.SCHEMA_DRIFT in [finding.code for finding in report.errors]
 
 
 def test_a_bad_type_is_reported_as_a_schema_finding(tmp_path):
@@ -236,6 +249,91 @@ def test_unknown_path_raises_lookup_error(tmp_path, bad):
     _write(layout, "feature-a", _FEATURE)
     with pytest.raises(LookupError, match="unknown work item"):
         work.run_lint(layout, _config(layout), today=TODAY, path=bad)
+
+
+@pytest.mark.parametrize("path", [None, "work/feature-a"])
+@pytest.mark.parametrize("broken", ["malformed", "missing-file", "missing-directory", "directory-target"])
+def test_broken_owned_schema_keeps_recovery_and_declaration_error(tmp_path, path, broken):
+    layout = _workspace(tmp_path)
+    _write(layout, "feature-a", _FEATURE)
+    target = layout.config_dir / "schema/_base.schema.json"
+    if broken == "malformed":
+        target.write_bytes(b"{broken")
+    elif broken == "missing-file":
+        target.unlink()
+    elif broken == "missing-directory":
+        target.parent.rename(layout.root / "saved-schema")
+    else:
+        target.unlink()
+        target.mkdir()
+    report = work.run_lint(layout, _config(layout), today=TODAY, path=path)
+    assert not report.ok
+    assert any(
+        f.code in {"workspace.schema-drift", "workspace.schema-missing"}
+        and f.path == ".gw/schema/_base.schema.json"
+        and "gw config sync --schemas" in f.message
+        for f in report.findings
+    )
+    errors = [f for f in report.findings if f.code == "workspace.declarations-invalid"]
+    assert len(errors) == 1
+    assert "not valid JSON" in errors[0].message if broken == "malformed" else "not loaded" in errors[0].message
+
+
+def test_lint_inspects_explicit_caller_declarations(tmp_path):
+    from dataclasses import replace
+
+    layout = _workspace(tmp_path)
+    _write(layout, "feature-a", _FEATURE)
+    declarations = layout.root / "caller-declarations"
+    layout.config_dir.rename(declarations)
+    (declarations / "schema/_base.schema.json").write_bytes(b"{broken")
+    report = work.run_lint(layout, replace(_config(layout), declarations_dir=declarations), today=TODAY)
+    assert any(
+        f.path == "caller-declarations/schema/_base.schema.json" and f.code == "workspace.schema-drift"
+        for f in report.findings
+    )
+    assert not any(f.path and f.path.startswith(".gw/") for f in report.findings)
+
+
+def test_owned_drift_does_not_hide_custom_schema_error(tmp_path):
+    from okf_ext.schemas import SchemaError
+
+    layout = _workspace(tmp_path)
+    (layout.config_dir / "schema/Bug.schema.json").write_bytes(b"{}")
+    (layout.config_dir / "schema/Custom.schema.json").write_bytes(b"{broken")
+    with pytest.raises(SchemaError, match=r"Custom\.schema\.json: not valid JSON"):
+        work.run_lint(layout, _config(layout), today=TODAY)
+
+
+def test_owned_drift_does_not_hide_section_filesystem_error(tmp_path):
+    layout = _workspace(tmp_path)
+    (layout.config_dir / "schema/Bug.schema.json").write_bytes(b"{}")
+    (layout.config_dir / "sections").rename(layout.root / "saved-sections")
+    with pytest.raises(FileNotFoundError):
+        work.run_lint(layout, _config(layout), today=TODAY)
+
+
+def test_lint_never_reads_owned_schemas_through_unsafe_parent(tmp_path, monkeypatch):
+    layout = _workspace(tmp_path)
+    _write(layout, "feature-a", _FEATURE)
+    parent = layout.config_dir / "schema"
+    outside = layout.root / "outside-schema"
+    parent.rename(outside)
+    try:
+        parent.symlink_to(outside, target_is_directory=True)
+    except OSError:
+        pytest.skip("symlink creation unavailable")
+    real_open = Path.open
+
+    def no_unsafe_open(self, *args, **kwargs):
+        if self.parent == parent:
+            pytest.fail("schema read through unsafe parent")
+        return real_open(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "open", no_unsafe_open)
+    report = work.run_lint(layout, _config(layout), today=TODAY)
+    assert not report.ok
+    assert any(f.code == "workspace.schema-drift" and "unsafe parent" in f.message for f in report.findings)
 
 
 def _legacy_work_only_ignore(bundle_dir):

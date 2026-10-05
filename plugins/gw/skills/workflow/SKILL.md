@@ -344,6 +344,8 @@ Under a supervised dispatch (step 2), add `--no-infer-worktree`; this applies to
 
 **Returned-scope refusals.** `return-evidence-missing`, `return-evidence-stale`, `return-evidence-incomplete`, `return-plan-changed` and `return-metadata-invalid` are non-bypassable. Fix the report or return again; never `--skip-gate`.
 
+**Schema drift.** Any advance refuses `schema-drift` when the workspace's installed work schemas differ from the packaged ones; its detail names each file. It is not a gate code and `--skip-gate` cannot bypass it. Preview with `gw config sync --schemas --workspace <workspace>`, and apply with `--apply` (add `--force` only after a human reviewed the diff of an edited or unrecorded copy). A supervised worker does not refresh: it sends `worker_done --outcome failed` with subject `advance refused: schema-drift` and the detail in its body.
+
 **Finish outcomes: only a verified integration resolves.** Apply this table
 for every item type, using the attended rider's outcome line or relay's result:
 

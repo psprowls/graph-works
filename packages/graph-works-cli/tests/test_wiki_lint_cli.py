@@ -12,6 +12,7 @@ from graph_works_cli.cli import app
 from graph_works_cli.wiki_cli import lint as lint_module
 from graph_works_core.lint_drift.lint import LaneReport, LintReport, ProposalBacklog, SemanticFinding
 from graph_works_core.workspace.errors import WorkspaceConfigError
+from graph_works_core.workspace.lint_repos import LintRepositories
 from okf_io import Finding, Report
 from typer.testing import CliRunner
 
@@ -64,7 +65,7 @@ def test_lint_passes_one_captured_utc_date_to_the_typed_core_call(
             "layout": layout,
             "config": lint_module.load_workspace_config(layout),
             "today": date(2026, 8, 18),
-            "repo_roots": (),
+            "repositories": LintRepositories({}),
         }
     ]
     assert result.stdout == report.render() + "\n"
@@ -240,3 +241,20 @@ def test_lint_reports_unreadable_configuration_before_running(
 
     assert result.exit_code == exit_codes.GENERIC
     assert "Error: config.yaml is malformed" in result.stderr
+
+
+def test_lint_refuses_a_missing_repository_checkout(initialized_workspace: Path) -> None:
+    manifest = initialized_workspace / "workspace.yaml"
+    manifest.write_text(
+        manifest.read_text(encoding="utf-8").replace(
+            "repositories: {}\n", "repositories:\n  code:\n    path: ../absent\n"
+        ),
+        encoding="utf-8",
+        newline="\n",
+    )
+
+    result = runner.invoke(app, ["wiki", "lint", "--json", "--workspace", str(initialized_workspace)])
+
+    assert result.exit_code == exit_codes.GENERIC
+    assert result.stdout == ""
+    assert "repositories.code" in result.stderr

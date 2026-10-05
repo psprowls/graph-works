@@ -806,7 +806,8 @@ def test_the_gate_vocabulary_is_closed_and_in_the_refusal_reason() -> None:
         "gate-bypass-unused",
         "gate-bypass-unrecorded",
     } == BYPASS_REFUSALS
-    assert COMMIT_GATE_REFUSALS | BYPASS_REFUSALS | {"finish-incomplete"} == GATE_REFUSALS
+    assert COMMIT_GATE_REFUSALS | BYPASS_REFUSALS | {"finish-incomplete", "schema-drift"} == GATE_REFUSALS
+    assert "schema-drift" not in COMMIT_GATE_REFUSALS
     assert set(typing.get_args(RefusalReason)) >= GATE_REFUSALS
 
 

@@ -60,10 +60,11 @@ from typing import Literal, Protocol
 from code_wiki_okf.config import Config
 from doc_wiki_okf.sources import SOURCE_TYPE, normalize_origin
 from okf_ext.bundle import SECTIONS_DIRNAME
+from okf_ext.schemas import SchemaError
 from okf_ext.shape import load_sections
 from okf_io import Bundle, Unreadable, parse, read_member
 from okf_io import validate as okf_validate
-from okf_io.validate import Report
+from okf_io.validate import Finding, Report
 from repositories_okf.repository import repository_rule
 from work_tracker_okf import decisions as _decisions
 from work_tracker_okf._selection import path_index
@@ -137,8 +138,10 @@ from graph_works_core.workspace.finish import FinishTarget, resolve_finish_targe
 from graph_works_core.workspace.landed import stale_spec_for
 from graph_works_core.workspace.lane_facts import gather_lane_facts, has_lane_pages, repository_notes, runner
 from graph_works_core.workspace.layout import WorkspaceLayout
+from graph_works_core.workspace.lint_repos import LintRepositories, work_lane_rules
 from graph_works_core.workspace.repos import declared_repositories, resolve_item_repo, resolve_repos
 from graph_works_core.workspace.transactions import MutationApplication, apply_mutation, only_stale_inventory
+from graph_works_core.workspace.work_schemas import drift_findings, inspect_work_schemas
 
 
 def _digest(content: bytes) -> str:
@@ -1069,6 +1072,7 @@ def run_lint(
     *,
     repo_root: Path | None = None,
     repo_roots: tuple[Path, ...] = (),
+    repositories: LintRepositories | None = None,
     strict: bool = False,
     today: date,
     path: str | None = None,
@@ -1081,7 +1085,11 @@ def run_lint(
     `graph_works_core.lint_drift.lint.run_mechanical`'s two-lane workspace
     check; it is the fast, synchronous, LLM-free "does the work lane conform"
     check `work_tracker_okf.cli` already provides, now
-    `WorkspaceLayout`-shaped. `repo_root=None` with no `repo_roots` skips
+    `WorkspaceLayout`-shaped. Interfaces pass `repositories=` to check each
+    item's own or inherited repository, using the union for untagged items.
+    The legacy `repo_root`/`repo_roots` pair remains available for test
+    injection; it cannot be combined with `repositories=`.
+    `repo_root=None` with no `repo_roots` skips
     `targets.affects-missing` (`plan.action-target-missing` still checks the
     vault root), the same contract `work_tracker_okf.compose.rule_set`
     documents. `repo_roots` is every declared repo in a multi-repository
@@ -1089,25 +1097,58 @@ def run_lint(
 
     `path` narrows the report to one item's page and everything beneath its
     owned directory, including a parent's subtree. Cross-document rules still
-    read the whole lane; only findings about this item are kept. An unknown
-    path raises `LookupError`.
+    read the whole lane; only findings about this item are kept. Workspace
+    schema findings are kept under a path scope because they block every
+    item's advance. An unknown path raises `LookupError`.
 
     `strict=True` promotes every warning to an error first, which fails even
     a conformant vault. A caller wiring this into an acceptance gate wants
     `strict=False`.
     """
+    if repositories is not None and (repo_root is not None or repo_roots):
+        raise ValueError("pass repositories= or repo_root=/repo_roots=, not both")
     # Lint retains ignored-member identity pending the separate pruned-resolver
     # fix; projection readers keep using load_work_bundle's pruning.
     partition = work_scope(layout)
     bundle = load_workspace_bundle(layout, ignore=partition.as_ignore())
-    rules = rule_set(
-        layout.bundle_dir,
-        repo_root=repo_root,
-        repo_roots=repo_roots,
-        vault_root=layout.bundle_dir,
-        declarations_dir=config.declarations_dir,
-        definition=load_dispatch_config(layout).definition,
-    )
+    if path is not None and path not in item_index(load_items(bundle)):
+        raise LookupError(f"unknown work item {path!r}")
+    inspection = inspect_work_schemas(layout, declarations_dir=config.declarations_dir)
+    schema = drift_findings(layout, inspection)
+
+    def incomplete(detail: str, source: Path) -> Report:
+        named = source.relative_to(layout.root).as_posix() if source.is_relative_to(layout.root) else source.as_posix()
+        return Report(
+            (
+                *schema,
+                Finding("workspace.declarations-invalid", "error", f"work rules not loaded: {detail}", "§5", named),
+            )
+        )
+
+    unavailable = tuple(state for state in inspection.files if state.state in ("missing", "unsafe"))
+    if unavailable:
+        detail = "; ".join(f"{state.path}: {state.detail}" for state in unavailable)
+        return incomplete(detail, unavailable[0].path)
+    try:
+        rules = (
+            work_lane_rules(layout, config, repositories)
+            if repositories is not None
+            else rule_set(
+                layout.bundle_dir,
+                repo_root=repo_root,
+                repo_roots=repo_roots,
+                vault_root=layout.bundle_dir,
+                declarations_dir=config.declarations_dir,
+                definition=load_dispatch_config(layout).definition,
+            )
+        )
+    except SchemaError as exc:
+        # Only owned drift earns this recovery report. Custom declaration and
+        # section/configuration failures keep their existing exception contract.
+        failed = next((state for state in inspection.drifted if str(exc).startswith(f"{state.path.name}:")), None)
+        if failed is None:
+            raise
+        return incomplete(str(exc), failed.path)
     if path is None and has_lane_pages(layout):
         git = runner(layout)
         if not isinstance(git, str):
@@ -1115,14 +1156,14 @@ def run_lint(
             behind = repository_rule(gather_lane_facts(layout, git), codes=frozenset({"repository.behind-track"}))
             rules = (*rules, behind)
     if path is None:
-        return okf_validate(bundle, today=today, extra_rules=rules, strict=strict)
-    if path not in item_index(load_items(bundle)):
-        raise LookupError(f"unknown work item {path!r}")
+        report = okf_validate(bundle, today=today, extra_rules=rules, strict=strict)
+        return Report(report.findings + schema)
     page, owned = f"{path}.md", f"{path}/"
     scope = frozenset(f"{cid}.md" for cid in bundle.concepts if cid == path or cid.startswith(owned))
     report = okf_validate(bundle, today=today, extra_rules=rules, strict=strict, scope=scope)
     return Report(
         tuple(f for f in report.findings if f.path is not None and (f.path == page or f.path.startswith(owned)))
+        + schema
     )
 
 

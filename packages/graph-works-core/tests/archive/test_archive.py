@@ -475,30 +475,27 @@ def test_a_wiki_page_archives_against_the_workspaces_own_declared_lanes(tmp_path
 
 
 def test_the_lanes_fall_back_to_the_seeded_schemas_when_the_workspace_has_none(tmp_path: Path) -> None:
-    """`_wiki_rules` gates on the schema directory existing; so does this. The
-    fallback is the package's own assets, which is exactly the behavior the
-    deleted `WIKI_LANES` constant had.
+    """A pre-manifest legacy workspace uses bundle work declarations.
 
-    `_wiki_schema_set` only ever reads `layout.config_dir / SCHEMA_DIRNAME`, so
-    removing that directory alone is enough to exercise its fallback branch.
-    But `run_archive`'s live apply also runs the *work* lane's postcondition
-    gate (`transactions._extra_rules`), which falls back to treating
-    `layout.bundle_dir` as the declarations root under the same missing-schema
-    condition -- a fallback that predates this change and serves an unrelated
-    workspace shape. Mirroring the real schema/sections declarations there
-    keeps that unrelated gate satisfied without touching production code
-    outside this task's scope, while still leaving `.gw/schema` itself absent
-    for `_wiki_schema_set` to fall back on.
+    With `.gw/schema` absent, wiki lane selection falls back to the package's
+    seeded schemas. The live work postcondition gate accepts bundle declarations
+    only for a genuine pre-manifest legacy layout; a configured workspace keeps
+    its declaration identity even when its schema directory is missing.
+    Copy the owned declarations into the bundle and remove the manifest to
+    exercise both legacy behaviors without weakening the live archive check.
     """
     layout = _layout(tmp_path)
     _wiki_page(layout, "docs/explanations/foo")
     shutil.copytree(layout.config_dir / SCHEMA_DIRNAME, layout.bundle_dir / SCHEMA_DIRNAME)
     shutil.copytree(layout.config_dir / "sections", layout.bundle_dir / "sections")
     shutil.rmtree(layout.config_dir / SCHEMA_DIRNAME)
+    layout.manifest_path.unlink()
 
     run = archive.run_archive(layout, (), ["docs/explanations/foo"], today=TODAY, dry_run=False)
 
     assert run.wiki_plan.tokens == ("docs/explanations/foo",)
+    assert run.result is not None and run.result.ok
+    assert run.wiki is not None and run.wiki.ok
     assert (layout.bundle_dir / "docs/explanations/_archive/foo.md").is_file()
 
 

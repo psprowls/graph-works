@@ -140,6 +140,31 @@ def test_wiki_lint_checks_the_work_lane_against_every_declared_repo(two_repos: t
     assert result.exit_code == 0, result.output
 
 
+@pytest.mark.parametrize("command", ("work", "wiki"))
+def test_lint_checks_a_tagged_item_only_against_its_own_repository(
+    two_repos: tuple[Path, Path, Path], command: str
+) -> None:
+    root, _code, _ui = two_repos
+    path = _file(root, "Wrong repository", "apps/ui")
+    document = load(root / "okf" / f"{path}.md")
+    document.set("repo", "code")
+    document.save()
+
+    result = runner.invoke(app, [command, "lint", "--json", "--workspace", str(root)])
+
+    assert result.exit_code == exit_codes.GENERIC
+    payload = json.loads(result.stdout)
+    findings = (
+        payload["findings"]
+        if command == "work"
+        else [finding for lane in payload["mechanical"] for finding in lane["findings"]]
+    )
+    missing = [finding for finding in findings if finding["code"] == "targets.affects-missing"]
+    assert len(missing) == 1
+    assert missing[0]["path"] == f"{path}.md"
+    assert "apps/ui" in missing[0]["message"]
+
+
 @pytest.fixture
 def two_repo_graph(two_repos: tuple[Path, Path, Path]) -> tuple[Path, Path, Path]:
     """`two_repos` plus the empty `code.db` `gw wiki drift` opens before anything else."""

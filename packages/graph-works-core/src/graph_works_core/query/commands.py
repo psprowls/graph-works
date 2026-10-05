@@ -366,8 +366,9 @@ class IndexRefresh:
     """What a refresh did, and why.
 
     `reason` takes a closed vocabulary — `"no-manifest"`, `"corpus-changed"`,
-    `"model-changed"`, `"schema-changed"`, `"forced"`, `"empty-bundle"`, or
-    `None` when the index was already fresh and nothing ran.
+    `"model-changed"`, `"schema-changed"`, `"missing-database"`, `"missing-pages"`,
+    `"forced"`, `"empty-bundle"`, or `None` when the index was already fresh
+    and nothing ran.
     """
 
     rebuilt: bool
@@ -484,9 +485,9 @@ def _embed_pages(
 def _staleness(cache_dir: Path, *, page_hashes: Mapping[str, str], signature: str) -> str | None:
     """Why the index must be rebuilt, or `None` when it is already fresh.
 
-    Three fields, all three compared, nothing else. A field written but never
-    read is a field that can drift silently, which is the class of bug this
-    replaces.
+    Compare all three manifest fields, then require an available embedding
+    table. Probe metadata read-only so checking freshness cannot create a
+    missing database or disturb the shared lexical tables.
     """
     manifest = _read_manifest(cache_dir)
     if manifest is None:
@@ -497,16 +498,29 @@ def _staleness(cache_dir: Path, *, page_hashes: Mapping[str, str], signature: st
         return "model-changed"
     if manifest.corpus_fingerprint != _corpus_fingerprint(page_hashes):
         return "corpus-changed"
+    db_path = _search_db(cache_dir)
+    if not db_path.exists():
+        return "missing-database"
+    uri = db_path.resolve().as_uri()
+    if not uri.startswith("file:///"):
+        # Keep UNC's //server/share in the filename, not the URI authority:
+        # standard SQLite rejects non-local authorities without an extension.
+        uri = uri.replace("file://", "file:////", 1)
+    conn = sqlite3.connect(uri + "?mode=ro", uri=True)
+    try:
+        if conn.execute("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'pages'").fetchone() is None:
+            return "missing-pages"
+    finally:
+        conn.close()
     return None
 
 
 def refresh_index(bundle: Bundle, cache_dir: Path, *, embedder: Embedder) -> IndexRefresh:
     """Make the index match *bundle*. Idempotent; rebuilds only when it must.
 
-    Freshness is a property of the content the index was derived from, not of
-    the files it was written to. The existence check this replaces was a
-    one-bit, monotone predicate: it flipped false→true once per workspace and
-    never back, which is why a deleted page kept being retrieved.
+    Freshness requires matching content, model and schema metadata plus an
+    available embedding table. A surviving manifest cannot vouch for a
+    database or table that has disappeared.
     """
     pages, read_text = _bundle_pages(bundle)
     return _refresh_embeddings(pages, read_text, cache_dir, embedder=embedder)

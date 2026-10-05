@@ -214,6 +214,7 @@ def resolve_item_repo(
     *,
     repo_name: str | None = None,
     fallback: RepoFallback | None = None,
+    repositories: Mapping[str, Path] | None = None,
 ) -> ItemRepo:
     """The code repository *item* lives in.
 
@@ -230,43 +231,59 @@ def resolve_item_repo(
 
     Every refusal is a `WorkspaceError` naming the item. A malformed `repo:`
     is walked past as absent and reported in `note`.
+    `repositories` replaces manifest resolution at every selection rung when
+    the caller has already resolved effective checkout roots.
     """
     label = item.path if item is not None else "<unknown item>"
     declared_name, setter = declared_repo(item, items) if item is not None else (None, None)
     note = _malformed_note(item, items, setter) if item is not None else None
     if declared_name is not None:
-        repositories = declared_repositories(layout)
-        if declared_name not in repositories:
+        by_name = declared_repositories(layout) if repositories is None else repositories
+        if declared_name not in by_name:
             raise WorkspaceError(
                 f"{label}: repo {declared_name!r} (set by {setter}) names no declared repository "
-                f"in {layout.manifest_path}; declared: {_declared_listing(repositories)}"
+                f"in {layout.manifest_path}; declared: {_declared_listing(by_name)}"
             )
         if repo_name is not None and repo_name != declared_name:
             raise WorkspaceError(
                 f"{label}: --repo-name {repo_name!r} conflicts with repo {declared_name!r} set by {setter}"
             )
-        return ItemRepo(declared_name, repositories[declared_name], "frontmatter", note)
+        return ItemRepo(declared_name, by_name[declared_name], "frontmatter", note)
     if repo_name is not None:
         try:
-            path, _ = resolve_repo(layout, repo_name=repo_name)
+            if repositories is None:
+                path, _ = resolve_repo(layout, repo_name=repo_name)
+            else:
+                if repo_name not in repositories:
+                    raise WorkspaceError(
+                        f"{layout.manifest_path}: repo_name {repo_name!r} names no declared repository; "
+                        f"declared: {_declared_listing(repositories)}"
+                    )
+                path = repositories[repo_name]
         except WorkspaceError as exc:
             raise WorkspaceError(f"{label}: {exc}") from exc
         return ItemRepo(repo_name, path, "flag", note)
     if fallback is not None:
         chosen = fallback()
         return replace(chosen, note=_join(note, chosen.note))
-    repositories = declared_repositories(layout)
-    if len(repositories) > 1:
+    by_name = declared_repositories(layout) if repositories is None else repositories
+    if len(by_name) > 1:
         raise WorkspaceError(
             _join(
-                f"{label}: {layout.manifest_path} declares {len(repositories)} repositories "
-                f"({_declared_listing(repositories)}) and {label} sets no repo:; add `repo: <name>` to it or an "
+                f"{label}: {layout.manifest_path} declares {len(by_name)} repositories "
+                f"({_declared_listing(by_name)}) and {label} sets no repo:; add `repo: <name>` to it or an "
                 "ancestor, or pass repo_name= (--repo-name) to choose one",
                 note,
             )
         )
-    path, strict_note = resolve_repo(layout)
-    return ItemRepo(next(iter(repositories), None), path, "sole", _join(note, strict_note))
+    if repositories is None:
+        path, strict_note = resolve_repo(layout)
+    else:
+        path = next(iter(repositories.values()), None)
+        strict_note = (
+            None if repositories else f"{layout.manifest_path}: declares no repositories, so no code repo was resolved"
+        )
+    return ItemRepo(next(iter(by_name), None), path, "sole", _join(note, strict_note))
 
 
 __all__ = [

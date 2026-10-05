@@ -37,7 +37,7 @@ from graph_works_core.workspace.config import load_workspace_config
 from graph_works_core.workspace.dispatch_config import run_dispatch_rules
 from graph_works_core.workspace.errors import QueryError, WorkspaceError
 from graph_works_core.workspace.layout import WorkspaceLayout
-from graph_works_core.workspace.repos import resolve_repos
+from graph_works_core.workspace.lint_repos import lint_repositories
 from graph_works_core.workspace.schema_read import run_schema_read
 from graph_works_wire import agent_config as wire_agent_config
 from graph_works_wire import code as wire_code
@@ -517,7 +517,7 @@ def _wiki_lint(context: ServeContext, _args: Mapping[str, object]) -> Reply:
     def run() -> Reply:
         layout = context.layout()
         report = run_mechanical(
-            layout, load_workspace_config(layout), today=mutations.now().date(), repo_roots=resolve_repos(layout)
+            layout, load_workspace_config(layout), today=mutations.now().date(), repositories=lint_repositories(layout)
         )
         return Reply(200, wire_wiki.wiki_lint_payload(report))
 

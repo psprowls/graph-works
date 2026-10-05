@@ -6,12 +6,18 @@ regenerated golden honest."""
 from __future__ import annotations
 
 from dataclasses import replace
-from datetime import date
+from datetime import UTC, date, datetime
 
 import pytest
 from code_wiki_okf.config import load_config
 from graph_works_core import apply_init, plan_init
+from graph_works_core.lint_drift.lanes import compose_lanes
 from graph_works_core.lint_drift.lint import LaneReport, LintReport, run_mechanical
+from graph_works_core.work import commands as work
+from graph_works_core.workspace.discovery import resolve
+from graph_works_core.workspace.lint_repos import LintRepositories, lint_repositories
+from graph_works_core.workspace.provenance import probe_git
+from graph_works_core.workspace.repos import resolve_repos
 from okf_ext.tags import VOCABULARY_FILENAME
 from okf_io import Document, load_bundle
 
@@ -1015,3 +1021,148 @@ async def test_page_parser_errors_alone_fail_an_otherwise_clean_lint(workspace, 
         assert len(report.errors) == 1 and "unknown page" in report.errors[0]
         assert all(f.page is None and f.message == f"{head}: concern" for f in report.semantic)
     assert report.ok is ok
+
+
+def _git(cwd, *args):
+    out = probe_git(cwd, *args)
+    assert out.returncode == 0, out.stderr or out.cause
+
+
+def _primary_with_linked(tmp_path):
+    primary_root = tmp_path / "primary"
+    primary_root.mkdir()
+    _git(primary_root, "init", "-q", "-b", "main")
+    primary = apply_init(plan_init(primary_root, today=TODAY, topic="Work")).layout
+    primary.manifest_path.write_text(
+        "version: 1\nworkflow:\n  dispatch_rules: dispatch.yaml\n"
+        "repositories:\n  gw:\n    path: okf/repositories/gw/references/git\n"
+        "    checkout: .gw/worktrees/gw/main\n",
+        encoding="utf-8",
+        newline="\n",
+    )
+    (primary_root / ".gitignore").write_text(
+        "/.gw/worktrees/\n/okf/repositories/gw/references/git/\n", encoding="utf-8", newline="\n"
+    )
+    (primary.config_dir / ".gitignore").write_text("/worktrees/\n", encoding="utf-8", newline="\n")
+    checkout = primary_root / ".gw/worktrees/gw/main"
+    (checkout / "packages/a").mkdir(parents=True)
+    _git(primary_root, "add", "-A")
+    _git(primary_root, "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "init")
+    linked_root = tmp_path / "linked"
+    _git(primary_root, "worktree", "add", "-q", "-b", "epic/x", str(linked_root))
+    linked = resolve(workspace=linked_root, environ={})
+    assert (linked.config_dir / "schema/Feature.schema.json").is_file()
+    assert (linked.config_dir / "sections").is_dir()
+    return primary, linked, checkout
+
+
+def _layout_config(layout):
+    return load_config(
+        layout.bundle_dir,
+        config_path=layout.manifest_path,
+        graph_dir=layout.cache_dir,
+        declarations_dir=layout.config_dir,
+    )
+
+
+def _repo_item(layout, name="gw", target="packages/a"):
+    page = layout.bundle_dir / "work/feature-a.md"
+    page.parent.mkdir(parents=True, exist_ok=True)
+    page.write_text(
+        "---\ntype: Feature\ntitle: A\ndescription: d\nstatus: stable\nwork_status: open\n"
+        f"repo: {name}\nphase: execute\neffort: medium\nopened: 2026-08-01\nupdated: 2026-08-01\n"
+        f"affects: [{target}]\n---\n",
+        encoding="utf-8",
+        newline="\n",
+    )
+
+
+@pytest.mark.parametrize("target, missing", [("packages/a", False), ("packages/nope", True)])
+def test_run_mechanical_work_lane_uses_effective_roots(tmp_path, target, missing):
+    primary, linked, _checkout = _primary_with_linked(tmp_path)
+    lane_findings = []
+    for layout in (primary, linked):
+        _repo_item(layout, target=target)
+        config = _layout_config(layout)
+        repositories = lint_repositories(layout)
+        report = run_mechanical(layout, config, today=TODAY, repositories=repositories)
+        work_lane = next(lane.report for lane in report.mechanical if lane.name == "work")
+        findings = work_lane.by_code("targets.affects-missing")
+        assert [f.path for f in findings] == (["work/feature-a.md"] if missing else [])
+        standalone = work.run_lint(layout, config, today=TODAY, repositories=repositories)
+        assert findings == standalone.by_code("targets.affects-missing")
+        lane_findings.append(work_lane.findings)
+    assert lane_findings[0] == lane_findings[1]
+    legacy = run_mechanical(linked, _layout_config(linked), today=TODAY, repo_roots=resolve_repos(linked))
+    assert "targets.affects-missing" in _codes(legacy)
+
+
+def test_run_mechanical_undeclared_repo_is_a_lane_error(tmp_path):
+    _primary, linked, _checkout = _primary_with_linked(tmp_path)
+    _repo_item(linked, name="ghost")
+    page = linked.bundle_dir / "concepts/loose.md"
+    page.parent.mkdir(parents=True, exist_ok=True)
+    page.write_text("---\ntype: NotADeclaredType\ntitle: Loose\n---\n", encoding="utf-8", newline="\n")
+    report = run_mechanical(linked, _layout_config(linked), today=TODAY, repositories=lint_repositories(linked))
+    assert any(error.startswith("work lane:") and "ghost" in error for error in report.errors)
+    assert [lane.name for lane in report.mechanical] == ["wiki"]
+    assert "schemas.no-schema-for-type" in _codes(report)
+    assert not report.ok
+
+
+@pytest.mark.parametrize("argument", ["repo_root", "repo_roots"])
+@pytest.mark.parametrize("entrypoint", ["compose_lanes", "run_mechanical", "run_lint"])
+async def test_rejects_both_root_forms(workspace, argument, entrypoint):
+    layout = workspace.layout
+    config = _layout_config(layout)
+    value = layout.root if argument == "repo_root" else (layout.root,)
+    kwargs = {"repositories": LintRepositories({}), argument: value}
+    # Refuse conflicting arguments even when schema inspection would stop lint.
+    (layout.config_dir / "schema/Feature.schema.json").unlink()
+    with pytest.raises(ValueError, match="pass repositories="):
+        if entrypoint == "compose_lanes":
+            compose_lanes(layout, config, at=datetime.combine(TODAY, datetime.min.time(), tzinfo=UTC), **kwargs)
+        elif entrypoint == "run_mechanical":
+            run_mechanical(layout, config, today=TODAY, **kwargs)
+        else:
+            await run_lint(layout, config, today=TODAY, **kwargs)
+
+
+def test_run_mechanical_repository_map_keeps_item_roots_separate(workspace, tmp_path):
+    one, two = tmp_path / "one", tmp_path / "two"
+    (one / "packages/a").mkdir(parents=True)
+    two.mkdir()
+    layout = workspace.layout
+    _repo_item(layout, name="two")
+    report = run_mechanical(
+        layout, _layout_config(layout), today=TODAY, repositories=LintRepositories({"one": one, "two": two})
+    )
+    work_lane = next(lane.report for lane in report.mechanical if lane.name == "work")
+    assert [f.path for f in work_lane.by_code("targets.affects-missing")] == ["work/feature-a.md"]
+
+
+def test_run_mechanical_wiki_constrains_uses_effective_roots(tmp_path):
+    _primary, linked, _checkout = _primary_with_linked(tmp_path)
+    page = linked.bundle_dir / "adrs/2026-08-01-kept.md"
+    page.parent.mkdir(parents=True, exist_ok=True)
+    page.write_text(
+        "---\ntype: Adr\ntitle: Kept\ndescription: d\ndecision_date: 2026-08-01\nabout: [repo:acme/demo]\n"
+        "decisions:\n  - id: D1\n    claim: Keep it.\n    constrains: [packages/a]\n---\n",
+        encoding="utf-8",
+        newline="\n",
+    )
+    config = _layout_config(linked)
+    legacy = run_mechanical(linked, config, today=TODAY, repo_roots=resolve_repos(linked))
+    assert "claims.constrains-missing" in _codes(legacy)
+    report = run_mechanical(linked, config, today=TODAY, repositories=lint_repositories(linked))
+    assert "claims.constrains-missing" not in _codes(report)
+
+
+async def test_run_lint_threads_effective_roots_to_mechanical_pass(tmp_path, monkeypatch):
+    _primary, linked, _checkout = _primary_with_linked(tmp_path)
+    _repo_item(linked)
+    monkeypatch.setattr(lint_module, "role_binding", lambda *a, **k: _bind(_FakeLLM("No issues")))
+    report = await run_lint(linked, _layout_config(linked), today=TODAY, repositories=lint_repositories(linked))
+    assert [lane.name for lane in report.mechanical] == ["wiki", "work"]
+    assert "targets.affects-missing" not in _codes(report)
+    assert report.errors == ()

@@ -275,6 +275,31 @@ def test_refresh_on_an_unchanged_bundle_does_not_rebuild(tmp_path):
     assert embedder.calls == []
 
 
+@pytest.mark.parametrize("loss", ["database", "table"])
+def test_bundle_retrieval_recovers_lost_embedding_store(tmp_path, loss):
+    layout = _layout(tmp_path)
+    bundle = load_bundle(_bundle_dir(tmp_path))
+    q.refresh_index(bundle, layout.cache_dir, embedder=FakeEmbedder())
+    db = q._search_db(layout.cache_dir)
+    if loss == "database":
+        db.unlink()
+    else:
+        with sqlite3.connect(db) as conn:
+            conn.execute("DROP TABLE pages")
+
+    embedder = FakeEmbedder()
+    brief = q.plan_query_brief("token refresh", layout, bundle=bundle, embedder=embedder, top_k=3)
+    assert brief.retrieval == "hybrid"
+    assert brief.warnings == ()
+    assert set(embedder.calls[:-1]) == {doc.raw_text for doc in bundle.concepts.values()}
+    assert len(embedder.calls) == 3
+    assert embedder.calls[-1] == "token refresh"
+    assert _rows(layout) == {"concepts/auth", "concepts/storage"}
+    embedder.calls.clear()
+    assert q.plan_query_brief("token refresh", layout, bundle=bundle, embedder=embedder, top_k=3) == brief
+    assert embedder.calls == ["token refresh"]
+
+
 def test_refresh_rebuilds_when_a_concept_is_added_or_removed(tmp_path):
     layout = _layout(tmp_path)
     root = _bundle_dir(tmp_path)

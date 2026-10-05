@@ -70,6 +70,7 @@ from graph_works_core.workspace.commits import (
 )
 from graph_works_core.workspace.dispatch_config import load_dispatch_config
 from graph_works_core.workspace.layout import WorkspaceLayout
+from graph_works_core.workspace.work_schemas import declarations_dir_for
 
 _HELD_BUNDLE_LOCKS: ContextVar[frozenset[str]] = ContextVar("_HELD_BUNDLE_LOCKS", default=frozenset())
 
@@ -2256,7 +2257,7 @@ def _extra_rules(
     loads and validates its dispatch definition.
     """
     validation_root = layout.bundle_dir
-    declarations_dir = layout.config_dir if (layout.config_dir / "schema").is_dir() else validation_root
+    declarations_dir = declarations_dir_for(layout)
     roots = repo_roots if repo_root is None else (repo_root, *repo_roots)
     if not roots and layout.repo_root is not None:
         roots = (layout.repo_root,)

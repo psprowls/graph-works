@@ -22,9 +22,16 @@ from graph_works_core.workspace.dispatch_projection import mutate_workspace_conf
 from graph_works_core.workspace.errors import WorkspaceError
 from graph_works_core.workspace.layout import WorkspaceLayout
 from graph_works_core.workspace.manifest import workspace_store
+from graph_works_core.workspace.work_schemas import SchemaRefreshStale, apply_schema_refresh, plan_schema_refresh
 
 from graph_works_cli import exit_codes
-from graph_works_cli.config_cli.rendering import render_hooks, render_projection, render_resolved, render_resolved_list
+from graph_works_cli.config_cli.rendering import (
+    render_hooks,
+    render_projection,
+    render_resolved,
+    render_resolved_list,
+    render_schema_refresh,
+)
 from graph_works_cli.errors import exit_error
 from graph_works_cli.workspace_resolution import resolve_workspace
 
@@ -40,6 +47,13 @@ _WORKSPACE_OPTION = typer.Option(
     help="Workspace path (default: GRAPH_WORKS_DIR, then cwd discovery).",
 )
 _JSON_OPTION = typer.Option(False, "--json", help="Emit machine-readable JSON.")
+_SCHEMAS_OPTION = typer.Option(
+    False, "--schemas", help="Preview refreshing installed work-lane schemas from the package."
+)
+_APPLY_OPTION = typer.Option(False, "--apply", help="With --schemas: apply the previewed refresh.")
+_FORCE_OPTION = typer.Option(
+    False, "--force", help="With --schemas: also replace edited or unrecorded copies (review the preview first)."
+)
 _REPO_OPTION = typer.Option(
     "",
     "--repo",
@@ -201,8 +215,16 @@ def unset_cmd(
 def sync(
     workspace: str = _WORKSPACE_OPTION,
     json_output: bool = _JSON_OPTION,
+    schemas: bool = _SCHEMAS_OPTION,
+    apply: bool = _APPLY_OPTION,
+    force: bool = _FORCE_OPTION,
 ) -> None:
     """Regenerate `.gw/cache/config.json` after an out-of-band manifest edit."""
+    if (apply or force) and not schemas:
+        raise typer.BadParameter("--apply and --force require --schemas")
+    if schemas:
+        _sync_schemas(workspace, apply=apply, force=force, json_output=json_output)
+        return
     try:
         target = write_dispatch_projection(_layout(workspace))
     except RegistryError as exc:
@@ -210,3 +232,21 @@ def sync(
     except (StoreValidationError, WorkspaceError) as exc:
         exit_error(str(exc), code=exit_codes.SCHEMA_MISMATCH, cause=exc)
     typer.echo(render_projection(target, json_output=json_output))
+
+
+def _sync_schemas(workspace: str, *, apply: bool, force: bool, json_output: bool) -> None:
+    layout = _layout(workspace)
+    plan = plan_schema_refresh(layout, force=force)
+    result = None
+    if apply and plan.ok and plan.changed:
+        try:
+            result = apply_schema_refresh(plan)
+        except SchemaRefreshStale as exc:
+            exit_error(str(exc), code=exit_codes.STALE, cause=exc)
+        except WorkspaceError as exc:
+            exit_error(str(exc), code=exit_codes.SCHEMA_MISMATCH, cause=exc)
+        except OSError as exc:
+            exit_error("\n".join((str(exc), *getattr(exc, "__notes__", ()))), cause=exc)
+    typer.echo(render_schema_refresh(plan, result, json_output=json_output))
+    if not plan.ok:
+        raise typer.Exit(exit_codes.SCHEMA_MISMATCH)

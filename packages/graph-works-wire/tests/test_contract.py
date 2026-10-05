@@ -45,6 +45,7 @@ EXPECTED: set[str] = {
     "config.resolved_payload",
     "config.rule_payload",
     "config.schema_read_payload",
+    "config.schema_refresh_payload",
     "util.line_endings_payload",
     "util.log_read_payload",
     "util.log_payload",
@@ -240,4 +241,18 @@ def test_repo_adopt_payload_shape() -> None:
             "reason": None,
         },
         "warnings": [],
+    }
+
+
+def test_schema_refresh_payload_shape() -> None:
+    assert SAMPLES["config.schema_refresh_payload"][2]() == {
+        "declarations_dir": "/ws/.gw",
+        "applied": True,
+        "force": False,
+        "writes": [{"path": "schema/A.schema.json", "diff": "+{}", "created": True}],
+        "refusals": [{"path": "schema/B.schema.json", "reason": "edited", "detail": "d", "diff": "-x"}],
+        "skipped": ["schema/C.schema.json"],
+        "provenance": True,
+        "written": ["a"],
+        "commit": {"status": "committed", "sha": "1" * 40, "reason": None},
     }

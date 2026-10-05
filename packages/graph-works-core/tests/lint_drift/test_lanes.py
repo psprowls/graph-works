@@ -11,6 +11,7 @@ import work_tracker_okf
 from code_wiki_okf.config import load_config
 from graph_works_core import apply_init, plan_init
 from graph_works_core.lint_drift.lanes import LaneSet, compose_lanes
+from graph_works_core.workspace.bundle import load_bundle_at
 from okf_ext.bundle import SCHEMA_DIRNAME, SECTIONS_DIRNAME
 from okf_ext.tags import VOCABULARY_FILENAME
 from okf_io import Bundle, RuleContext, build_link_graph, load_bundle, validate
@@ -195,6 +196,35 @@ def test_the_wiki_lane_accepts_canonical_nested_code_wiki_placement(workspace):
     report = validate(load_bundle(wiki.root, ignore=wiki.ignore), today=TODAY, extra_rules=wiki.rules)
 
     assert not any(finding.code == "placement.directory-mismatch" for finding in report.findings)
+
+
+def test_the_wiki_lane_resolves_a_mirrored_file_under_references(workspace):
+    root = workspace.layout.bundle_dir
+    member = "code-graph/graph-works/file-system/plugins/gw/skills/demo/references/example.md"
+    uri = "file:graph-works:plugins/gw/skills/demo/references/example.md"
+    page = root / member
+    page.parent.mkdir(parents=True)
+    page.write_text(
+        f"---\ntype: File\ntitle: Example\ndescription: A reference file.\nresource: {uri}\n---\n\nBody.\n",
+        encoding="utf-8",
+        newline="",
+    )
+    for name, target in (("present", uri), ("missing", uri.replace("example.md", "missing.md"))):
+        curated = root / "docs" / "explanations" / f"{name}.md"
+        curated.parent.mkdir(parents=True, exist_ok=True)
+        curated.write_text(
+            f"---\ntype: Explanation\ntitle: {name}\ndescription: A reference.\n"
+            f"status: draft\nabout: [{target}]\n---\n\nBody.\n",
+            encoding="utf-8",
+            newline="",
+        )
+    wiki, _work = _compose(workspace).lanes
+    bundle = load_bundle_at(wiki.root, ignore=wiki.ignore, prune=wiki.prune)
+    report = validate(bundle, today=TODAY, extra_rules=wiki.rules)
+    assert [(f.path, f.severity) for f in report.by_code("about.unresolved")] == [
+        ("docs/explanations/missing.md", "error")
+    ]
+    assert member.removesuffix(".md") in bundle.concepts
 
 
 def test_the_wiki_lane_reports_an_unresolved_source_path(workspace):

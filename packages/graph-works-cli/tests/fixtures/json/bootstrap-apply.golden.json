@@ -26,6 +26,7 @@
     "AGENTS.md",
     "CLAUDE.md",
     "cache/config.json",
+    ".gw/schema/work-tracker-okf.provenance.json",
     "index.md",
     "log.md",
     "tags.yaml",

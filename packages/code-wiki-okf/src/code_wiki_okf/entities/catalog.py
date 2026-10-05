@@ -268,13 +268,19 @@ def _required_catalogs(
         )
 
         entities = entities_directory(repository)
-        headings[entities] = tuple(heading for heading, _type_name in _ENTITY_GROUPS)
+        entity_directories = tuple(lane_directory(repository, type_name) for type_name in _REPOSITORY_LANE_TYPES)
+        if dependency_items or dependency_lane in retained_directories:
+            entity_directories += (dependency_lane,)
+        headings[entities] = (*(heading for heading, _type_name in _ENTITY_GROUPS), "Directories")
         index_renders[entities] = Render(
             sections={
-                heading: _section_body(
-                    ecosystem_entries if type_name == "Dependency" else _entries_of(items, type_name)
-                )
-                for heading, type_name in _ENTITY_GROUPS
+                **{
+                    heading: _section_body(
+                        ecosystem_entries if type_name == "Dependency" else _entries_of(items, type_name)
+                    )
+                    for heading, type_name in _ENTITY_GROUPS
+                },
+                "Directories": _section_body(tuple(_index_entry(directory) for directory in entity_directories)),
             }
         )
         for type_name in _REPOSITORY_LANE_TYPES:

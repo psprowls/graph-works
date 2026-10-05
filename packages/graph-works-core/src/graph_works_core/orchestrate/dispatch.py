@@ -23,6 +23,7 @@ from subagents_io.backend import BackendError
 from work_tracker_okf.pipeline import code_phases
 from work_tracker_okf.placement import ReaderObservation
 
+from graph_works_core.orchestrate import delivery
 from graph_works_core.orchestrate import dispatch_record as dr
 from graph_works_core.orchestrate.orca_port import OrcaPort
 from graph_works_core.orchestrate.placement import PlacementRecord, run_record_placement, run_record_reader
@@ -55,6 +56,8 @@ FAILURE_REASONS: frozenset[str] = frozenset(
     }
 )
 PROBE_OUTCOMES = ("submitted-heartbeat", "submitted-transcript", "nudged", "inconclusive", "no-terminal", "skipped")
+DELIVERY_READ_LIMIT = 200
+DELIVERY_READS = 3
 #: `pin-detached` is the planner's reader placement (`commands.READER_ACTION`): a
 #: dedicated checkout detached at the planned `start_sha`, never a shared one.
 READER_ACTION = "pin-detached"
@@ -101,6 +104,7 @@ class DispatchResult:
     placement: ObservedPlacement | None = None
     recorded: str | None = None
     probe: str | None = None
+    delivery: str | None = None
     record_path: str | None = None
     failure: DispatchFailure | None = None
 
@@ -274,6 +278,17 @@ def _shape(
             raise dr.DispatchRecordError(f"{label}.{name}: invalid value")
 
 
+def _valid_receipt(value: object) -> bool:
+    return (
+        isinstance(value, Mapping)
+        and set(value) == {"version", "token"}
+        and type(value["version"]) is int
+        and value["version"] == delivery.RECEIPT_VERSION
+        and isinstance(value["token"], str)
+        and re.fullmatch(r"[0-9a-f]{16}", value["token"]) is not None
+    )
+
+
 def _validate_persisted(a: dr.Attempt, key: str) -> None:
     """Check dispatch-owned shapes before any restore, lookup or resumed effect.
 
@@ -349,6 +364,10 @@ def _validate_persisted(a: dr.Attempt, key: str) -> None:
             optional = {"warning": _string}
         elif name == "settle":
             optional = {"start_sha": _nullable_string}
+        elif name == "encode":
+            optional = {"receipt": _valid_receipt}
+        elif name == "probe":
+            optional = {"delivery": lambda v: v in delivery.DELIVERY_OUTCOMES}
         _shape(state.result, f"{name}.result", schema, optional)
         settled = state.result
         if name == "settle" and settled is not None:
@@ -405,6 +424,10 @@ def _restore(c: _Dispatch) -> None:
         placement=placement,
         recorded=recorded.get("recorded", "skipped:read-only-descendant" if record_step.state == "skipped" else None),
         probe=probed.get("probe", "skipped" if probe_step.state == "skipped" else None),
+        delivery=probed.get(
+            "delivery",
+            "skipped" if probe_step.state == "skipped" else ("unverified" if probe_step.state == "done" else None),
+        ),
     )
 
 
@@ -441,6 +464,8 @@ def _resolve(c: _Dispatch) -> bool:
     if titled:
         if a is not None and a.task_id == titled[0]["id"]:
             _restore(c)
+        else:
+            c.result = replace(c.result, delivery="unverified")
         c.result = replace(c.result, status="existing", task_id=titled[0]["id"], display_name=titled[0]["display_name"])
     return False
 
@@ -689,14 +714,22 @@ def _encode(c: _Dispatch, placed: dict[str, Any], profile: tuple[str, str | None
     return envelope
 
 
+def _receipt(a: dr.Attempt) -> str | None:
+    encoded = a.steps.get("encode", dr.StepState("attempted")).result or {}
+    receipt = encoded.get("receipt")
+    token = receipt.get("token") if isinstance(receipt, Mapping) else None
+    return token if isinstance(token, str) else None
+
+
 def _create(c: _Dispatch) -> None:
     a = c.attempt
-    spec = (
-        "GW_LAUNCH_V1 "
-        + json.dumps(dict(a.envelope), ensure_ascii=False, separators=(",", ":"))
-        + "\n"
-        + c.item["prompt"]
-    )
+    prompt = c.item["prompt"]
+    token = _receipt(a)
+    if token is not None:
+        if delivery.receipt_token(c.result.key, prompt) != token:
+            raise _Stop("recovery-inspection", "planned brief changed since the delivery receipt was encoded")
+        prompt = prompt.rstrip("\n") + "\n\n" + delivery.receipt_instruction(c.result.key, token) + "\n"
+    spec = "GW_LAUNCH_V1 " + json.dumps(dict(a.envelope), ensure_ascii=False, separators=(",", ":")) + "\n" + prompt
     task_id = c.port.task_create(c.result.run_id, spec=spec, title=c.result.key, display_name=a.display_name)
     c.result = replace(c.result, task_id=task_id)
     c.mark("done", result={"task_id": task_id}, task_id=task_id)
@@ -956,12 +989,55 @@ def _attend(c: _Dispatch) -> None:
     c.mark("done", result=warning)
 
 
+def _delivery(c: _Dispatch, sleep: Callable[[float], None], seconds: float, *, reads: int) -> str:
+    token = _receipt(c.attempt)
+    if token is None or c.result.task_id is None or c.result.dispatch_id is None:
+        return "unverified"
+    expected = delivery.expected_line(
+        task_id=c.result.task_id, dispatch_id=c.result.dispatch_id, key=c.result.key, token=token
+    )
+    outcome = "inconclusive"
+    for attempt in range(reads):
+        if attempt:
+            sleep(seconds)
+        try:
+            outcome = delivery.assess(c.port.worker_read(c.result.dispatch_id, limit=DELIVERY_READ_LIMIT), expected)
+        except BackendError:
+            return "inconclusive"
+        if outcome != "unverified":
+            return outcome
+    return outcome
+
+
+def _recheck_delivery(c: _Dispatch) -> None:
+    """Upgrade only the exact completed attempt; never downgrade or launch."""
+    if (
+        not c.journal.attempts
+        or c.result.task_id is None
+        or c.attempt.task_id != c.result.task_id
+        or c.result.dispatch_id is None
+        or c.attempt.dispatch_id != c.result.dispatch_id
+        or not c.attempt.complete
+    ):
+        return
+    probe_step = c.attempt.steps.get("probe")
+    if probe_step is None or probe_step.state != "done" or c.result.delivery == "verified":
+        return
+    if _delivery(c, lambda _s: None, 0.0, reads=1) == "verified":
+        c.step = "probe"
+        c.mark("done", result={**(probe_step.result or {}), "delivery": "verified"})
+        c.result = replace(c.result, delivery="verified")
+
+
 def _probe(c: _Dispatch, enabled: bool, seconds: float, sleep: Callable[[float], None]) -> None:
     def finish(outcome: str) -> None:
-        c.result = replace(c.result, probe=outcome)
+        delivered = (
+            outcome if outcome in ("skipped", "inconclusive") else _delivery(c, sleep, seconds, reads=DELIVERY_READS)
+        )
+        c.result = replace(c.result, probe=outcome, delivery=delivered)
         c.mark(
             "skipped" if outcome == "skipped" else "done",
-            result={"probe": outcome},
+            result={"probe": outcome, "delivery": delivered},
             reason="probe-disabled" if outcome == "skipped" else None,
         )
 
@@ -1032,6 +1108,8 @@ def run_dispatch(
                 raise _Stop("recovery-inspection", "execute return is pending; inspect or resume before dispatch")
             resuming = _resolve(c)
             if c.result.status == "existing":
+                if probe:
+                    _recheck_delivery(c)
                 return c.result
             if not resuming:
                 # Reject overrides before *any* placement write or provisioning.
@@ -1044,6 +1122,10 @@ def run_dispatch(
                 at = clock().isoformat()
                 steps = {name: dr.StepState("done", at=at) for name in ("validate", "place", "encode")}
                 steps["place"] = dr.StepState("done", at=at, result={"notes": list(notes)})
+                token = delivery.receipt_token(c.result.key, c.item["prompt"])
+                steps["encode"] = dr.StepState(
+                    "done", at=at, result={"receipt": {"version": delivery.RECEIPT_VERSION, "token": token}}
+                )
                 steps["create"] = dr.StepState("attempted", at=at)
                 attempt = dr.Attempt(None, None, c.result.display_name or "", envelope, placed, steps)
                 c.save(c.journal.with_attempt(attempt))

@@ -63,9 +63,17 @@ class OrcaWorkerShow(TypedDict):
     last_heartbeat_at: str | None
 
 
+class OrcaTranscriptText(TypedDict):
+    role: str | None
+    text: str
+
+
 class OrcaRead(TypedDict):
     source: str | None
     message_count: int
+    source_exact: bool
+    window_complete: bool
+    messages: list[OrcaTranscriptText]
 
 
 class OrcaPendingQuestion(TypedDict):

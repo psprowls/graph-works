@@ -1131,6 +1131,8 @@ dispatched <key> -> <observed path> detached at <start_sha>
 `probe: inconclusive` can mean either the heartbeat read or transcript read
 failed. Run the manual probe below; the result alone never authorizes Enter.
 
+`delivery` is separate from `probe`. `verified` means this attempt's worker echoed its receipt line (task, dispatch, key and the token from the end of its frozen brief) in assistant text. `unverified` means no matching receipt was seen in a complete transcript window, including a worker that asked for its brief, a heartbeat-only worker, or a legacy attempt without a token; `inconclusive` means the read could not prove absence (terminal source, clipped window, failed read). A new attempt with `--no-probe` reports `skipped`; an existing dispatch invoked with `--no-probe` skips the transcript re-read and preserves its prior journal observation. None of these authorizes Enter, a re-paste, a replacement dispatch or cleanup: report `delivery unverified for <key> (<dispatch_id>)` and follow the missing-receipt runbook in `references/dispatch-checks.md`. For a completed, previously probed attempt with a persisted token and `unverified` or `inconclusive` delivery, re-running the same `gw work dispatch <key>` with probing enabled reads the transcript once and can upgrade a later matching receipt to `verified` without launching anything. An originally skipped probe, a tokenless legacy attempt, or an already verified observation keeps its recorded facts and is not re-read.
+
 ### Manual ordered probe (timeout or inconclusive)
 
 For the affected dispatch, allow a short settle interval after launch and run

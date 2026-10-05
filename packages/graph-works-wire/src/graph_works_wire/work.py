@@ -287,6 +287,7 @@ def dispatch_payload(resolution: DispatchResolution | DispatchResult) -> dict[st
             "placement": None if placement is None else _observed_placement(placement),
             "recorded": resolution.recorded,
             "probe": resolution.probe,
+            "delivery": resolution.delivery,
             "record_path": resolution.record_path,
             "failure": _dispatch_failure(resolution.failure),
         }

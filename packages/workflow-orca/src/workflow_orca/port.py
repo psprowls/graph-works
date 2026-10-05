@@ -35,6 +35,7 @@ __all__ = [
     "OrcaRepo",
     "OrcaStart",
     "OrcaTask",
+    "OrcaTranscriptText",
     "OrcaWorker",
     "OrcaWorkerShow",
     "OrcaWorktree",
@@ -90,9 +91,17 @@ class OrcaWorkerShow(TypedDict):
     last_heartbeat_at: str | None
 
 
+class OrcaTranscriptText(TypedDict):
+    role: str | None
+    text: str
+
+
 class OrcaRead(TypedDict):
     source: str | None
     message_count: int
+    source_exact: bool
+    window_complete: bool
+    messages: list[OrcaTranscriptText]
 
 
 class OrcaMessage(TypedDict):
@@ -117,6 +126,29 @@ def _object(value: object) -> dict[str, Any]:
 
 def _string(value: object) -> str | None:
     return value if isinstance(value, str) else None
+
+
+WINDOW_CLIPPING = "message_limit_or_scan_window"
+
+
+def _valid_transcript_message(message: object) -> bool:
+    if not isinstance(message, dict):
+        return False
+    role = message.get("role")
+    if role is not None and not isinstance(role, str):
+        return False
+    blocks = message.get("blocks", [])
+    return isinstance(blocks, list) and all(
+        isinstance(block, dict)
+        and isinstance(block.get("type"), str)
+        and (block["type"] != "text" or isinstance(block.get("text"), str))
+        for block in blocks
+    )
+
+
+def _message_text(message: dict[str, Any]) -> str:
+    """Project only validated text blocks; tool inputs and outputs are never evidence."""
+    return "\n".join(block["text"] for block in message.get("blocks", []) if block["type"] == "text")
 
 
 def _rows(value: object) -> list[dict[str, Any]]:
@@ -420,8 +452,8 @@ class OrcaCliPort:
         result = self._call(("worker-read", "--dispatch", dispatch_id, "--limit", str(limit)))
         transcript = _object(result.get("transcript"))
         messages = transcript.get("messages")
-        if result.get("source") == "transcript" and (
-            not isinstance(messages, list) or any(not isinstance(message, dict) for message in messages)
+        if (result.get("source") == "transcript" and not isinstance(messages, list)) or (
+            isinstance(messages, list) and any(not _valid_transcript_message(message) for message in messages)
         ):
             raise OrcaCliError(
                 ("orca", "orchestration", "worker-read", "--dispatch", dispatch_id, "--limit", str(limit), "--json"),
@@ -430,9 +462,16 @@ class OrcaCliPort:
                 message="worker-read has no complete transcript message array",
                 receipt={"ok": True, "result": result},
             )
+        listed = messages if isinstance(messages, list) else []
+        clipping = result.get("clipping")
         return {
             "source": _string(result.get("source")),
-            "message_count": len(messages) if isinstance(messages, list) else 0,
+            "message_count": len(listed),
+            "source_exact": result.get("sourceExact") is True,
+            "window_complete": isinstance(clipping, list)
+            and all(isinstance(c, str) for c in clipping)
+            and WINDOW_CLIPPING not in clipping,
+            "messages": [{"role": _string(m.get("role")), "text": _message_text(m)} for m in listed],
         }
 
     def pending_questions(self, run_id: str) -> OrcaPendingQuestions:

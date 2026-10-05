@@ -506,6 +506,7 @@ WORK: dict[str, tuple[Callable[[], object], ...]] = {
                     True,
                     ("created",),
                 ),
+                delivery="verified",
             )
         ),
         lambda: work.dispatch_payload(

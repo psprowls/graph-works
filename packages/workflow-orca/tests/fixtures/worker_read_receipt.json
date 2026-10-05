@@ -1,0 +1,24 @@
+{
+  "id": "c0ffee00-0000-4000-8000-000000000002",
+  "ok": true,
+  "result": {
+    "source": "transcript",
+    "sourceExact": true,
+    "contentComplete": false,
+    "clipping": ["transcript_payload"],
+    "transcript": {
+      "messages": [
+        {"role": "user", "blocks": [{"type": "text", "text": "…prompt…"}]},
+        {
+          "role": "assistant",
+          "blocks": [
+            {"type": "text", "text": "GW-RECEIPT v1 task=task_1 dispatch=ctx_1 key=k token=0123456789abcdef\nStarting."},
+            {"type": "tool-call", "name": "Bash", "input": {"command": "echo GW-RECEIPT v1 task=task_1 dispatch=ctx_1 key=k token=0123456789abcdef"}, "callId": "c1"}
+          ]
+        },
+        {"role": "tool", "blocks": [{"type": "tool-result", "output": "GW-RECEIPT …"}]},
+        {"role": "assistant", "blocks": []}
+      ]
+    }
+  }
+}

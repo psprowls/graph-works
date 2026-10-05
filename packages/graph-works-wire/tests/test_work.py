@@ -186,6 +186,7 @@ def test_worker_dispatch_payload_exact_success_shape() -> None:
         placement=ObservedPlacement("create", "/wt", "feature/a", "A", "repo_1", "parent_1", True, ("created",)),
         recorded="written",
         probe="submitted-heartbeat",
+        delivery="verified",
         record_path="/record.json",
     )
     payload = work.dispatch_payload(result)
@@ -202,6 +203,7 @@ def test_worker_dispatch_payload_exact_success_shape() -> None:
         "placement",
         "recorded",
         "probe",
+        "delivery",
         "record_path",
         "failure",
     }
@@ -229,6 +231,7 @@ def test_worker_dispatch_payload_exact_success_shape() -> None:
         },
         "recorded": "written",
         "probe": "submitted-heartbeat",
+        "delivery": "verified",
         "record_path": "/record.json",
         "failure": None,
     }

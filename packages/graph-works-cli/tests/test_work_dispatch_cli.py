@@ -19,9 +19,9 @@ from typer.testing import CliRunner
 from workflow_orca._launch import decode_launch_spec
 
 REPO = Path(__file__).resolve().parents[3]
-FakeOrcaPort = runpy.run_path(str(REPO / "packages/graph-works-core/tests/orchestrate/fake_orca_port.py"))[
-    "FakeOrcaPort"
-]
+_fake_port = runpy.run_path(str(REPO / "packages/graph-works-core/tests/orchestrate/fake_orca_port.py"))
+FakeOrcaPort = _fake_port["FakeOrcaPort"]
+read = _fake_port["read"]
 KEY = "gw-execute-x-1a2b"
 runner = CliRunner()
 
@@ -116,6 +116,7 @@ def test_dispatch_happy_path_emits_the_envelope(dispatch_env) -> None:
     assert result.exit_code == 0, result.output
     doc = json.loads(result.stdout)
     assert doc["status"] == "dispatched" and "error" not in doc and doc["failure"] is None
+    assert doc["delivery"] == "skipped"
 
 
 def test_dispatch_reads_saved_plan_from_stdin(dispatch_env) -> None:
@@ -160,7 +161,7 @@ def test_dispatch_step_failure_emits_one_parseable_document(dispatch_env, case: 
     elif case == "outcome-unknown":
         port.start["state"] = "outcome_unknown"
     elif case == "unsent":
-        port.reads = [{"source": "transcript", "message_count": 0}]
+        port.reads = [read()]
     elif case == "task-update-failed":
         port.fail["task_update"] = BackendError("unavailable")
     elif case == "recovery-inspection":
@@ -365,10 +366,11 @@ def test_real_adapter_incomplete_probe_never_sends_enter(dispatch_env, monkeypat
     root, plan, port = dispatch_env
     adapter = OrcaCliPort(run=lambda argv: OrcaResult(0, json.dumps({"ok": True, "result": payload}), ""))
     monkeypatch.setattr(port, method, getattr(adapter, method))
-    port.reads = [{"source": "transcript", "message_count": 0}]
+    port.reads = [read()]
     result = invoke(root, "dispatch", KEY, "--plan", str(plan), "--run", "run_1", "--settle-seconds", "0")
     assert result.exit_code == 0, result.output
     assert json.loads(result.stdout)["probe"] == "inconclusive"
+    assert json.loads(result.stdout)["delivery"] == "inconclusive"
     assert "terminal_send_enter" not in port.names()
 
 

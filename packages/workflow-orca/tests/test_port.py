@@ -384,7 +384,114 @@ def test_worker_read_counts_messages():
     assert p.worker_read("ctx", limit=5)["message_count"] == 0
     assert runner.calls[-1] == ("orca", "orchestration", "worker-read", "--dispatch", "ctx", "--limit", "5", "--json")
     p, _ = port([(("worker-read",), "worker_read_transcript")])
-    assert p.worker_read("ctx", limit=5) == {"source": "transcript", "message_count": 1}
+    assert p.worker_read("ctx", limit=5) == {
+        "source": "transcript",
+        "message_count": 1,
+        "source_exact": False,
+        "window_complete": False,
+        "messages": [{"role": "tool", "text": ""}],
+    }
+
+
+def test_worker_read_keeps_role_and_text_blocks_only():
+    p, runner = port([(("worker-read",), "worker_read_receipt")])
+    read = p.worker_read("ctx", limit=200)
+    assert runner.calls[-1] == ("orca", "orchestration", "worker-read", "--dispatch", "ctx", "--limit", "200", "--json")
+    assert read["source"] == "transcript"
+    assert read["source_exact"] is True and read["window_complete"] is True
+    assert read["message_count"] == 4
+    assert [m["role"] for m in read["messages"]] == ["user", "assistant", "tool", "assistant"]
+    assert read["messages"][0]["text"] == "…prompt…"
+    assert read["messages"][1]["text"] == (
+        "GW-RECEIPT v1 task=task_1 dispatch=ctx_1 key=k token=0123456789abcdef\nStarting."
+    )
+    assert read["messages"][2]["text"] == "" and read["messages"][3]["text"] == ""
+
+
+@pytest.mark.parametrize("clipping", [["message_limit_or_scan_window"], None, "x", [1], ["transcript_payload", False]])
+def test_worker_read_window_is_incomplete_unless_proven(clipping):
+    def response(argv):
+        result = {"source": "transcript", "sourceExact": True, "transcript": {"messages": []}}
+        if clipping is not None:
+            result["clipping"] = clipping
+        return OrcaResult(0, json.dumps({"ok": True, "result": result}), "")
+
+    assert OrcaCliPort(run=response).worker_read("ctx", limit=5)["window_complete"] is False
+
+
+@pytest.mark.parametrize("source_exact", [None, False, 1, "true", [], {}])
+def test_worker_read_source_is_exact_only_for_literal_true(source_exact):
+    def response(argv):
+        result = {"source": "transcript", "sourceExact": source_exact, "clipping": [], "transcript": {"messages": []}}
+        return OrcaResult(0, json.dumps({"ok": True, "result": result}), "")
+
+    read = OrcaCliPort(run=response).worker_read("ctx", limit=5)
+    assert read["source_exact"] is False
+    assert read["window_complete"] is True
+
+
+def test_worker_read_joins_text_blocks_and_preserves_missing_roles():
+    def response(argv):
+        result = {
+            "source": "transcript",
+            "sourceExact": True,
+            "clipping": [],
+            "transcript": {
+                "messages": [
+                    {
+                        "blocks": [
+                            {"type": "text", "text": "first"},
+                            {"type": "image"},
+                            {"type": "text", "text": "second"},
+                        ]
+                    },
+                    {"role": None},
+                ]
+            },
+        }
+        return OrcaResult(0, json.dumps({"ok": True, "result": result}), "")
+
+    read = OrcaCliPort(run=response).worker_read("ctx", limit=5)
+    assert read["messages"] == [{"role": None, "text": "first\nsecond"}, {"role": None, "text": ""}]
+
+
+@pytest.mark.parametrize("messages", [None, {}, [None], ["text"]])
+def test_worker_read_rejects_malformed_message_arrays(messages):
+    def response(argv):
+        result = {"source": "transcript", "transcript": {"messages": messages}}
+        return OrcaResult(0, json.dumps({"ok": True, "result": result}), "")
+
+    with pytest.raises(OrcaCliError, match="transcript message array"):
+        OrcaCliPort(run=response).worker_read("ctx", limit=5)
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        {"role": 1},
+        {"role": False},
+        {"role": []},
+        {"blocks": "text"},
+        {"blocks": None},
+        {"blocks": {}},
+        {"blocks": ["text"]},
+        {"blocks": [None]},
+        {"blocks": [{}]},
+        {"blocks": [{"type": 1}]},
+        {"blocks": [{"type": "text"}]},
+        {"blocks": [{"type": "text", "text": None}]},
+        {"blocks": [{"type": "text", "text": 1}]},
+    ],
+)
+def test_worker_read_rejects_malformed_roles_and_blocks(change):
+    def response(argv):
+        receipt = {"type": "text", "text": "GW-RECEIPT v1 task=task_1 dispatch=ctx_1 key=k token=0123456789abcdef"}
+        messages = [{"role": "assistant", "blocks": [receipt]}, {"role": "assistant", "blocks": [], **change}]
+        result = {"source": "transcript", "sourceExact": True, "clipping": [], "transcript": {"messages": messages}}
+        return OrcaResult(0, json.dumps({"ok": True, "result": result}), "")
+
+    with pytest.raises(OrcaCliError, match="transcript message array"):
+        OrcaCliPort(run=response).worker_read("ctx", limit=5)
 
 
 def test_terminal_send_is_a_bare_enter():
@@ -416,7 +523,13 @@ def test_degraded_worker_read_stays_inconclusive_without_transcript():
     def response(argv):
         return OrcaResult(0, json.dumps({"ok": True, "result": {"source": "terminal"}}), "")
 
-    assert OrcaCliPort(run=response).worker_read("ctx", limit=5) == {"source": "terminal", "message_count": 0}
+    assert OrcaCliPort(run=response).worker_read("ctx", limit=5) == {
+        "source": "terminal",
+        "message_count": 0,
+        "source_exact": False,
+        "window_complete": False,
+        "messages": [],
+    }
 
 
 def test_check_wait_argv_without_ack():

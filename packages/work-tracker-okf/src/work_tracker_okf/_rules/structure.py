@@ -31,6 +31,7 @@ CODES: tuple[str, ...] = (
     "structure.index-entry-non-direct",
     "structure.index-entry-unreadable",
     "structure.finish-obligations-malformed",
+    "structure.execute-return-malformed",
 )
 
 _SPEC = "work_tracker_okf._rules.structure"
@@ -271,6 +272,19 @@ def obligations(ctx: RuleContext) -> Iterable[Finding]:
             )
 
 
+def execute_returns(ctx: RuleContext) -> Iterable[Finding]:
+    """Warn when authored return metadata cannot safely carry execution scope."""
+    for item in items(ctx):
+        if "execute_return" in item.invalid_optional_fields:
+            yield _finding(
+                "structure.execute-return-malformed",
+                "warn",
+                item,
+                "`execute_return` must be a valid return record with id, recorded date, "
+                "state, coverage and nonempty scope; plan and plan_sha256 must be supplied together",
+            )
+
+
 def rules(config: LaneConfig) -> tuple[Rule, ...]:
     del config
-    return (layout, sources, indexes, obligations)
+    return (layout, sources, indexes, obligations, execute_returns)

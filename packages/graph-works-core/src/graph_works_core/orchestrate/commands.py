@@ -84,6 +84,7 @@ from graph_works_core.workspace.dispatch import (
 from graph_works_core.workspace.dispatch_artifacts import routing_items
 from graph_works_core.workspace.dispatch_config import load_dispatch_config
 from graph_works_core.workspace.errors import WorkspaceError
+from graph_works_core.workspace.execute_return import pending_return
 from graph_works_core.workspace.finish import FinishPlan, FinishTarget, resolve_finish_targets
 from graph_works_core.workspace.landed import stale_by_path
 from graph_works_core.workspace.layout import WorkspaceLayout
@@ -2463,6 +2464,13 @@ def run_orchestrate(
             ),
         )
 
+    repo_refusals.update(
+        {
+            item.path: BlockedItem(item.path, "invalid", "execute return is pending; inspect or resume before dispatch")
+            for item in items
+            if pending_return(layout, item.path) is not None
+        }
+    )
     computed = plan(
         planning_items,
         path,

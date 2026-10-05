@@ -390,6 +390,110 @@ def test_two_dispatches_with_one_key_create_one_task(env):
     assert env[2].names().count("task_create") == 1
 
 
+def returned_execute(env):
+    """Model the active intent and reused checkout after a successful return."""
+    layout, plan, _port, _repo, wt = env
+    page = layout.bundle_dir / "work/x.md"
+    page.write_text(
+        page.read_text(encoding="utf-8").replace(
+            "affects: []\n",
+            "affects: []\n"
+            "execute_return:\n"
+            "  id: ret-20260926-1a2b3c4d\n"
+            "  recorded: 2026-09-26\n"
+            "  state: active\n"
+            "  coverage: /work/x/references/03-execute-coverage.md\n"
+            "  scope:\n"
+            "    - {id: R1, text: Implement the newly returned task}\n",
+            1,
+        ),
+        encoding="utf-8",
+        newline="\n",
+    )
+    plan["dispatches"][0]["worktree"].update(action="reuse", path=str(wt), exists=True)
+
+
+def test_returned_execute_key_with_settled_task_is_existing_until_rerouted(env):
+    from graph_works_core.orchestrate.reroute import run_reroute
+
+    first = run(env)
+    assert first.ok, first.failure
+    port = env[2]
+    port.tasks[0]["status"] = "completed"
+    port.workers[0].update(state="succeeded", dispatch_status="completed")
+    returned_execute(env)
+    before = record(env)
+    start = len(port.calls)
+
+    existing = run(env)
+
+    assert existing.ok and existing.status == "existing"
+    assert (existing.task_id, existing.dispatch_id) == (first.task_id, first.dispatch_id)
+    assert port.names()[start:] == ["task_list"]
+    assert record(env) == before
+
+    reason = "execute return ret-20260926-1a2b3c4d"
+    rerouted = run_reroute(
+        env[0], KEY, run_id="run_1", reason=reason, port=port, clock=lambda: datetime(2026, 9, 26, tzinfo=UTC)
+    )
+    assert rerouted.ok and rerouted.status == "rerouted"
+    assert (rerouted.superseded_task_id, rerouted.superseded_dispatch_id) == (first.task_id, first.dispatch_id)
+    assert rerouted.overrides == dr.Overrides()
+    assert record(env).reroutes[-1].reason == reason
+    assert port.tasks[0]["status"] == "blocked"
+    port.start["dispatch_id"] = "ctx_2"
+
+    fresh = run(env)
+
+    assert fresh.ok and fresh.status == "dispatched", fresh.failure
+    assert fresh.task_id != first.task_id and fresh.dispatch_id != first.dispatch_id
+    saved = record(env)
+    assert len(saved.attempts) == 2 and saved.attempts[-1].complete
+    for field in ("agent", "model", "reasoning_effort"):
+        assert saved.attempts[-1].envelope[field] == saved.attempts[0].envelope[field]
+    assert port.names().count("task_create") == port.names().count("worker_start") == 2
+
+
+def test_returned_execute_key_without_prior_task_dispatches_directly(env):
+    returned_execute(env)
+    assert not env[2].tasks and record(env) is None
+
+    result = run(env)
+
+    assert result.ok and result.status == "dispatched", result.failure
+    saved = record(env)
+    assert len(saved.attempts) == 1 and saved.attempts[-1].complete
+    assert not saved.reroutes and not saved.superseded
+    assert env[2].names().count("task_create") == env[2].names().count("worker_start") == 1
+
+
+def test_reroute_refuses_live_attempt_for_returned_key(env):
+    from graph_works_core.orchestrate.reroute import run_reroute
+    from test_reroute import worker
+
+    first = run(env)
+    assert first.ok, first.failure
+    env[2].workers = [worker(dispatch_id=first.dispatch_id, task_id=first.task_id, state="running")]
+    returned_execute(env)
+    before = record(env)
+    start = len(env[2].calls)
+
+    result = run_reroute(
+        env[0],
+        KEY,
+        run_id="run_1",
+        reason="execute return ret-20260926-1a2b3c4d",
+        port=env[2],
+        clock=lambda: datetime(2026, 9, 26, tzinfo=UTC),
+    )
+
+    assert not result.ok and result.status is None
+    assert (result.failure.step, result.failure.reason) == ("reroute", "reroute-live")
+    assert (result.failure.task_id, result.failure.dispatch_id) == (first.task_id, first.dispatch_id)
+    assert record(env) == before
+    assert env[2].names()[start:] == ["task_list", "task_list", "worker_list"]
+
+
 def crash(env, monkeypatch, step):
     save = dr.compare_and_swap_record
 

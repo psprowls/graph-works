@@ -26,6 +26,7 @@ from work_tracker_okf.placement import ReaderObservation
 from graph_works_core.orchestrate import dispatch_record as dr
 from graph_works_core.orchestrate.orca_port import OrcaPort
 from graph_works_core.orchestrate.placement import PlacementRecord, run_record_placement, run_record_reader
+from graph_works_core.workspace.execute_return import pending_return, return_dispatch_admission
 from graph_works_core.workspace.layout import WorkspaceLayout
 from graph_works_core.workspace.provenance import GitFailure, gate_git, probe_git, strict_commit, strict_git
 from graph_works_core.workspace.workspace_branch import WORKSPACE_REPO
@@ -213,6 +214,8 @@ def _validate(c: _Dispatch, plan: object) -> None:
         or entry["worktree"].get("branch") is not None
     ):
         raise _Stop("plan-invalid", "reader dispatch needs a full commit start_sha and no branch")
+    if pending_return(c.layout, entry["path"]) is not None:
+        raise _Stop("recovery-inspection", "execute return is pending; inspect or resume before dispatch")
     c.root, c.entry = plan["path"], entry
     path = dr.record_file(c.layout, entry["path"], c.result.key)
     loaded = dr.load_record(path)
@@ -1021,9 +1024,12 @@ def run_dispatch(
         try:
             _validate(c, plan)
             ownership.enter_context(dr.execution_owner(layout, key))
+            ownership.enter_context(return_dispatch_admission(layout, c.item["path"]))
             # Validation read is only a snapshot until execution ownership is held.
             if dr.load_record(dr.record_file(layout, c.item["path"], key)) != c.persisted:
                 raise dr.DispatchRecordConflict("dispatch record changed before execution ownership; retry")
+            if pending_return(layout, c.item["path"]) is not None:
+                raise _Stop("recovery-inspection", "execute return is pending; inspect or resume before dispatch")
             resuming = _resolve(c)
             if c.result.status == "existing":
                 return c.result

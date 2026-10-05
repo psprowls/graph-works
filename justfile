@@ -411,6 +411,8 @@ test-plugin: preflight
     bash tests/test-finish-strategy-contract.sh
     echo "--- test-finish-obligations-docs"
     bash tests/test-finish-obligations-docs.sh
+    echo "--- test-execute-return-docs"
+    bash tests/test-execute-return-docs.sh
     echo "--- test-no-stage-artifact-literals"
     bash tests/test-no-stage-artifact-literals.sh
     echo "--- codex/test-marketplace-manifest"

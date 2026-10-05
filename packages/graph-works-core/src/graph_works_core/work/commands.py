@@ -97,7 +97,7 @@ from work_tracker_okf.projection import ResumeSelection, Rollup, rollup, select_
 from work_tracker_okf.reparent import plan_release_adoption, plan_reparent
 from work_tracker_okf.sources import upsert
 from work_tracker_okf.vocabulary import PARENT_TYPES, SPEC_SOURCE_ID, TERMINAL_STATUSES
-from work_tracker_okf.workflow import RouteResult, RouteState, Transition, route, state_for
+from work_tracker_okf.workflow import Blocker, RouteResult, RouteState, Transition, route, state_for
 
 from graph_works_core.guidance.assembly import Guidance, assemble_guidance, write_guidance
 from graph_works_core.read_session import ReadSession, borrow_read_session, open_read_session
@@ -132,6 +132,7 @@ from graph_works_core.workspace.dispatch import (
 from graph_works_core.workspace.dispatch_artifacts import missing_design_source, routing_items
 from graph_works_core.workspace.dispatch_config import DispatchConfig, load_dispatch_config
 from graph_works_core.workspace.errors import WorkspaceError
+from graph_works_core.workspace.execute_return import pending_return
 from graph_works_core.workspace.finish import FinishTarget, resolve_finish_targets
 from graph_works_core.workspace.landed import stale_spec_for
 from graph_works_core.workspace.lane_facts import gather_lane_facts, has_lane_pages, repository_notes, runner
@@ -766,6 +767,10 @@ def _plan_route(
     )
     assert state is not None
     computed = route(state, definition=definition)
+    if pending_return(layout, selected_path) is not None:
+        message = "execute return is pending; inspect or resume the same return before dispatch"
+        computed = RouteResult(None, message, blockers=(Blocker("invalid", message),))
+        normalizations = ()
     report = path_report(state, computed, definition)
     preview = NextResult(
         requested_path=path,
@@ -943,6 +948,9 @@ def run_next(
     )
     assert persisted_state is not None
     persisted_route = route(persisted_state, definition=definition)
+    if pending_return(layout, preview.selected_path) is not None:
+        message = "execute return is pending; inspect or resume the same return before dispatch"
+        persisted_route = RouteResult(None, message, blockers=(Blocker("invalid", message),))
     resolution, preflight = _resolve_dispatch_with(config, persisted_state, persisted_route)
     report = path_report(persisted_state, persisted_route, definition)
     applied = replace(

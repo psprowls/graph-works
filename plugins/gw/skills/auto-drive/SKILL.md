@@ -1590,13 +1590,14 @@ step is what makes the report worth writing.
    anyway*. No retry option: a dispatch that succeeded is not a recovery case,
    and the failure question's Retry is authorized only by Orca's failure
    response.
-   - **Send it back**: run `gw work next <path> --json` and capture `phase`.
-     Proceed only when it is `finish`; then run
-     `gw work advance <path> --from finish --return --no-infer-worktree`. The
-     next cycle's plan (§2.2) redispatches `execute` naturally: the task mirror
-     already records the settled dispatch, and §2.6's diff re-proposes the key
-     once the phase moves back. If the item is not at `finish`, report that
-     plainly and do not advance.
+   - **Send it back**:
+     1. Run `gw work next <path> --json` and require `phase: finish`. If the item is not at `finish`, report that plainly and do not advance.
+     2. If the send-back is for work beyond the unchecked coverage lines (for example new plan tasks or review findings), name each piece with `--return-scope "<one line>"`. Otherwise omit it to return the coverage obligations.
+     3. Run `gw work advance <path> --from finish --return [--return-scope …] --no-infer-worktree` and require success. On `return-scope-required`, ask for scope. On `return-pending`, inspect and do not retry with different scope. After success, run `gw work next <path> --json` and read `carried_context.slots.execute_return.data.return_id` for `<return-id>`.
+     4. Read the execute key's attempt state fresh using §2.1. If a settled Task exists for the key, run `gw work reroute <key> --run <run_id> --reason "execute return <return-id>"` with no agent, model or effort overrides and require success. If there is no prior Task, skip the reroute. On a live, outcome-unknown or ambiguous attempt, stop and report.
+     5. Replan (§2.2) and dispatch.
+
+     A phase change alone never relaunches execute.
    - **Accept anyway**: continue; the coverage file stands as the record. The
      advance already recorded each unchecked line as an `origin: coverage`
      entry in the item's `finish_obligations`, and the finish question lists

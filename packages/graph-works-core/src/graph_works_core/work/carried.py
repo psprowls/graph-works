@@ -39,6 +39,7 @@ from graph_works_core.work.epic_brief import epic_brief
 from graph_works_core.workspace import provenance
 from graph_works_core.workspace.landed import landed_since
 from graph_works_core.workspace.layout import WorkspaceLayout
+from graph_works_core.workspace.workspace_placement import ReturnDestination, confined_member, resolve_destination
 
 type JsonValue = bool | int | float | str | list[JsonValue] | dict[str, JsonValue] | None
 
@@ -186,8 +187,64 @@ def _epic_brief(inp: SlotInput) -> SlotFill:
     return SlotFill(lines=brief.lines, data=MappingProxyType(dict(brief.data)), warnings=brief.warnings)
 
 
+def _execute_return(inp: SlotInput) -> SlotFill:
+    """Carry returned scope even when its report destination cannot be proven."""
+    if "execute_return" in inp.item.invalid_optional_fields:
+        return SlotFill(warnings=("execute_return: malformed; repair before executing",))
+    record = inp.item.execute_return
+    if record is None or not record.active:
+        return SlotFill()
+    design = next((source.resource for source in inp.item.sources if source.id == "design"), None)
+    lines = [
+        f"Return `{record.id}` sent this item back from finish. Execute is not done until every row below is reported.",
+        *(f"- [ ] {row.id}: {row.text}" for row in record.scope),
+    ]
+    warnings: list[str] = []
+    if record.plan is not None:
+        try:
+            plan_path = confined_member(inp.layout.bundle_dir, record.plan.removeprefix("/"))
+        except (OSError, ValueError) as exc:
+            warnings.append(f"execute_return: canonical plan unavailable: {exc}")
+        else:
+            lines.append(
+                f"Canonical plan: {record.plan} (sha256 `{_short(record.plan_sha256)}`), "
+                f"read it in the main workspace ({plan_path}) even if your content root's copy is older."
+            )
+    if design is not None:
+        lines.append(f"Design: {design}")
+    coverage: dict[str, JsonValue] = {
+        "resource": record.coverage,
+        "path": None,
+        "worktree": None,
+        "branch": None,
+    }
+    try:
+        destination = resolve_destination(inp.layout, {item.path: item for item in inp.items}, inp.item)
+        if isinstance(destination, ReturnDestination):
+            path = confined_member(destination.bundle_root, record.coverage.removeprefix("/"))
+            coverage.update(path=str(path), worktree=destination.worktree, branch=destination.branch)
+            lines.append(
+                f"Report in: {path} under `## Returned scope {record.id}`; "
+                "keep the row ids and set `Report state: reported`."
+            )
+        else:
+            warnings.append(f"execute_return: destination unavailable: {destination[1]}")
+    except (OSError, ValueError) as exc:
+        warnings.append(f"execute_return: destination unavailable: {exc}")
+    data: dict[str, JsonValue] = {
+        "return_id": record.id,
+        "scope": [{"id": row.id, "text": row.text} for row in record.scope],
+        "plan": record.plan,
+        "plan_sha256": record.plan_sha256,
+        "design": design,
+        "coverage": coverage,
+    }
+    return SlotFill(lines=tuple(lines), data=MappingProxyType(data), warnings=tuple(warnings))
+
+
 SLOTS: Final[tuple[Slot, ...]] = (
     Slot("epic_brief", "Epic brief", frozenset({DESIGN, PLAN, EXECUTE}), _epic_brief),
+    Slot("execute_return", "Returned scope", frozenset({EXECUTE}), _execute_return),
     Slot("landed_since", "Landed since your design", frozenset({"plan"}), _landed_since),
     Slot("finish_obligations", "Finish obligations", frozenset({"finish"}), _finish_obligations),
 )

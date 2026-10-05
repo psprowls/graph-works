@@ -39,8 +39,9 @@ class DispatchRecordConflict(ValueError):
 def execution_owner(layout: WorkspaceLayout, key: str) -> Iterator[None]:
     """Own this key across dispatch/reroute decisions, effects and journal writes.
 
-    This is a separate, non-reentrant OS lock, held *before* any short item
-    owner lock, which in turn precedes placement's bundle/executor locks.
+    This is a separate, non-reentrant OS lock, held before return/dispatch
+    admission (when dispatching) and any short item owner lock, which in turn
+    precedes placement's bundle/executor locks.
     No item owner lock is held across an Orca call or record-placement call.
     The key is workspace-wide (not Run-specific), so another Run cannot bypass
     ownership. Never unlink the lock file: process death releases its descriptor.

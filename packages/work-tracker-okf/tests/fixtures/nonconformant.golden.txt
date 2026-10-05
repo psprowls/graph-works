@@ -38,6 +38,7 @@ error	plan.accepted-without-plan	work/spike-wrong-parent-type/children/feature-a
 warn	state.phase-status-incoherent	work/spike-wrong-parent-type/children/feature-accepted-no-plan.md	work_tracker_okf._rules.state	`work_status` 'accepted' expects `phase` in ['done', 'execute', 'finish'], got 'design'
 warn	state.stuck-accepted	work/spike-wrong-parent-type/children/feature-accepted-no-plan.md	work_tracker_okf._rules.state	`work_status: accepted` with no update in 124 days (over 60)
 error	state.in-progress-without-owner	work/tech-debt-in-progress.md	work_tracker_okf._rules.state	`work_status: in-progress` with no `owner`
+warn	structure.execute-return-malformed	work/tech-debt-in-progress.md	work_tracker_okf._rules.structure	`execute_return` must be a valid return record with id, recorded date, state, coverage and nonempty scope; plan and plan_sha256 must be supplied together
 warn	structure.finish-obligations-malformed	work/tech-debt-in-progress.md	work_tracker_okf._rules.structure	`finish_obligations` has malformed entries; each must be exactly {text, origin: coverage|deferred, recorded: YYYY-MM-DD}
 error	state.mitigated-without-mitigation	work/tech-debt-mitigated.md	work_tracker_okf._rules.state	`work_status: mitigated` with no `mitigation`
 error	structure.source-escape	work/tech-debt-mitigated.md	work_tracker_okf._rules.structure	`sources[2].resource` '/work/test-gap-wontfix.md' escapes its owner or bundle

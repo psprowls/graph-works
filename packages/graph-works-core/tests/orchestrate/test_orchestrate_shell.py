@@ -352,7 +352,7 @@ def test_return_transition_does_not_restamp_the_pointer(tmp_path: Path) -> None:
     _write(layout, path, phase="finish", work_status="in-progress")
     assert work.run_regen_indexes(layout, dry_run=False).application.ok
     provenance.write_active_work(layout, path, "finish", updated=TODAY.isoformat())
-    result = stage.run_stage_advance(layout, path, today=TODAY, return_=True, dry_run=False)
+    result = stage.run_stage_advance(layout, path, today=TODAY, return_=True, return_scope=("Rework",), dry_run=False)
     assert result.application is not None and result.application.ok
     assert result.outcome.plan.trigger == "return"
     assert result.pointer_path is None
@@ -1122,7 +1122,9 @@ def test_returning_an_item_at_finish_moves_it_back_to_execute(tmp_path: Path) ->
     repo, _fork = _code_repo(tmp_path / "c")
     path = "work/feature-a"
     _ready(layout, path, phase="finish")
-    result = stage.run_stage_advance(layout, path, today=TODAY, repo=repo, return_=True, dry_run=False)
+    result = stage.run_stage_advance(
+        layout, path, today=TODAY, repo=repo, return_=True, return_scope=("Rework",), dry_run=False
+    )
     assert result.outcome.plan.refusal is None
     assert result.outcome.written
     assert "phase: execute" in (layout.bundle_dir / f"{path}.md").read_text(encoding="utf-8")
@@ -1134,7 +1136,9 @@ def test_returning_an_item_that_is_not_at_finish_is_refused(tmp_path: Path) -> N
     repo, _fork = _code_repo(tmp_path / "c")
     path = "work/feature-a"
     _ready(layout, path)
-    result = stage.run_stage_advance(layout, path, today=TODAY, repo=repo, return_=True, dry_run=False)
+    result = stage.run_stage_advance(
+        layout, path, today=TODAY, repo=repo, return_=True, return_scope=("Rework",), dry_run=False
+    )
     assert result.outcome.plan.refusal == "return-not-available"
 
 
@@ -1322,11 +1326,17 @@ def test_a_return_then_re_advance_replaces_coverage_and_keeps_deferred(tmp_path:
     _coverage(layout, path, "- [ ] first caveat\n- [ ] second caveat\n")
     assert stage.run_stage_advance(layout, path, today=TODAY, dry_run=False).application.ok
 
-    returned = stage.run_stage_advance(layout, path, today=TODAY, return_=True, dry_run=False)
+    returned = stage.run_stage_advance(layout, path, today=TODAY, return_=True, return_scope=("Rework",), dry_run=False)
     assert returned.application is not None and returned.application.ok
     assert len(_obligations(layout, path)) == 3
 
-    _coverage(layout, path, "- [x] first caveat\n- [ ] second caveat\n")
+    rid = load(layout.bundle_dir / f"{path}.md").fm_data()["execute_return"]["id"]
+    _coverage(
+        layout,
+        path,
+        f"- [x] first caveat\n- [ ] second caveat\n\n## Returned scope {rid}\n\n"
+        "Report state: reported\n\n- [x] R1: Rework -- completed\n",
+    )
     assert stage.run_stage_advance(layout, path, today=TODAY, dry_run=False).application.ok
 
     assert [(entry["origin"], entry["text"]) for entry in _obligations(layout, path)] == [

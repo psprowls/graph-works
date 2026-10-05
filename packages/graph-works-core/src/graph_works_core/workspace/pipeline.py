@@ -145,6 +145,11 @@ EXECUTE_TAIL = (
     "`## What this design changes` headings instead and say in the file that you did. "
     "Mark honestly -- an unchecked box is a normal, expected outcome; an inaccurate checked box "
     "is not. Pass that file's path as --report-path on your worker_done.\n"
+    "When your brief carries a `Returned scope` block, that file's `## Returned scope <id>` section "
+    "is part of the report: read the canonical plan it names, keep its heading and row ids, "
+    "report every row `- [x]` or `- [ ]` with a one-line justification, and set its `Report state:` "
+    "line to `reported`. Write it in the coverage location the block names. "
+    "A fully checked older report is not evidence for a return.\n"
     "When the plan marks a step `Deferred to finish`, record it with "
     '`gw work obligation add {path} --text "<the step>" --apply` instead of doing it or leaving it in prose.\n'
     "Context hygiene: when the gate fails, `gw work gate wait` already prints the last 40 lines of its log -- "

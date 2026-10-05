@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import re
 from datetime import date
+from pathlib import Path
 
 import code_wiki_okf.init
 import doc_wiki_okf.init
@@ -1138,3 +1139,14 @@ def test_the_root_level_obsidian_vault_is_never_touched(tmp_path):
     (root / ".obsidian" / "app.json").write_text("{}\n", encoding="utf-8", newline="")
     _init(root)
     assert (root / ".obsidian" / "app.json").read_text(encoding="utf-8") == "{}\n"
+
+
+def test_init_records_work_schema_provenance(tmp_path: Path) -> None:
+    from graph_works_core.workspace import work_schemas as ws
+
+    result = apply_init(plan_init(tmp_path / "w", today=date(2026, 10, 5), topic="P"))
+    provenance = ws.declarations_dir_for(result.layout) / ws.PROVENANCE_RELATIVE
+    assert provenance.is_file()
+    assert any(label.endswith(ws.PROVENANCE_RELATIVE) for label in result.written)
+    again = apply_init(plan_init(tmp_path / "w", today=date(2026, 10, 5), topic="P"))
+    assert not any(label.endswith(ws.PROVENANCE_RELATIVE) for label in again.written)

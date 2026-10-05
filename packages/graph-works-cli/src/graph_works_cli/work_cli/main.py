@@ -44,7 +44,7 @@ from graph_works_core.workspace.config import WorkspaceConfig, load_workspace_co
 from graph_works_core.workspace.errors import WorkspaceConfigError, WorkspaceError
 from graph_works_core.workspace.finish import STRATEGIES, IntegrationStrategy
 from graph_works_core.workspace.layout import WorkspaceLayout
-from graph_works_core.workspace.repos import resolve_repos
+from graph_works_core.workspace.lint_repos import lint_repositories
 from graph_works_wire import work as wire_work
 
 from graph_works_cli import exit_codes
@@ -321,7 +321,7 @@ def lint(
     config = _config(layout)
     try:
         report = work.run_lint(
-            layout, config, repo_roots=resolve_repos(layout), strict=strict, today=_today(), path=path or None
+            layout, config, repositories=lint_repositories(layout), strict=strict, today=_today(), path=path or None
         )
     except WorkspaceError as exc:
         rendering.fail(str(exc), reason="workspace", code=exit_codes.SCHEMA_MISMATCH, cause=exc)

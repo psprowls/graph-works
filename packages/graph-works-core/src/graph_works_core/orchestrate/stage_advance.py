@@ -70,6 +70,7 @@ from graph_works_core.workspace.repos import (
     resolve_repos,
 )
 from graph_works_core.workspace.transactions import MutationApplication, apply_mutation
+from graph_works_core.workspace.work_schemas import drift_detail
 
 #: The phases whose *completion* produces a results stub. A design or plan
 #: stage leaves an artifact of its own; the stage table's `results` column
@@ -231,7 +232,9 @@ def run_stage_advance(
     `dry_run=True` is okf-io's writer default throughout this workspace: the
     call plans and writes nothing -- not the page, not the stub, not the
     pointer. The commit gate evaluates on a dry run too and reports its
-    refusal, but a dry run writes nothing.
+    refusal, but a dry run writes nothing. `schema-drift` refuses installed
+    work-schema differences before the callback, commit gate or any write;
+    recovery is an explicit schema refresh, never `--skip-gate`.
 
     `skip_gate` bypasses one execute -> finish gate refusal, attributed. It is
     accepted only when this invocation's gate refuses with exactly that code;
@@ -507,6 +510,10 @@ def _advance(
             trigger=None,
         )
         outcome = replace(outcome, plan=refused, stamped=None, stamp_title=None, plan_row=False)
+    if outcome.plan.refusal is None:
+        schema_detail = drift_detail(layout)
+        if schema_detail is not None:
+            return StageAdvance(outcome=_refuse(outcome, "schema-drift", schema_detail), repo_note=repo_note)
     drift_warnings: tuple[str, ...] = ()
     if (
         item is not None
@@ -797,6 +804,13 @@ def _advance(
         ):
             raise WorkspaceError("finish evidence changed; inspect and retry before advancing")
 
+    def validate_read_set() -> None:
+        if finish_guard is not None:
+            validate_finish()
+        schema_detail = drift_detail(layout)
+        if schema_detail is not None:
+            raise WorkspaceError(f"schema-drift: {schema_detail}")
+
     transition = outcome.plan.transition
     resolved = transition is not None and transition.work_status == "resolved"
     subject = f"workspace: advance {item_stem(path)} {old_phase or 'none'} -> {new_phase or 'none'}"
@@ -812,7 +826,7 @@ def _advance(
         repo_root=resolved_repo,
         repo_roots=declared,
         baseline_bundle=bundle,
-        validate_read_set=validate_finish if finish_guard is not None else None,
+        validate_read_set=validate_read_set,
         commit=workspace_commit,
     )
     if application.ok:

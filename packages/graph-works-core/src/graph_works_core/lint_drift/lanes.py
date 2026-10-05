@@ -64,6 +64,7 @@ from graph_works_core.workspace.dispatch_config import load_dispatch_config
 from graph_works_core.workspace.errors import WorkspaceError
 from graph_works_core.workspace.lane_facts import gather_lane_facts, has_lane_pages, runner
 from graph_works_core.workspace.layout import WorkspaceLayout
+from graph_works_core.workspace.lint_repos import LintRepositories, work_lane_rules
 
 #: The two lane names a default workspace composes, in report order.
 WIKI_LANE = "wiki"
@@ -253,7 +254,12 @@ def _compose_wiki(
 
 
 def _compose_work(
-    layout: WorkspaceLayout, config: Config, *, repo_root: Path | None, repo_roots: tuple[Path, ...] = ()
+    layout: WorkspaceLayout,
+    config: Config,
+    *,
+    repo_root: Path | None,
+    repo_roots: tuple[Path, ...] = (),
+    repositories: LintRepositories | None = None,
 ) -> Lane:
     """The work lane. `repo_root=None` with no `repo_roots` is not an error —
     `rule_set`'s own `lane_rules` component skips the two rules that ask a
@@ -275,6 +281,8 @@ def _compose_work(
     directory at all. `compose_lanes` still catches that as one lane error,
     same as a malformed declaration.
 
+    With *repositories*, root-dependent rules select each item's effective repository.
+
     Its scope comes from `graph_works_core.workspace.bundle.work_scope`, the
     one definition `run_lint` shares. Both use `BundleScope.as_ignore` to
     ignore the other directories and root files, symmetric with `wiki_scope`
@@ -291,13 +299,17 @@ def _compose_work(
         name=WORK_LANE,
         root=layout.bundle_dir,
         ignore=scope.as_ignore(),
-        rules=rule_set(
-            layout.bundle_dir,
-            repo_root=repo_root,
-            repo_roots=repo_roots,
-            vault_root=layout.bundle_dir,
-            declarations_dir=config.declarations_dir,
-            definition=load_dispatch_config(layout).definition,
+        rules=(
+            work_lane_rules(layout, config, repositories)
+            if repositories is not None
+            else rule_set(
+                layout.bundle_dir,
+                repo_root=repo_root,
+                repo_roots=repo_roots,
+                vault_root=layout.bundle_dir,
+                declarations_dir=config.declarations_dir,
+                definition=load_dispatch_config(layout).definition,
+            )
         ),
     )
 
@@ -308,6 +320,7 @@ def compose_lanes(
     *,
     repo_root: Path | None = None,
     repo_roots: tuple[Path, ...] = (),
+    repositories: LintRepositories | None = None,
     at: datetime,
     reader: GraphReader | None = None,
 ) -> LaneSet:
@@ -318,11 +331,15 @@ def compose_lanes(
     declared repo as *repo_roots*, and a path under any one of them is good.
     The wiki lane's claims contract resolves `constrains` paths against the
     same roots.
+    *repositories* selects effective roots per work item and their union for
+    wiki claims, excluding legacy root arguments.
 
     *reader* is optional because the mechanical pass is useful without a graph:
     with no reader the `sync` capability contributes no rule, exactly as an
     absent declaration directory does.
     """
+    if repositories is not None and (repo_root is not None or repo_roots):
+        raise ValueError("pass repositories= or repo_root=/repo_roots=, not both")
     lanes: list[Lane] = []
     errors: list[str] = []
     repository_git: Git | None = None
@@ -332,7 +349,11 @@ def compose_lanes(
             errors.append(f"{WIKI_LANE} lane: repository.* rules skipped — {resolved}; set toolchain.git")
         else:
             repository_git = resolved
-    contract_roots = tuple(dict.fromkeys((*repo_roots, *((repo_root,) if repo_root is not None else ()))))
+    contract_roots = (
+        repositories.union
+        if repositories is not None
+        else tuple(dict.fromkeys((*repo_roots, *((repo_root,) if repo_root is not None else ()))))
+    )
     builders: tuple[tuple[str, Callable[[], Lane]], ...] = (
         (
             WIKI_LANE,
@@ -340,7 +361,12 @@ def compose_lanes(
                 layout, config, reader, at=at, repo_roots=contract_roots, repository_git=repository_git
             ),
         ),
-        (WORK_LANE, lambda: _compose_work(layout, config, repo_root=repo_root, repo_roots=repo_roots)),
+        (
+            WORK_LANE,
+            lambda: _compose_work(
+                layout, config, repo_root=repo_root, repo_roots=repo_roots, repositories=repositories
+            ),
+        ),
     )
     for name, build in builders:
         try:

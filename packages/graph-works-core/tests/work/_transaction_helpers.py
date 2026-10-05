@@ -35,7 +35,9 @@ def _workspace(tmp_path: Path) -> WorkspaceLayout:
     (layout.root / "dispatch.yaml").write_text("{}\n", encoding="utf-8", newline="\n")
     layout.bundle_dir.mkdir(parents=True)
     layout.cache_dir.mkdir(parents=True)
-    installed = install_bundle(layout.bundle_dir, today=date(2026, 8, 22), dry_run=False)
+    installed = install_bundle(
+        layout.bundle_dir, declarations_dir=layout.config_dir, today=date(2026, 8, 22), dry_run=False
+    )
     assert installed.ok
     return layout
 

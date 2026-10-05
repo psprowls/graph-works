@@ -506,6 +506,39 @@
           "required": false,
           "default": false,
           "is_flag": true
+        },
+        {
+          "name": "schemas",
+          "opts": [
+            "--schemas"
+          ],
+          "secondary_opts": [],
+          "help": "Preview refreshing installed work-lane schemas from the package.",
+          "required": false,
+          "default": false,
+          "is_flag": true
+        },
+        {
+          "name": "apply",
+          "opts": [
+            "--apply"
+          ],
+          "secondary_opts": [],
+          "help": "With --schemas: apply the previewed refresh.",
+          "required": false,
+          "default": false,
+          "is_flag": true
+        },
+        {
+          "name": "force",
+          "opts": [
+            "--force"
+          ],
+          "secondary_opts": [],
+          "help": "With --schemas: also replace edited or unrecorded copies (review the preview first).",
+          "required": false,
+          "default": false,
+          "is_flag": true
         }
       ],
       "commands": [],
@@ -2255,7 +2288,7 @@
     },
     {
       "name": "gw wiki lint",
-      "help": "Run the workspace's mechanical and semantic lint pipeline.\n\nThe work lane checks repo paths against every repository `workspace.yaml`\ndeclares: a path under any one of them is good.",
+      "help": "Run the workspace's mechanical and semantic lint pipeline.\n\nThe work lane checks each item's repo paths against its own repository's\nworking checkout.",
       "short_help": "Run the workspace's mechanical and semantic lint pipeline.",
       "usage": [
         "[OPTIONS]"

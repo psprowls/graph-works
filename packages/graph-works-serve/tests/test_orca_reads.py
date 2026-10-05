@@ -13,7 +13,7 @@ from graph_works_core.proposals import run_proposal_checks, run_proposal_preview
 from graph_works_core.work.affecting import run_work_affecting
 from graph_works_core.workspace.config import load_workspace_config
 from graph_works_core.workspace.layout import WorkspaceLayout
-from graph_works_core.workspace.repos import resolve_repos
+from graph_works_core.workspace.lint_repos import lint_repositories
 from graph_works_serve import mutations
 from graph_works_wire import code as wire_code
 from graph_works_wire import wiki as wire_wiki
@@ -29,11 +29,32 @@ def test_lint_is_mechanical_and_matches_core(
     body = client.get("/v1/wiki/lint").json()
     expected = wire_wiki.wiki_lint_payload(
         run_mechanical(
-            workspace, load_workspace_config(workspace), today=date(2026, 9, 18), repo_roots=resolve_repos(workspace)
+            workspace,
+            load_workspace_config(workspace),
+            today=date(2026, 9, 18),
+            repositories=lint_repositories(workspace),
         )
     )
     assert body == expected
     assert body["semantic"] is None and set(body["counts"]) == {"errors", "warnings", "by_code"}
+
+
+def test_lint_refuses_a_missing_repository_checkout(client: TestClient, workspace: WorkspaceLayout) -> None:
+    head = workspace.manifest_path.read_text(encoding="utf-8").split("repositories:")[0]
+    workspace.manifest_path.write_text(
+        f"{head}repositories:\n  code:\n    path: ../absent\n",
+        encoding="utf-8",
+        newline="\n",
+    )
+
+    response = client.get("/v1/wiki/lint")
+
+    assert response.status_code == 500
+    error = response.json()["error"]
+    assert error["reason"] == "workspace"
+    assert error["exit_code"] == 4
+    assert error["payload"] is None
+    assert "repositories.code" in error["message"]
 
 
 @pytest.fixture

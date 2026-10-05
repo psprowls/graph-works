@@ -44,7 +44,7 @@ from subagents_io import SubagentPool, TaskResult
 from subagents_io.roles import RoleBinding
 
 from graph_works_core.agent_substrate.roles import role_binding
-from graph_works_core.lint_drift.lanes import WIKI_LANE, Lane, compose_lanes, wiki_entry_keys
+from graph_works_core.lint_drift.lanes import WIKI_LANE, WORK_LANE, Lane, compose_lanes, wiki_entry_keys
 from graph_works_core.lint_drift.linter import (
     build_linter_adr_chain_system,
     build_linter_page_quality_system,
@@ -52,7 +52,10 @@ from graph_works_core.lint_drift.linter import (
 )
 from graph_works_core.prompts.project_context import render_project_context
 from graph_works_core.workspace.bundle import load_bundle_at
+from graph_works_core.workspace.errors import WorkspaceError
 from graph_works_core.workspace.layout import WorkspaceLayout
+from graph_works_core.workspace.lint_repos import LintRepositories
+from graph_works_core.workspace.work_schemas import drift_findings, inspect_work_schemas
 
 
 @dataclass(frozen=True, slots=True)
@@ -286,7 +289,7 @@ def _lane_reports(
     today: date,
     strict: bool,
 ) -> tuple[tuple[LaneReport, ...], dict[str, Bundle], tuple[str, ...]]:
-    """Walk and validate each lane, capturing a failed walk per lane.
+    """Walk and validate each lane, capturing walk and configuration failures per lane.
 
     The bundles come back so the semantic pass and the proposal counter read
     the same walk rather than repeating it — okf-io's one-walk rule, kept
@@ -301,7 +304,11 @@ def _lane_reports(
         except OSError as exc:
             errors.append(f"{lane.name} lane: {exc}")
             continue
-        report = validate(bundle, today=today, extra_rules=lane.rules, strict=strict)
+        try:
+            report = validate(bundle, today=today, extra_rules=lane.rules, strict=strict)
+        except WorkspaceError as exc:
+            errors.append(f"{lane.name} lane: {exc}")
+            continue
         bundles[lane.name] = bundle
         reports.append(LaneReport(name=lane.name, report=report))
     return tuple(reports), bundles, tuple(errors)
@@ -376,6 +383,7 @@ def run_mechanical(
     today: date,
     repo_root: Path | None = None,
     repo_roots: tuple[Path, ...] = (),
+    repositories: LintRepositories | None = None,
     reader: GraphReader | None = None,
     strict: bool = False,
 ) -> LintReport:
@@ -386,7 +394,14 @@ def run_mechanical(
     `compose_lanes`.
     """
     report, _bundles = _run_mechanical(
-        layout, config, today=today, repo_root=repo_root, repo_roots=repo_roots, reader=reader, strict=strict
+        layout,
+        config,
+        today=today,
+        repo_root=repo_root,
+        repo_roots=repo_roots,
+        repositories=repositories,
+        reader=reader,
+        strict=strict,
     )
     return report
 
@@ -398,6 +413,7 @@ def _run_mechanical(
     today: date,
     repo_root: Path | None,
     repo_roots: tuple[Path, ...] = (),
+    repositories: LintRepositories | None = None,
     reader: GraphReader | None,
     strict: bool,
 ) -> tuple[LintReport, dict[str, Bundle]]:
@@ -406,17 +422,51 @@ def _run_mechanical(
     Private because the bundles are an implementation detail of running both
     halves off one walk; `run_mechanical` is the contract.
     """
+    if repositories is not None and (repo_root is not None or repo_roots):
+        raise ValueError("pass repositories= or repo_root=/repo_roots=, not both")
+    inspection = inspect_work_schemas(layout, declarations_dir=config.declarations_dir)
+    schema = drift_findings(layout, inspection)
+    unsafe = tuple(state for state in inspection.files if state.state == "unsafe")
+    if unsafe:
+        # Both lanes share these declarations. Do not let their loaders follow
+        # unsafe paths; explicitly report that neither lane was validated.
+        detail = "; ".join(f"{state.path}: {state.detail}" for state in unsafe)
+        return (
+            LintReport(
+                mechanical=(LaneReport(name="workspace", report=Report(schema)),),
+                semantic=(),
+                open_proposals=ProposalBacklog(),
+                errors=(f"wiki and work rules not loaded: {detail}",),
+            ),
+            {},
+        )
     lane_set = compose_lanes(
-        layout, config, repo_root=repo_root, repo_roots=repo_roots, at=_at_for(today), reader=reader
+        layout,
+        config,
+        repo_root=repo_root,
+        repo_roots=repo_roots,
+        repositories=repositories,
+        at=_at_for(today),
+        reader=reader,
     )
-    reports, bundles, walk_errors = _lane_reports(lane_set.lanes, today=today, strict=strict)
+    lanes = lane_set.lanes
+    missing = tuple(state for state in inspection.files if state.state == "missing")
+    incomplete: tuple[str, ...] = ()
+    if missing:
+        # Missing shared refs can fail only when a work page is validated.
+        # Keep the independent wiki lane while marking the work pass incomplete.
+        lanes = tuple(lane for lane in lanes if lane.name != WORK_LANE)
+        incomplete = ("work rules not loaded: " + "; ".join(f"{state.path}: missing" for state in missing),)
+    reports, bundles, walk_errors = _lane_reports(lanes, today=today, strict=strict)
+    if schema:
+        reports = (*reports, LaneReport(name="workspace", report=Report(schema)))
     return (
         LintReport(
             mechanical=reports,
             semantic=(),
             open_proposals=_open_proposals(bundles, today=today),
             source_drain=_source_drain(config, bundles),
-            errors=lane_set.errors + walk_errors,
+            errors=lane_set.errors + walk_errors + incomplete,
         ),
         bundles,
     )
@@ -698,6 +748,7 @@ async def run_lint(
     today: date,
     repo_root: Path | None = None,
     repo_roots: tuple[Path, ...] = (),
+    repositories: LintRepositories | None = None,
     reader: GraphReader | None = None,
     model_override: str | None = None,
     strict: bool = False,
@@ -710,7 +761,14 @@ async def run_lint(
     the mechanical half unaffected.
     """
     mechanical, bundles = _run_mechanical(
-        layout, config, today=today, repo_root=repo_root, repo_roots=repo_roots, reader=reader, strict=strict
+        layout,
+        config,
+        today=today,
+        repo_root=repo_root,
+        repo_roots=repo_roots,
+        repositories=repositories,
+        reader=reader,
+        strict=strict,
     )
     bundle = bundles.get(WIKI_LANE)
     if bundle is None:

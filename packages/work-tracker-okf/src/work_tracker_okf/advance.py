@@ -58,6 +58,7 @@ RefusalReason = Literal[
     "units-invalid",
     "units-command-failed",
     "no-gate-configured",
+    "schema-drift",
 ]
 
 #: Which routing-table transition a plan picked. `dispatch` is an entry
@@ -99,7 +100,8 @@ BYPASS_REFUSALS: frozenset[str] = frozenset(
 #: Every reason this module never produces itself. `return-not-available` and
 #: `unreadable-member` sit among them in `RefusalReason` but are *not*
 #: members: `advance()` produces both itself.
-GATE_REFUSALS: frozenset[str] = COMMIT_GATE_REFUSALS | BYPASS_REFUSALS | {"finish-incomplete"}
+#: `schema-drift` cannot be bypassed; recovery is `gw config sync --schemas`.
+GATE_REFUSALS: frozenset[str] = COMMIT_GATE_REFUSALS | BYPASS_REFUSALS | {"finish-incomplete", "schema-drift"}
 
 
 @dataclass(frozen=True, slots=True)

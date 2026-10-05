@@ -85,6 +85,7 @@ from graph_works_core.workspace.layout import (
 )
 from graph_works_core.workspace.manifest import defaults, read, render_initial, workspace_store
 from graph_works_core.workspace.pipeline import RELAY_TAIL_SEED
+from graph_works_core.workspace.work_schemas import seed_provenance
 
 GITIGNORE_FILENAME = ".gitignore"
 AGENTS_FILENAME = "AGENTS.md"
@@ -665,22 +666,29 @@ def apply_init(plan: WorkspacePlan) -> WorkspaceInit:
     if projection_path.read_bytes() != before:
         written.append(f"{plan.layout.cache_dir.name}/{PROJECTION_FILENAME}")
 
+    scaffold = apply(plan.scaffold)
+    installs = tuple(
+        installer(
+            plan.layout.bundle_dir,
+            today=plan.today,
+            declarations_dir=plan.layout.config_dir,
+            dry_run=False,
+        )
+        for installer in plan.installers
+    )
+    if work_tracker_okf.init.install_bundle in plan.installers and all(install.ok for install in installs):
+        seeded = seed_provenance(plan.layout)
+        if seeded is not None:
+            written.append(seeded)
+
     return WorkspaceInit(
         layout=plan.layout,
         created=plan.directories,
         notices=plan.notices,
         written=tuple(written),
         deleted=tuple(deleted),
-        scaffold=apply(plan.scaffold),
-        installs=tuple(
-            installer(
-                plan.layout.bundle_dir,
-                today=plan.today,
-                declarations_dir=plan.layout.config_dir,
-                dry_run=False,
-            )
-            for installer in plan.installers
-        ),
+        scaffold=scaffold,
+        installs=installs,
     )
 
 

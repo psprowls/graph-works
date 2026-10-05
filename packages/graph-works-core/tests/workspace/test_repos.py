@@ -192,6 +192,35 @@ def test_item_repo_inherits_from_an_ancestor(tmp_path):
     assert repos.resolve_item_repo(layout, index[CHILD], index) == repos.ItemRepo("two", two, "frontmatter")
 
 
+@pytest.mark.parametrize("rung", ["frontmatter", "flag", "sole"])
+def test_item_repo_uses_repositories_override_at_every_selection_rung(tmp_path, rung):
+    layout, _one, _two_path = _two(tmp_path)
+    effective = tmp_path / "effective"
+    effective.mkdir()
+    index = _items(layout, child="repo: one\n" if rung == "frontmatter" else "")
+    # A broken manifest proves the override never consults the checkout resolver.
+    layout.manifest_path.write_text("version: 1\nrepositories: [invalid]\n", encoding="utf-8", newline="\n")
+    chosen = repos.resolve_item_repo(
+        layout, index[CHILD], index, repositories={"one": effective}, repo_name="one" if rung == "flag" else None
+    )
+    assert chosen == repos.ItemRepo("one", effective, rung)
+
+
+def test_item_repo_empty_override_degrades_with_a_note(tmp_path):
+    layout, _one, _two_path = _two(tmp_path)
+    index = _items(layout)
+    chosen = repos.resolve_item_repo(layout, index[CHILD], index, repositories={})
+    assert (chosen.name, chosen.path, chosen.source) == (None, None, "sole")
+    assert chosen.note
+
+
+def test_item_repo_unknown_flag_refuses_against_override(tmp_path):
+    layout, one, _two_path = _two(tmp_path)
+    index = _items(layout)
+    with pytest.raises(WorkspaceError, match="two"):
+        repos.resolve_item_repo(layout, index[CHILD], index, repositories={"one": one}, repo_name="two")
+
+
 def test_item_repo_own_value_overrides_the_ancestor(tmp_path):
     layout, one, _two_path = _two(tmp_path)
     index = _items(layout, epic="repo: two\n", child="repo: one\n")

@@ -7,7 +7,14 @@ from pathlib import Path
 
 from config_io import Resolved
 from graph_works_core.hooks import HooksResult
-from graph_works_wire.config import hooks_payload, projection_payload, resolved_list_payload, resolved_payload
+from graph_works_core.workspace.work_schemas import SchemaRefreshPlan, SchemaRefreshResult
+from graph_works_wire.config import (
+    hooks_payload,
+    projection_payload,
+    resolved_list_payload,
+    resolved_payload,
+    schema_refresh_payload,
+)
 
 from graph_works_cli.json_output import encode
 
@@ -17,6 +24,35 @@ def render_projection(path: Path, *, json_output: bool) -> str:
     if json_output:
         return encode(projection_payload(path))
     return f"[ok] projection: {path}"
+
+
+def render_schema_refresh(plan: SchemaRefreshPlan, result: SchemaRefreshResult | None, *, json_output: bool) -> str:
+    """Render a schema refresh preview or its applied result."""
+    if json_output:
+        return encode(schema_refresh_payload(plan, result))
+    lines: list[str] = []
+    for write in plan.writes:
+        lines.append(f"+ {write.relative} (create)" if write.before is None else f"~ {write.relative} (replace)")
+        if write.diff:
+            lines.append(write.diff.rstrip("\n"))
+    for refusal in plan.refusals:
+        lines.append(f"! {refusal.relative} refused ({refusal.reason}): {refusal.detail}")
+        if refusal.diff:
+            lines.append(refusal.diff.rstrip("\n"))
+    lines.append(f"= {len(plan.skipped)} current")
+    if plan.provenance is not None:
+        lines.append("+ provenance")
+    if result is None:
+        lines.append("preview only; re-run with --apply to write")
+        if any(refusal.reason in ("edited", "unrecorded") for refusal in plan.refusals):
+            lines.append("edited/unrecorded files need --force after review")
+        if any(refusal.reason == "unsafe" for refusal in plan.refusals):
+            lines.append("repair unsafe targets or their parents, then re-run the preview; force cannot bypass them")
+    else:
+        lines.append(f"[ok] wrote {len(result.written)} file(s)")
+        if result.commit is not None:
+            lines.append(f"commit: {result.commit.status} {result.commit.sha or result.commit.reason or ''}".rstrip())
+    return "\n".join(lines)
 
 
 def render_resolved(result: Resolved, *, json_output: bool) -> str:

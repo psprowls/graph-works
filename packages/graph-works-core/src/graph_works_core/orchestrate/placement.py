@@ -12,7 +12,8 @@ sees the new phase and refuses rather than stamping a stage that already ended.
 The lock prevents lost updates; it does not remove that race, and the refusal
 is how the race is made visible.
 
-Nothing here reads Orca; only `run_record_baseline` runs git, through `provenance`'s gate probes.
+Nothing here reads Orca. `run_record_baseline` and, when a changed pair must prove it may keep a
+recorded baseline, `run_record_placement` run git through `provenance`'s gate probes.
 The pair is the caller's verified observation; this module proves only that the item is entitled to it now.
 `run_record_reader` is the reader counterpart: it writes a receipt in
 workspace coordination storage, never the page.
@@ -37,6 +38,7 @@ from work_tracker_okf.items import IGNORE, WorkItem, load_items
 from work_tracker_okf.mutation import PlannedWrite, WorkMutationPlan
 from work_tracker_okf.paths import item_page
 from work_tracker_okf.placement import (
+    BaselineAncestry,
     BaselinePlan,
     BaselineRefusal,
     PlacementPlan,
@@ -46,6 +48,7 @@ from work_tracker_okf.placement import (
     plan_baseline,
     plan_placement,
     plan_reader_receipt,
+    selected_baseline,
 )
 from work_tracker_okf.placement import (
     ReaderObservation as ReaderObservation,
@@ -64,6 +67,7 @@ from graph_works_core.workspace.decision_owner import locked_decision_owner
 from graph_works_core.workspace.dispatch_artifacts import routing_items
 from graph_works_core.workspace.dispatch_config import load_dispatch_config
 from graph_works_core.workspace.errors import WorkspaceError
+from graph_works_core.workspace.finish import enclosing_owner
 from graph_works_core.workspace.layout import WorkspaceLayout
 from graph_works_core.workspace.repos import ItemRepo, declared_repositories, resolve_item_repo, resolve_repos
 from graph_works_core.workspace.transactions import MutationApplication, apply_mutation, commit_pending
@@ -247,6 +251,70 @@ class PlacementRecord:
         return self.application is not None and self.application.ok
 
 
+def _destination_ancestry(
+    layout: WorkspaceLayout,
+    by_path: Mapping[str, WorkItem],
+    path: str,
+    *,
+    target: str | None,
+    own: ItemRepo | None,
+    repo_name: str | None,
+    worktree: str,
+    branch: str,
+    start_sha: str | None,
+    environ: Mapping[str, str] | None,
+) -> BaselineAncestry | None:
+    """Prove whether the selected stamp's recorded baseline is an ancestor of the destination's HEAD.
+
+    `None` when no proof is needed: an explicit *start_sha*, no recorded
+    baseline, an unchanged pair, or malformed fields the planner refuses
+    anyway. Every unreadable fact is `ancestor=None`, never `False`.
+    """
+    item = by_path.get(path)
+    if item is None or start_sha is not None:
+        return None
+    if target is not None and "repo_stamps" in item.invalid_optional_fields:
+        return None
+    before, recorded = selected_baseline(item, target)
+    if recorded is None or before == (worktree, branch):
+        return None
+
+    def unknown(detail: str) -> BaselineAncestry:
+        return BaselineAncestry(recorded, None, detail)
+
+    try:
+        if target is None:
+            selected = own or resolve_item_repo(layout, item, by_path, repo_name=repo_name)
+            repo_path, label = selected.path, f"{path}'s repository {selected.name!r}"
+        elif target == WORKSPACE_REPO:
+            workspace, note = workspace_repo(layout)
+            repo_path, label = (workspace.path if workspace else None), (note or "the workspace repository")
+        else:
+            repo_path, label = declared_repositories(layout).get(target), f"repository {target!r}"
+    except WorkspaceError as exc:
+        return unknown(str(exc))
+    if repo_path is None:
+        return unknown(f"no checkout resolves for {label}")
+    git = provenance.gate_git(layout, environ=environ)
+    if isinstance(git, provenance.GitFailure):
+        return unknown(f"no usable git ({git.cause}): {git.detail}")
+    destination = Path(worktree)
+    if not destination.is_dir():
+        return unknown(f"destination {worktree} does not exist")
+    same = provenance.strict_same_repository(destination, repo_path, git=git)
+    if isinstance(same, provenance.GitFailure):
+        return unknown(same.detail)
+    if not same:
+        return unknown(f"destination {worktree} is not a checkout of {label}")
+    head = provenance.strict_commit(destination, "HEAD", git=git)
+    if isinstance(head, provenance.GitFailure):
+        return unknown(head.detail)
+    answer = provenance.strict_is_ancestor(destination, recorded, head, git=git)
+    if isinstance(answer, provenance.GitFailure):
+        return unknown(answer.detail)
+    return BaselineAncestry(recorded, answer, f"{recorded} {'is' if answer else 'is not'} an ancestor of {head}")
+
+
 def _prepare_placement(
     layout: WorkspaceLayout,
     items: Sequence[WorkItem],
@@ -261,6 +329,7 @@ def _prepare_placement(
     repo: str | None,
     start_sha: str | None = None,
     require_start_sha: bool = False,
+    environ: Mapping[str, str] | None = None,
 ) -> tuple[PlacementPlan, ItemRepo | None]:
     """Plan first, then resolve the item's repository for eligible placements."""
     by_path = {item.path: item for item in items}
@@ -281,6 +350,18 @@ def _prepare_placement(
         own = resolve_item_repo(layout, by_path[path], by_path, repo_name=repo_name)
         target = None if own.name == repo else repo
     definition = load_dispatch_config(layout).definition
+    ancestry = _destination_ancestry(
+        layout,
+        by_path,
+        path,
+        target=target,
+        own=own,
+        repo_name=repo_name,
+        worktree=worktree,
+        branch=branch,
+        start_sha=start_sha,
+        environ=environ,
+    )
     plan = plan_placement(
         routing_items(layout.bundle_dir, items, definition=definition),
         path,
@@ -292,6 +373,7 @@ def _prepare_placement(
         repo=target,
         start_sha=start_sha,
         require_start_sha=require_start_sha,
+        ancestry=ancestry,
         definition=definition,
     )
     if plan.refusal is None and own is None:
@@ -314,6 +396,7 @@ def run_record_placement(
     expected_preparation: str | None = None,
     start_sha: str | None = None,
     require_start_sha: bool = False,
+    environ: Mapping[str, str] | None = None,
 ) -> PlacementRecord:
     """Record (*worktree*, *branch*) on *path* for its *phase* dispatch under *root*.
 
@@ -347,6 +430,11 @@ def run_record_placement(
 
     *start_sha* is the observed commit this placement's work starts from (its
     execute baseline); see `plan_placement` for keep/drop/conflict.
+    With no *start_sha* and a changed pair, a recorded baseline is kept only
+    when the configured gate Git proves the destination is a checkout of the
+    selected repository and the baseline is an ancestor of its HEAD; unreadable
+    evidence refuses `git-unavailable`. *environ* overrides the environment the
+    gate Git is resolved from.
     *require_start_sha* refuses a code placement that would end up with no
     baseline.
     """
@@ -367,6 +455,7 @@ def run_record_placement(
             repo=repo,
             start_sha=start_sha,
             require_start_sha=require_start_sha,
+            environ=environ,
         )
         return PlacementRecord(plan=plan, repo_note=own.note if own else None)
     commit_mode(layout)
@@ -389,6 +478,7 @@ def run_record_placement(
             repo=repo,
             start_sha=start_sha,
             require_start_sha=require_start_sha,
+            environ=environ,
         )
         workspace_commit = WorkspaceCommit(f"workspace: record {item_stem(path)} {phase} placement", items=(path,))
         if plan.refusal is not None:
@@ -454,6 +544,41 @@ class BaselineRecord:
         return self.application is not None and self.application.ok
 
 
+def _malformed_scalar_worktree(bundle: Bundle, path: str) -> bool:
+    """An authored `worktree` the projection erased: never treat it as no constraint."""
+    document = bundle.concepts.get(path)
+    raw = document.fm_raw.get("worktree") if document is not None else None
+    return raw is not None and (not isinstance(raw, str) or not raw.strip())
+
+
+def _execute_base(
+    layout: WorkspaceLayout, item: WorkItem, by_path: Mapping[str, WorkItem], own: ItemRepo
+) -> tuple[str | None, str]:
+    """The branch *item*'s execute work forks from in *own*, and where that answer came from.
+
+    A child forks from its enclosing integration owner's anchor; a top-level
+    item from the repository default base. A child's own branch is never its base.
+    """
+    outer = enclosing_owner(item, by_path)
+    if outer is None:
+        assert own.path is not None
+        return provenance.default_base(own.path), "the repository default base"
+    try:
+        outer_repo = resolve_item_repo(layout, outer, by_path)
+    except WorkspaceError as exc:
+        return None, f"enclosing integration owner {outer.path}: {exc}"
+    if outer_repo.name == own.name:
+        branch = outer.branch
+    elif "repo_stamps" in outer.invalid_optional_fields or own.name is None:
+        branch = None
+    else:
+        stamp = outer.repo_stamps.get(own.name)
+        branch = stamp.branch if stamp is not None else None
+    if not branch:
+        return None, f"enclosing integration owner {outer.path} records no anchor branch in {own.name!r}"
+    return branch, f"the anchor of {outer.path}"
+
+
 def run_record_baseline(
     layout: WorkspaceLayout,
     path: str,
@@ -472,10 +597,16 @@ def run_record_baseline(
     the gate's git (`provenance.gate_git`), so the baseline and the gate that
     later reads it agree on which git answered. A live record takes the decision
     owner's lock and applies one journaled page write.
+
+    When *path* records a scalar `worktree`, *cwd* must be in that checkout
+    (`wrong-checkout`). A first recording must sit at its branch point from the
+    enclosing anchor (or the repository default base for a top-level item): HEAD
+    with commits past it refuses `already-started`. Replays of an existing
+    baseline are unchanged.
     """
     git = provenance.gate_git(layout, environ=environ)
 
-    def decide(items: Sequence[WorkItem]) -> tuple[BaselinePlan, ItemRepo | None]:
+    def decide(bundle: Bundle, items: Sequence[WorkItem]) -> tuple[BaselinePlan, ItemRepo | None]:
         by_path = {item.path: item for item in items}
         item = by_path.get(path)
         if item is None:
@@ -500,21 +631,57 @@ def run_record_baseline(
         head = provenance.strict_commit(cwd, "HEAD", git=git)
         if isinstance(head, provenance.GitFailure):
             return refused("git-unavailable", f"cannot read HEAD in {cwd}: {head.detail}")
+        if _malformed_scalar_worktree(bundle, path):
+            return refused("invalid-item", f"{path} has a malformed worktree; repair it before recording a baseline")
+        if item.worktree is not None:
+            root = provenance.strict_toplevel(cwd, git=git)
+            if isinstance(root, provenance.GitFailure):
+                return refused("git-unavailable", f"cannot read the checkout root of {cwd}: {root.detail}")
+            try:
+                expected = Path(item.worktree).resolve(strict=True)
+            except OSError as exc:
+                return refused("git-unavailable", f"{path}'s recorded worktree {item.worktree} is unreadable: {exc}")
+            if root != expected:
+                return refused(
+                    "wrong-checkout",
+                    f"{path} records worktree {expected}; {cwd} is in checkout {root} -- "
+                    "run from the item's recorded worktree",
+                )
         descends = False
         if item.start_sha is not None and item.start_sha != head:
             answer = provenance.strict_is_ancestor(cwd, item.start_sha, head, git=git)
             if isinstance(answer, provenance.GitFailure):
                 return refused("git-unavailable", answer.detail)
             descends = answer
-        return plan_baseline(items, path, observed_head=head, head_descends_from_recorded=descends, today=today), own
+        plan = plan_baseline(items, path, observed_head=head, head_descends_from_recorded=descends, today=today)
+        if plan.refusal is not None or not plan.changed:
+            return plan, own
+        base, origin = _execute_base(layout, item, by_path, own)
+        if base is None:
+            return refused("git-unavailable", f"cannot prove where {path}'s execute work forks: {origin}")
+        base_sha = provenance.strict_commit(cwd, f"refs/heads/{base}", git=git)
+        if isinstance(base_sha, provenance.GitFailure):
+            return refused("git-unavailable", f"cannot resolve base branch {base!r} ({origin}): {base_sha.detail}")
+        fork = provenance.strict_merge_base(cwd, base_sha, head, git=git)
+        if isinstance(fork, provenance.GitFailure):
+            return refused("git-unavailable", f"merge-base of {base!r} and HEAD unreadable: {fork.detail}")
+        if fork != head:
+            return refused(
+                "already-started",
+                f"{cwd} HEAD {head} is past its branch point {fork} from {base!r} ({origin}); "
+                "where this stage started can no longer be read from the checkout -- a human decides: "
+                "bypass `no-start-sha` at advance, or return the item to execute",
+            )
+        return plan, own
 
-    items = load_items(load_work_bundle(layout))
+    bundle = load_work_bundle(layout)
+    items = load_items(bundle)
     if dry_run or not any(item.path == path for item in items):
-        plan, own = decide(items)
+        plan, own = decide(bundle, items)
         return BaselineRecord(plan, repo_note=own.note if own else None)
     commit_mode(layout)
     with locked_decision_owner(layout, path) as context:
-        plan, own = decide(context.items)
+        plan, own = decide(context.bundle, context.items)
         if plan.refusal is not None or not plan.changed:
             return BaselineRecord(plan, repo_note=own.note if own else None)
         assert own is not None

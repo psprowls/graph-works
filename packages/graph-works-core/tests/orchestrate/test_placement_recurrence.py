@@ -97,20 +97,20 @@ def _finish_dispatch(layout: WorkspaceLayout, repo: Path) -> PlannedDispatch:
 
 
 def _execute_in_fork(layout: WorkspaceLayout, repo: Path, fork: Path, *, explicit_start: bool = True) -> str:
-    start = _git(fork, "rev-parse", "HEAD")
-    (fork / "packages/a/x.txt").write_text("two\n", encoding="utf-8", newline="")
-    _git(fork, "commit", "-am", "execute work")
-    commit = _git(fork, "rev-parse", "HEAD")
+    # Without a recorded placement the gate reads the enclosing Epic's anchor, so the
+    # unrecorded control commits there; the recorded case commits in the fork.
+    checkout = fork if explicit_start else Path(load(layout.bundle_dir / f"{EPIC}.md").fm_data()["worktree"])
+    start = _git(checkout, "rev-parse", "HEAD")
+    (checkout / "packages/a/x.txt").write_text("two\n", encoding="utf-8", newline="")
+    _git(checkout, "commit", "-am", "execute work")
+    commit = _git(checkout, "rev-parse", "HEAD")
     assert commit != start
-    # Without a recorded worktree the gate reads `repo`, which is main, where the
-    # range has zero commits. The control (no recorded placement) therefore
-    # gates the fork directly so finish placement can be inspected.
-    gate_ready(layout, repo if explicit_start else fork, CHILD, tree_of=fork)
+    gate_ready(layout, repo, CHILD, tree_of=checkout)
     advanced = stage.run_stage_advance(
         layout,
         CHILD,
         today=TODAY,
-        repo=repo if explicit_start else fork,
+        repo=repo,
         start_sha=start,
         infer_worktree=False,
         cwd=fork,
@@ -185,4 +185,4 @@ def test_without_a_record_finish_uses_verified_enclosing_anchor(
     assert dispatch.worktree.branch == EPIC_BRANCH
     assert dispatch.merge_target == EPIC_BRANCH
     assert _git(repo, "rev-parse", "HEAD") != commit
-    assert _git(fork, "rev-parse", "HEAD") == commit
+    assert _git(Path(epic_worktree), "rev-parse", "HEAD") == commit

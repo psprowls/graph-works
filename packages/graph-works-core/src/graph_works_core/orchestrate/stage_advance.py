@@ -42,6 +42,7 @@ from work_tracker_okf.sources import upsert
 from work_tracker_okf.workflow import Blocker
 
 from graph_works_core.orchestrate import gate_git, gate_units
+from graph_works_core.orchestrate.anchors import Anchor, AnchorRefusal, enclosing_owner, reader_anchor
 from graph_works_core.orchestrate.gate_receipts import GateEvidence, evaluate
 from graph_works_core.workspace import anchor, provenance
 from graph_works_core.workspace.bundle import load_workspace_bundle
@@ -60,6 +61,7 @@ from graph_works_core.workspace.finish import finish_read_guard, inspect_finish
 from graph_works_core.workspace.gate_config import repo_gate
 from graph_works_core.workspace.landed import stale_spec_for
 from graph_works_core.workspace.layout import WorkspaceLayout
+from graph_works_core.workspace.repo_context import observe_repository
 from graph_works_core.workspace.repos import (
     ItemRepo,
     declared_repositories,
@@ -556,9 +558,11 @@ def _advance(
         return replace(
             candidate, outcome=_refuse(outcome, "gate-bypass-unused", "no execute -> finish gate runs on this advance")
         )
+    anchor_root = _anchor_resolver(layout, items, item, resolved_repo, item_repo)
     if gated:
         verdict = _commit_gate(
             item,
+            anchor_root=anchor_root,
             repo=resolved_repo,
             repo_note=repo_note,
             repo_name=item_repo.name if item_repo is not None else None,
@@ -650,7 +654,7 @@ def _advance(
     results_path: Path | None = None
     result_member: str | None = None
     result_bytes: bytes | None = None
-    facts_root = _facts_root(item, stamped_worktree, resolved_repo)
+    facts_root = _facts_root(item, stamped_worktree, resolved_repo, anchor_root=anchor_root)
     if (
         outcome.plan.trigger == "complete"
         and facts_root is not None
@@ -931,6 +935,66 @@ class GateVerdict:
     receipt: GateEvidence | None = None
 
 
+AnchorRoot = Callable[[], "Path | GateVerdict"]
+
+
+def _anchor_resolver(
+    layout: WorkspaceLayout,
+    items: Sequence[WorkItem],
+    item: WorkItem | None,
+    repo: Path | None,
+    item_repo: ItemRepo | None,
+) -> AnchorRoot | None:
+    """A memoized, lazy selector for a descendant's enclosing integration anchor.
+
+    `None` for a top-level item (the declared checkout stays its fallback) or when
+    no repository resolved. Observation of the repository happens at most once.
+    """
+    if item is None or repo is None or _infers_from_cwd(item):
+        return None
+    by_path = {candidate.path: candidate for candidate in items}
+    memo: list[Path | GateVerdict] = []
+
+    def refuse(detail: str) -> GateVerdict:
+        # the closed vocabulary keeps `worktree-missing`; a bypass never authorizes reading trunk
+        return GateVerdict("worktree-missing", detail)
+
+    def select() -> Path | GateVerdict:
+        owner = enclosing_owner(item, by_path)
+        if owner is None:
+            return refuse(
+                f"{item.path} has no enclosing integration owner (Epic, Release or Feature with children) and "
+                "records no worktree; the gate never substitutes the declared checkout -- record its placement"
+            )
+        repo_name = item_repo.name if item_repo is not None else _repo_name_of(layout, repo)
+        gated = ItemRepo(repo_name, repo, "flag")
+        try:
+            owner_repo = resolve_item_repo(layout, owner, by_path, fallback=lambda: gated)
+            anchor_ = reader_anchor(
+                owner,
+                repos={owner.path: owner_repo},
+                repo=gated,
+                context=observe_repository(repo),
+            )
+        except WorkspaceError as exc:
+            return refuse(f"{item.path}: integration owner {owner.path}: {exc}")
+        if isinstance(anchor_, AnchorRefusal):
+            return refuse(f"{item.path}: nearest integration owner {owner.path}: {anchor_.reason}")
+        if not isinstance(anchor_, Anchor):
+            return refuse(
+                f"{item.path} records no worktree and its nearest integration owner {owner.path} records no "
+                f"anchor for repository {repo_name or repo}; record the placement (`gw work record-placement`)"
+            )
+        return Path(anchor_.worktree)
+
+    def resolve() -> Path | GateVerdict:
+        if not memo:
+            memo.append(select())
+        return memo[0]
+
+    return resolve
+
+
 def _gate_placement(item: WorkItem, repo_name: str | None) -> tuple[str | None, str | None]:
     """`(worktree, start_sha)` recorded for the gated repository: its `repo_stamps`
     entry when it has one *with* a `start_sha`, else the scalar placement. A
@@ -944,6 +1008,7 @@ def _gate_placement(item: WorkItem, repo_name: str | None) -> tuple[str | None, 
 def _commit_gate(
     item: WorkItem,
     *,
+    anchor_root: AnchorRoot | None = None,
     repo: Path | None,
     repo_note: str | None,
     repo_name: str | None,
@@ -995,6 +1060,12 @@ def _commit_gate(
                 f"{item.path} records worktree {recorded_worktree}, which no longer exists; the gate never "
                 "substitutes another checkout -- restore it or record the placement again",
             )
+    elif anchor_root is not None and not _infers_from_cwd(item):
+        # D-004: an unstamped descendant reads its enclosing anchor, never the declared checkout.
+        selected = anchor_root()
+        if isinstance(selected, GateVerdict):
+            return selected
+        root = selected
     else:
         root = repo
 
@@ -1139,14 +1210,21 @@ def _effective_start_sha(
     return anchor.phase_start_sha(facts_root, spec_path, spec_text)
 
 
-def _facts_root(item: WorkItem | None, worktree: str | None, repo: Path | None) -> Path | None:
+def _facts_root(
+    item: WorkItem | None, worktree: str | None, repo: Path | None, *, anchor_root: AnchorRoot | None = None
+) -> Path | None:
     """Where the stage's commits actually landed: the worktree this call
-    detected, then the item's recorded one, then the repo. A stub gathered from
-    the main checkout when the work happened in a worktree is a stub of the
-    wrong range."""
+    detected, then the item's recorded one, then (for a descendant with no
+    recorded placement) its enclosing anchor, then the repo. A stub gathered
+    from the main checkout when the work happened in a worktree is a stub of
+    the wrong range. A descendant whose anchor cannot be proven gets no stub
+    rather than a trunk one."""
     for candidate in (worktree, item.worktree if item is not None else None):
         if candidate and Path(candidate).is_dir():
             return Path(candidate)
+    if item is not None and anchor_root is not None and not item.worktree and not _infers_from_cwd(item):
+        selected = anchor_root()
+        return selected if isinstance(selected, Path) else None
     return repo
 
 

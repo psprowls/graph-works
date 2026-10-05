@@ -236,6 +236,47 @@ def strict_is_ancestor(repo: Path, ancestor: str, descendant: str, *, git: GitEx
     return outcome.returncode == 0
 
 
+def strict_toplevel(cwd: Path, *, git: GitExecutable) -> Path | GitFailure:
+    """The canonical root of the checkout containing *cwd*.
+
+    A subdirectory and a symlinked path name the same checkout as its root;
+    another worktree of the same repository does not.
+    """
+    out = strict_git(cwd, "rev-parse", "--show-toplevel", git=git)
+    if isinstance(out, GitFailure):
+        return out
+    raw = out.strip()
+    if not raw:
+        return GitFailure("error", f"`git rev-parse --show-toplevel` in {cwd} answered nothing")
+    try:
+        return Path(raw).resolve(strict=True)
+    except OSError as exc:
+        return GitFailure("error", f"cannot resolve checkout root {raw!r}: {exc}")
+
+
+def strict_merge_base(repo: Path, a: str, b: str, *, git: GitExecutable) -> str | GitFailure:
+    """The best common ancestor of *a* and *b*; unrelated histories are a failure, not an answer."""
+    out = strict_git(repo, "merge-base", a, b, git=git)
+    if isinstance(out, GitFailure):
+        return out
+    sha = out.strip()
+    return sha or GitFailure("error", f"`git merge-base` in {repo} answered nothing")
+
+
+def strict_same_repository(cwd: Path, repo: Path, *, git: GitExecutable) -> bool | GitFailure:
+    """Whether *cwd* is a checkout of *repo*: their `--git-common-dir`s agree."""
+    commons: list[Path] = []
+    for where in (cwd, repo):
+        out = strict_git(where, "rev-parse", "--git-common-dir", git=git)
+        if isinstance(out, GitFailure):
+            return out
+        common = _absolute(out, where)
+        if common is None:
+            return GitFailure("error", f"cannot resolve the git common dir of {where}")
+        commons.append(common)
+    return commons[0] == commons[1]
+
+
 def _porcelain_z(out: str) -> tuple[str, ...]:
     fields = out.split("\0")
     dirty: list[str] = []

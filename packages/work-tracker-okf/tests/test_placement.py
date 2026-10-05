@@ -15,12 +15,15 @@ from work_tracker_okf.decisions import HoldFact
 from work_tracker_okf.dependencies import DependencyEdge
 from work_tracker_okf.items import IGNORE, Stamp, WorkItem, load_items
 from work_tracker_okf.placement import (
+    BASELINE_REFUSALS,
     PLACEMENT_REFUSALS,
+    BaselineAncestry,
     PlacementPlan,
     apply_baseline,
     apply_placement,
     plan_baseline,
     plan_placement,
+    selected_baseline,
 )
 from work_tracker_okf.workflow import route, state_for
 
@@ -111,7 +114,24 @@ def test_the_refusal_vocabulary_is_closed() -> None:
         "invalid-baseline",
         "baseline-conflict",
         "baseline-missing",
+        "git-unavailable",
     } == PLACEMENT_REFUSALS
+
+
+def test_the_baseline_refusal_vocabulary_is_closed() -> None:
+    assert {
+        "unknown-path",
+        "invalid-item",
+        "terminal",
+        "not-execute",
+        "invalid-baseline",
+        "baseline-conflict",
+        "no-repo",
+        "outside-repository",
+        "git-unavailable",
+        "wrong-checkout",
+        "already-started",
+    } == BASELINE_REFUSALS
 
 
 @pytest.mark.parametrize("phase", ["execute", "finish"])
@@ -615,10 +635,79 @@ def test_an_unchanged_pair_keeps_its_recorded_baseline_when_none_is_given(tmp_pa
     assert plan.refusal is None and plan.start_after == A and not plan.changed
 
 
-def test_a_changed_pair_never_retains_the_prior_baseline(tmp_path):
+def test_a_changed_pair_without_proof_drops_the_prior_baseline(tmp_path):
     items, path = _items(tmp_path, worktree="/wt/old", branch="old", start_sha=A)
     plan = _bplan(items, path, worktree="/wt/new", branch="new")
     assert plan.start_after is None and ("start_sha", None) in plan.changes
+
+
+def test_a_changed_pair_keeps_a_proved_ancestor(tmp_path):
+    items, path = _items(tmp_path, worktree="/wt/old", branch="old", start_sha=A)
+    plan = _bplan(items, path, worktree="/wt/new", branch="new", ancestry=BaselineAncestry(A, True))
+    assert plan.refusal is None and plan.start_after == A
+    assert all(key != "start_sha" for key, _ in plan.changes)
+
+
+def test_a_first_pair_keeps_a_proved_ancestor(tmp_path):
+    items, path = _items(tmp_path, start_sha=A)
+    plan = _bplan(items, path, worktree="/wt/new", branch="new", ancestry=BaselineAncestry(A, True))
+    assert plan.refusal is None and plan.start_after == A
+
+
+def test_a_changed_pair_drops_a_proved_non_ancestor(tmp_path):
+    items, path = _items(tmp_path, worktree="/wt/old", branch="old", start_sha=A)
+    plan = _bplan(items, path, worktree="/wt/new", branch="new", ancestry=BaselineAncestry(A, False))
+    assert plan.start_after is None and ("start_sha", None) in plan.changes
+
+
+def test_a_dropped_non_ancestor_still_meets_require_start_sha(tmp_path):
+    items, path = _items(tmp_path, worktree="/wt/old", branch="old", start_sha=A)
+    plan = _bplan(
+        items, path, worktree="/wt/new", branch="new", ancestry=BaselineAncestry(A, False), require_start_sha=True
+    )
+    assert plan.refusal == "baseline-missing" and plan.changes == ()
+
+
+def test_unknown_ancestry_refuses_without_deleting(tmp_path):
+    items, path = _items(tmp_path, worktree="/wt/old", branch="old", start_sha=A)
+    plan = _bplan(items, path, worktree="/wt/new", branch="new", ancestry=BaselineAncestry(A, None, "git broke"))
+    assert plan.refusal == "git-unavailable" and plan.changes == () and plan.start_after == A
+    assert "git broke" in plan.detail
+
+
+def test_a_proof_about_another_baseline_is_no_proof(tmp_path):
+    items, path = _items(tmp_path, worktree="/wt/old", branch="old", start_sha=A)
+    plan = _bplan(items, path, worktree="/wt/new", branch="new", ancestry=BaselineAncestry(B, True))
+    assert plan.start_after is None
+
+
+def test_ancestry_is_ignored_on_an_unchanged_pair_and_with_an_explicit_baseline(tmp_path):
+    items, path = _items(tmp_path, worktree="/wt/x", branch="b", start_sha=A)
+    unknown = BaselineAncestry(A, None, "unused")
+    assert _bplan(items, path, worktree="/wt/x", branch="b", ancestry=unknown).refusal is None
+    explicit = _bplan(items, path, worktree="/wt/y", branch="c", start_sha=B, ancestry=unknown)
+    assert explicit.refusal is None and explicit.start_after == B
+
+
+def test_selected_baseline_reads_the_scalar_or_the_named_stamp(tmp_path):
+    stamps = f"repo_stamps:\n  ui:\n    worktree: /wt/u\n    branch: u\n    start_sha: {B}\n"
+    items, path = _items(tmp_path, worktree="/wt/x", branch="b", start_sha=A, repo_stamps=stamps)
+    item = next(i for i in items if i.path == path)
+    assert selected_baseline(item, None) == (("/wt/x", "b"), A)
+    assert selected_baseline(item, "ui") == (("/wt/u", "u"), B)
+    assert selected_baseline(item, "absent") == ((None, None), None)
+
+
+def test_a_foreign_repoint_keeps_a_proved_ancestor_in_its_own_stamp(tmp_path):
+    stamps = f"repo_stamps:\n  ui:\n    worktree: /wt/u\n    branch: u\n    start_sha: {A}\n"
+    root, page = _page(tmp_path, start_sha=B, repo_stamps=stamps)
+    items = load_items(load_bundle(root, ignore=IGNORE))
+    document = load(page)
+    plan = _bplan(items, PATH, worktree="/wt/v", branch="v", repo="ui", ancestry=BaselineAncestry(A, True))
+    apply_placement(document, plan)
+    data = document.fm_data()
+    assert data["repo_stamps"]["ui"] == {"worktree": "/wt/v", "branch": "v", "start_sha": A}
+    assert data["start_sha"] == B
 
 
 def test_a_conflicting_baseline_on_an_unchanged_pair_refuses(tmp_path):

@@ -325,3 +325,20 @@ def test_readers_are_settled_and_reported_at_the_prepared_commit() -> None:
     assert "a branch name is never consulted" in text
     assert "reads from the shared epic worktree" not in text
     assert "read-only descendant that records nothing" not in text
+
+
+def test_every_shell_baseline_refusal_is_named_where_the_workflow_records_the_baseline() -> None:
+    skill = _find("plugins/gw/skills/workflow/SKILL.md")
+    if skill is None:
+        pytest.skip("workflow SKILL.md is not present in this checkout")
+    text = skill.read_text(encoding="utf-8")
+    paragraph = text.split("**Record the execute baseline.**", 1)[1].split("\n\n", 1)[0]
+    shell = (
+        "baseline-conflict",
+        "wrong-checkout",
+        "already-started",
+        "outside-repository",
+        "git-unavailable",
+        "no-repo",
+    )
+    assert [code for code in shell if f"`{code}`" not in paragraph] == []

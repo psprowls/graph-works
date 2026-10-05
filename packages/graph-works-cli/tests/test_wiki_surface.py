@@ -96,7 +96,6 @@ def test_help_json_freezes_the_existing_root_and_complete_c4_wiki_surface() -> N
         ("wiki", "proposals"): {"--json", "--workspace"},
         ("wiki", "proposal", "file"): {
             "--type",
-            "--lane",
             "--title",
             "--description",
             "--id",

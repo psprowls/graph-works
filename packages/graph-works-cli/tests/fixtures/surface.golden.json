@@ -2396,19 +2396,8 @@
           ],
           "secondary_opts": [],
           "help": "The page type the proposal argues for, e.g. Explanation.",
-          "required": false,
-          "default": "",
-          "is_flag": false
-        },
-        {
-          "name": "lane",
-          "opts": [
-            "--lane"
-          ],
-          "secondary_opts": [],
-          "help": "Deprecated: tutorial|how-to|reference|explanation|adr. Use --type.",
-          "required": false,
-          "default": "",
+          "required": true,
+          "default": null,
           "is_flag": false
         },
         {

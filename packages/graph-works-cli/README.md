@@ -41,7 +41,7 @@ Wiki commands:
 - `gw wiki tags apply DISPOSITION [--only merge|strip] [--dry-run]`
 - `gw wiki tags gate [--json]`
 - `gw wiki proposals [--json]`
-- `gw wiki proposal file --lane TEXT --title TEXT --id TEXT --resource PATH [--description TEXT] [--rationale TEXT] [--evidence TEXT]`
+- `gw wiki proposal file --type TEXT --title TEXT --id TEXT --resource PATH [--description TEXT] [--rationale TEXT] [--evidence TEXT]`
 - `gw wiki proposal approve TARGET [--note TEXT] [--dry-run] [--json]`
 - `gw wiki proposal reject TARGET [--note TEXT] [--dry-run] [--json]`
 - `gw wiki proposal supersede TARGET --by-page PATH [--note TEXT] [--dry-run] [--json]`

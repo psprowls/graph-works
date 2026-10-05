@@ -348,13 +348,10 @@ def test_proposal_file_requires_each_filing_identity_field(missing: str, value: 
     options = {"--type": "Explanation", "--title": "T", "--id": "s1", "--resource": "r"}
     options.pop(missing)
     result = runner.invoke(app, ["wiki", "proposal", "file", *[part for pair in options.items() for part in pair]])
-    if missing == "--type":
-        assert result.exit_code != 0 and "pass exactly one of --type or --lane" in result.stderr
-    else:
-        assert result.exit_code == 2 and missing in result.stderr
+    assert result.exit_code == 2 and missing in result.stderr
 
 
-@pytest.mark.parametrize("flag", ("--kind", "--target-slug", "--origin"))
+@pytest.mark.parametrize("flag", ("--kind", "--target-slug", "--origin", "--lane"))
 def test_proposal_file_rejects_removed_flags(flag: str) -> None:
     result = runner.invoke(app, [*_file_args(Path()), flag, "x"])
     assert result.exit_code == 2 and f"No such option: {flag}" in result.stderr
@@ -409,21 +406,13 @@ def test_decide_dry_run_without_json_prints_planned_members(initialized_workspac
     assert result.exit_code == 0 and result.stdout.strip() == "proposals/docs-explanations-typed-cli.md"
 
 
-def test_the_deprecated_lane_maps_to_its_type_and_warns(
-    monkeypatch: pytest.MonkeyPatch, initialized_workspace: Path
-) -> None:
-    captured: list[dict[str, object]] = []
-    monkeypatch.setattr(
-        proposals_module, "run_proposal_file", lambda _layout, **kwargs: captured.append(kwargs) or _file_run()
-    )
+def test_a_missing_type_is_a_usage_error(initialized_workspace: Path) -> None:
     result = runner.invoke(
         app,
         [
             "wiki",
             "proposal",
             "file",
-            "--lane",
-            "how-to",
             "--title",
             "T",
             "--id",
@@ -434,28 +423,4 @@ def test_the_deprecated_lane_maps_to_its_type_and_warns(
             str(initialized_workspace),
         ],
     )
-    assert result.exit_code == 0, result.output
-    assert captured[0]["type_name"] == "HowTo"
-    assert "--lane is deprecated" in result.stderr
-
-
-@pytest.mark.parametrize("argv", [["--lane", "concepts"], ["--type", "Explanation", "--lane", "explanation"], []])
-def test_type_and_lane_misuse_is_a_usage_error(argv: list[str], initialized_workspace: Path) -> None:
-    result = runner.invoke(
-        app,
-        [
-            "wiki",
-            "proposal",
-            "file",
-            *argv,
-            "--title",
-            "T",
-            "--id",
-            "s1",
-            "--resource",
-            "r",
-            "--workspace",
-            str(initialized_workspace),
-        ],
-    )
-    assert result.exit_code != 0
+    assert result.exit_code == 2 and "--type" in result.stderr

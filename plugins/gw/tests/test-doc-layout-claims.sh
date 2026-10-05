@@ -795,7 +795,7 @@ for doc in "skills/graph-works/references/ingest-workflow.md" "skills/ingest/SKI
     assert_contains "$doc" "gw wiki proposal file --type" \
         "$doc files a declined page by its schema type"
     assert_not_matches "$doc" '^[[:space:]]*(gw wiki proposal file.*--lane|--lane )' \
-        "$doc no longer teaches the deprecated --lane command"
+        "$doc does not teach the removed --lane flag"
 done
 assert_not_matches "skills/graph-works/references/proposal-disposition.md" 'Diataxis lanes and ADR' \
     "the disposition reference describes the pool, not five lanes"

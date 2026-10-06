@@ -12,6 +12,7 @@ so a caller holding both does not have to hold two mental models.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import PurePosixPath
 from types import MappingProxyType
@@ -24,7 +25,6 @@ from okf_io import Bundle
 from ruamel.yaml.error import YAMLError
 
 from doc_wiki_okf.diataxis.pages import directory_for
-from doc_wiki_okf.diataxis.rubric import TYPE_NAMES
 
 #: Why a retype was refused, by this module. Small and ours: the move's own
 #: refusals keep their own vocabulary on `plan.move.refusals`, where it already
@@ -109,7 +109,9 @@ def _empty_move(bundle: Bundle) -> MovePlan:
     )
 
 
-def plan_retype(bundle: Bundle, schema_set: SchemaSet, concept_id: str, new_type: str) -> RetypePlan:
+def plan_retype(
+    bundle: Bundle, schema_set: SchemaSet, concept_id: str, new_type: str, *, allowed_types: Sequence[str]
+) -> RetypePlan:
     """Plan *concept_id*'s move into *new_type*'s lane. Writes nothing.
 
     A page okf-io could not parse is refused by `plan_move`'s own `parse-error`,
@@ -137,12 +139,12 @@ def plan_retype(bundle: Bundle, schema_set: SchemaSet, concept_id: str, new_type
     wanted = new_type.strip()
     refusals: list[RetypeRefusal] = []
 
-    if wanted not in TYPE_NAMES:
+    if wanted not in allowed_types:
         refusals.append(
             RetypeRefusal(
                 concept_id=concept_id,
                 kind="unknown-type",
-                detail=f"unknown type {wanted!r}; expected one of {list(TYPE_NAMES)}",
+                detail=f"unknown type {wanted!r}; expected one of {list(allowed_types)}",
             )
         )
     elif wanted not in schema_set.schemas:

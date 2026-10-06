@@ -31,6 +31,7 @@ from okf_ext.proposals import (
     PageStatus,
     Plan,
     Proposal,
+    Refusal,
     WriteFailure,
     apply,
     list_proposals,
@@ -51,8 +52,8 @@ from doc_wiki_okf.ingest import (
     resolve_source_path,
 )
 from doc_wiki_okf.proposals.filing import plan_file
-from doc_wiki_okf.proposals.lanes import LaneSet, lane_set
 from doc_wiki_okf.proposals.migrate import MigrationPlan, migrate_and_move, plan_migrate
+from doc_wiki_okf.proposals.pool import PoolError, ProposalPool, proposal_pool
 from doc_wiki_okf.proposals.promote import plan_promotion
 from doc_wiki_okf.proposals.render import ReviewRenderer
 from doc_wiki_okf.resources import seed_files
@@ -134,12 +135,8 @@ def _schema_set(root: Path, declarations_dir: Path | None) -> SchemaSet:
         raise typer.Exit(code=1) from exc
 
 
-def _lanes(root: Path, declarations_dir: Path | None) -> LaneSet:
-    try:
-        return lane_set(_schema_set(root, declarations_dir))
-    except KeyError as exc:
-        typer.echo(f"{root}: {exc}", err=True)
-        raise typer.Exit(code=1) from exc
+def _pool(root: Path, declarations_dir: Path | None) -> ProposalPool:
+    return proposal_pool(_schema_set(root, declarations_dir))
 
 
 def _sections(root: Path, declarations_dir: Path | None) -> SectionSet:
@@ -166,15 +163,16 @@ def _echo_failure(failure: WriteFailure) -> None:
     typer.echo(f"refused {failure.path} ({failure.kind}): {failure.error}", err=True)
 
 
-def _proposal_json(proposal: Proposal, lanes: LaneSet) -> dict[str, Any]:
+def _proposal_json(proposal: Proposal, pool: ProposalPool) -> dict[str, Any]:
     """The §6 shape. Every value survives `json.dumps` with no encoder, which
     is the promise `fm_data` already makes and the reason
     `okf_ext.proposals.model` carries sources as plain data."""
-    lane = lanes.lane_for(proposal.target)
+    resolved = pool.type_for(proposal)
     return {
         "member": proposal.member,
         "target": proposal.target,
-        "lane": None if lane is None else lane.name,
+        "type": None if isinstance(resolved, Refusal) else resolved.name,
+        "target_type": proposal.target_type,
         "title": proposal.title,
         "description": proposal.description,
         "page_status": proposal.page_status,
@@ -371,15 +369,16 @@ def proposals(
     because a filter is how a caller picks documents to act on.
     """
     bundle = _bundle(root)
-    lanes = _lanes(root, declarations_dir)
+    pool = _pool(root, declarations_dir)
     found = list_proposals(bundle, page_status=_page_status(page_status))
     if json_output:
-        _emit([_proposal_json(proposal, lanes) for proposal in found])
+        _emit([_proposal_json(proposal, pool) for proposal in found])
         return
     for proposal in found:
-        lane = lanes.lane_for(proposal.target)
+        resolved = pool.type_for(proposal)
         flag = f" [{proposal.malformed}]" if proposal.malformed else ""
-        typer.echo(f"{proposal.raw_page_status or '?':<9} {lane.name if lane else '-':<11} {proposal.target}{flag}")
+        type_name = resolved.name if not isinstance(resolved, Refusal) else "-"
+        typer.echo(f"{proposal.raw_page_status or '?':<9} {type_name:<12} {proposal.target}{flag}")
     if not found:
         typer.echo("no proposals")
 
@@ -397,19 +396,19 @@ def show(
     so what a reviewer sees is what the next merge would write.
     """
     bundle = _bundle(root)
-    lanes = _lanes(root, declarations_dir)
     found = _find(bundle, str(target))
     if json_output:
-        _emit(_proposal_json(found, lanes))
+        pool = _pool(root, declarations_dir)
+        _emit(_proposal_json(found, pool))
         return
-    lane = lanes.lane_for(found.target)
-    if lane is None:
-        typer.echo(f"{found.target}: in no declared lane directory", err=True)
+    resolved_type = _pool(root, declarations_dir).type_for(found)
+    if isinstance(resolved_type, Refusal):
+        typer.echo(f"{found.target}: {resolved_type.detail}", err=True)
         raise typer.Exit(code=1)
     raw_target = bundle.member_id(found.target)
     resolved = raw_target if raw_target is not None else found.target
     render = ReviewRenderer(
-        lane=lane,
+        type_name=resolved_type.name,
         target=resolved,
         mode="update" if raw_target is not None else "create",
     )
@@ -419,7 +418,7 @@ def show(
 @proposal_app.command("file")
 def file_proposal(
     root: Path = typer.Argument(..., help="Bundle root to file into."),  # noqa: B008
-    lane: str = typer.Option(..., "--lane", help="Which lane the page belongs to."),
+    type_name: str = typer.Option(..., "--type", help="The page type the proposal argues for, e.g. Explanation."),
     title: str = typer.Option(..., "--title", help="The proposed page's title; the target slugs from it."),
     description: str = typer.Option("", "--description", help="One line, written into the proposal's frontmatter."),
     identifier: str = typer.Option(..., "--id", help="The source's `id`, used as its footnote key."),
@@ -443,28 +442,27 @@ def file_proposal(
     """
     today = _today(today_option)
     bundle = _bundle(root)
-    lanes = _lanes(root, declarations_dir)
-    lane_names = [declared.name for declared in lanes.lanes]
-    if lane not in lane_names:
-        typer.echo(f"--lane {lane!r}: expected one of {lane_names}", err=True)
-        raise typer.Exit(code=1)
-
     source: dict[str, Any] = {"id": identifier, "resource": resource}
     if rationale:
         source["rationale"] = rationale
     if evidence:
         source["evidence"] = list(evidence)
 
-    plan = plan_file(
-        bundle,
-        lanes,
-        lane=lane,
-        title=title,
-        description=description,
-        source=source,
-        by=by or producer_actor("doc-wiki-okf"),
-        at=_at(today),
-    )
+    pool = _pool(root, declarations_dir)
+    try:
+        plan = plan_file(
+            bundle,
+            pool,
+            type_name=type_name,
+            title=title,
+            description=description,
+            source=source,
+            by=by or producer_actor("doc-wiki-okf"),
+            at=_at(today),
+        )
+    except PoolError as exc:
+        typer.echo(f"--type {type_name!r}: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
     _report(plan, dry_run=dry_run, bundle=bundle, json_output=json_output)
 
 
@@ -518,7 +516,7 @@ def promote(
         None, "--by", help="Stamped into the new page's `generated.by`. Default `doc-wiki-okf/<version>`."
     ),
     declarations_dir: Path | None = typer.Option(None, "--declarations-dir", help="Where the declarations live."),  # noqa: B008
-    today_option: str | None = typer.Option(None, "--today", help="The date an ADR's filename carries."),
+    today_option: str | None = typer.Option(None, "--today", help="The date a dated type's filename carries."),
     dry_run: bool = typer.Option(False, "--dry-run", help="Print the plan instead of writing."),
     json_output: bool = typer.Option(False, "--json", help="Emit the plan as JSON."),
 ) -> None:
@@ -530,12 +528,12 @@ def promote(
     """
     today = _today(today_option)
     bundle = _bundle(root)
-    lanes = _lanes(root, declarations_dir)
+    pool = _pool(root, declarations_dir)
     found = _find(bundle, str(target))
     try:
         plan = plan_promotion(
             bundle,
-            lanes,
+            pool,
             found,
             section_set=_sections(root, declarations_dir),
             by=by or producer_actor("doc-wiki-okf"),

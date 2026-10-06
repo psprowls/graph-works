@@ -1,11 +1,7 @@
 """The review artifact: seven sections, pinned whole, byte-stable."""
 
-from doc_wiki_okf.proposals.lanes import Lane
 from doc_wiki_okf.proposals.render import ReviewRenderer
 from okf_ext.proposals import HEADER, BodyRenderer
-
-ADR = Lane(name="adr", directory="adrs/", type_name="Explanation", dated=True)
-REFERENCE = Lane(name="reference", directory="docs/reference/", type_name="Reference", dated=False)
 
 SOURCES = (
     {
@@ -22,8 +18,8 @@ SOURCES = (
 )
 
 
-def _renderer(lane=ADR, target="adrs/bulk-write.md", mode="create") -> ReviewRenderer:
-    return ReviewRenderer(lane=lane, target=target, mode=mode)
+def _renderer(type_name="Explanation", target="adrs/bulk-write.md", mode="create") -> ReviewRenderer:
+    return ReviewRenderer(type_name=type_name, target=target, mode=mode)
 
 
 def test_the_rendered_body_is_exactly_this():
@@ -100,8 +96,8 @@ def test_every_empty_section_says_so_rather_than_rendering_a_bare_heading():
     )
 
 
-def test_the_verb_derives_from_the_mode_and_the_sentence_from_the_lane():
-    body = _renderer(lane=REFERENCE, target="docs/reference/flags.md", mode="update")(description="", sources=())
+def test_the_verb_derives_from_the_mode_and_the_sentence_from_the_type():
+    body = _renderer(type_name="Reference", target="docs/reference/flags.md", mode="update")(description="", sources=())
     assert "Update existing Reference page `docs/reference/flags.md`." in body
 
 

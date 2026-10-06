@@ -26,7 +26,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
-from doc_wiki_okf.proposals.lanes import LaneSet
+from doc_wiki_okf.proposals.pool import ProposalPool
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.tools import BaseTool, tool
 from okf_io import Bundle
@@ -166,9 +166,9 @@ def build_reasoner_prompt(
         f"{truncate_text(page_text, MAX_WIKI_PAGE_CHARS)}\n\n"
         "Raw source text or chunk manifest:\n"
         f"{raw_source_section}\n\n"
-        "Produce up to 10 candidate analyses. For each candidate include: lane, the page it "
+        "Produce up to 10 candidate analyses. For each candidate include: type, the page it "
         "argues for, title, source evidence, existing pages considered, reasoning summary, "
-        "potential conflicts, implementation notes, confidence, rank, and why that lane is the "
+        "potential conflicts, implementation notes, confidence, rank, and why that type is the "
         "right one. Return no candidates if the source does not justify durable wiki changes."
     )
 
@@ -177,7 +177,7 @@ async def run_proposal_reasoner(
     *,
     bundle: Bundle,
     lanes: Sequence[str],
-    lane_set: LaneSet,
+    pool: ProposalPool,
     material: Path,
     source_text: str,
     source_page: str,
@@ -196,7 +196,7 @@ async def run_proposal_reasoner(
     status instead -- but a constructor failure in `make_llm` does propagate,
     and `plan_suggestions` is where that is caught.
 
-    *lane_set* is the proposal `LaneSet`, and it is **not** *lanes*: *lanes* is
+    *pool* is the proposal pool, and it is **not** *lanes*: *lanes* is
     `catalog_lanes`' wider set -- the proposal lanes plus the entity lanes plus
     `sources/` -- which is what the catalog tool covers, not what the model may
     propose into. Reusing it for the system prompt would offer lanes no
@@ -205,7 +205,7 @@ async def run_proposal_reasoner(
     chunks = build_source_chunks(source_text).chunks
     tools = build_reasoner_tools(bundle=bundle, lanes=lanes, chunks=chunks, graph_tools=graph_tools)
     messages = [
-        SystemMessage(content=build_proposal_reasoner_system(lane_set=lane_set)),
+        SystemMessage(content=build_proposal_reasoner_system(pool=pool)),
         HumanMessage(
             content=build_reasoner_prompt(
                 bundle=bundle,

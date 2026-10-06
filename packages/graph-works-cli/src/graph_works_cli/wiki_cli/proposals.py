@@ -116,7 +116,7 @@ def _decide(
 
 
 def file_proposal(
-    lane: str = typer.Option(..., "--lane"),
+    type_name: str = typer.Option(..., "--type", help="The page type the proposal argues for, e.g. Explanation."),
     title: str = typer.Option(..., "--title"),
     description: str = typer.Option("", "--description"),
     identifier: str = typer.Option(..., "--id"),
@@ -127,7 +127,7 @@ def file_proposal(
     json_output: bool = typer.Option(False, "--json", help="Print the proposal projection instead of text."),
     workspace: str = typer.Option("", "--workspace"),
 ) -> None:
-    """File or merge one source's proposal for a lane target."""
+    """File or merge one source's proposal for a page of one type."""
     command = "wiki proposal file"
     layout = resolve_workspace(workspace, json_mode=json_output, command=command)
     source: dict[str, Any] = {"id": identifier, "resource": resource}
@@ -139,7 +139,7 @@ def file_proposal(
     try:
         run = run_proposal_file(
             layout,
-            lane=lane,
+            type_name=type_name,
             title=title,
             description=description,
             source=source,

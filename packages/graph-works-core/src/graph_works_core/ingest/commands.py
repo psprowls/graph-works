@@ -76,7 +76,7 @@ from doc_wiki_okf.actors import producer_actor
 from doc_wiki_okf.ingest import DocumentBrief, plan_document_brief
 from doc_wiki_okf.ingest.layout import GRAPH_WIKI_LAYOUT, IngestLayout
 from doc_wiki_okf.ingest.seams import NO_ENTITY, EntityMatcher, StateGate
-from doc_wiki_okf.proposals.lanes import lane_set
+from doc_wiki_okf.proposals.pool import proposal_pool
 from doc_wiki_okf.sources import (
     KEY_CLAIMS_HEADING,
     copy_target,
@@ -429,7 +429,7 @@ def plan_ingest_brief(
     A standalone copy of `run_ingest_source`'s own brief-computation preamble,
     not a shared call: see this module's own docstring note on why sharing a
     return shape would couple this function's signature to `run_ingest_source`'s
-    later, unrelated need for `config`/`schema_set`/`section_set`/`lanes`/`bundle`.
+    later, unrelated need for `config`/`schema_set`/`section_set`/`pool`/`bundle`.
     """
     config = load_workspace_config(layout)
     schema_set = load_schemas(config.declarations_dir / SCHEMA_DIRNAME)
@@ -524,7 +524,7 @@ async def run_ingest_source(
     schema_set = load_schemas(config.declarations_dir / SCHEMA_DIRNAME)
     kinds = source_kinds(schema_set)
     section_set = load_sections(config.declarations_dir / SECTIONS_DIRNAME)
-    lanes = lane_set(schema_set)
+    pool = proposal_pool(schema_set)
     bundle = load_workspace_bundle(layout, ignore=BUNDLE_IGNORE)
 
     with _matcher_for(match_entity, config, schema_set) as matcher:
@@ -627,7 +627,7 @@ async def run_ingest_source(
     planned, status = await plan_suggestions(
         bundle=bundle,
         schema_set=schema_set,
-        lane_set=lanes,
+        pool=pool,
         material=brief.source_path,
         source_text=brief.text,
         source_page=page,

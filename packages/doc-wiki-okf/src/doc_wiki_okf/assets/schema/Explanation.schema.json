@@ -16,5 +16,22 @@
     }
   },
   "x-okf-directory": "docs/explanations/",
+  "x-okf-accept-proposals": true,
+  "x-okf-proposal-guidance": {
+    "summary": "the reader wants to understand why; an argument for why something is the way it is.",
+    "question": "Does the reader want to understand why?",
+    "signals": [
+      "context comes before the idea itself",
+      "alternatives and trade-offs are weighed",
+      "there are no steps to follow and nothing to look up",
+      "a reader could restate the idea in their own words afterwards"
+    ],
+    "anti_signals": [
+      "the page prescribes an order of operations",
+      "the page is a table of facts",
+      "the reader is expected to type along"
+    ],
+    "title_pattern": "Frames a concept: `How ... works`, `Understanding ...`, `Why ... is designed this way`"
+  },
   "x-okf-about": { "entries": "claims" }
 }

@@ -48,3 +48,17 @@ def test_py_typed_ships_inside_the_package() -> None:
     import importlib.resources
 
     assert (importlib.resources.files("doc_wiki_okf") / "py.typed").is_file()
+
+
+def test_retired_taxonomy_apis_are_unavailable() -> None:
+    import importlib.util
+
+    import doc_wiki_okf.diataxis as diataxis
+    import doc_wiki_okf.proposals as proposals
+
+    for name in ("RUBRIC", "TYPE_NAMES", "TypeRubric", "brief"):
+        assert not hasattr(diataxis, name)
+    for name in ("ADR_DIRECTORY", "ADR_TYPE", "DIATAXIS_LANES", "Lane", "LaneSet", "lane_set"):
+        assert not hasattr(proposals, name)
+    assert importlib.util.find_spec("doc_wiki_okf.proposals.lanes") is None
+    assert importlib.util.find_spec("doc_wiki_okf.diataxis.rubric") is None

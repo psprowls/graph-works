@@ -63,7 +63,7 @@ def ingest_result(*, degraded: bool) -> object:
         indexes_updated=("index.md",),
         proposals=(
             {
-                "lane": "concepts",
+                "type": "Explanation",
                 "title": "T",
                 "target": "concepts/t.md",
                 "proposal": "p",
@@ -119,7 +119,7 @@ def proposal_file(*, applied: bool) -> ProposalFileRun:
     write = Write(member="proposals/explanations-a.md", mode="create", text="---\nbody\n")
     plan = ProposalPlan(Path("/ws/okf"), "docs/explanations/a.md", write.member, (write,), ())
     return ProposalFileRun(
-        lane="explanation",
+        type_name="Explanation",
         target=plan.target,
         proposal=plan.proposal,
         plan=plan,
@@ -396,6 +396,7 @@ WIKI: dict[str, tuple[Callable[[], object], ...]] = {
             ns(
                 member="proposals/a.md",
                 target="concepts/a.md",
+                target_type=None,
                 title="A",
                 description="d",
                 page_status="proposed",
@@ -414,6 +415,7 @@ WIKI: dict[str, tuple[Callable[[], object], ...]] = {
                     proposal=ns(
                         member="proposals/a.md",
                         target="concepts/a.md",
+                        target_type=None,
                         title="A",
                         description="d",
                         page_status="proposed",
@@ -423,6 +425,8 @@ WIKI: dict[str, tuple[Callable[[], object], ...]] = {
                         malformed="missing target",
                     ),
                     mode="update",
+                    type_name=None,
+                    type_refusal=ns(path="proposals/a.md", kind="malformed-proposal", detail="missing target"),
                 )
             ]
         ),

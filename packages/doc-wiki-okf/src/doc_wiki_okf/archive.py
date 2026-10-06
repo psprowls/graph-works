@@ -66,9 +66,8 @@ SkipReason = Literal["unknown-member", "already-archived"]
 #: The six wiki types whose lane this package ships a schema for. Type names
 #: are legitimately this package's vocabulary; directories are not -- those
 #: come off the schema set, so `wiki_lanes` and `x-okf-directory` cannot drift
-#: apart. `Proposal` is absent deliberately: no shipped schema declares it
-#: (`resources.SEED_RELATIVE_PATHS`), so its lane is the one fixed convention
-#: below.
+#: apart. `Proposal` is absent deliberately: its directory is the fixed
+#: convention below, which its shipped schema also declares.
 WIKI_LANE_TYPES: tuple[str, ...] = (
     "Tutorial",
     "HowTo",
@@ -78,8 +77,8 @@ WIKI_LANE_TYPES: tuple[str, ...] = (
     "Source",
 )
 
-#: The proposal lane, trailing slash, matching `proposals.lanes.ADR_DIRECTORY`'s
-#: convention. Named once here because no schema declares it.
+#: The proposal lane, trailing slash, like every `x-okf-directory`. Named once here; `Proposal.schema.json`
+#: declares the same directory.
 PROPOSALS_DIRECTORY = "proposals/"
 
 #: The Source frontmatter key naming the page's reference copy, declared
@@ -92,15 +91,14 @@ def wiki_lanes(schema_set: SchemaSet) -> tuple[str, ...]:
     slash, longest first.
 
     Longest first so a prefix lookup is unambiguous when one lane's directory
-    prefixes another's (`docs` versus `docs/explanations`) -- the same ordering
-    `LaneSet.lane_for` computes for itself.
+    prefixes another's (`docs` versus `docs/explanations`).
 
     Reads a `SchemaSet` it is handed and touches no file, so this module stays
     as pure as it was when the vocabulary was a constant; the I/O stays with
     the caller that was already doing it.
 
     Raises `KeyError` for a wiki type the set does not carry -- caller
-    configuration, the same contract `directory_for` and `lane_set` state.
+    configuration, matching `directory_for`'s required-declaration contract.
     """
     declared = [directory_for(schema_set, type_name).rstrip("/") for type_name in WIKI_LANE_TYPES]
     declared.append(PROPOSALS_DIRECTORY.rstrip("/"))

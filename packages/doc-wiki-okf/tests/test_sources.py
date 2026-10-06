@@ -307,7 +307,7 @@ def test_the_two_step_flow_yields_a_backlink(tmp_path: Path) -> None:
     `build_link_graph()` already derives backlinks from it -- the two-step flow
     needs no new machinery, and this is what proves it."""
     from doc_wiki_okf.proposals.filing import plan_file
-    from doc_wiki_okf.proposals.lanes import lane_set
+    from doc_wiki_okf.proposals.pool import proposal_pool
     from okf_io import build_link_graph
 
     root = tmp_path / "bundle"
@@ -318,8 +318,8 @@ def test_the_two_step_flow_yields_a_backlink(tmp_path: Path) -> None:
     reloaded = load_bundle(root, ignore=IGNORE)
     filing = plan_file(
         reloaded,
-        lane_set(schema_set()),
-        lane="explanation",
+        proposal_pool(schema_set()),
+        type_name="Explanation",
         title="Why Auth Works This Way",
         description="Derived from the auth spec.",
         source={"id": "src-auth", "resource": PAGE},

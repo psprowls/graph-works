@@ -165,3 +165,18 @@ def test_shared_resolved_in_is_probed_once_per_call(evidence, monkeypatch, ref_k
     assert sum(args[0] == "merge-base" for args in calls) == (0 if ref_kind == "invalid" else 1)
     assert len(result.entries) == (2 if ref_kind == "landed" else 0)
     assert len(result.warnings) == (2 if ref_kind in ("invalid", "comparison_failure") else 0)
+
+
+def test_a_dangling_resolved_in_is_an_unreachable_warning_not_an_entry(evidence):
+    layout, items, subject, repo, *_ = evidence
+    _git(repo, "checkout", "-qb", "gone")
+    orphan = _commit(repo, "orphan")
+    _git(repo, "checkout", "-q", "main")
+    _git(repo, "branch", "-qD", "gone")
+    items = tuple(replace(i, resolved_in=orphan) if i.path == SIBLING else i for i in items)
+    result = landed_since(layout, items, subject)
+    assert result.entries == () and result.stale == ()
+    assert result.warnings == (
+        f"landed-since: {SIBLING} resolved_in {orphan!r} is not reachable from any ref in {repo} "
+        "(history rewritten or branch deleted); skipped",
+    )

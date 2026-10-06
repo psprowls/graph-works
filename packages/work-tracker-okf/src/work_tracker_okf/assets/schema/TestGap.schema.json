@@ -3,5 +3,24 @@
   "$ref": "_base.schema.json",
   "unevaluatedProperties": false,
   "properties": { "type": { "const": "TestGap" } },
+  "x-okf-accept-proposals": true,
+  "x-okf-proposal-guidance": {
+    "summary": "behaviour that works today but that no test would catch breaking.",
+    "question": "Does the source show behaviour that matters but that no test pins?",
+    "signals": [
+      "a code path, input class or contract is named with no test exercising it",
+      "the behaviour is believed correct today",
+      "a regression there would ship silently"
+    ],
+    "anti_signals": [
+      "the behaviour is already wrong",
+      "the gap is in the code's design, not its coverage",
+      "a test already covers it"
+    ],
+    "title_pattern": "Names what is unpinned: `Cover ...`, `Test ... under ...`"
+  },
+  "x-okf-proposal-promotion": {
+    "frontmatter": { "work_status": "open", "opened": "{on}", "updated": "{on}" }
+  },
   "x-okf-directory": "work/"
 }

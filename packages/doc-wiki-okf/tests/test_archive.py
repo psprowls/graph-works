@@ -384,10 +384,9 @@ def test_wiki_lanes_derives_every_declared_lane_from_the_schema_set() -> None:
         assert directory_for(schema_set, type_name).rstrip("/") in lanes
 
 
-def test_wiki_lanes_carries_proposals_which_no_shipped_schema_declares() -> None:
-    """`doc-wiki-okf` ships six schemas, not seven (`resources.SEED_RELATIVE_PATHS`):
-    `proposals/` is a fixed convention, named once, like `ADR_DIRECTORY`."""
-    assert "Proposal" not in _schema_set().schemas
+def test_wiki_lanes_carries_proposals_where_the_shipped_schema_declares_it() -> None:
+    """`Proposal` ships a schema now, and its directory is the fixed convention."""
+    assert _schema_set().schemas["Proposal"]["x-okf-directory"] == PROPOSALS_DIRECTORY
     assert PROPOSALS_DIRECTORY.rstrip("/") in wiki_lanes(_schema_set())
 
 

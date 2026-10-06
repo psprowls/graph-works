@@ -5,7 +5,7 @@ from datetime import date
 from pathlib import Path
 
 import pytest
-from okf_ext.schemas import declared_members, load_schemas, schema_rule
+from okf_ext.schemas import declared_members, declared_proposables, load_schemas, schema_rule
 from okf_io import load_bundle
 from okf_io import validate as okf_validate
 
@@ -13,7 +13,7 @@ from okf_io import validate as okf_validate
 _DIATAXIS_TYPES = ("Explanation", "HowTo", "Reference", "Tutorial")
 
 #: Every type this package ships a schema for, sorted.
-_ALL_TYPES = ("Adr", "Explanation", "HowTo", "Reference", "Source", "Tutorial")
+_ALL_TYPES = ("Adr", "Explanation", "HowTo", "Proposal", "Reference", "Source", "Tutorial")
 
 _LANES = {
     "Tutorial": "docs/tutorials/",
@@ -22,6 +22,7 @@ _LANES = {
     "Explanation": "docs/explanations/",
     "Source": "sources/",
     "Adr": "adrs/",
+    "Proposal": "proposals/",
 }
 
 
@@ -30,7 +31,7 @@ def _schema_set():
     return load_schemas(str(assets))
 
 
-def test_seed_schemas_load_as_exactly_the_six_types() -> None:
+def test_seed_schemas_load_as_exactly_the_seven_types() -> None:
     assert tuple(sorted(_schema_set().schemas)) == _ALL_TYPES
 
 
@@ -366,3 +367,34 @@ def test_the_source_seed_accepts_both_ledger_shapes(tmp_path: Path, ledger: str)
 )
 def test_the_source_seed_rejects_a_bad_ledger_entry(tmp_path: Path, ledger: str) -> None:
     assert _findings(tmp_path, _SOURCE_HEAD + ledger, lane="sources", heading="TL;DR")
+
+
+def test_the_shipped_pool_is_the_four_diataxis_types_and_adr() -> None:
+    found = declared_proposables(_schema_set())
+    assert [entry.name for entry in found.types] == ["Adr", "Explanation", "HowTo", "Reference", "Tutorial"]
+    assert found.locked == ("Proposal", "Source")
+    assert found.refused == ()
+
+
+def test_only_adr_is_dated_and_its_promotion_covers_decision_date() -> None:
+    by_name = {entry.name: entry for entry in declared_proposables(_schema_set()).types}
+    adr = by_name["Adr"]
+    assert adr.promotion is not None and adr.promotion.dated
+    assert adr.promotion.frontmatter_on(date(2026, 10, 4)) == {"decision_date": "2026-10-04", "status": "stable"}
+    assert all(by_name[name].promotion is None for name in _DIATAXIS_TYPES)
+
+
+def test_the_diataxis_guidance_carries_the_retired_rubric_verbatim() -> None:
+    explanation = {e.name: e for e in declared_proposables(_schema_set()).types}["Explanation"].guidance
+    assert explanation.summary == "the reader wants to understand why; an argument for why something is the way it is."
+    assert explanation.question == "Does the reader want to understand why?"
+    assert explanation.signals[0] == "context comes before the idea itself"
+    assert explanation.title_pattern == (
+        "Frames a concept: `How ... works`, `Understanding ...`, `Why ... is designed this way`"
+    )
+
+
+def test_the_proposal_schema_admits_target_type() -> None:
+    proposal = _schema_set().schemas["Proposal"]
+    assert proposal["properties"]["target_type"] == {"type": "string", "minLength": 1}
+    assert proposal["additionalProperties"] is False

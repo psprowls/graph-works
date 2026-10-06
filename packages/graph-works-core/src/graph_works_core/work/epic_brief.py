@@ -184,11 +184,18 @@ def epic_brief(layout: WorkspaceLayout, items: Sequence[WorkItem], item: WorkIte
         ref = sibling.resolved_in or ""
         overlaps = bool(own & set(code_affects(sibling.affects)))
         new: bool | None = None
+        unreachable = False
         if code is not None and repo is not None:
             comparison = compare_to_baseline(repo, ref, code)
             new = comparison.new
+            unreachable = comparison.unreachable
             if comparison.missing:
                 warnings.append(f"epic_brief: {sibling.path} resolved_in {_short(ref)} is not a commit in {repo}")
+            elif unreachable:
+                warnings.append(
+                    f"epic_brief: {sibling.path} resolved_in {_short(ref)} is not reachable from any ref in {repo} "
+                    "(history rewritten or branch deleted)"
+                )
             elif new is None:
                 warnings.append(
                     f"epic_brief: could not compare {sibling.path} resolved_in {_short(ref)} "
@@ -200,7 +207,7 @@ def epic_brief(layout: WorkspaceLayout, items: Sequence[WorkItem], item: WorkIte
             f"affects overlap: {'yes' if overlaps else 'no'}{marker}"
         )
         siblings.append({"path": sibling.path, "resolved_in": ref, "overlaps": overlaps, "new_since_baseline": new})
-        if overlaps and (code is None or new is not False):
+        if overlaps and not unreachable and (code is None or new is not False):
             flagged.append(sibling.path)
     if flagged:
         flags.append(f"overlapping landed sibling(s): {', '.join(flagged)}")

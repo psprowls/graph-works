@@ -34,7 +34,7 @@ def _layout(root: Path) -> WorkspaceLayout:
 
 def _file(layout: WorkspaceLayout, **overrides: object) -> None:
     kwargs: dict[str, object] = {
-        "lane": "explanation",
+        "type_name": "Explanation",
         "title": "Typed CLI",
         "description": "d",
         "source": SOURCE,
@@ -158,9 +158,9 @@ def test_file_plans_by_default_then_creates_then_merges(tmp_path: Path) -> None:
     before = _snapshot(layout.bundle_dir)
 
     planned = run_proposal_file(
-        layout, lane="explanation", title="Typed CLI", description="d", source=SOURCE, by="agent:t", at=AT
+        layout, type_name="Explanation", title="Typed CLI", description="d", source=SOURCE, by="agent:t", at=AT
     )
-    assert planned.ok and planned.result is None and planned.lane == "explanation"
+    assert planned.ok and planned.result is None and planned.type_name == "Explanation"
     assert planned.target == TARGET and planned.proposal == MEMBER
     assert [write.mode for write in planned.plan.writes] == ["create"]
     assert _snapshot(layout.bundle_dir) == before
@@ -169,7 +169,7 @@ def test_file_plans_by_default_then_creates_then_merges(tmp_path: Path) -> None:
     assert (layout.bundle_dir / MEMBER).is_file()
     merged = run_proposal_file(
         layout,
-        lane="explanation",
+        type_name="Explanation",
         title="Typed CLI",
         description="d",
         source={"id": "s2", "resource": "/sources/two.md"},
@@ -182,7 +182,7 @@ def test_file_plans_by_default_then_creates_then_merges(tmp_path: Path) -> None:
 def test_file_unknown_lane_raises_key_error(tmp_path: Path) -> None:
     layout = _layout(tmp_path)
     with pytest.raises(KeyError):
-        run_proposal_file(layout, lane="nope", title="T", description="", source=SOURCE, by="a", at=AT)
+        run_proposal_file(layout, type_name="nope", title="T", description="", source=SOURCE, by="a", at=AT)
 
 
 def test_file_naive_at_raises(tmp_path: Path) -> None:
@@ -190,7 +190,7 @@ def test_file_naive_at_raises(tmp_path: Path) -> None:
     with pytest.raises(ValueError):
         run_proposal_file(
             layout,
-            lane="explanation",
+            type_name="Explanation",
             title="T",
             description="",
             source=SOURCE,

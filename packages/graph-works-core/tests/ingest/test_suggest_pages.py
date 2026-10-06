@@ -1,11 +1,11 @@
-"""The suggest phase: parse, validate against the lanes, file, report."""
+"""The suggest phase: parse, validate against the proposal pool, file, report."""
 
 from __future__ import annotations
 
 import json
 from pathlib import Path
 
-from doc_wiki_okf.proposals.lanes import lane_set
+from doc_wiki_okf.proposals.pool import proposal_pool
 from graph_works_core.ingest.proposal_reasoner import ProposalReasonerResult
 from graph_works_core.ingest.suggest_pages import (
     MAX_SUGGESTIONS,
@@ -24,12 +24,12 @@ from okf_ext.bundle import SCHEMA_DIRNAME
 from okf_io import load_bundle
 from suggest_fixtures import make_bundle  # see Step 2
 
-LANES = ("tutorial", "how-to", "reference", "explanation", "adr")
+TYPES = ("Tutorial", "HowTo", "Reference", "Explanation", "Adr")
 
 
 def _suggestion(**overrides):
     base = {
-        "lane": "explanation",
+        "type": "Explanation",
         "title": "Why splicing beats regeneration",
         "rationale": "The source argues for the design, so it is an explanation.",
         "description": "Why the writer splices.",
@@ -46,47 +46,47 @@ def _suggestion(**overrides):
 
 
 def test_parse_accepts_the_object_form():
-    parsed, ok = parse_extractor_response(json.dumps({"suggestions": [_suggestion()]}), lane_names=LANES)
+    parsed, ok = parse_extractor_response(json.dumps({"suggestions": [_suggestion()]}))
     assert ok and len(parsed) == 1
 
 
 def test_parse_accepts_a_bare_list_and_a_fenced_object():
-    assert parse_extractor_response(json.dumps([_suggestion()]), lane_names=LANES)[1] is True
-    assert parse_extractor_response(json_fence({"suggestions": [_suggestion()]}), lane_names=LANES)[1] is True
+    assert parse_extractor_response(json.dumps([_suggestion()]))[1] is True
+    assert parse_extractor_response(json_fence({"suggestions": [_suggestion()]}))[1] is True
 
 
 def test_parse_treats_a_null_suggestions_key_as_zero_and_parsed():
-    assert parse_extractor_response('{"suggestions": null}', lane_names=LANES) == ([], True)
+    assert parse_extractor_response('{"suggestions": null}') == ([], True)
 
 
 def test_parse_reports_a_miss_for_non_json_and_for_a_wrong_shape():
-    assert parse_extractor_response("not json at all", lane_names=LANES) == ([], False)
-    assert parse_extractor_response('"a string"', lane_names=LANES) == ([], False)
-    assert parse_extractor_response("", lane_names=LANES) == ([], False)
-    assert parse_extractor_response("```\n", lane_names=LANES) == ([], False)
+    assert parse_extractor_response("not json at all") == ([], False)
+    assert parse_extractor_response('"a string"') == ([], False)
+    assert parse_extractor_response("") == ([], False)
+    assert parse_extractor_response("```\n") == ([], False)
 
 
 def test_a_non_dict_suggestion_item_is_dropped():
     payload = {"suggestions": ["not a dict", _suggestion()]}
-    parsed, ok = parse_extractor_response(json.dumps(payload), lane_names=LANES)
+    parsed, ok = parse_extractor_response(json.dumps(payload))
     assert ok
     assert len(parsed) == 1
 
 
 def test_a_non_list_suggestions_value_is_a_parse_miss():
-    assert parse_extractor_response(json.dumps({"suggestions": "oops"}), lane_names=LANES) == ([], False)
+    assert parse_extractor_response(json.dumps({"suggestions": "oops"})) == ([], False)
 
 
-def test_a_bad_lane_a_blank_title_and_a_blank_rationale_are_dropped():
+def test_a_blank_type_a_blank_title_and_a_blank_rationale_are_dropped():
     payload = {
         "suggestions": [
-            _suggestion(lane="concept"),
+            _suggestion(type=""),
             _suggestion(title="   "),
             _suggestion(rationale=""),
             _suggestion(),
         ]
     }
-    parsed, ok = parse_extractor_response(json.dumps(payload), lane_names=LANES)
+    parsed, ok = parse_extractor_response(json.dumps(payload))
     assert ok and len(parsed) == 1
 
 
@@ -97,20 +97,19 @@ def test_an_explicit_null_title_or_rationale_is_dropped_not_stringified():
     is the non-blank literal `"None"` -- defeating the blank check below. The
     fallback has to trigger on `None` too, not only on a missing key.
     """
-    assert _validate_suggestion({"lane": "explanation", "title": None, "rationale": "ok reason"}, LANES) is None
-    assert _validate_suggestion({"lane": "explanation", "title": "T", "rationale": None}, LANES) is None
+    assert _validate_suggestion({"type": "Explanation", "title": None, "rationale": "ok reason"}) is None
+    assert _validate_suggestion({"type": "Explanation", "title": "T", "rationale": None}) is None
 
 
 def test_a_null_description_and_reasoning_summary_fall_back_instead_of_stringifying():
     entry = _validate_suggestion(
         {
-            "lane": "explanation",
+            "type": "Explanation",
             "title": "T",
             "rationale": "R",
             "description": None,
             "reasoning_summary": None,
         },
-        LANES,
     )
     assert entry is not None
     assert entry["description"] == "R"
@@ -125,14 +124,14 @@ def test_string_list_handles_none_and_a_bare_scalar():
 
 def test_parse_sorts_by_rank_and_caps_the_list():
     payload = {"suggestions": [_suggestion(title=f"T{index}", rank=10 - index) for index in range(8)]}
-    parsed, _ = parse_extractor_response(json.dumps(payload), lane_names=LANES)
+    parsed, _ = parse_extractor_response(json.dumps(payload))
     assert len(parsed) == MAX_SUGGESTIONS
     assert [entry["rank"] for entry in parsed] == sorted(entry["rank"] for entry in parsed)
 
 
 def test_an_unparseable_rank_and_confidence_fall_back():
     parsed, _ = parse_extractor_response(
-        json.dumps({"suggestions": [_suggestion(rank="soon", confidence="certain")]}), lane_names=LANES
+        json.dumps({"suggestions": [_suggestion(rank="soon", confidence="certain")]}),
     )
     assert parsed[0]["rank"] == 999
     assert parsed[0]["confidence"] == "medium"
@@ -141,11 +140,11 @@ def test_an_unparseable_rank_and_confidence_fall_back():
 def test_catalog_lanes_are_the_proposal_lanes_plus_code_graph_and_sources(tmp_path):
     root = make_bundle(tmp_path)
     schema_set, _section_set = declarations(root)
-    proposal_lanes = lane_set(schema_set)
-    lanes = catalog_lanes(proposal_lanes, schema_set)
+    proposal_lanes = proposal_pool(schema_set)
+    lanes = catalog_lanes(proposal_lanes)
 
     expected = tuple(
-        dict.fromkeys((*(lane.directory.rstrip("/") for lane in proposal_lanes.lanes), "code-graph", "sources"))
+        dict.fromkeys((*(lane.directory.rstrip("/") for lane in proposal_lanes.types), "code-graph", "sources"))
     )
     assert lanes == expected
     for absent in (
@@ -161,16 +160,16 @@ def test_catalog_lanes_are_the_proposal_lanes_plus_code_graph_and_sources(tmp_pa
         assert absent not in lanes
 
 
-def test_the_curated_index_lists_existing_pages_with_their_lane(tmp_path):
+def test_the_curated_index_lists_existing_pages_with_their_type(tmp_path):
     root = make_bundle(tmp_path)
     bundle = load_bundle(root)
-    index = build_curated_index(bundle, lane_set(declarations(root)[0]))
-    assert {"lane": "explanation", "id": "docs/explanations/why", "title": "Why", "summary": "The reason"} in index
+    index = build_curated_index(bundle, proposal_pool(declarations(root)[0]))
+    assert {"type": "Explanation", "id": "docs/explanations/why", "title": "Why", "summary": "The reason"} in index
 
 
 def test_the_extract_prompt_names_the_existing_pages_and_says_so_when_there_are_none():
     assert "(no curated pages yet)" in build_extract_prompt("analysis", [])
-    listed = build_extract_prompt("analysis", [{"lane": "adr", "id": "adrs/x", "title": "X", "summary": "s"}])
+    listed = build_extract_prompt("analysis", [{"type": "Adr", "id": "adrs/x", "title": "X", "summary": "s"}])
     assert "adrs/x" in listed and "analysis" in listed
 
 
@@ -189,7 +188,7 @@ async def _phase(root: Path, *, extractor_payload, reasoner=None, monkeypatch):
     return await run_suggest_phase(
         bundle=bundle,
         schema_set=schema_set,
-        lane_set=lane_set(schema_set),
+        pool=proposal_pool(schema_set),
         material=Path("/tmp/thing.md"),
         source_text="short",
         source_page="sources/2026-08-thing.md",
@@ -219,7 +218,7 @@ async def _plan_phase(root: Path, *, extractor_payload, reasoner=None, monkeypat
     planned, status = await plan_suggestions(
         bundle=bundle,
         schema_set=schema_set,
-        lane_set=lane_set(schema_set),
+        pool=proposal_pool(schema_set),
         material=Path("/tmp/thing.md"),
         source_text="short",
         source_page="sources/2026-08-thing.md",
@@ -331,7 +330,7 @@ async def test_run_suggest_phase_merges_plan_time_and_apply_time_errored_entries
     reports, status = await run_suggest_phase(
         bundle=load_bundle(root),
         schema_set=schema_set,
-        lane_set=lane_set(schema_set),
+        pool=proposal_pool(schema_set),
         material=Path("/tmp/thing.md"),
         source_text="short",
         source_page="sources/2026-08-thing.md",
@@ -391,10 +390,15 @@ async def test_apply_suggestions_skips_apply_plan_for_an_is_empty_planned_item(t
     assert status == {"proposals": 1, "failed": [], "errored": []}
 
 
-async def test_each_lane_files_to_its_declared_target(tmp_path, monkeypatch):
+async def test_each_type_files_to_its_declared_target(tmp_path, monkeypatch):
     root = make_bundle(tmp_path)
     payload = json.dumps(
-        {"suggestions": [_suggestion(lane=lane, title=f"Page {lane}", rank=index) for index, lane in enumerate(LANES)]}
+        {
+            "suggestions": [
+                _suggestion(type=type_name, title=f"Page {'How To' if type_name == 'HowTo' else type_name}", rank=index)
+                for index, type_name in enumerate(TYPES)
+            ]
+        }
     )
     reports, status = await _phase(root, extractor_payload=payload, monkeypatch=monkeypatch)
     targets = {report["target"] for report in reports}
@@ -407,17 +411,16 @@ async def test_each_lane_files_to_its_declared_target(tmp_path, monkeypatch):
     }
     assert status["extractor"] == "ok"
     assert status["proposals"] == 5
+    assert [report["type"] for report in reports] == list(TYPES)
     assert all("mode" not in report for report in reports)
 
 
 async def test_a_classify_refusal_drops_the_suggestion_and_records_the_reason(tmp_path, monkeypatch):
-    """`classify` gets a narrower SchemaSet than the LaneSet was built from.
+    """Classification sees fewer declarations than the suggestion pool.
 
-    That is the real asymmetry: `lane_set` needs every Diataxis type to derive
-    its directories (a missing one is a `KeyError` at construction), while
-    `classify` is validating against whatever the bundle actually declares.
-    Dropping `Reference` from the set `classify` sees reaches `undeclared-type`
-    without breaking lane construction.
+    The pool admits types from the full schema set, while `classify` validates
+    against the narrower set supplied here. Dropping `Reference` only from
+    that set reaches `undeclared-type` for an otherwise admitted suggestion.
     """
     from okf_ext.schemas import load_schemas
 
@@ -432,7 +435,7 @@ async def test_a_classify_refusal_drops_the_suggestion_and_records_the_reason(tm
     monkeypatch.setattr(
         "graph_works_core.ingest.suggest_pages.make_llm",
         lambda *args, **kwargs: FakeLLM(
-            FakeResponse(json.dumps({"suggestions": [_suggestion(lane="reference", title="Options")]}))
+            FakeResponse(json.dumps({"suggestions": [_suggestion(type="Reference", title="Options")]}))
         ),
     )
 
@@ -443,7 +446,7 @@ async def test_a_classify_refusal_drops_the_suggestion_and_records_the_reason(tm
     reports, status = await run_suggest_phase(
         bundle=load_bundle(root),
         schema_set=load_schemas(narrow_dir),
-        lane_set=lane_set(full_schema_set),
+        pool=proposal_pool(full_schema_set),
         material=Path("/tmp/thing.md"),
         source_text="short",
         source_page="sources/2026-08-thing.md",
@@ -534,7 +537,7 @@ async def test_a_reasoner_that_raises_writes_nothing(tmp_path, monkeypatch):
     reports, status = await run_suggest_phase(
         bundle=load_bundle(root),
         schema_set=schema_set,
-        lane_set=lane_set(schema_set),
+        pool=proposal_pool(schema_set),
         material=Path("/tmp/thing.md"),
         source_text="short",
         source_page="sources/2026-08-thing.md",
@@ -612,7 +615,7 @@ async def test_an_extractor_call_failure_writes_nothing(tmp_path, monkeypatch):
     reports, status = await run_suggest_phase(
         bundle=load_bundle(root),
         schema_set=schema_set,
-        lane_set=lane_set(schema_set),
+        pool=proposal_pool(schema_set),
         material=Path("/tmp/thing.md"),
         source_text="short",
         source_page="sources/2026-08-thing.md",
@@ -705,7 +708,7 @@ async def test_a_blank_source_text_skips_both_model_calls(tmp_path, monkeypatch)
     planned, status = await plan_suggestions(
         bundle=load_bundle(root),
         schema_set=schema_set,
-        lane_set=lane_set(schema_set),
+        pool=proposal_pool(schema_set),
         material=Path("/tmp/scan.pdf"),
         source_text="   \n\t  ",
         source_page="sources/2026-08-scan.md",
@@ -766,10 +769,10 @@ async def test_one_run_files_each_drop_kind_under_its_own_key(tmp_path, monkeypa
     payload = json.dumps(
         {
             "suggestions": [
-                _suggestion(lane="reference", title="Options", rank=1),
-                _suggestion(lane="explanation", title="Blocked", rank=2),
-                _suggestion(lane="explanation", title="Same Page", rank=3),
-                _suggestion(lane="explanation", title="Same Page", rank=4, description="another angle"),
+                _suggestion(type="Reference", title="Options", rank=1),
+                _suggestion(type="Explanation", title="Blocked", rank=2),
+                _suggestion(type="Explanation", title="Same Page", rank=3),
+                _suggestion(type="Explanation", title="Same Page", rank=4, description="another angle"),
             ]
         }
     )
@@ -785,7 +788,7 @@ async def test_one_run_files_each_drop_kind_under_its_own_key(tmp_path, monkeypa
     reports, status = await run_suggest_phase(
         bundle=load_bundle(root),
         schema_set=load_schemas(narrow_dir),
-        lane_set=lane_set(full_schema_set),
+        pool=proposal_pool(full_schema_set),
         material=Path("/tmp/thing.md"),
         source_text="short",
         source_page="sources/2026-08-thing.md",
@@ -803,3 +806,109 @@ async def test_one_run_files_each_drop_kind_under_its_own_key(tmp_path, monkeypa
     assert status["duplicates"] == ["Same Page: docs/explanations/same-page.md"]
     assert status["proposals"] == 1
     assert [report["title"] for report in reports] == ["Same Page"]
+
+
+async def test_a_lowercase_type_is_canonicalised_and_a_kebab_one_is_unknown(tmp_path, monkeypatch):
+    root = make_bundle(tmp_path)
+    payload = json.dumps(
+        {
+            "suggestions": [
+                _suggestion(type="explanation", title="Why A", rank=1),
+                _suggestion(type="how-to", title="Do B", rank=2),
+            ]
+        }
+    )
+    reports, status = await _phase(root, extractor_payload=payload, monkeypatch=monkeypatch)
+    assert [(r["type"], r["target"]) for r in reports] == [("Explanation", "docs/explanations/why-a.md")]
+    assert status["unclassified"] == ["Do B: unknown-type"]
+
+
+async def test_a_locked_type_is_refused_not_retyped(tmp_path, monkeypatch):
+    root = make_bundle(tmp_path)
+    payload = json.dumps({"suggestions": [_suggestion(type="Source", title="A source")]})
+    reports, status = await _phase(root, extractor_payload=payload, monkeypatch=monkeypatch)
+    assert reports == []
+    assert status["refused"] == ["A source: locked-type"]
+    assert status["unclassified"] == []
+
+
+async def test_a_refused_pool_type_is_reported_and_its_neighbours_still_propose(tmp_path, monkeypatch):
+    root = make_bundle(tmp_path)
+    (root / "schema" / "Memo.schema.json").write_text(
+        '{"x-okf-directory": "memos/", "x-okf-accept-proposals": true}', encoding="utf-8"
+    )
+    payload = json.dumps(
+        {"suggestions": [_suggestion(type="Memo", title="M", rank=1), _suggestion(title="Why", rank=2)]}
+    )
+    reports, status = await _phase(root, extractor_payload=payload, monkeypatch=monkeypatch)
+    assert status["pool_refused"] == ["Memo: missing-guidance"]
+    assert status["unclassified"] == ["M: unknown-type"]
+    assert [r["type"] for r in reports] == ["Explanation"]
+
+
+async def test_an_empty_pool_skips_both_model_calls_and_says_why(tmp_path, monkeypatch):
+    root = make_bundle(tmp_path)
+    for schema in (root / "schema").glob("*.schema.json"):
+        text = schema.read_text(encoding="utf-8").replace(
+            '"x-okf-accept-proposals": true', '"x-okf-accept-proposals": false'
+        )
+        schema.write_text(text, encoding="utf-8")
+    called = []
+    monkeypatch.setattr("graph_works_core.ingest.suggest_pages.make_llm", lambda *a, **k: called.append("extractor"))
+
+    async def fake_reasoner(**kwargs):
+        called.append("reasoner")
+
+    monkeypatch.setattr("graph_works_core.ingest.suggest_pages.run_proposal_reasoner", fake_reasoner)
+    schema_set, _ = declarations(root)
+    planned, status = await plan_suggestions(
+        bundle=load_bundle(root),
+        schema_set=schema_set,
+        pool=proposal_pool(schema_set),
+        material=Path("/tmp/thing.md"),
+        source_text="short",
+        source_page="sources/2026-08-thing.md",
+        source_title="Thing",
+        source_kind="note",
+        origin="/tmp/thing.md",
+        page_text="body",
+        entity_uri=None,
+        entity_page=None,
+        by="agent:test",
+        at=AT,
+    )
+    assert planned == [] and called == []
+    assert status["pool"] == "empty" and status["error"] is None
+
+
+async def test_a_user_authored_type_is_proposed_end_to_end_with_no_python_change(tmp_path, monkeypatch):
+    """The Goal's acceptance test: a schema and a sections file, then a proposal and a promoted page."""
+    from doc_wiki_okf.proposals.promote import plan_promotion
+    from graph_works_core.ingest.prompts.extractor import build_extractor_system
+    from okf_ext.proposals import apply, list_proposals, plan_decide
+    from okf_ext.schemas import frontmatter_errors
+    from okf_io import parse
+    from suggest_fixtures import add_runbook
+
+    root = make_bundle(tmp_path)
+    add_runbook(root)
+    schema_set, section_set = declarations(root)
+    pool = proposal_pool(schema_set)
+    assert "- Runbook: an operator restoring a service needs exact recovery steps." in build_extractor_system(pool=pool)
+
+    payload = json.dumps({"suggestions": [_suggestion(type="Runbook", title="Recover the queue")]})
+    reports, _status = await _phase(root, extractor_payload=payload, monkeypatch=monkeypatch)
+    assert [(r["type"], r["target"]) for r in reports] == [("Runbook", "runbooks/recover-the-queue.md")]
+    (proposal,) = [p for p in list_proposals(load_bundle(root)) if p.target == "runbooks/recover-the-queue.md"]
+    assert proposal.target_type == "Runbook"
+
+    ignore = ("schema/*", "*/schema/*", "sections/*", "*/sections/*")
+    bundle = load_bundle(root, ignore=ignore)
+    assert apply(bundle, plan_decide(bundle, proposal, "approved", by="human:t", at=AT)).ok
+    bundle = load_bundle(root, ignore=ignore)
+    (approved,) = [p for p in list_proposals(bundle) if p.target == "runbooks/recover-the-queue.md"]
+    plan = plan_promotion(bundle, pool, approved, section_set=section_set, by="agent:test", at=AT, on=AT.date())
+    assert apply(bundle, plan).ok
+    page = parse((root / "runbooks/recover-the-queue.md").read_text(encoding="utf-8"))
+    assert page.fm.type == "Runbook"
+    assert frontmatter_errors(schema_set, "Runbook", page.fm_data(dates="iso")) == ()

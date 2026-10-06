@@ -466,7 +466,8 @@ def spec_anchor_commit(repo: Path, spec_path: Path) -> str | None:
 
 
 def commit_exists(repo: Path, sha: str) -> bool:
-    """Whether *sha* names a commit reachable in *repo*. Never raises.
+    """Whether *sha* names a commit present in *repo*'s object store (not
+    necessarily reachable from any ref). Never raises.
 
     The guard on a blank *sha* is not defensive noise: `cat-file -e ^{commit}`
     on an empty string is a git usage error, and this answers a question the

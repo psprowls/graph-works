@@ -33,7 +33,7 @@ from graph_works_core.wiki_page.section import SectionWriteRun
 from graph_works_core.wiki_stats.commands import HubEntry, WikiStats
 from graph_works_core.workspace.init import WorkspaceInit, WorkspacePlan
 from okf_ext.proposals import ApplyResult as ProposalApplyResult
-from okf_ext.proposals import Proposal, Write
+from okf_ext.proposals import Proposal, Refusal, Write
 from okf_ext.tags import TagInventory
 
 from graph_works_wire._jsonable import commit_payload, jsonable
@@ -245,9 +245,12 @@ def ingest_payload(result: IngestResult) -> dict[str, object]:
         warnings.append(f"suggestion phase degraded: {suggestion_error}")
     warnings.extend(f"suggestion apply failed: {entry}" for entry in (result.proposal_status.get("failed") or ()))
     warnings.extend(f"suggestion apply errored: {entry}" for entry in (result.proposal_status.get("errored") or ()))
+    warnings.extend(f"proposal type refused: {entry}" for entry in (result.proposal_status.get("pool_refused") or ()))
+    if result.proposal_status.get("pool") == "empty":
+        warnings.append("no eligible proposal types; suggestion phase skipped")
     warnings.extend(result.notes)
     proposals = [
-        {key: row.get(key) for key in ("lane", "title", "target", "proposal", "status")} for row in result.proposals
+        {key: row.get(key) for key in ("type", "title", "target", "proposal", "status")} for row in result.proposals
     ]
     return {
         "ok": result.ok,
@@ -435,7 +438,9 @@ def stats_payload(stats: WikiStats) -> dict[str, object]:
     }
 
 
-def proposal_payload(proposal: Proposal, *, mode: str) -> dict[str, object]:
+def proposal_payload(
+    proposal: Proposal, *, mode: str, type_name: str | None = None, type_refusal: Refusal | None = None
+) -> dict[str, object]:
     """Render one parsed proposal without its internal identity fields.
 
     *mode* (`create` or `update`) is derived by core from the bundle, which
@@ -444,6 +449,11 @@ def proposal_payload(proposal: Proposal, *, mode: str) -> dict[str, object]:
     return {
         "member": proposal.member,
         "target": proposal.target,
+        "target_type": proposal.target_type,
+        "type": type_name,
+        "type_refusal": None
+        if type_refusal is None
+        else {"path": type_refusal.path, "kind": type_refusal.kind, "detail": type_refusal.detail},
         "title": proposal.title,
         "description": proposal.description,
         "page_status": proposal.page_status,
@@ -509,7 +519,7 @@ def section_write_payload(run: SectionWriteRun) -> dict[str, object]:
 def proposal_file_payload(run: ProposalFileRun) -> dict[str, object]:
     """`gw wiki proposal file --json`."""
     return {
-        "lane": run.lane,
+        "type": run.type_name,
         "target": run.target,
         "proposal": run.proposal,
         "ok": run.ok,
@@ -537,7 +547,12 @@ def tags_undeclared_payload(missing: Sequence[str]) -> dict[str, object]:
 
 def proposals_payload(listings: Sequence[ProposalListing]) -> list[dict[str, object]]:
     """`gw wiki proposals --json` and `/v1/wiki/proposals`."""
-    return [proposal_payload(listing.proposal, mode=listing.mode) for listing in listings]
+    return [
+        proposal_payload(
+            listing.proposal, mode=listing.mode, type_name=listing.type_name, type_refusal=listing.type_refusal
+        )
+        for listing in listings
+    ]
 
 
 def proposal_checks_payload(result: ProposalChecks) -> dict[str, object]:

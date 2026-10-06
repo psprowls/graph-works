@@ -12,9 +12,8 @@ cannot shift under a merge still in flight. The page write is already ordered
 before the flip inside `plan_promote`, so a partial failure leaves a proposal
 `approved` rather than a ledger claiming `created` for a page that never landed.
 
-**The page lands scaffolded and empty.** Frontmatter is `title` and
-`description` only, and the body is the type's declared section skeleton -- the
-capability writes a page's existence and provenance, never its prose.
+Frontmatter is `title`, `description`, and the type's own promotion block; the
+body is the type's declared section skeleton.
 """
 
 from __future__ import annotations
@@ -23,42 +22,33 @@ from dataclasses import replace
 from datetime import date, datetime
 
 from okf_ext.proposals import PagePlan, PageRender, Proposal, Refusal, plan_promote
+from okf_ext.proposals import mode as target_mode
+from okf_ext.schemas import ProposableType
 from okf_ext.sections import render_skeleton
 from okf_ext.shape import SectionSet
 from okf_io import Bundle
 
-from doc_wiki_okf.proposals.lanes import Lane, LaneSet
+from doc_wiki_okf.proposals.pool import ProposalPool
 
 
-def page_render(lane: Lane, proposal: Proposal, *, section_set: SectionSet, on: date | None = None) -> PageRender:
-    """The page this promotion writes: the lane's type, the declared skeleton,
-    and the proposal's own title and description. For the ADR lane, given *on*, it
-    also carries `decision_date` and `status: stable`, which the `Adr` schema needs.
+def page_render(
+    entry: ProposableType, proposal: Proposal, *, section_set: SectionSet, on: date | None = None
+) -> PageRender:
+    """Render the type's skeleton, title, description and promotion frontmatter.
 
-    Nothing in `OWNED_PROVENANCE_KEYS` -- `generated`, `sources` and `verified`
-    are the capability's, and `plan_create` raises on a caller that supplies
-    one. Exposed rather than inlined so a test can assert that directly rather
-    than inferring it from the absence of an exception.
-
-    Raises `KeyError` when *section_set* does not declare the lane's type --
-    caller configuration, as in `diataxis.pages.new_page_text`.
+    Given *on*, expand the promotion block's `{on}` token. The schema reader
+    refuses provenance keys; this layer never supplies them. Raises `KeyError`
+    when *section_set* does not declare the type.
     """
     frontmatter: dict[str, object] = {"title": proposal.title, "description": proposal.description}
-    if lane.name == "adr" and on is not None:
-        # The `Adr` schema requires `decision_date`. A promotion is a human
-        # decision taken on *on*, so the ADR is `stable` from the day it lands.
-        frontmatter["decision_date"] = on.isoformat()
-        frontmatter["status"] = "stable"
-    return PageRender(
-        type=lane.type_name,
-        body=render_skeleton(section_set.types[lane.type_name]),
-        frontmatter=frontmatter,
-    )
+    if entry.promotion is not None and on is not None:
+        frontmatter.update(entry.promotion.frontmatter_on(on))
+    return PageRender(type=entry.name, body=render_skeleton(section_set.types[entry.name]), frontmatter=frontmatter)
 
 
 def plan_promotion(
     bundle: Bundle,
-    lane_set: LaneSet,
+    pool: ProposalPool,
     proposal: Proposal,
     *,
     section_set: SectionSet,
@@ -66,42 +56,40 @@ def plan_promotion(
     at: datetime,
     on: date,
 ) -> PagePlan:
-    """Plan promoting *proposal* into its dated page.
+    """Plan promotion using the pool's resolved type and its promotion block.
 
-    The lane is recovered from the proposal's current target by directory, the
-    same lookup `proposal show` uses to address a proposal by path alone. A
-    target in no declared directory is a refusal, not a guess.
+    Preserve recorded targets for updates and undated types. Only a new dated
+    promotion derives a target from its title and date. Work types refuse with
+    `type-unavailable`: `gw work file` is the sole work-item creator, so ordinary
+    promotion never applies work metadata or flips the proposal to `created`.
     """
-    lane = lane_set.lane_for(proposal.target)
-    if lane is None:
+    resolved = pool.type_for(proposal)
+    if not isinstance(resolved, Refusal) and resolved.directory == "work/":
+        resolved = Refusal(
+            path=proposal.member,
+            kind="type-unavailable",
+            detail=f"{resolved.name}: work items must be filed through gw work file; ordinary promotion is unavailable",
+        )
+    if isinstance(resolved, Refusal):
         return PagePlan(
             root=bundle.root,
             target=proposal.target,
-            mode="create",
+            mode=target_mode(bundle, proposal),
             proposal=proposal.member,
             writes=(),
-            refusals=(
-                Refusal(
-                    path=proposal.member,
-                    kind="malformed-proposal",
-                    detail=(
-                        f"target {proposal.target!r} is in none of the declared lane directories "
-                        f"({', '.join(declared.directory for declared in lane_set.lanes)}); "
-                        f"this layer resolves a lane by directory and will not guess one"
-                    ),
-                ),
-            ),
+            refusals=(resolved,),
         )
-
-    dated = lane_set.target_for(lane.name, proposal.title, on=on)
+    target = proposal.target
+    if target_mode(bundle, proposal) == "create" and resolved.promotion is not None and resolved.promotion.dated:
+        target = pool.target_for(resolved.name, proposal.title, on=on)
     plan = plan_promote(
         bundle,
-        replace(proposal, target=dated),
-        page_render(lane, proposal, section_set=section_set, on=on),
+        replace(proposal, target=target),
+        page_render(resolved, proposal, section_set=section_set, on=on),
         by=by,
         at=at,
     )
-    return _retargeted(plan, proposal.member, dated)
+    return _retargeted(plan, proposal.member, target)
 
 
 def _retargeted(plan: PagePlan, member: str, dated: str) -> PagePlan:

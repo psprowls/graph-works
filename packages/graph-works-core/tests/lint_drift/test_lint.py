@@ -542,7 +542,9 @@ def _seed_corpus(workspace, *, count: int = 25) -> None:
 
 
 def _window(bundle, *, today=TODAY) -> tuple[str, ...]:
-    return tuple(concept_id for concept_id, _document in _group_pages(bundle, today=today)["page_quality"])
+    return tuple(
+        concept_id for concept_id, _document in _group_pages(bundle, today=today, adr_directory="adrs/")["page_quality"]
+    )
 
 
 def _today_seeding(ordered: tuple[str, ...], concept_id: str) -> date:
@@ -654,7 +656,7 @@ def test_a_bundle_with_no_concepts_yields_an_empty_window(tmp_path):
     """`today.toordinal() % 0` is the trap this guards."""
     empty = tmp_path / "empty"
     empty.mkdir()
-    assert _group_pages(load_bundle(empty), today=TODAY)["page_quality"] == ()
+    assert _group_pages(load_bundle(empty), today=TODAY, adr_directory="adrs/")["page_quality"] == ()
 
 
 def test_the_same_day_and_bundle_produce_an_identical_window_twice(workspace):
@@ -882,6 +884,7 @@ async def _semantic_reply(tmp_path, ids, reply):
     return await lint_module._semantic_pass(
         bundle,
         _bind(_FakeLLM(reply)),
+        adr_directory="adrs/",
         today=TODAY,
         trace_dir=tmp_path / "traces",
         project_context="",
@@ -1166,3 +1169,11 @@ async def test_run_lint_threads_effective_roots_to_mechanical_pass(tmp_path, mon
     assert [lane.name for lane in report.mechanical] == ["wiki", "work"]
     assert "targets.affects-missing" not in _codes(report)
     assert report.errors == ()
+
+
+async def test_no_adr_schema_skips_the_adr_semantic_group(curated, monkeypatch):
+    (curated.layout.config_dir / "schema/Adr.schema.json").unlink()
+    monkeypatch.setattr(lint_module, "role_binding", lambda *a, **k: _bind(_FakeLLM()))
+    report = await _lint(curated)
+    assert "adr_chain" not in {f.group for f in report.semantic}
+    assert {f.group for f in report.semantic} == {"page_quality", "stale_claims"}

@@ -7,5 +7,24 @@
     "version": { "type": "string", "minLength": 1 },
     "target_date": { "type": "string", "format": "date" }
   },
+  "x-okf-accept-proposals": true,
+  "x-okf-proposal-guidance": {
+    "summary": "a versioned, dated train grouping the work that ships together.",
+    "question": "Does the source describe a set of changes shipping together under one version or date?",
+    "signals": [
+      "a version number or target date is named",
+      "items are grouped by when they ship, not by what they do",
+      "release notes or a changelog are implied"
+    ],
+    "anti_signals": [
+      "the grouping is by outcome rather than by ship date",
+      "there is one change, not a train",
+      "no version or date governs it"
+    ],
+    "title_pattern": "Names the release: `<package> vX.Y.Z`, `<Month YYYY> release`"
+  },
+  "x-okf-proposal-promotion": {
+    "frontmatter": { "work_status": "open", "opened": "{on}", "updated": "{on}" }
+  },
   "x-okf-directory": "work/"
 }

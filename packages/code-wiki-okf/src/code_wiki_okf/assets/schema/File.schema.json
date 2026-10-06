@@ -24,5 +24,6 @@
     "last_updated_commit": { "type": "string" },
     "tokens": { "type": "integer", "minimum": 0 }
   },
+  "x-okf-accept-proposals": false,
   "x-okf-directory": "file-system/"
 }

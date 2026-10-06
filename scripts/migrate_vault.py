@@ -193,17 +193,19 @@ _KIND_PROPOSALS: dict[str, str] = {
     "tutorial": "Tutorial",
 }
 
+#: The four Diátaxis types a legacy `concepts/` page may be retyped into --
+#: this script's own closed answer set; the packages ship no type list.
+_DIATAXIS_TYPES: tuple[str, ...] = ("Tutorial", "HowTo", "Reference", "Explanation")
+
 _QUESTIONS: tuple[str, ...] = ("diataxis-type", "status-active")
 
 DECIDED_BY = "scripts/migrate_vault.py decisions"
 
 
 def legal_decisions(question: str) -> tuple[str, ...]:
-    """The closed answer set for *question*. Read from the packages, not typed twice."""
-    from doc_wiki_okf.diataxis import TYPE_NAMES
-
+    """The closed answer set for *question*. Owned by this migration script."""
     if question == "diataxis-type":
-        return TYPE_NAMES
+        return _DIATAXIS_TYPES
     if question == "status-active":
         return ("delete", "draft", "stable", "deprecated")
     raise ValueError(f"unknown question: {question}")
@@ -241,6 +243,7 @@ def _diataxis_row(vault: Path, member: str, document: Document, schema_set) -> d
         title=title,
         rationale=f"proposed from legacy kind: {legacy_kind!r}" if legacy_kind else "no legacy kind to propose from",
         decided_by=DECIDED_BY,
+        allowed_types=_DIATAXIS_TYPES,
     )
     if isinstance(decision, Unclassified):
         return {
@@ -1230,7 +1233,7 @@ def cmd_lanes(args: argparse.Namespace) -> PhaseReport:
             if chosen is None:
                 refusals.append(Refusal(member=member, reason="uncovered-by-decisions", detail="diataxis-type"))
                 continue
-            plan = plan_retype(bundle, schema_set, concept_id, chosen)
+            plan = plan_retype(bundle, schema_set, concept_id, chosen, allowed_types=_DIATAXIS_TYPES)
             if plan.move.stranded:
                 notes.append(f"stranded: {moves.stranded_summary(plan.move.stranded)}")
             if not plan.ok:

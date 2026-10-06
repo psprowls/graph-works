@@ -7,5 +7,22 @@
     "prerequisites": { "type": "array", "items": { "type": "string" } },
     "outcome": { "type": "string", "minLength": 1 }
   },
-  "x-okf-directory": "docs/tutorials/"
+  "x-okf-directory": "docs/tutorials/",
+  "x-okf-accept-proposals": true,
+  "x-okf-proposal-guidance": {
+    "summary": "the reader is learning by doing, for the first time.",
+    "question": "Is the reader learning by doing, for the first time?",
+    "signals": [
+      "the reader is new to the subject and needs to be taken through it",
+      "every step ends in a visible, verifiable result",
+      "one path only, with no alternatives to weigh",
+      "explanation is minimised in favour of doing"
+    ],
+    "anti_signals": [
+      "the reader already knows what they want to accomplish",
+      "the page is something to look a fact up in",
+      "the page argues for a design"
+    ],
+    "title_pattern": "Starts with a verb: `Build your first ...`, `Create a ... from scratch`"
+  }
 }

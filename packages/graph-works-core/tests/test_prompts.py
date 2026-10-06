@@ -20,6 +20,7 @@ from graph_works_core.lint_drift.drift_propagator import (
     parse_drift_propagator_verdict,
 )
 from graph_works_core.prompts import _fragments
+from graph_works_core.prompts._fragments.type_list import render_type_rubric, render_type_summaries
 from graph_works_core.query.prompts.code_reader import (
     CODE_READER_SYSTEM,
     ORCHESTRATED_CODE_READER_SYSTEM,
@@ -29,7 +30,7 @@ from graph_works_core.query.prompts.query_orchestrator import QUERY_ORCHESTRATOR
 from graph_works_core.query.prompts.synthesizer import SYNTHESIZER_SYSTEM
 from graph_works_core.workspace.layout import layout_for
 from okf_ext.bundle import SCHEMA_DIRNAME
-from okf_ext.schemas import SchemaSet, load_schemas
+from okf_ext.schemas import ProposableType, ProposalGuidance, SchemaSet, load_schemas
 
 _TODAY = date(2026, 8, 16)
 
@@ -55,7 +56,7 @@ def _full_schema_set(tmp_path) -> SchemaSet:
 #: Fragment modules that export a renderer and no text constant, so the walk
 #: below finds nothing in them. Naming one here is the deliberate decision the
 #: guard demands; a new renderer-only fragment fails until someone makes it.
-_RENDERER_ONLY = frozenset({"architecture_overview", "page_categories"})
+_RENDERER_ONLY = frozenset({"architecture_overview", "page_categories", "type_list"})
 
 
 def _texts(value: object) -> list[str]:
@@ -314,7 +315,7 @@ def test_the_log_format_fragment_teaches_the_iso_date_heading():
 
 def test_the_ingest_prompts_carry_no_wikilinks(tmp_path):
     """Spec §6.8: C2's rule extends to cover the three ingest prompts."""
-    from doc_wiki_okf.proposals.lanes import lane_set
+    from doc_wiki_okf.proposals.pool import proposal_pool
     from doc_wiki_okf.sources import seed_source_kinds
     from graph_works_core.ingest.prompts.extractor import build_extractor_system
     from graph_works_core.ingest.prompts.ingestor import build_ingestor_system
@@ -324,11 +325,11 @@ def test_the_ingest_prompts_carry_no_wikilinks(tmp_path):
     from suggest_fixtures import make_bundle
 
     schema_set, _ = declarations(make_bundle(tmp_path))
-    lanes = lane_set(schema_set)
+    pool = proposal_pool(schema_set)
     for text in (
         build_ingestor_system(layout=layout_for(tmp_path / ".works"), kinds=seed_source_kinds(), schema_set=schema_set),
-        build_extractor_system(lane_set=lanes),
-        build_proposal_reasoner_system(lane_set=lanes),
+        build_extractor_system(pool=pool),
+        build_proposal_reasoner_system(pool=pool),
     ):
         assert "[[" not in text
 
@@ -414,9 +415,10 @@ def test_the_rendered_categories_match_the_schemas_declarations_exactly(tmp_path
         line.split("|")[1].strip().strip("`") for line in rendered.splitlines() if line.startswith("| `")
     }
 
-    expected = {"adr", "work"}
-    for _type_name, directory in declared_directories(schema_set).items():
-        if directory != "adrs/":  # the hardcoded `adr` row already stands for it
+    expected = {"work"}
+    for type_name, directory in declared_directories(schema_set).items():
+        # Work types share one row; the locked Proposal record is not a page category.
+        if directory != "work/" and type_name != "Proposal":
             expected.add(directory.rstrip("/"))
     # Directory names and category names differ only by pluralization for the
     # eleven schema-sourced rows (e.g. "how-tos" -> "how-to"); assert on
@@ -444,12 +446,12 @@ def test_the_rendered_categories_match_the_schemas_declarations_exactly(tmp_path
 
 def test_a_schema_set_with_no_wiki_types_renders_only_the_constant_rows(tmp_path):
     # Isolates render_page_categories from the eleven-type production set:
-    # an empty-but-valid SchemaSet still names adr and work, and nothing else.
+    # an empty-but-valid SchemaSet still names work, and nothing else.
     from okf_ext.schemas import SchemaSet
 
     empty = SchemaSet(schemas={}, sources={}, documents={}, root=tmp_path)
     rendered = prompts.render_page_categories(empty)
-    assert "`adr`" in rendered
+    assert "`adr`" not in rendered
     assert "`work`" in rendered
     assert "`app`" not in rendered
     assert "`concept`" not in rendered
@@ -661,3 +663,50 @@ def test_style_rules_does_not_mandate_a_key_frontmatter_rules_forbids():
     # and FRONTMATTER_RULES itself says any other key is dropped on read. The
     # librarian never writes at all, so the bullet has no referent there either.
     assert "updated" not in prompts.STYLE_RULES
+
+
+_FULL = ProposableType(
+    name="Runbook",
+    directory="runbooks/",
+    guidance=ProposalGuidance(
+        summary="an operator restoring a service needs exact steps.",
+        question="Is the reader restoring a running service?",
+        signals=("an incident is named", "steps end in a healthy check"),
+        anti_signals=("the page explains why",),
+        title_pattern="Names the incident: `Recover ... from ...`",
+    ),
+    promotion=None,
+)
+_BARE = ProposableType(
+    name="Memo",
+    directory="memos/",
+    guidance=ProposalGuidance(summary="a memo.", question="Memo?"),
+    promotion=None,
+)
+
+
+def test_type_summaries_are_one_bullet_per_type_in_order():
+    assert render_type_summaries([_FULL, _BARE]) == (
+        "- Runbook: an operator restoring a service needs exact steps.\n- Memo: a memo."
+    )
+
+
+def test_the_type_rubric_renders_every_guidance_field_and_skips_absent_ones():
+    assert render_type_rubric([_FULL, _BARE]) == (
+        "- Runbook: an operator restoring a service needs exact steps.\n"
+        "  Question: Is the reader restoring a running service?\n"
+        "  Signals: an incident is named; steps end in a healthy check\n"
+        "  Anti-signals: the page explains why\n"
+        "  Title pattern: Names the incident: `Recover ... from ...`\n"
+        "- Memo: a memo.\n"
+        "  Question: Memo?"
+    )
+
+
+def test_a_proposal_type_row_comes_from_its_guidance_summary(tmp_path):
+    rendered = prompts.render_page_categories(_full_schema_set(tmp_path))
+    assert (
+        "| `explanation` | the reader wants to understand why; an argument for why something is the way it is. |"
+        in rendered
+    )
+    assert "| `adr` | a dated, consequential decision the source records or strongly implies. |" in rendered

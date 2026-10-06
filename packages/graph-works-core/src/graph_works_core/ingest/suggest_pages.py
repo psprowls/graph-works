@@ -4,25 +4,15 @@ The output contract is spec §4.5's:
 
 | Key | Where it comes from |
 |---|---|
-| `lane` | proposed by the extractor, one of the lanes |
-| `slug` | derived: `lane_set.target_for(lane, title)` |
+| `type` | proposed by the extractor, one of the pool's types |
+| `slug` | derived: `pool.target_for(type, title)` |
 | `mode`, `existing_slug` | derived: `plan_file` reads `bundle.has_member` |
 | `rank`, `confidence`, `evidence`, ... | ride through into `sources[]` |
 
-**`classify` validates the decision; it never makes one.** The extractor
-proposes a lane *and a rationale*, and `doc_wiki_okf.diataxis.classify` says
-whether that decision stands. What it refuses is **dropped** with its closed
-reason recorded in `status["unclassified"]` -- never defaulted into a lane.
-Mapping every refusal to `explanation` is a two-line change that makes
-`explanation` a dumping ground at the exact point where pages enter the vault.
-That key carries `classify` refusals and nothing else: a `plan_file` refusal
-and a same-run duplicate are different shapes and get their own keys, so
-"closed vocabulary" is true of each key rather than of none.
-
-`classify` validates a **type name**, and the lane's type comes from
-`LaneSet[lane].type_name`. Its derived `concept_id` is deliberately unused: it
-would be derived from the type's own directory, while the target is
-`lane_set.target_for`'s. Placement is the lane's; validation is `classify`'s.
+**`classify` validates the pool type; it never makes the decision.** The extractor proposes a type and a
+rationale. A locked type goes to `refused` as `locked-type`; an unknown or refused pool type goes to
+`unclassified` as `unknown-type`. Neither defaults into another type. Classification refusals, filing
+refusals, and same-run duplicates retain their separate status keys.
 
 **Best-effort, always.** A reasoner failure, an extractor call failure, or a
 parse miss yields zero proposals, records the failure in the status, and never
@@ -51,9 +41,8 @@ from typing import Any
 
 from code_wiki_okf.placement import CODE_GRAPH_LANE
 from doc_wiki_okf.diataxis.classify import Unclassified, classify
-from doc_wiki_okf.diataxis.rubric import TYPE_NAMES
 from doc_wiki_okf.proposals.filing import plan_file
-from doc_wiki_okf.proposals.lanes import ADR_TYPE, LaneSet
+from doc_wiki_okf.proposals.pool import ProposalPool
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.tools import BaseTool
 from okf_ext.proposals import ProposalPlan
@@ -89,17 +78,15 @@ _CONFIDENCES = frozenset({"high", "medium", "low"})
 _UNRANKED = 999
 
 
-def catalog_lanes(lane_set: LaneSet, schema_set: SchemaSet) -> tuple[str, ...]:
+def catalog_lanes(pool: ProposalPool) -> tuple[str, ...]:
     """Every lane the reasoner's catalog covers, as directory ids.
 
-    The proposal lanes come off the `LaneSet` (whose directories come off
-    the loaded schemas). Every code-wiki page lives under placement's one
-    `code-graph` lane, and the reasoner's catalog is prefix-matched, so that
-    single lane covers every entity page. `sources/` remains because the
-    reasoner should see what has already been ingested.
+    The proposal-type directories come off the pool (whose directories come
+    off the schemas). Every code-wiki page lives under placement's one
+    `code-graph` lane, and `sources/` remains so the reasoner sees what has
+    already been ingested.
     """
-    _ = schema_set
-    proposal = tuple(lane.directory.rstrip("/") for lane in lane_set.lanes)
+    proposal = tuple(entry.directory.rstrip("/") for entry in pool.types)
     return tuple(dict.fromkeys((*proposal, CODE_GRAPH_LANE, SOURCES_LANE)))
 
 
@@ -112,17 +99,17 @@ def _string_list(value: object) -> list[str]:
     return [text] if text else []
 
 
-def _validate_suggestion(raw: object, lane_names: Sequence[str]) -> dict[str, Any] | None:
+def _validate_suggestion(raw: object) -> dict[str, Any] | None:
     """Normalize one suggestion to the §4.5 shape, or `None` if unusable.
 
     Three requirements, checked here so `classify` is never called on input it
-    would refuse for a reason the model could have avoided: a lane the set
-    declares, a non-blank title, and a non-blank rationale.
+    would refuse for a reason the model could have avoided: a non-blank type,
+    title, and rationale. Pool membership is judged during planning.
     """
     if not isinstance(raw, dict):
         return None
-    lane = str(raw.get("lane", "")).strip().lower()
-    if lane not in lane_names:
+    type_name = str(raw.get("type") or "").strip()
+    if not type_name:
         return None
     title = str(raw.get("title") or "").strip()
     rationale = str(raw.get("rationale") or "").strip()
@@ -136,7 +123,7 @@ def _validate_suggestion(raw: object, lane_names: Sequence[str]) -> dict[str, An
     if confidence not in _CONFIDENCES:
         confidence = "medium"
     entry: dict[str, Any] = {
-        "lane": lane,
+        "type": type_name,
         "title": title,
         "rationale": rationale,
         "description": str(raw.get("description") or "").strip() or rationale,
@@ -148,7 +135,7 @@ def _validate_suggestion(raw: object, lane_names: Sequence[str]) -> dict[str, An
     return entry
 
 
-def parse_extractor_response(text: str, *, lane_names: Sequence[str]) -> tuple[list[dict[str, Any]], bool]:
+def parse_extractor_response(text: str) -> tuple[list[dict[str, Any]], bool]:
     """Parse the extractor output into `(suggestions, parsed)`.
 
     `parsed` is `True` whenever a well-formed list was recovered, **including
@@ -181,29 +168,26 @@ def parse_extractor_response(text: str, *, lane_names: Sequence[str]) -> tuple[l
     else:
         return [], False
 
-    suggestions = [entry for entry in (_validate_suggestion(item, lane_names) for item in items) if entry is not None]
+    suggestions = [entry for entry in (_validate_suggestion(item) for item in items) if entry is not None]
     suggestions.sort(key=lambda entry: int(entry["rank"]))
     return suggestions[:MAX_SUGGESTIONS], True
 
 
-def build_curated_index(bundle: Bundle, lane_set: LaneSet) -> list[dict[str, str]]:
-    """Existing pages in the proposal lanes: `{lane, id, title, summary}`.
+def build_curated_index(bundle: Bundle, pool: ProposalPool) -> list[dict[str, str]]:
+    """Existing pages in the proposal-type directories: `{type, id, title, summary}`.
 
-    The dedup substrate the extractor proposes *against*. Built from the loaded
-    bundle -- one walk, every member already typed -- rather than a directory
-    walk per lane, which is C2 §4.2's move for the same reason.
+    `type` is the page's own `type:`, not a directory lookup: `work/` hosts
+    seven types.
     """
-    by_directory = {lane.directory: lane.name for lane in lane_set.lanes}
+    directories = {entry.directory for entry in pool.types}
     index: list[dict[str, str]] = []
     for concept_id in sorted(bundle.concepts):
-        directory = f"{concept_id.rpartition('/')[0]}/"
-        lane = by_directory.get(directory)
-        if lane is None:
+        if f"{concept_id.rpartition('/')[0]}/" not in directories:
             continue
         document = bundle.concepts[concept_id]
         index.append(
             {
-                "lane": lane,
+                "type": str(document.fm.type or ""),
                 "id": concept_id,
                 "title": str(document.fm.title or concept_id.rpartition("/")[2]),
                 "summary": str(document.fm.description or ""),
@@ -216,7 +200,7 @@ def build_extract_prompt(analysis: str, curated: Sequence[Mapping[str, str]]) ->
     """The extractor's human message: what exists, then what the reasoner said."""
     if curated:
         listed = "\n".join(
-            f"  - {entry['lane']} · {entry['id']} — {entry.get('title', '')}"
+            f"  - {entry['type']} · {entry['id']} — {entry.get('title', '')}"
             + (f" — {entry['summary']}" if entry.get("summary") else "")
             for entry in curated
         )
@@ -261,7 +245,7 @@ class PlannedProposal:
     """One classified, `plan_file`'d suggestion, not yet applied."""
 
     title: str
-    lane: str
+    type_name: str
     target: str
     rank: int
     confidence: str
@@ -272,7 +256,7 @@ async def plan_suggestions(
     *,
     bundle: Bundle,
     schema_set: SchemaSet,
-    lane_set: LaneSet,
+    pool: ProposalPool,
     material: Path,
     source_text: str,
     source_page: str,
@@ -305,10 +289,11 @@ async def plan_suggestions(
     `len(planned)`: nothing has been applied yet. `failed` is always `[]`
     here -- a planned write not landing is `apply_suggestions`' own finding.
     """
-    lane_names = tuple(lane.name for lane in lane_set.lanes)
     status: dict[str, Any] = {
         "reasoner": "skipped",
         "extractor": "skipped",
+        "pool": "ok",
+        "pool_refused": [f"{name}: {reason}" for name, reason in pool.refused],
         "proposals": 0,
         "unclassified": [],
         "refused": [],
@@ -325,11 +310,16 @@ async def plan_suggestions(
         # `"skipped"`, which is the record: every other path overwrites them.
         return [], status
 
+    if not pool.names:
+        # A configuration skip, like an empty source, leaves error unset.
+        status["pool"] = "empty"
+        return [], status
+
     try:
         reasoned = await run_proposal_reasoner(
             bundle=bundle,
-            lanes=catalog_lanes(lane_set, schema_set),
-            lane_set=lane_set,
+            lanes=catalog_lanes(pool),
+            pool=pool,
             material=material,
             source_text=source_text,
             source_page=source_page,
@@ -351,10 +341,10 @@ async def plan_suggestions(
         status["error"] = reasoned.error or "proposal_reasoner failed"
         return [], status
 
-    prompt = build_extract_prompt(reasoned.analysis, build_curated_index(bundle, lane_set))
+    prompt = build_extract_prompt(reasoned.analysis, build_curated_index(bundle, pool))
     try:
         response = await make_llm("extractor", layout=layout, model_override=model_override).ainvoke(
-            [SystemMessage(build_extractor_system(lane_set=lane_set)), HumanMessage(prompt)]
+            [SystemMessage(build_extractor_system(pool=pool)), HumanMessage(prompt)]
         )
     except Exception:  # best-effort by contract
         logger.warning("extractor call failed; skipping suggestions", exc_info=True)
@@ -367,7 +357,7 @@ async def plan_suggestions(
         status["error"] = "extractor output did not parse"
         return [], status
 
-    suggestions, parsed = parse_extractor_response(response.content, lane_names=lane_names)
+    suggestions, parsed = parse_extractor_response(response.content)
     if not parsed:
         status["extractor"] = "failed"
         status["error"] = "extractor output did not parse"
@@ -381,14 +371,21 @@ async def plan_suggestions(
     filed: set[str] = set()
     for suggestion in suggestions:
         try:
-            lane = lane_set[suggestion["lane"]]
+            state, type_name = pool.lookup(suggestion["type"])
+            if state == "locked":
+                # Locked types are refused, never retyped into a neighbour.
+                refused.append(f"{suggestion['title']}: locked-type")
+                continue
+            if state != "pool":
+                unclassified.append(f"{suggestion['title']}: unknown-type")
+                continue
             decision = classify(
                 schema_set,
-                type_name=lane.type_name,
+                type_name=type_name,
                 title=suggestion["title"],
                 rationale=suggestion["rationale"],
                 decided_by="agent:extractor",
-                allowed_types=(*TYPE_NAMES, ADR_TYPE),
+                allowed_types=pool.names,
             )
             if isinstance(decision, Unclassified):
                 # Dropped, never defaulted. `Unclassified.reason` is closed
@@ -398,7 +395,7 @@ async def plan_suggestions(
                 logger.info("dropping %r: %s (%s)", suggestion["title"], decision.reason, decision.detail)
                 continue
 
-            target = lane_set.target_for(suggestion["lane"], suggestion["title"])
+            target = pool.target_for(type_name, suggestion["title"])
             if target in filed:
                 # *bundle* is a snapshot taken before this loop ran, so it does
                 # not carry the loop's own writes and `plan_file` would derive
@@ -414,8 +411,8 @@ async def plan_suggestions(
 
             plan = plan_file(
                 bundle,
-                lane_set,
-                lane=suggestion["lane"],
+                pool,
+                type_name=type_name,
                 title=suggestion["title"],
                 description=suggestion["description"],
                 source=_source_entry(suggestion, source_page=source_page, source_title=source_title),
@@ -432,7 +429,7 @@ async def plan_suggestions(
             planned.append(
                 PlannedProposal(
                     title=suggestion["title"],
-                    lane=suggestion["lane"],
+                    type_name=type_name,
                     target=target,
                     rank=suggestion["rank"],
                     confidence=suggestion["confidence"],
@@ -488,7 +485,7 @@ def apply_suggestions(
                     continue
             reports.append(
                 {
-                    "lane": item.lane,
+                    "type": item.type_name,
                     "title": item.title,
                     "target": item.target,
                     "proposal": item.plan.proposal,

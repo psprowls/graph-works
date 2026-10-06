@@ -7,9 +7,7 @@ discovery reads the installed code-wiki type/catalog policy. This is
 code-wiki declarations and an added `log.md` because this vertical appends to
 one.
 
-No `Proposal` declaration is installed and none is needed: `okf_ext.proposals`
-carries its own type, which is why `doc-wiki-okf`'s proposal suite seeds
-exactly these twelve files too.
+`Proposal` now ships with doc-wiki-okf and is installed with the rest.
 """
 
 from __future__ import annotations
@@ -44,3 +42,31 @@ def make_bundle(tmp_path: Path, *, without: str | None = None) -> Path:
         "---\ntype: Explanation\ntitle: Why\ndescription: The reason\n---\n\nBecause.\n", encoding="utf-8"
     )
     return root
+
+
+RUNBOOK_SCHEMA = """{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$ref": "_base-diataxis.schema.json",
+  "unevaluatedProperties": false,
+  "required": ["service"],
+  "properties": { "type": { "const": "Runbook" }, "service": { "type": "string", "minLength": 1 } },
+  "x-okf-directory": "runbooks/",
+  "x-okf-accept-proposals": true,
+  "x-okf-proposal-guidance": {
+    "summary": "an operator restoring a service needs exact recovery steps.",
+    "question": "Is the reader an operator restoring a running service?"
+  },
+  "x-okf-proposal-promotion": { "frontmatter": { "service": "unassigned" } }
+}
+"""
+
+RUNBOOK_SECTIONS = (
+    "sections:\n  - heading: Steps\n    required: true\n    placeholder: |\n"
+    "      > TODO: the recovery steps.\nadditional_sections: true\n"
+)
+
+
+def add_runbook(root: Path) -> None:
+    """Declare a user-authored `Runbook` type: a schema and a sections file, no Python."""
+    (root / "schema" / "Runbook.schema.json").write_text(RUNBOOK_SCHEMA, encoding="utf-8")
+    (root / "sections" / "Runbook.yaml").write_text(RUNBOOK_SECTIONS, encoding="utf-8")

@@ -152,9 +152,8 @@ def test_source_ids_returns_ids_in_order_blanks_included():
 
 
 def test_the_refusal_vocabulary_is_closed_and_ordered():
-    """A ninth member, appended rather than inserted: the order is the order
-    `test_proposals_roundtrip.py`'s reachability parametrize reads, and the
-    two deliberate extensions beyond the design spec's seven sit last."""
+    """New refusals are appended rather than inserted, preserving the order
+    `test_proposals_roundtrip.py`'s reachability parametrize reads."""
     assert get_args(RefusalKind) == (
         "already-decided",
         "not-proposed",
@@ -169,4 +168,6 @@ def test_the_refusal_vocabulary_is_closed_and_ordered():
         "unknown-replacement",
         "self-replacement",
         "unexpected-replacement",
+        "target-type-conflict",
+        "type-unavailable",
     )

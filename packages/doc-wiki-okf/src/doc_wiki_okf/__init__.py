@@ -8,16 +8,15 @@ inspection that knows nothing of OKF, wikis or workspaces:
 
     from doc_wiki_okf.reading import extract, gather_skill_sources, slugify
 
-`doc_wiki_okf.diataxis` is the four Diátaxis types — the taxonomy as data, a
-classifier that validates a decision rather than making one, placement read off
+`doc_wiki_okf.diataxis` provides a classifier that validates a decision rather than making one, placement read off
 each type's `x-okf-directory`, and retyping as a move:
 
-    from doc_wiki_okf.diataxis import TYPE_NAMES, classify, plan_retype
+    from doc_wiki_okf.diataxis import classify, plan_retype
 
-`doc_wiki_okf.proposals` is the lane map, the review renderer, and the two
+`doc_wiki_okf.proposals` is the proposal pool, the review renderer, and the two
 compositions over `okf_ext.proposals` -- filing and promotion:
 
-    from doc_wiki_okf.proposals import lane_set, plan_file, plan_promotion
+    from doc_wiki_okf.proposals import plan_file, plan_promotion, proposal_pool
 
 `doc_wiki_okf.proposals.migrate` is the old-dialect rewriter -- the
 `kind`/`mode`/`target_slug`/`origins[]` ledger converted to `okf_ext.proposals`

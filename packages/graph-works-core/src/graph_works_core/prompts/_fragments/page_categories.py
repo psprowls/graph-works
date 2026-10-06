@@ -14,17 +14,10 @@ hand-written table did -- add, rename or remove a schema's
 `architecture_overview.py` already made for the layout half of these
 prompts.
 
-`adr` and `work` stay hardcoded rows. `adr` because the row must render for a
-workspace whose declarations predate the `Adr` schema
-(`doc_wiki_okf.proposals.lanes.ADR_DIRECTORY` names the directory either way);
-`Adr` is deliberately absent from `_TYPE_GLOSSES`, so a schema-declared `adrs/`
-does not add a second row. `work_tracker_okf`'s own
-schemas (`Epic`, `Bug`, `Feature`, `Spike`, `TechDebt`, `TestGap`) do declare
-`x-okf-directory: "work/"` and are installed alongside the rest -- `work` is
-hardcoded rather than schema-derived because `_TYPE_GLOSSES` is keyed on only
-the thirteen top-level page kinds. None of those six work-item types appear in
-it, and a single `work` row (from `work_tracker_okf.WORK_DIR`) stands in for
-all six.
+`work` is the one hardcoded row: seven work types share `work/`, and one
+row from `work_tracker_okf.WORK_DIR` stands for all of them. Every proposal
+type's row outside `work/`, including `adr`, comes from its schema's guidance
+`summary` and kebab-cased type name.
 
 `File` declares the repository-local lane segment `file-system/`. Its row says so
 explicitly: the schema annotation is not a claim that a top-level `file-system/`
@@ -36,28 +29,22 @@ resource identity that qualifies their canonical placement.
 `repository-resource` row stands for both types; keying both would emit two rows for
 one directory.
 
-Glosses cannot come off the schema either -- no schema property carries
-prose. Four (`tutorial`, `how-to`, `reference`, `explanation`) are reused
-verbatim from `lane_list.LANE_GLOSSES` rather than re-authored. The rest
-carry over from the retired `PAGE_CATEGORIES` constant's own prose
-unchanged (`app`, `package`, `dependency`, `source`, `adr`, `work`), or are
-new one-liners for the directories the old table omitted
-(`test-suite`, `agent-plugin`, `repository`, `repository-resource`, `file`).
+Generated types keep their glosses here because a locked type carries no
+proposal guidance. Proposal types carry their own summary in
+`x-okf-proposal-guidance`, so their glosses follow the schema set.
 """
 
 from __future__ import annotations
 
+import re
 from collections.abc import Mapping
 
-from doc_wiki_okf.proposals.lanes import ADR_DIRECTORY
-from okf_ext.schemas import SchemaSet, declared_directories
+from okf_ext.schemas import SchemaSet, declared_directories, declared_proposables
 from work_tracker_okf import WORK_DIR
 
-from graph_works_core.prompts._fragments.lane_list import LANE_GLOSSES
-
-#: type_name -> (category name, gloss), for every schema type this table
-#: names a row for. Types absent here contribute no row -- see the module
-#: docstring for the deliberately collapsed work-item types.
+#: Generated type_name -> (category name, gloss). Admitted proposal types
+#: contribute their schema guidance separately; work-item types collapse
+#: into one row as described in the module docstring.
 _TYPE_GLOSSES: Mapping[str, tuple[str, str]] = {
     "App": ("app", "One application workspace (web, mobile, CLI) — platform, entry points, deployment"),
     "Package": ("package", "One library/service workspace — what it exports, who depends on it, key patterns"),
@@ -80,34 +67,42 @@ _TYPE_GLOSSES: Mapping[str, tuple[str, str]] = {
         "A repository the workspace embeds as a resource, managed or reference, at `repositories/<name>.md`",
     ),
     "File": ("file", "A repository-local source-file mirror under that repository's `file-system/` lane"),
-    "Tutorial": ("tutorial", LANE_GLOSSES["tutorial"]),
-    "HowTo": ("how-to", LANE_GLOSSES["how-to"]),
-    "Reference": ("reference", LANE_GLOSSES["reference"]),
-    "Explanation": ("explanation", LANE_GLOSSES["explanation"]),
     "Source": ("source", "Summary of an ingested spec, PR, article, transcript, etc."),
 }
 
-#: The two rows no schema declares -- (directory, category name, gloss).
-_CONSTANT_ROWS: tuple[tuple[str, str, str], ...] = (
-    (ADR_DIRECTORY, "adr", "Architecture Decision Record — a dated, citable decision with context + consequences"),
-    (f"{WORK_DIR}/", "work", "Unified bug / tech-debt / feature / epic / spike — replaces issues + roadmap"),
+#: The one row no single schema declares: seven work types share `work/`, and
+#: one row stands for all of them -- (directory, category name, gloss).
+_WORK_ROW: tuple[str, str, str] = (
+    f"{WORK_DIR}/",
+    "work",
+    "Unified bug / tech-debt / feature / epic / spike — replaces issues + roadmap",
 )
+
+
+def _category(type_name: str) -> str:
+    """`HowTo` -> `how-to`: the kebab category name this table has always used."""
+    return re.sub(r"(?<!^)(?=[A-Z])", "-", type_name).lower()
 
 
 def render_page_categories(schema_set: SchemaSet) -> str:
     """## Page categories, rendered from the bundle's own declarations.
 
-    Every row but `adr` and `work` comes from `declared_directories(schema_set)`
-    -- add, rename, or remove a schema's `x-okf-directory` and this table
-    follows. Rows are sorted by directory so the render is stable regardless
-    of `declared_directories`' own (unordered-by-contract) `dict` return.
+    Generated types come from `declared_directories` with the glosses above;
+    every proposal-pool type outside `work/` comes from
+    `declared_proposables`, its gloss being its own guidance `summary`; one
+    `work` row stands for the work types. Sorted by directory.
     """
     rows = [
         (directory, *_TYPE_GLOSSES[type_name])
         for type_name, directory in declared_directories(schema_set).items()
         if type_name in _TYPE_GLOSSES
     ]
-    rows.extend(_CONSTANT_ROWS)
+    rows.extend(
+        (entry.directory, _category(entry.name), entry.guidance.summary)
+        for entry in declared_proposables(schema_set).types
+        if entry.directory != _WORK_ROW[0] and entry.name not in _TYPE_GLOSSES
+    )
+    rows.append(_WORK_ROW)
     rows.sort(key=lambda row: row[0])
     header = "## Page categories\n\n| Category | What it documents |\n|---|---|"
     body = "\n".join(f"| `{name}` | {gloss} |" for _directory, name, gloss in rows)

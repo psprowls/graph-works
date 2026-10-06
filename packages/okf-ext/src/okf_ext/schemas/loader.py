@@ -17,6 +17,7 @@ from collections.abc import Mapping
 from pathlib import Path
 from types import MappingProxyType
 from typing import Any
+from urllib.parse import unquote
 
 from jsonschema.exceptions import SchemaError as JsonSchemaError
 from jsonschema.validators import validator_for
@@ -25,7 +26,15 @@ from referencing.jsonschema import DRAFT202012
 from ruamel.yaml import YAML
 from ruamel.yaml.error import YAMLError
 
-from okf_ext.schemas.model import AboutMandate, SchemaError, SchemaSet
+from okf_ext.schemas.model import (
+    AboutMandate,
+    Proposables,
+    ProposableType,
+    ProposalGuidance,
+    ProposalPromotion,
+    SchemaError,
+    SchemaSet,
+)
 
 #: The conventional directory name. A default tools may offer, never one this
 #: module reaches for.
@@ -212,10 +221,27 @@ def _resolve_ref(
     if target_doc is None:
         return None
     target: object = target_doc
-    for part in (p for p in fragment.split("/") if p):
-        if not isinstance(target, Mapping):
+    pointer = unquote(fragment)
+    if pointer and not pointer.startswith("/"):
+        return None
+    for token in pointer.split("/")[1:]:
+        part = token.replace("~1", "/").replace("~0", "~")
+        if isinstance(target, Mapping):
+            target = target.get(part)
+        elif isinstance(target, list):
+            if (
+                not part.isascii()
+                or not part.isdecimal()
+                or (len(part) > 1 and part.startswith("0"))
+                or len(part) > len(str(len(target)))
+            ):
+                return None
+            index = int(part)
+            if index >= len(target):
+                return None
+            target = target[index]
+        else:
             return None
-        target = target.get(part.replace("~1", "/").replace("~0", "~"))
     return (target, target_doc) if isinstance(target, Mapping) else None
 
 
@@ -280,3 +306,163 @@ def declared_about(schema_set: SchemaSet) -> dict[str, AboutMandate]:
         if isinstance(entries, str) and entries.strip() and isinstance(properties, Mapping) and entries in properties:
             found[type_name] = AboutMandate(entries=entries)
     return found
+
+
+#: Keys a promoted page gets without the type's promotion block: `type`,
+#: `title` and `description` come off the proposal, and the rest are what
+#: `okf_ext.proposals` writes itself (`OWNED_PROVENANCE_KEYS`). Restated, not
+#: imported -- this capability may not import `proposals` (the `independence`
+#: contract) -- and `test_schemas_proposables.py` pins the two together.
+PROMOTION_SUPPLIED: frozenset[str] = frozenset({"type", "title", "description", "generated", "sources", "verified"})
+
+_GUIDANCE_KEYS = frozenset({"summary", "question", "signals", "anti_signals", "title_pattern"})
+_PROMOTION_KEYS = frozenset({"dated", "frontmatter"})
+
+
+def _strings(value: object) -> tuple[str, ...] | None:
+    """*value* as a tuple of stripped non-blank strings, or None if it is not one."""
+    if not isinstance(value, list) or not all(isinstance(item, str) and item.strip() for item in value):
+        return None
+    return tuple(item.strip() for item in value)
+
+
+def _guidance(value: object) -> ProposalGuidance | str:
+    """The parsed guidance, or the `invalid-guidance: …` reason it is unusable."""
+    if not isinstance(value, Mapping):
+        return "invalid-guidance: x-okf-proposal-guidance must be an object"
+    unknown = sorted(str(key) for key in value if key not in _GUIDANCE_KEYS)
+    if unknown:
+        return f"invalid-guidance: unknown key(s) {', '.join(unknown)}"
+    summary = value.get("summary")
+    if not isinstance(summary, str) or not summary.strip():
+        return "invalid-guidance: `summary` must be a non-blank string"
+    question = value.get("question")
+    if not isinstance(question, str) or not question.strip():
+        return "invalid-guidance: `question` must be a non-blank string"
+    signals = _strings(value.get("signals", []))
+    if signals is None:
+        return "invalid-guidance: `signals` must be a list of non-blank strings"
+    anti_signals = _strings(value.get("anti_signals", []))
+    if anti_signals is None:
+        return "invalid-guidance: `anti_signals` must be a list of non-blank strings"
+    title_pattern = value.get("title_pattern")
+    if "title_pattern" in value and (not isinstance(title_pattern, str) or not title_pattern.strip()):
+        return "invalid-guidance: `title_pattern` must be a non-blank string"
+    return ProposalGuidance(
+        summary=summary.strip(),
+        question=question.strip(),
+        signals=signals,
+        anti_signals=anti_signals,
+        title_pattern=None if title_pattern is None else title_pattern.strip(),
+    )
+
+
+def _promotion(value: object) -> ProposalPromotion | str:
+    """The parsed promotion, or the `invalid-promotion: …` reason it is unusable."""
+    if not isinstance(value, Mapping):
+        return "invalid-promotion: x-okf-proposal-promotion must be an object"
+    unknown = sorted(str(key) for key in value if key not in _PROMOTION_KEYS)
+    if unknown:
+        return f"invalid-promotion: unknown key(s) {', '.join(unknown)}"
+    dated = value.get("dated", False)
+    if not isinstance(dated, bool):
+        return "invalid-promotion: `dated` must be a boolean"
+    frontmatter = value.get("frontmatter", {})
+    if not isinstance(frontmatter, Mapping) or not all(
+        isinstance(key, str) and key.strip() and isinstance(item, str) for key, item in frontmatter.items()
+    ):
+        return "invalid-promotion: `frontmatter` must map non-blank keys to strings"
+    collisions = sorted(key for key in frontmatter if key in PROMOTION_SUPPLIED)
+    if collisions:
+        return f"invalid-promotion: `frontmatter` may not set {', '.join(collisions)}; promotion supplies them"
+    return ProposalPromotion(dated=dated, frontmatter=MappingProxyType(dict(frontmatter)))
+
+
+def _effective_required(schema_set: SchemaSet, schema: Mapping[str, Any]) -> frozenset[str] | None:
+    """Every `required` name reached through `$ref` and `allOf`, or None when a `$ref` dangles.
+
+    `anyOf`/`oneOf` branches are not walked: a field one branch requires is not
+    required of every page, so a promotion need not supply it.
+    """
+    seen: set[int] = set()
+    found: set[str] = set()
+
+    def walk(node: Mapping[str, Any], document: Mapping[str, Any]) -> bool:
+        if id(node) in seen:
+            return True
+        seen.add(id(node))
+        required = node.get("required")
+        if isinstance(required, list):
+            found.update(item for item in required if isinstance(item, str))
+        ref = node.get("$ref")
+        if isinstance(ref, str):
+            resolved = _resolve_ref(schema_set, ref, document)
+            if resolved is None or not walk(*resolved):
+                return False
+        branches = node.get("allOf")
+        if isinstance(branches, list):
+            for branch in branches:
+                if isinstance(branch, Mapping) and not walk(branch, document):
+                    return False
+        return True
+
+    return frozenset(found) if walk(schema, schema) else None
+
+
+def declared_proposables(schema_set: SchemaSet) -> Proposables:
+    """The proposal pool *schema_set* declares through `x-okf-accept-proposals`.
+
+    Absent is no answer at all; `false` locks the type; `true` admits it when
+    its `x-okf-directory`, `x-okf-proposal-guidance` and optional
+    `x-okf-proposal-promotion` hold up, and its effective `required` set minus
+    `PROMOTION_SUPPLIED` is covered by the promotion's `frontmatter`.
+
+    **Nothing raises.** A misconfigured flagged type is excluded with a reason
+    -- `invalid-flag`, `no-directory`, `missing-guidance`,
+    `invalid-guidance: …`, `invalid-promotion: …`, `unresolved-base`,
+    `uncovered-required: …` -- and every other type is unaffected, the posture
+    of `declared_directories`. Underscore-prefixed files are `$ref` targets,
+    not types, and are never considered.
+    """
+    types: list[ProposableType] = []
+    locked: list[str] = []
+    refused: list[tuple[str, str]] = []
+    for type_name, schema in schema_set.schemas.items():
+        if "x-okf-accept-proposals" not in schema:
+            continue
+        flag = schema["x-okf-accept-proposals"]
+        if flag is False:
+            locked.append(type_name)
+            continue
+        if flag is not True:
+            refused.append((type_name, "invalid-flag"))
+            continue
+        directory = schema.get("x-okf-directory")
+        if not isinstance(directory, str) or not directory.strip():
+            refused.append((type_name, "no-directory"))
+            continue
+        if "x-okf-proposal-guidance" not in schema:
+            refused.append((type_name, "missing-guidance"))
+            continue
+        guidance = _guidance(schema["x-okf-proposal-guidance"])
+        if isinstance(guidance, str):
+            refused.append((type_name, guidance))
+            continue
+        promotion: ProposalPromotion | None = None
+        if "x-okf-proposal-promotion" in schema:
+            parsed = _promotion(schema["x-okf-proposal-promotion"])
+            if isinstance(parsed, str):
+                refused.append((type_name, parsed))
+                continue
+            promotion = parsed
+        required = _effective_required(schema_set, schema)
+        if required is None:
+            refused.append((type_name, "unresolved-base"))
+            continue
+        supplied = set(PROMOTION_SUPPLIED) | (set(promotion.frontmatter) if promotion is not None else set())
+        uncovered = sorted(required - supplied)
+        if uncovered:
+            refused.append((type_name, f"uncovered-required: {', '.join(uncovered)}"))
+            continue
+        types.append(ProposableType(name=type_name, directory=directory, guidance=guidance, promotion=promotion))
+    return Proposables(types=tuple(types), locked=tuple(locked), refused=tuple(refused))

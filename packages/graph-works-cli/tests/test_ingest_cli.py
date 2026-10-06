@@ -72,7 +72,7 @@ def test_ingest_runs_one_source_against_the_first_configured_repo(
             indexes_updated=("index.md",),
             proposals=(
                 {
-                    "lane": "concepts",
+                    "type": "Explanation",
                     "title": "Demo concept",
                     "target": "concepts/demo.md",
                     "proposal": "Add the concept",
@@ -118,7 +118,7 @@ def test_ingest_runs_one_source_against_the_first_configured_repo(
         "indexes_updated": ["index.md"],
         "proposals": [
             {
-                "lane": "concepts",
+                "type": "Explanation",
                 "title": "Demo concept",
                 "target": "concepts/demo.md",
                 "proposal": "Add the concept",

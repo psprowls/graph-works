@@ -3,5 +3,24 @@
   "$ref": "_base.schema.json",
   "unevaluatedProperties": false,
   "properties": { "type": { "const": "Epic" } },
+  "x-okf-accept-proposals": true,
+  "x-okf-proposal-guidance": {
+    "summary": "an outcome too large for one item, decomposed into children that ship separately.",
+    "question": "Does the source describe one outcome that needs several independently shippable items?",
+    "signals": [
+      "the outcome spans packages or stages that would each ship on their own",
+      "the children can be named and ordered",
+      "one design governs all of them"
+    ],
+    "anti_signals": [
+      "one design, plan and branch would deliver it",
+      "the pieces share no outcome",
+      "the grouping is by ship date rather than by outcome"
+    ],
+    "title_pattern": "Names the outcome: `<Capability> across ...`, `<Area> correctness`"
+  },
+  "x-okf-proposal-promotion": {
+    "frontmatter": { "work_status": "open", "opened": "{on}", "updated": "{on}" }
+  },
   "x-okf-directory": "work/"
 }

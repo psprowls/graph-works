@@ -3,5 +3,24 @@
   "$ref": "_base.schema.json",
   "unevaluatedProperties": false,
   "properties": { "type": { "const": "Feature" } },
+  "x-okf-accept-proposals": true,
+  "x-okf-proposal-guidance": {
+    "summary": "a new capability: something users or callers cannot do today.",
+    "question": "Does the source argue for a capability the system does not yet have?",
+    "signals": [
+      "a user or caller outcome is described that no current path delivers",
+      "the change adds behaviour rather than repairing it",
+      "one design, plan and branch can deliver it"
+    ],
+    "anti_signals": [
+      "the system already does this and does it wrongly",
+      "the change only restructures existing code",
+      "the outcome needs several independently shippable pieces"
+    ],
+    "title_pattern": "Names the capability: `<Verb> <thing>`, `Support ... in ...`"
+  },
+  "x-okf-proposal-promotion": {
+    "frontmatter": { "work_status": "open", "opened": "{on}", "updated": "{on}" }
+  },
   "x-okf-directory": "work/"
 }

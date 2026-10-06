@@ -2415,20 +2415,20 @@
     },
     {
       "name": "gw wiki proposal file",
-      "help": "File or merge one source's proposal for a lane target.",
-      "short_help": "File or merge one source's proposal for a lane target.",
+      "help": "File or merge one source's proposal for a page of one type.",
+      "short_help": "File or merge one source's proposal for a page of one type.",
       "usage": [
         "[OPTIONS]"
       ],
       "arguments": [],
       "options": [
         {
-          "name": "lane",
+          "name": "type_name",
           "opts": [
-            "--lane"
+            "--type"
           ],
           "secondary_opts": [],
-          "help": "",
+          "help": "The page type the proposal argues for, e.g. Explanation.",
           "required": true,
           "default": null,
           "is_flag": false

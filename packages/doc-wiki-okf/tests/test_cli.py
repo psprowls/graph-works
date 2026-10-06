@@ -17,15 +17,15 @@ def _init(root) -> None:
     assert runner.invoke(app, ["init", str(root), "--today", DAY]).exit_code == 0
 
 
-def _file_one(root, *, title="Bulk Write Staging Protocol", lane="adr", resource="sources/a.md"):
+def _file_one(root, *, title="Bulk Write Staging Protocol", type_name="Adr", resource="sources/a.md"):
     return runner.invoke(
         app,
         [
             "proposal",
             "file",
             str(root),
-            "--lane",
-            lane,
+            "--type",
+            type_name,
             "--title",
             title,
             "--description",
@@ -86,6 +86,7 @@ def test_proposals_lists_what_was_filed(tmp_path) -> None:
     assert result.exit_code == 0
     assert "adrs/bulk-write-staging-protocol.md" in result.stdout
     assert "proposed" in result.stdout
+    assert "Adr" in result.stdout
 
 
 def test_proposals_json_carries_the_documented_shape(tmp_path) -> None:
@@ -99,7 +100,8 @@ def test_proposals_json_carries_the_documented_shape(tmp_path) -> None:
     assert set(payload[0]) == {
         "member",
         "target",
-        "lane",
+        "type",
+        "target_type",
         "title",
         "description",
         "page_status",
@@ -107,7 +109,8 @@ def test_proposals_json_carries_the_documented_shape(tmp_path) -> None:
         "verified",
         "malformed",
     }
-    assert payload[0]["lane"] == "adr"
+    assert payload[0]["type"] == "Adr"
+    assert payload[0]["target_type"] == "Adr"
     assert payload[0]["page_status"] == "proposed"
     assert payload[0]["sources"][0]["resource"] == "sources/a.md"
 
@@ -164,7 +167,7 @@ def test_show_targets_the_raw_disk_id_for_a_non_ascii_page(tmp_path, monkeypatch
     stale stored one."""
     nfd = unicodedata.normalize("NFD", "café")
     nfc = unicodedata.normalize("NFC", "café")
-    monkeypatch.setattr("doc_wiki_okf.proposals.lanes.slugify", lambda title: nfc)
+    monkeypatch.setattr("doc_wiki_okf.proposals.pool.slugify", lambda title: nfc)
     root = tmp_path / "b"
     _init(root)
     (root / "docs" / "reference").mkdir(parents=True, exist_ok=True)
@@ -176,8 +179,8 @@ def test_show_targets_the_raw_disk_id_for_a_non_ascii_page(tmp_path, monkeypatch
             "proposal",
             "file",
             str(root),
-            "--lane",
-            "reference",
+            "--type",
+            "Reference",
             "--title",
             "Café",
             "--description",
@@ -226,8 +229,8 @@ def test_file_dry_run_writes_nothing(tmp_path) -> None:
             "proposal",
             "file",
             str(root),
-            "--lane",
-            "adr",
+            "--type",
+            "Adr",
             "--title",
             "T",
             "--description",
@@ -257,8 +260,8 @@ def test_file_carries_every_repeated_evidence_bullet(tmp_path) -> None:
             "proposal",
             "file",
             str(root),
-            "--lane",
-            "adr",
+            "--type",
+            "Adr",
             "--title",
             "T",
             "--description",
@@ -1094,3 +1097,38 @@ def test_the_ignore_list_covers_reference_copies() -> None:
         "*/sources/references/*",
         "*/.DS_Store",
     )
+
+
+def test_file_refuses_a_locked_type_and_writes_nothing(tmp_path) -> None:
+    root = tmp_path / "b"
+    assert runner.invoke(app, ["init", str(root), "--today", DAY]).exit_code == 0
+    result = runner.invoke(
+        app, ["proposal", "file", str(root), "--type", "Source", "--title", "T", "--id", "s1", "--resource", "r"]
+    )
+    assert result.exit_code == 1
+    assert "x-okf-accept-proposals: false" in result.stderr
+    assert not (root / "proposals").exists()
+
+
+def test_show_text_uses_the_pool_without_requiring_the_stock_lane_schemas(tmp_path) -> None:
+    root = tmp_path / "b"
+    _init(root)
+    assert _file_one(root).exit_code == 0
+    # An opted-in type can stand alone; rendering it must not construct LaneSet.
+    for name in ("Tutorial", "HowTo", "Reference", "Explanation"):
+        (root / "schema" / f"{name}.schema.json").unlink()
+    result = runner.invoke(app, ["proposal", "show", str(root), "adrs/bulk-write-staging-protocol.md"])
+    assert result.exit_code == 0, result.output
+    assert "Create new Adr page" in result.stdout
+
+
+def test_show_json_reports_the_resolved_and_recorded_type(tmp_path) -> None:
+    root = tmp_path / "b"
+    _init(root)
+    _file_one(root)
+    result = runner.invoke(app, ["proposal", "show", str(root), "adrs/bulk-write-staging-protocol.md", "--json"])
+    assert result.exit_code == 0
+    record = json.loads(result.stdout)
+    assert record["type"] == "Adr"
+    assert record["target_type"] == "Adr"
+    assert "lane" not in record

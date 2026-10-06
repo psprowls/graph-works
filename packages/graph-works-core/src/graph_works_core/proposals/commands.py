@@ -3,7 +3,7 @@
 This vertical owns target normalization, the bundle/lane-schema load sequence,
 and the plan/apply composition so interfaces only route, parse, format, and
 read the clock. Content refusals remain values; invalid caller input such as a
-naive timestamp or undeclared lane still raises.
+naive timestamp or type outside the proposal pool still raises.
 """
 
 from __future__ import annotations
@@ -16,7 +16,7 @@ from types import MappingProxyType
 from typing import Any
 
 from doc_wiki_okf.actors import human_actor
-from doc_wiki_okf.proposals import lane_set, plan_file
+from doc_wiki_okf.proposals import plan_file, proposal_pool
 from okf_ext.bundle import SCHEMA_DIRNAME
 from okf_ext.proposals import (
     PAGE_STATUSES,
@@ -87,7 +87,7 @@ class ProposalDecideRun:
 class ProposalFileRun:
     """What one proposal filing planned and, when applied, wrote."""
 
-    lane: str
+    type_name: str
     target: str
     proposal: str
     plan: ProposalPlan
@@ -200,7 +200,7 @@ def run_proposal_decide(
 def run_proposal_file(
     layout: WorkspaceLayout,
     *,
-    lane: str,
+    type_name: str,
     title: str,
     description: str,
     source: Mapping[str, Any],
@@ -208,14 +208,20 @@ def run_proposal_file(
     at: datetime,
     dry_run: bool = True,
 ) -> ProposalFileRun:
-    """Plan -- and unless ``dry_run``, apply -- filing one source's proposal."""
+    """Plan -- and unless ``dry_run``, apply -- filing one source's proposal.
+
+    Raises `PoolError` (a `KeyError`) for a locked, refused, or unknown type.
+    """
     _require_aware(at)
     bundle = load_workspace_bundle(layout)
     config = load_workspace_config(layout)
-    lanes = lane_set(load_schemas(config.declarations_dir / SCHEMA_DIRNAME))
-    plan = plan_file(bundle, lanes, lane=lane, title=title, description=description, source=source, by=by, at=at)
+    pool = proposal_pool(load_schemas(config.declarations_dir / SCHEMA_DIRNAME))
+    declared = pool[type_name].name
+    plan = plan_file(
+        bundle, pool, type_name=declared, title=title, description=description, source=source, by=by, at=at
+    )
     run = ProposalFileRun(
-        lane=lane,
+        type_name=declared,
         target=plan.target,
         proposal=plan.proposal,
         plan=plan,
@@ -224,7 +230,7 @@ def run_proposal_file(
     if dry_run or not plan.ok or plan.is_empty:
         return run
     return ProposalFileRun(
-        lane=lane,
+        type_name=declared,
         target=plan.target,
         proposal=plan.proposal,
         plan=plan,
@@ -239,6 +245,8 @@ class ProposalListing:
 
     proposal: Proposal
     mode: Mode
+    type_name: str | None
+    type_refusal: Refusal | None
 
 
 def run_proposals_read(layout: WorkspaceLayout, page_status: str = "proposed") -> tuple[ProposalListing, ...]:
@@ -253,10 +261,20 @@ def run_proposals_read(layout: WorkspaceLayout, page_status: str = "proposed") -
     if page_status not in PAGE_STATUSES:
         raise ValueError(f"page_status {page_status!r} not in {'|'.join(PAGE_STATUSES)}")
     bundle = load_workspace_bundle(layout)
-    return tuple(
-        ProposalListing(proposal=proposal, mode=target_mode(bundle, proposal))
-        for proposal in list_proposals(bundle, page_status=page_status)
-    )
+    config = load_workspace_config(layout)
+    pool = proposal_pool(load_schemas(config.declarations_dir / SCHEMA_DIRNAME))
+    listings = []
+    for proposal in list_proposals(bundle, page_status=page_status):
+        resolved = pool.type_for(proposal)
+        listings.append(
+            ProposalListing(
+                proposal=proposal,
+                mode=target_mode(bundle, proposal),
+                type_name=None if isinstance(resolved, Refusal) else resolved.name,
+                type_refusal=resolved if isinstance(resolved, Refusal) else None,
+            )
+        )
+    return tuple(listings)
 
 
 __all__ = [

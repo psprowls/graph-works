@@ -72,23 +72,41 @@ def landed_siblings(items: Sequence[WorkItem], item: WorkItem) -> tuple[LandedSi
 @dataclass(frozen=True, slots=True)
 class BaselineComparison:
     """`new` is True when the ref is not an ancestor of the baseline, False when
-    it is, None when undetermined (`missing` ref, or a probe failure with `cause`)."""
+    it is, None when undetermined (`missing` ref, a probe failure with `cause`,
+    or an `unreachable` ref: a commit present in the object store that no ref
+    contains, left behind by a history rewrite or a branch deleted after a
+    squash integration, which therefore cannot have landed since anything)."""
 
     new: bool | None
     missing: bool = False
     cause: str | None = None
+    unreachable: bool = False
 
 
 def compare_to_baseline(repo: Path, ref: str, baseline: str) -> BaselineComparison:
-    """One `merge-base --is-ancestor <ref> <baseline>` probe, after checking *ref* is a commit."""
+    """One `merge-base --is-ancestor <ref> <baseline>` probe, after checking *ref* is a commit.
+
+    A non-ancestor gets a second probe, `for-each-ref --contains`, so a dangling
+    commit is reported `unreachable` instead of new; the ancestor path stays one probe.
+    """
     if not provenance.commit_exists(repo, ref):
         return BaselineComparison(None, missing=True)
     outcome = provenance.probe_git(repo, "merge-base", "--is-ancestor", ref, baseline)
     if outcome.returncode == 0:
         return BaselineComparison(False)
     if outcome.returncode == 1:
-        return BaselineComparison(True)
+        return _reachability(repo, ref)
     return BaselineComparison(None, cause=outcome.cause)
+
+
+def _reachability(repo: Path, ref: str) -> BaselineComparison:
+    """New when any ref contains *ref*, `unreachable` when none does."""
+    outcome = provenance.probe_git(repo, "for-each-ref", "--contains", ref, "--count=1", "--format=%(refname)")
+    if outcome.returncode != 0:
+        return BaselineComparison(None, cause=outcome.cause)
+    if not outcome.stdout.strip():
+        return BaselineComparison(None, unreachable=True)
+    return BaselineComparison(True)
 
 
 @dataclass(frozen=True, slots=True)
@@ -139,6 +157,12 @@ def landed_since(layout: WorkspaceLayout, items: Sequence[WorkItem], item: WorkI
         comparison = comparisons[ref]
         if comparison.missing:
             warnings.append(f"landed-since: {sibling.path} resolved_in {ref!r} is not a commit in {repo}; skipped")
+            continue
+        if comparison.unreachable:
+            warnings.append(
+                f"landed-since: {sibling.path} resolved_in {ref!r} is not reachable from any ref in {repo} "
+                "(history rewritten or branch deleted); skipped"
+            )
             continue
         if comparison.new is False:
             continue

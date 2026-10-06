@@ -28,5 +28,6 @@
     "updated": { "type": "string", "format": "date" },
     "tags": { "type": "array", "items": { "type": "string" } }
   },
+  "x-okf-accept-proposals": false,
   "x-okf-directory": "repositories/"
 }

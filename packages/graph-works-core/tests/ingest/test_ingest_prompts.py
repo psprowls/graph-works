@@ -2,9 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import replace
-
-from doc_wiki_okf.proposals.lanes import Lane, lane_set
+from doc_wiki_okf.proposals.pool import ProposalPool, proposal_pool
 from doc_wiki_okf.sources import seed_source_kinds
 from graph_works_core import prompts
 from graph_works_core.ingest.prompts.extractor import build_extractor_system
@@ -12,13 +10,13 @@ from graph_works_core.ingest.prompts.ingestor import build_ingestor_system
 from graph_works_core.ingest.prompts.proposal_reasoner import build_proposal_reasoner_system
 from graph_works_core.workspace.layout import layout_for
 from ingest_helpers import declarations
-from suggest_fixtures import make_bundle
+from suggest_fixtures import add_runbook, make_bundle
 
 
-def _lane_set(tmp_path):
-    """The real `LaneSet` a seeded bundle produces -- no lane name written down."""
+def _pool(tmp_path) -> ProposalPool:
+    """The real proposal pool a seeded bundle declares."""
     schema_set, _ = declarations(make_bundle(tmp_path))
-    return lane_set(schema_set)
+    return proposal_pool(schema_set)
 
 
 def _schema_set(tmp_path):
@@ -29,11 +27,11 @@ def _schema_set(tmp_path):
 
 
 def _extractor(tmp_path):
-    return build_extractor_system(lane_set=_lane_set(tmp_path))
+    return build_extractor_system(pool=_pool(tmp_path))
 
 
 def _reasoner(tmp_path):
-    return build_proposal_reasoner_system(lane_set=_lane_set(tmp_path))
+    return build_proposal_reasoner_system(pool=_pool(tmp_path))
 
 
 def _system(tmp_path, kinds=None):
@@ -116,34 +114,29 @@ def test_project_context_is_inserted_second_when_given(tmp_path):
     assert "Context body." not in build_ingestor_system(layout=layout, kinds=kinds, schema_set=schema_set)
 
 
-def test_the_extractor_names_every_lane_and_demands_a_rationale(tmp_path):
-    text = _extractor(tmp_path)
-    for lane in _lane_set(tmp_path).lanes:
-        assert lane.name in text
-    assert "rationale" in text
-    assert "JSON" in text
-
-
 def test_the_extractor_no_longer_speaks_the_retired_vocabulary(tmp_path):
     for retired in ("concept_kind", "existing_slug", "create_new", "update_existing"):
         assert retired not in _extractor(tmp_path)
 
 
-def test_the_reasoner_names_every_lane(tmp_path):
-    text = _reasoner(tmp_path)
-    for lane in _lane_set(tmp_path).lanes:
-        assert lane.name in text
+def test_the_extractor_names_every_pool_type_with_its_summary_and_demands_a_rationale(tmp_path):
+    pool = _pool(tmp_path)
+    text = build_extractor_system(pool=pool)
+    for entry in pool.types:
+        assert f"- {entry.name}: {entry.guidance.summary}" in text
+    assert "rationale" in text and "Required" in text
 
 
-def test_a_sixth_lane_is_named_in_both_prompts_with_no_edit_to_either_module(tmp_path):
-    """F1's whole point. A lane the `LaneSet` declares and the prompts do not
-    is a silent zero-proposals run: the model keeps proposing the old names and
-    `_validate_suggestion` drops every suggestion in the new lane with no error
-    anywhere. Names come off the set, so that state is unrepresentable. The
-    gloss is optional editorial -- a new lane renders as its bare name.
-    """
-    base = _lane_set(tmp_path)
-    sixth = Lane(name="runbook", directory="runbooks/", type_name="HowTo", dated=False)
-    widened = replace(base, lanes=(*base.lanes, sixth))
-    for text in (build_extractor_system(lane_set=widened), build_proposal_reasoner_system(lane_set=widened)):
-        assert "runbook" in text
+def test_the_reasoner_carries_every_pool_types_question(tmp_path):
+    pool = _pool(tmp_path)
+    text = build_proposal_reasoner_system(pool=pool)
+    for entry in pool.types:
+        assert entry.guidance.question in text
+
+
+def test_a_flagged_user_type_is_named_in_both_prompts_with_no_edit_to_either_module(tmp_path):
+    root = make_bundle(tmp_path)
+    add_runbook(root)
+    pool = proposal_pool(declarations(root)[0])
+    for text in (build_extractor_system(pool=pool), build_proposal_reasoner_system(pool=pool)):
+        assert "Runbook" in text

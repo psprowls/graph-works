@@ -13,6 +13,10 @@ Frontmatter is read through `Document.fm_data(dates="iso")`  and never re-parsed
 so dates arrive as ISO strings rather than as `datetime.date` objects that
 both `format: date` and `type: string` misfire on.
 
+`declared_proposables` reads the proposal pool -- the types flagged
+`x-okf-accept-proposals` -- with the same never-raise posture as
+`declared_directories`.
+
 **This module imports no sibling capability**, and never the top-level `okf_ext`
 package.
 """
@@ -33,10 +37,19 @@ from okf_ext.schemas.loader import (
     declared_about,
     declared_directories,
     declared_members,
+    declared_proposables,
     declares_property,
     load_schemas,
 )
-from okf_ext.schemas.model import AboutMandate, SchemaError, SchemaSet
+from okf_ext.schemas.model import (
+    AboutMandate,
+    Proposables,
+    ProposableType,
+    ProposalGuidance,
+    ProposalPromotion,
+    SchemaError,
+    SchemaSet,
+)
 from okf_ext.schemas.rule import CODES, TOPIC, frontmatter_errors, schema_rule
 
 #: `schema/` is a **documented convention, not magic** -- nothing here
@@ -57,12 +70,17 @@ __all__ = [
     "SCHEMA_SUFFIXES",
     "TOPIC",
     "AboutMandate",
+    "ProposableType",
+    "Proposables",
+    "ProposalGuidance",
+    "ProposalPromotion",
     "SchemaError",
     "SchemaSet",
     "build_registry",
     "declared_about",
     "declared_directories",
     "declared_members",
+    "declared_proposables",
     "declares_property",
     "frontmatter_errors",
     "load_schemas",

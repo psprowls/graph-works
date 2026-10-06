@@ -2,6 +2,13 @@
   {
     "member": "proposals/a.md",
     "target": "concepts/a.md",
+    "target_type": null,
+    "type": null,
+    "type_refusal": {
+      "path": "proposals/a.md",
+      "kind": "malformed-proposal",
+      "detail": "target 'concepts/a.md' records no target_type and is in none of the proposal types' directories (adrs/, docs/explanations/, docs/how-tos/, docs/reference/, docs/tutorials/, work/)"
+    },
     "title": "A",
     "description": "d",
     "page_status": "proposed",

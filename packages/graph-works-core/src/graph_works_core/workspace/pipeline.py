@@ -105,7 +105,9 @@ NOTIFY_LINE = (
 #: How a dispatched agent waits (epic D-011, D-014): one long blocking call, spaced
 #: polls, no sleeps. Phrased tool-relatively so it names no vendor -- "600000 ms" is
 #: the shell-tool timeout where a tool takes milliseconds, "at least 60 s" the yield
-#: where a tool hands control back early. Mirrored verbatim, with `{path}` rendered
+#: where a tool hands control back early. Subagent waits take 300000 ms: a subagent-wait
+#: call returns as soon as the child finishes, so the timeout costs no latency, and 300 s
+#: matches the worker preamble's 5-minute heartbeat. Mirrored verbatim, with `{path}` rendered
 #: as `<work-path>`, in the workflow skill's subagent-driven-development,
 #: test-driven-development and finishing-a-development-branch riders
 #: (`references/brief-riders.md`) and in finishing-relay's R1 and R4 gate
@@ -116,8 +118,10 @@ WAIT_LINE = (
     "(600000 ms where it takes milliseconds). If the tool hands control back before the command ends, "
     "keep waiting on that same process with the longest yield your tool allows, at least 60 s; "
     "never use short yields and never start a second wait beside it. When it reports `running`, "
-    "call it again at once, without a sleep. Wait on subagents the same way: one blocking wait for "
-    "their completion, not a loop of short checks."
+    "call it again at once, without a sleep. Wait on subagents with your tool's subagent-wait call "
+    "at a 300000 ms timeout where it takes one; it returns as soon as a subagent finishes, so never "
+    "use a shorter timeout and never loop on short checks. After each wake, do any heartbeat, "
+    "coordinator check or progress update that is due in one call, then wait again."
 )
 
 #: The obligation both execute variants carry. A packaged default rather than

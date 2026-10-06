@@ -33,6 +33,11 @@ def _sections(text: str, heading: str) -> dict[str, str]:
     return {part.split("\n", 1)[0].strip(): part for part in parts[1:]}
 
 
+def test_subagent_waits_use_the_heartbeat_window() -> None:
+    assert "Wait on subagents the same way" not in WAIT_LINE
+    assert "at a 300000 ms timeout" in WAIT_LINE
+
+
 @pytest.mark.parametrize(
     "rider", ["subagent-driven-development", "test-driven-development", "finishing-a-development-branch"]
 )

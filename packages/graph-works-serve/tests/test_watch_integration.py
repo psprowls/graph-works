@@ -1,39 +1,71 @@
-"""Exercise the real watchfiles backend over a temporary workspace."""
+"""Exercise the real watchfiles polling backend over a temporary workspace."""
 
 from __future__ import annotations
 
 import asyncio
+import os
 from collections.abc import AsyncIterator, Callable
-from pathlib import Path
+from contextlib import asynccontextmanager
 
 import pytest
+from config_io import PROJECTION_FILENAME
 from graph_works_core.events import ChangeEvent, EventKind
 from graph_works_core.workspace.dispatch_projection import write_dispatch_projection
 from graph_works_core.workspace.layout import WorkspaceLayout
 from graph_works_serve import watch
 from graph_works_serve.hub import Changes, Hub, Resync, Subscription
 from graph_works_serve.readstate import ReadState
+from watcher_helpers import PollingBackend
+from watcher_helpers import write as _write
 
-DEADLINE = 10.0
+# Polling is deterministic but the gate runs many suites at once; these are
+# failure bounds, not latency promises, and passing runs return early.
+DEADLINE = 30.0
+READINESS_DEADLINE = 60.0
 
 
-def _write(path: Path, text: str) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(text, encoding="utf-8", newline="\n")
+async def _ready(sub: Subscription, backend: PollingBackend) -> None:
+    await asyncio.wait_for(backend.wait_ready(), READINESS_DEADLINE)
+    # Both backend iterators have processed startup batches and completed an
+    # idle timeout. Drain only these setup messages before test edits begin.
+    while sub.queue_size:
+        message = await sub.get()
+        assert isinstance(message, Changes), message
 
 
-@pytest.fixture
-async def running(workspace: WorkspaceLayout) -> AsyncIterator[tuple[Hub, Subscription]]:
+@asynccontextmanager
+async def _running(
+    workspace: WorkspaceLayout, backend: PollingBackend | None = None
+) -> AsyncIterator[tuple[Hub, Subscription]]:
+    # Give atomic replacement a distinct polling timestamp without touching
+    # the replacement afterward: that test must observe the replace itself.
+    projection = workspace.cache_dir / PROJECTION_FILENAME
+    stat = projection.stat()
+    os.utime(projection, ns=(stat.st_atime_ns, stat.st_mtime_ns - 2_000_000_000))
     hub = Hub()
     sub = hub.subscribe()
     stop = asyncio.Event()
-    task = asyncio.create_task(watch.watch_workspace(workspace.root, hub, ReadState(), stop))
-    await asyncio.sleep(0.5)  # let the native watchers arm; not a correctness wait
+    backend = PollingBackend() if backend is None else backend
+    task = asyncio.create_task(watch.watch_workspace(workspace.root, hub, ReadState(), stop, awatch_fn=backend.awatch))
     try:
+        await _ready(sub, backend)
         yield hub, sub
     finally:
         stop.set()
         await asyncio.wait_for(task, DEADLINE)
+
+
+@pytest.fixture
+def polling_backend() -> PollingBackend:
+    return PollingBackend()
+
+
+@pytest.fixture
+async def running(
+    workspace: WorkspaceLayout, polling_backend: PollingBackend
+) -> AsyncIterator[tuple[Hub, Subscription]]:
+    async with _running(workspace, polling_backend) as pair:
+        yield pair
 
 
 async def _collect_until(
@@ -54,16 +86,16 @@ async def _collect_until(
     return messages, events
 
 
-async def test_editing_a_work_item_emits_one_event_quickly(
+async def test_editing_a_work_item_emits_one_event(
     workspace: WorkspaceLayout, running: tuple[Hub, Subscription]
 ) -> None:
+    # Delivery latency is the backend's (300ms poll plus the 800ms debounce, and
+    # whatever load the machine is under), so this asserts the single event, not
+    # a wall-clock bound.
     _, sub = running
-    loop = asyncio.get_running_loop()
-    start = loop.time()
     _write(workspace.bundle_dir / "work" / "feature-a.md", "---\ntitle: A\n---\n")
-    _, events = await _collect_until(sub, lambda es: any(e.path == "work/feature-a" for e in es), deadline=2.0)
-    assert loop.time() - start < 2.0
-    assert any(e.kind is EventKind.WORK_ITEM for e in events)
+    _, events = await _collect_until(sub, lambda es: any(e.path == "work/feature-a" for e in es))
+    assert [(e.kind, e.path) for e in events if e.path.startswith("work/")] == [(EventKind.WORK_ITEM, "work/feature-a")]
 
 
 async def test_a_burst_coalesces_into_at_most_two_batches(
@@ -107,7 +139,7 @@ async def test_traces_and_worktrees_never_emit(workspace: WorkspaceLayout, runni
 
 
 async def test_moving_dispatch_rules_rewatches_and_the_new_file_classifies(
-    workspace: WorkspaceLayout, running: tuple[Hub, Subscription]
+    workspace: WorkspaceLayout, running: tuple[Hub, Subscription], polling_backend: PollingBackend
 ) -> None:
     _, sub = running
     old = workspace.root / "dispatch.yaml"
@@ -125,7 +157,7 @@ async def test_moving_dispatch_rules_rewatches_and_the_new_file_classifies(
                 return
 
     await asyncio.wait_for(until_rewatch(), DEADLINE)
-    await asyncio.sleep(0.5)  # re-arm
+    await _ready(sub, polling_backend)
     _write(new, new.read_text(encoding="utf-8") + "\n# edited\n")
     await _collect_until(sub, lambda es: any(e.kind is EventKind.CONFIG and e.path == "dispatch" for e in es))
 
@@ -154,12 +186,7 @@ async def test_existing_clone_edits_and_deletions_never_emit(workspace: Workspac
     code = clone / "src/code.py"
     _write(readme, "before")
     _write(code, "before")
-    hub = Hub()
-    sub = hub.subscribe()
-    stop = asyncio.Event()
-    task = asyncio.create_task(watch.watch_workspace(workspace.root.resolve(), hub, ReadState(), stop))
-    await asyncio.sleep(0.5)
-    try:
+    async with _running(workspace) as (hub, sub):
         _write(readme, "after")
         _write(code, "after")
         _write(workspace.bundle_dir / "repositories/example/references/notes.md", "notes")
@@ -187,6 +214,3 @@ async def test_existing_clone_edits_and_deletions_never_emit(workspace: Workspac
         with pytest.raises(TimeoutError):
             await asyncio.wait_for(sub.get(), 1.2)
         assert hub.seq == before
-    finally:
-        stop.set()
-        await asyncio.wait_for(task, DEADLINE)

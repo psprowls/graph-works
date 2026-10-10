@@ -3,15 +3,32 @@
 from __future__ import annotations
 
 import json
+import os
 import signal
 import subprocess
 import sys
+import threading
 import time
 import urllib.request
+from collections.abc import Iterator
 
 import pytest
 from graph_works_core.workspace.layout import WorkspaceLayout
 from graph_works_serve import discovery_file as df
+from watcher_helpers import write
+
+
+def _until_change(lines: Iterator[str], path: str) -> None:
+    deadline = time.monotonic() + 10
+    for line in lines:
+        assert time.monotonic() < deadline, f"stream did not deliver {path}"
+        if line == "event: changes":
+            data = next(lines)
+            assert data.startswith("data: "), data
+            payload = json.loads(data.removeprefix("data: "))
+            if any(event["path"] == path for event in payload["events"]):
+                return
+    pytest.fail(f"stream ended without {path}")
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX signal shutdown")
@@ -21,6 +38,7 @@ def test_gw_serve_answers_status_then_cleans_up(workspace: WorkspaceLayout) -> N
         [sys.executable, "-m", "graph_works_serve.main", "--workspace", str(workspace.root), "--port", "0"],
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
+        env={**os.environ, "WATCHFILES_FORCE_POLLING": "true"},
     )
     try:
         deadline = time.monotonic() + 20
@@ -53,6 +71,7 @@ def test_events_stream_and_sigint_exits_promptly(workspace: WorkspaceLayout) -> 
         [sys.executable, "-m", "graph_works_serve.main", "--workspace", str(workspace.root), "--port", "0"],
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
+        env={**os.environ, "WATCHFILES_FORCE_POLLING": "true"},
     )
     try:
         deadline = time.monotonic() + 20
@@ -70,14 +89,29 @@ def test_events_stream_and_sigint_exits_promptly(workspace: WorkspaceLayout) -> 
             assert next(lines) == "retry: 2000"
             assert next(lines) == "event: ready"
             assert next(lines).startswith("data: ")
+            # SSE ready acknowledges the subscription, not native registration.
+            # Prove the watcher is delivering before the single work-item edit.
+            sentinel = workspace.bundle_dir / "work" / "feature-socket-ready.md"
+            stop = threading.Event()
+
+            def pulse() -> None:
+                count = 0
+                while not stop.is_set():
+                    count += 1
+                    write(sentinel, f"---\ntitle: socket ready\n---\n\n<!-- socket ready {count} -->\n")
+                    stop.wait(0.1)
+
+            probe = threading.Thread(target=pulse)
+            probe.start()
+            try:
+                _until_change(lines, "work/feature-socket-ready")
+            finally:
+                stop.set()
+                probe.join(timeout=5)
+                assert not probe.is_alive()
             item = workspace.bundle_dir / "work" / "feature-smoke.md"
-            item.write_text("---\ntitle: smoke\n---\n", encoding="utf-8", newline="\n")
-            for line in lines:
-                if line == "event: changes":
-                    assert "work/feature-smoke" in next(lines)
-                    break
-            else:
-                pytest.fail("stream ended without a change")
+            write(item, "---\ntitle: smoke\n---\n")
+            _until_change(lines, "work/feature-smoke")
             start = time.monotonic()
             proc.send_signal(signal.SIGINT)
             for _ in lines:

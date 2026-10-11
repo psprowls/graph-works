@@ -18,9 +18,9 @@ from pathlib import Path, PurePosixPath
 from sys import platform
 from types import MappingProxyType
 
-from okf_ext.readindex import Diagnostics, MemberRow, ReadIndex, member_row
+from okf_ext.readindex import Diagnostics, MemberRow, PageContent, ReadIndex, StoredContent, member_row, read_content
 from okf_ext.readindex.view import IndexView
-from okf_io import Heading, Link, resolve_member
+from okf_io import Document, Heading, Link, Unreadable, resolve_member
 from okf_io.bundle import MemberKind, canonical_id
 from work_tracker_okf.items import IGNORE
 from work_tracker_okf.paths import parse_item_path
@@ -42,11 +42,20 @@ class _Overlay:
 class IndexSession:
     """Use a pinned view, or one bundle backend chosen before serving results."""
 
-    def __init__(self, index: ReadIndex, view: IndexView, *, root: Path, db_path: Path) -> None:
+    def __init__(
+        self,
+        index: ReadIndex,
+        view: IndexView,
+        *,
+        root: Path,
+        db_path: Path,
+        documents: Mapping[tuple[str, str], Document] | None = None,
+    ) -> None:
         self._index = index
         self._view = view
         self._root = root
         self._db_path = db_path
+        self._documents: dict[tuple[str, str], Document] = dict(documents or {})
         self._bundle: BundleSession | None = None
         self._served = False
         self._unreadable: frozenset[str] | None = None
@@ -236,6 +245,42 @@ class IndexSession:
             return None if row is None else row.sha256
 
         return self._guard(on_index, lambda bundle: bundle.content_hash(member_id))
+
+    @property
+    def content_root(self) -> Path:
+        return self._root
+
+    def stored_content(self, member_id: str) -> StoredContent | None:
+        return self._guard(
+            lambda: self._view.stored_content(member_id), lambda bundle: bundle.stored_content(member_id)
+        )
+
+    def content(self, member_id: str) -> PageContent | Unreadable | None:
+        """Read the file once and serve the pinned row when its hash matches (epic D-005).
+
+        An OSError is a content failure, never a backend switch.
+        """
+
+        def on_index() -> PageContent | Unreadable | None:
+            stored = self._view.stored_content(member_id)
+            if stored is None and member_id not in self._unreadable_files():
+                return None
+            return read_content(self._root, member_id, stored)
+
+        return self._guard(on_index, lambda bundle: bundle.content(member_id))
+
+    def reconciled_document(self, member_id: str, sha256: str) -> Document | None:
+        """The Document reconcile parsed for this exact raw id and verified hash (epic D-006).
+
+        Never normalizes ids; empty on the bundle backend and after the session closes.
+        Callers treat the Document as read-only.
+        """
+        if self._bundle is not None:
+            return None
+        return self._documents.get((member_id, sha256))
+
+    def release_documents(self) -> None:
+        self._documents = {}
 
     def _outlinks(self, cid: str, ignore: Sequence[str]) -> tuple[Link, ...]:
         return () if ignored_by(cid + ".md", ignore) else self._view.outlinks(cid)

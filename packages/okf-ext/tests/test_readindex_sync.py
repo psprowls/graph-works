@@ -1,12 +1,15 @@
 from __future__ import annotations
 
+import hashlib
 import os
 import sqlite3
+from collections import UserDict
 from pathlib import Path
 
 import pytest
 from ext_helpers import write
 from okf_ext.readindex import IndexBusy, open_index, reconcile, sync
+from okf_io import Document
 from readindex_helpers import age, tree
 
 
@@ -401,3 +404,120 @@ def test_recursive_root_alias_with_sequence_mapping_key_is_stored_inexact(tmp_pa
         assert index.connection.execute("SELECT * FROM tags").fetchall() == [("a.md", "x")]
         assert index.connection.execute("SELECT text FROM headings").fetchall() == [("Heading",)]
         assert index.connection.execute("SELECT source, target FROM links").fetchall() == [("a", "target.md")]
+
+
+def _sha(root: Path, mid: str) -> str:
+    return hashlib.sha256((root / mid).read_bytes()).hexdigest()
+
+
+def test_documents_sink_receives_parsed_documents(tmp_path: Path, counted: list[str]) -> None:
+    root = tree(tmp_path / "b", {"a.md": "---\ntitle: A\n---\nbody\n", "index.md": "# I\n", "p.png": "x"})
+    sink: dict[tuple[str, str], Document] = {}
+    with open_index(tmp_path / "i.db", root) as index:
+        result = reconcile(index, documents=sink)
+        assert set(sink) == {("a.md", _sha(root, "a.md")), ("index.md", _sha(root, "index.md"))}
+        assert sink[("a.md", _sha(root, "a.md"))].fm.title == "A"
+        assert result.parsed == len(sink)
+        write(root / "a.md", "---\ntitle: B\n---\n")
+        age(root)
+        sink2: dict[tuple[str, str], Document] = {}
+        reconcile(index, documents=sink2)
+        assert list(sink2) == [("a.md", _sha(root, "a.md"))]
+        sink3: dict[tuple[str, str], Document] = {}
+        reconcile(index, documents=sink3)
+        assert sink3 == {}
+
+
+def test_documents_sink_is_optional_and_result_unchanged(tmp_path: Path) -> None:
+    root = tree(tmp_path / "b", {"a.md": "x"})
+    with open_index(tmp_path / "i.db", root) as index:
+        assert reconcile(index).added == ("a.md",)
+
+
+def test_documents_sink_untouched_on_busy(tmp_path: Path) -> None:
+    root = tree(tmp_path / "b", {"a.md": "x"})
+    db = tmp_path / "i.db"
+    open_index(db, root).close()
+    blocker = sqlite3.connect(db, isolation_level=None)
+    blocker.execute("BEGIN IMMEDIATE")
+    sink: dict[tuple[str, str], Document] = {}
+    try:
+        with open_index(db, root, busy_timeout_ms=50) as index, pytest.raises(IndexBusy):
+            reconcile(index, documents=sink)
+    finally:
+        blocker.execute("ROLLBACK")
+        blocker.close()
+    assert sink == {}
+
+
+def test_documents_sink_untouched_on_failed_publication(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    root = tree(tmp_path / "b", {"a.md": "x"})
+    with open_index(tmp_path / "i.db", root) as index:
+        reconcile(index)
+        write(root / "a.md", "new")
+        age(root)
+        monkeypatch.setattr(sync, "_bump_generation", lambda conn, gen: (_ for _ in ()).throw(RuntimeError("boom")))
+        sink: dict[tuple[str, str], Document] = {}
+        with pytest.raises(RuntimeError):
+            reconcile(index, documents=sink)
+        assert sink == {}
+
+
+def test_documents_sink_skips_unsettled_and_unreadable(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    root = tree(tmp_path / "b", {"a.md": "old", "b.md": "fine"})
+    (root / "bad.md").write_bytes(b"\xff\xfe not utf-8")
+    age(root)
+    real = sync.read_member
+
+    def racing(root_: Path, member_id: str):
+        if member_id == "a.md":
+            write(root_ / member_id, "a new projection")
+        return real(root_, member_id)
+
+    monkeypatch.setattr(sync, "read_member", racing)
+    sink: dict[tuple[str, str], Document] = {}
+    with open_index(tmp_path / "i.db", root) as index:
+        result = reconcile(index, documents=sink)
+    assert result.unsettled == ("a.md",)
+    assert [mid for mid, _ in sink] == ["b.md"]
+
+
+def test_unicode_and_bom_ids_round_trip(tmp_path: Path) -> None:
+    root = tmp_path / "b"
+    root.mkdir()
+    (root / "café.md").write_bytes(b"\xef\xbb\xbf---\r\ntitle: C\r\n---\r\nx\r\n")
+    age(root)
+    sink: dict[tuple[str, str], Document] = {}
+    with open_index(tmp_path / "i.db", root) as index:
+        reconcile(index, documents=sink)
+    ((mid, digest),) = sink
+    raw = next(p.name for p in root.iterdir())
+    assert mid == raw and digest == _sha(root, raw)
+    assert sink[(mid, digest)].fm.title == "C" and sink[(mid, digest)].parse_error is None
+
+
+def test_documents_sink_update_error_propagates_after_publication(tmp_path: Path) -> None:
+    root = tree(tmp_path / "b", {"a.md": "---\ntitle: A\n---\n", "b.md": "---\ntitle: B\n---\n"})
+    error = RuntimeError("sink rejected update")
+
+    class ThrowingSink(UserDict[tuple[str, str], Document]):
+        def __setitem__(self, key: tuple[str, str], value: Document) -> None:
+            super().__setitem__(key, value)
+            raise error
+
+    sink = ThrowingSink()
+    db = tmp_path / "i.db"
+    with open_index(db, root) as index:
+        with pytest.raises(RuntimeError) as caught:
+            reconcile(index, documents=sink)
+        assert caught.value is error
+        assert not index.connection.in_transaction
+        assert list(sink) == [("a.md", _sha(root, "a.md"))]
+        assert sink[("a.md", _sha(root, "a.md"))].fm.title == "A"
+    with open_index(db, root) as index:
+        assert index.connection.execute("SELECT id, title FROM members ORDER BY id").fetchall() == [
+            ("a.md", "A"),
+            ("b.md", "B"),
+        ]
+        result = reconcile(index)
+        assert result.generation == 1 and result.parsed == 0 and not result.published

@@ -62,9 +62,14 @@ class LexicalResult:
     rebuilt: str | None
 
 
-def prepare_page(root: Path, concept_id: str, sha256: str, *, excerpt_chars: int) -> Prepared:
-    """Prepare one concept exactly as build_index does, tolerating unreadable pages."""
-    result = read_member(root, f"{concept_id}.md")
+def prepare_page(
+    root: Path, concept_id: str, sha256: str, *, excerpt_chars: int, document: Document | None = None
+) -> Prepared:
+    """Prepare one concept exactly as build_index does, tolerating unreadable pages.
+
+    *document* is the caller's already-parsed version of exactly *sha256* (epic D-006).
+    """
+    result = document if document is not None else read_member(root, f"{concept_id}.md")
     if not isinstance(result, Document):
         return Prepared(sha256, MappingProxyType({}), 0, missing_concept_excerpt(concept_id))
     tf, length = ext_search.term_postings(result)

@@ -40,7 +40,7 @@ from okf_ext.tables.model import (
     TableSpec,
     TextSplice,
 )
-from okf_ext.tables.read import read, read_all, read_section
+from okf_ext.tables.read import document_read_section, read, read_all, read_section
 from okf_ext.tables.splice import apply, plan_row, splice_text
 from okf_ext.writing import ApplyResult, FailureKind, Skipped, SkipReason, WriteFailure
 
@@ -64,6 +64,7 @@ __all__ = [
     "TextSplice",
     "WriteFailure",
     "apply",
+    "document_read_section",
     "plan_row",
     "read",
     "read_all",

@@ -38,6 +38,7 @@ door.
 
 from __future__ import annotations
 
+from okf_io._md import ParsedMarkdown
 from okf_io.bundle import Bundle, Member, MemberKind, MemberStat, Unreadable, Walk, read_member, resolve_member, walk
 from okf_io.bundle import load as load_bundle
 from okf_io.derive import (
@@ -130,6 +131,7 @@ __all__ = [
     "MigrationChangeKind",
     "Parameter",
     "ParseError",
+    "ParsedMarkdown",
     "Report",
     "Rule",
     "RuleContext",

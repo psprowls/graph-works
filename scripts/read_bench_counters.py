@@ -1,7 +1,7 @@
-"""Structural read counters: documents parsed, link graphs built, git processes spawned.
+"""Structural read counters: document/markdown parses, walks, graphs and git processes.
 
 Counts, not timings (D-004): they do not move with host load, so a test can assert
-them. `counting()` patches five choke points for the duration of its block and
+them. `counting()` patches these choke points for the duration of its block and
 restores them on exit, including on an exception:
 
 - `okf_io.document.Document.parse` -- the bundle walk, `Document.load` and
@@ -14,6 +14,8 @@ restores them on exit, including on an exception:
 
 - `okf_ext.search.index.term_postings` and its public alias -- pages tokenized.
 - `graph_works_core.query.commands._page_hashes` -- pages hashed on the oracle path.
+- `markdown_it.MarkdownIt.parse` -- markdown parsed through every parser instance.
+- `okf_io.bundle._files` and `okf_io.bundle._files_at` -- one walk per call.
 
 Not thread-aware: a read that spawns worker threads is counted in full, which is
 what a per-read count wants, but two concurrent `counting()` blocks are refused.
@@ -31,6 +33,9 @@ from dataclasses import asdict, dataclass
 from pathlib import PureWindowsPath
 from typing import Any
 
+from markdown_it import MarkdownIt
+
+_bundle = importlib.import_module("okf_io.bundle")
 _document = importlib.import_module("okf_io.document")
 _links = importlib.import_module("okf_io.links")
 _search = importlib.import_module("okf_ext.search")
@@ -47,6 +52,8 @@ class Counts:
     git_calls: int = 0
     pages_hashed: int = 0
     pages_tokenized: int | None = 0
+    markdown_parses: int = 0
+    walks: int = 0
 
     def as_dict(self) -> dict[str, int | None]:
         return asdict(self)
@@ -89,7 +96,7 @@ class _CountingPopen(subprocess.Popen):  # type: ignore[type-arg]
 
 @contextmanager
 def counting() -> Iterator[Counts]:
-    """Count parses, link graphs, git processes, page hashes and tokenizations."""
+    """Count document/markdown parses, walks, graphs, git processes and search work."""
     global _active
     if _active is not None:
         raise RuntimeError("counting() is not reentrant")
@@ -98,6 +105,9 @@ def counting() -> Iterator[Counts]:
     original_parse = document_class.__dict__["parse"]
     original_graph = _links.LinkGraph
     original_popen = subprocess.Popen
+    original_md_parse = MarkdownIt.parse
+    original_files = _bundle._files
+    original_files_at = _bundle._files_at
     original_postings = getattr(_search_index, "term_postings", None)
     original_public_postings = getattr(_search, "term_postings", None)
     postings_available = original_postings is not None and original_public_postings is not None
@@ -112,6 +122,18 @@ def counting() -> Iterator[Counts]:
     def link_graph(*args: Any, **kwargs: Any) -> Any:
         counts.link_graph_builds += 1
         return original_graph(*args, **kwargs)
+
+    def md_parse(self: Any, src: str, env: Any = None) -> Any:
+        counts.markdown_parses += 1
+        return original_md_parse(self, src, env)
+
+    def files(*args: Any, **kwargs: Any) -> Any:
+        counts.walks += 1
+        return original_files(*args, **kwargs)
+
+    def files_at(*args: Any, **kwargs: Any) -> Any:
+        counts.walks += 1
+        return original_files_at(*args, **kwargs)
 
     def term_postings(*args: Any, **kwargs: Any) -> Any:
         assert counts.pages_tokenized is not None and original_postings is not None
@@ -131,9 +153,15 @@ def counting() -> Iterator[Counts]:
     document_class.parse = classmethod(parse)
     _links.LinkGraph = link_graph
     subprocess.Popen = _CountingPopen  # type: ignore[misc]
+    MarkdownIt.parse = md_parse
+    _bundle._files = files
+    _bundle._files_at = files_at
     try:
         yield counts
     finally:
+        _bundle._files_at = original_files_at
+        _bundle._files = original_files
+        MarkdownIt.parse = original_md_parse
         _query._page_hashes = original_hashes
         if postings_available:
             _search.term_postings = original_public_postings

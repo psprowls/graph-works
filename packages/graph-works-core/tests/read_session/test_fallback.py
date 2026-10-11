@@ -145,8 +145,8 @@ def test_actual_unsettled_reconcile_uses_fresh_bundle(workspace, monkeypatch, ca
             (root / mid).write_text("---\ntitle: Newest\n---\n", encoding="utf-8", newline="\n")
         return result
 
-    def capture(index):
-        result = real_reconcile(index)
+    def capture(index, **kwargs):
+        result = real_reconcile(index, **kwargs)
         results.append(result)
         return result
 

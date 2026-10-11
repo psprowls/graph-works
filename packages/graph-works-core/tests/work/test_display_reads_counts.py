@@ -9,6 +9,7 @@ import pytest
 from _display_fixture import display_workspace
 from graph_works_core.read_session import open_read_session
 from graph_works_core.work import commands as work
+from okf_io import Document
 
 NO_PARSE = [work.run_status, work.run_work_list, work.run_work_queue, work.run_ingest_queue, work.run_open_decisions]
 
@@ -22,9 +23,8 @@ def parses(monkeypatch: pytest.MonkeyPatch) -> list[str]:
     from okf_ext.readindex import sync
 
     seen: list[str] = []
-    real_sync, real_work = sync.read_member, work.read_member
-    monkeypatch.setattr(sync, "read_member", lambda root, mid: seen.append(mid) or real_sync(root, mid))
-    monkeypatch.setattr(work, "read_member", lambda root, mid: seen.append(mid) or real_work(root, mid))
+    real = sync.read_member
+    monkeypatch.setattr(sync, "read_member", lambda root, mid: seen.append(mid) or real(root, mid))
     return seen
 
 
@@ -48,9 +48,17 @@ def test_warm_read_parses_nothing(warm, parses, run) -> None:
     assert parses == []
 
 
-def test_item_read_parses_one_file(warm, parses) -> None:
+def test_item_read_parses_nothing(warm, monkeypatch) -> None:
+    seen = []
+    real = Document.parse
+
+    def parse(cls, text, *, path=None):
+        seen.append(path)
+        return real(text, path=path)
+
+    monkeypatch.setattr(Document, "parse", classmethod(parse))
     work.run_item_read(warm, "work/feature-open")
-    assert parses == ["work/feature-open.md"]
+    assert seen == []
 
 
 def test_unrelated_wiki_pages_do_not_change_work_read_cost(warm, parses) -> None:

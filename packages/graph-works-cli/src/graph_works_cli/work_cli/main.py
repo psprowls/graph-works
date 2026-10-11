@@ -1063,7 +1063,9 @@ def _finish_path_mutation(payload: dict[str, object], *, dry_run: bool, json_out
 
 @work_app.command()
 def reparent(
-    path: str = typer.Argument(..., help="Extensionless bundle-relative canonical concept path."),
+    path: list[str] = typer.Argument(  # noqa: B008 -- Typer declares CLI arguments in defaults
+        ..., help="One or more canonical work paths to move."
+    ),
     parent_path: str = typer.Option(..., "--parent", help="Canonical destination parent path."),
     dry_run: bool = typer.Option(False, "--dry-run", help="Print the plan instead of writing."),
     workspace: str = typer.Option("", "--workspace", help="Workspace path."),
@@ -1077,7 +1079,9 @@ def reparent(
         rendering.fail(str(exc), reason="workspace", code=exit_codes.SCHEMA_MISMATCH, cause=exc)
     except (OSError, ValueError) as exc:
         rendering.fail(str(exc), reason="io", cause=exc)
-    _finish_path_mutation(wire_work.path_mutation_payload(result), dry_run=dry_run, json_output=json_output)
+    _finish_path_mutation(
+        wire_work.path_mutation_payload(result, sources=path), dry_run=dry_run, json_output=json_output
+    )
 
 
 @work_app.command()

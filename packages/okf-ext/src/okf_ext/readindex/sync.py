@@ -6,6 +6,7 @@ import hashlib
 import json
 import sqlite3
 import time
+from collections.abc import MutableMapping
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
@@ -172,8 +173,15 @@ def _delete_children(conn: sqlite3.Connection, member_id: str) -> None:
         execute(conn, "DELETE FROM links WHERE source=?", (member_id[:-3],))
 
 
-def reconcile(index: ReadIndex) -> Reconcile:
-    """Refresh changed members without holding a transaction during file I/O."""
+def reconcile(index: ReadIndex, *, documents: MutableMapping[tuple[str, str], Document] | None = None) -> Reconcile:
+    """Refresh changed members without holding a transaction during file I/O.
+
+    With *documents*, a successful return also hands over every readable Document
+    this call parsed, keyed by (raw member id, verified sha256). Preparation or
+    publication failures leave the sink untouched; unsettled members contribute
+    nothing. Sink update errors propagate after publication, with any partial
+    sink mutation governed by the caller's mapping implementation.
+    """
     start_ns = time.time_ns()
     conn = index.connection
     # Pin metadata, member observations and auxiliary rows to one WAL snapshot.
@@ -194,6 +202,7 @@ def reconcile(index: ReadIndex) -> Reconcile:
     refreshes: list[tuple[object, ...]] = []
     state = dict(stored)
     parsed = 0
+    pending: dict[tuple[str, str], Document] = {}
     for member in walked.members:
         old = stored.get(member.id)
         if old and old.kind == member.kind and member.stat is not None and member.stat.same(old.stat) and not old.racy:
@@ -228,6 +237,8 @@ def reconcile(index: ReadIndex) -> Reconcile:
         if visible:
             (added if old is None else changed).append(member.id)
             rows.append(_prepare(member, row, doc))
+            if documents is not None and doc is not None and digest is not None:
+                pending[(member.id, digest)] = doc
         else:
             refreshes.append(bindings((*row[3:7], int(racy), member.id)))
         state[member.id] = _Stored(member.kind, member.stat, digest, racy, failure)
@@ -297,6 +308,8 @@ def reconcile(index: ReadIndex) -> Reconcile:
             ):
                 raise IndexBusy(str(exc)) from exc
             raise
+    if documents is not None:
+        documents.update(pending)
     return Reconcile(
         generation,
         tuple(added),

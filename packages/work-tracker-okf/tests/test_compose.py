@@ -81,6 +81,57 @@ def test_stamp_for_refuses_an_unmanaged_transition_source(tmp_path: Path) -> Non
         stamp_for(tmp_path, make_item(ITEM), "legacy-design-spec", definition=PACKAGED_DEFINITION)
 
 
+def test_stamp_for_titles_a_supplied_body_without_loading(tmp_path: Path, monkeypatch) -> None:
+    target = tmp_path / ITEM / "references" / "01-design.md"
+    target.parent.mkdir(parents=True)
+    target.write_text("# On disk\n", encoding="utf-8")
+    monkeypatch.setattr(compose, "load", lambda path: pytest.fail(f"loaded {path}"))
+    seen = []
+
+    def body_of(ref):
+        seen.append(ref)
+        return "intro\n\n# Supplied ###\n"
+
+    ref, title = stamp_for(
+        tmp_path, make_item(ITEM, title="Cutover"), SPEC_SOURCE_ID, definition=PACKAGED_DEFINITION, body_of=body_of
+    )
+    assert seen == [ref]
+    assert title == "Supplied ###"
+
+
+def test_stamp_for_supplied_body_without_h1_uses_the_fallback(tmp_path: Path) -> None:
+    item = make_item(ITEM, title="Cutover")
+    _ref, title = stamp_for(
+        tmp_path, item, SPEC_SOURCE_ID, definition=PACKAGED_DEFINITION, body_of=lambda ref: "no heading\n"
+    )
+    assert title == "Design spec — Cutover"
+
+
+def test_stamp_for_supplier_none_defers_to_the_file(tmp_path: Path) -> None:
+    target = tmp_path / ITEM / "references" / "01-design.md"
+    target.parent.mkdir(parents=True)
+    target.write_text("---\ntype: Spec\n# yaml comment\n---\n# From file\n", encoding="utf-8")
+    _ref, title = stamp_for(
+        tmp_path,
+        make_item(ITEM, title="Cutover"),
+        SPEC_SOURCE_ID,
+        definition=PACKAGED_DEFINITION,
+        body_of=lambda ref: None,
+    )
+    assert title == "From file"
+
+
+def test_stamp_for_supplier_none_and_no_file_is_the_fallback(tmp_path: Path) -> None:
+    _ref, title = stamp_for(
+        tmp_path,
+        make_item(ITEM, title="Cutover"),
+        SPEC_SOURCE_ID,
+        definition=PACKAGED_DEFINITION,
+        body_of=lambda ref: None,
+    )
+    assert title == "Design spec — Cutover"
+
+
 def test_plan_row_splice_is_pure_and_uses_root_absolute_resource(tmp_path: Path) -> None:
     page = _write_feature(tmp_path, phase="plan")
     document = load(page)

@@ -374,3 +374,70 @@ def test_session_normalizes_excerpt_keys_once(make_workspace, concept_id, resolv
         brief = q.plan_query_brief("token", layout, embedder=None, top_k=3, page=concept_id)
         assert brief == oracle
         assert brief.top_pages[0].excerpt == expected
+
+
+EDITS = {
+    "s/p3.md": b"---\ntitle: P3\n---\nnew token words\n",
+    "s/broken.md": b"---\ntitle: [x\n---\ntoken rotation\n",
+    "s/bom.md": b"\xef\xbb\xbf---\r\ntitle: Bom2\r\n---\r\ntoken refresh\r\n",
+}
+
+
+@pytest.mark.parametrize("hybrid", [False, True])
+@pytest.mark.parametrize("member", sorted(EDITS))
+def test_one_edit_parses_once(make_workspace, probes, hybrid, member) -> None:
+    layout = make_workspace("synthetic")
+    kw = {"embedder": FakeEmbedder() if hybrid else None, "top_k": 5}
+    q.plan_query_brief("token", layout, **kw)
+    (layout.bundle_dir / member).write_bytes(EDITS[member])
+    settle_mtimes(layout.bundle_dir)
+    probes.clear()
+    brief = q.plan_query_brief("token", layout, **kw)
+    measured = dict(probes)
+    assert measured.get("doc_parses") == 1 and measured.get("parsed") == 1
+    assert measured.get("tokenized") == 1 and measured.get("full_loads", 0) == 0
+    assert brief == _oracle(layout, "token", **{**kw, "embedder": FakeEmbedder() if hybrid else None})
+
+
+@pytest.mark.parametrize("hybrid", [False, True])
+def test_pinned_edited_page_parses_once(make_workspace, probes, hybrid) -> None:
+    layout = make_workspace("synthetic")
+    kw = {"embedder": FakeEmbedder() if hybrid else None, "top_k": 5, "page": "s/p3"}
+    q.plan_query_brief("token", layout, **kw)
+    (layout.bundle_dir / "s/p3.md").write_bytes(EDITS["s/p3.md"])
+    settle_mtimes(layout.bundle_dir)
+    probes.clear()
+    brief = q.plan_query_brief("token", layout, **kw)
+    assert probes["doc_parses"] == 1
+    assert brief == _oracle(layout, "token", **{**kw, "embedder": FakeEmbedder() if hybrid else None})
+
+
+@pytest.mark.parametrize("hybrid", [False, True])
+def test_n_additions_parse_and_tokenize_once_each(make_workspace, probes, hybrid) -> None:
+    layout = make_workspace("synthetic")
+    kw = {"embedder": FakeEmbedder() if hybrid else None, "top_k": 5}
+    q.plan_query_brief("token", layout, **kw)
+    for i in range(7):
+        (layout.bundle_dir / f"u{i}.md").write_text(f"---\ntitle: U{i}\n---\ntoken\n", encoding="utf-8", newline="\n")
+    settle_mtimes(layout.bundle_dir)
+    probes.clear()
+    q.plan_query_brief("token", layout, **kw)
+    assert probes["doc_parses"] == 7 and probes["tokenized"] == 7
+
+
+def test_prepare_page_uses_given_document(tmp_path, monkeypatch) -> None:
+    from okf_io import Document
+
+    monkeypatch.setattr(ls, "read_member", lambda *a: (_ for _ in ()).throw(AssertionError("reread")))
+    doc = Document.parse("---\ntitle: T\n---\ntoken token\n")
+    prepared = ls.prepare_page(tmp_path, "t", "f" * 64, excerpt_chars=200, document=doc)
+    assert prepared.sha256 == "f" * 64 and prepared.length == 2
+
+
+def test_corpus_without_session_reads_members(make_workspace, probes) -> None:
+    layout = make_workspace("synthetic")
+    corpus = q._SessionCorpus(layout.bundle_dir, {"s/p3": "0" * 64})
+    probes.clear()
+    corpus.page("s/p3", "0" * 64)
+    corpus.text("s/p3")
+    assert probes["parsed"] == 2

@@ -59,11 +59,14 @@ def test_apply_mutation_accepts_the_ignore_baseline(tmp_path: Path) -> None:
 def test_refuse_scoped_baseline_allows_only_clone_roots(tmp_path: Path) -> None:
     layout = _workspace(tmp_path)
     baseline = load_workspace_bundle(layout, ignore=IGNORE)
-    transactions._refuse_scoped_baseline(baseline)
-    transactions._refuse_scoped_baseline(replace(baseline, pruned=frozenset({"repositories/demo/references/git"})))
+    transactions._refuse_scoped_baseline(baseline, _plan(layout))
+    transactions._refuse_scoped_baseline(
+        replace(baseline, pruned=frozenset({"repositories/demo/references/git"})), _plan(layout)
+    )
     with pytest.raises(ValueError, match=r"pruned beyond the clone glob: repositories$"):
-        transactions._refuse_scoped_baseline(replace(baseline, pruned=frozenset({"repositories"})))
+        transactions._refuse_scoped_baseline(replace(baseline, pruned=frozenset({"repositories"})), _plan(layout))
     with pytest.raises(ValueError, match=r"pruned beyond the clone glob: docs, repositories$"):
         transactions._refuse_scoped_baseline(
-            replace(baseline, pruned=frozenset({"repositories/demo/references/git", "repositories", "docs"}))
+            replace(baseline, pruned=frozenset({"repositories/demo/references/git", "repositories", "docs"})),
+            _plan(layout),
         )

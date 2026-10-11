@@ -19,7 +19,9 @@ from collections.abc import Iterator, Mapping, Sequence
 from functools import lru_cache
 from types import MappingProxyType
 
-from okf_ext.body import Section, find_section, prose_lines, split_lines
+from okf_io import Document
+
+from okf_ext.body import Section, document_prose_lines, document_sections, find_section, prose_lines, split_lines
 from okf_ext.tables.model import SectionRead, Table, TableSpec
 
 #: A `|` that is not escaped. `\\|` is a cell's own content; a bare `|` is the
@@ -130,8 +132,12 @@ def _scan(body: str) -> tuple[Table, ...]:
     `| --- | --- |` row directly under it is recorded as the delimiter rather
     than required.
     """
+    return _scan_prose(body, prose_lines(body))
+
+
+def _scan_prose(body: str, prose: frozenset[int]) -> tuple[Table, ...]:
+    """The same physical-line scanner for string and Document readers."""
     body_lines = split_lines(body)
-    prose = prose_lines(body)
     total = len(body_lines)
 
     tables: list[Table] = []
@@ -265,6 +271,33 @@ def read_section(body: str, heading: str, spec: TableSpec) -> SectionRead:
         return SectionRead(state="missing", rows=(), table=None, matched=())
 
     table = read(body, within=section)
+    return _read_spec(table, spec)
+
+
+def document_read_section(document: Document, heading: str, spec: TableSpec) -> SectionRead:
+    """The string reader's table result using the Document's CommonMark tokens.
+
+    Tables here are physical pipe rows, not Markdown table-plugin tokens.
+    The shared CommonMark profile supplies exactly the same heading spans and
+    code exclusion as the string reader; all cells, rows and spec matching
+    still run through its source scanner.
+    """
+    wanted = heading.strip().casefold()
+    section = next((section for section in document_sections(document) if section.heading.casefold() == wanted), None)
+    if section is None:
+        return SectionRead(state="missing", rows=(), table=None, matched=())
+    table = next(
+        (
+            table
+            for table in _scan_prose(document.body, document_prose_lines(document))
+            if section.body_start <= table.start and table.stop <= section.stop
+        ),
+        None,
+    )
+    return _read_spec(table, spec)
+
+
+def _read_spec(table: Table | None, spec: TableSpec) -> SectionRead:
     if table is None:
         return SectionRead(state="malformed", rows=(), table=None, matched=())
 

@@ -5,8 +5,8 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from typing import Literal, Protocol
 
-from okf_ext.readindex import Diagnostics, MemberRow
-from okf_io import Heading, Link
+from okf_ext.readindex import Diagnostics, MemberRow, PageContent
+from okf_io import Document, Heading, Link, Unreadable
 from okf_io.bundle import MemberKind
 from work_tracker_okf.items import IGNORE
 from work_tracker_okf.snapshot import WorkSnapshot
@@ -56,6 +56,14 @@ class ReadSession(Protocol):
 
     def headings(self, member_id: str) -> tuple[Heading, ...]: ...
 
+    def content(self, member_id: str) -> PageContent | Unreadable | None:
+        """One exact raw markdown member's verified frontmatter, body and parse result.
+
+        None when the id is not a concept, index or log member; Unreadable when
+        the file cannot be read or decoded. Never resolves NFC variants or ignores.
+        """
+        ...
+
     def diagnostics(self, *, ignore: Sequence[str] = ()) -> Diagnostics: ...
 
     def work_snapshot(self, *, ignore: Sequence[str] = IGNORE) -> WorkSnapshot: ...
@@ -74,3 +82,16 @@ def index_revision(session: ReadSession) -> IndexRevision | None:
         return None
     epoch: object = getattr(session, "index_epoch", None)
     return epoch if isinstance(epoch, str) else None, session.generation
+
+
+def reconciled_document(session: ReadSession, member_id: str, sha256: str) -> Document | None:
+    """The Document this session's reconcile parsed for exactly (member_id, sha256), if any.
+
+    An optional capability, like index_epoch: custom and snapshot sessions lack it
+    and every caller falls back to reading the member.
+    """
+    accessor: object = getattr(session, "reconciled_document", None)
+    if not callable(accessor):
+        return None
+    document: object = accessor(member_id, sha256)
+    return document if isinstance(document, Document) else None

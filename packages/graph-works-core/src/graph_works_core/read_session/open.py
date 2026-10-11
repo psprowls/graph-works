@@ -8,6 +8,7 @@ from contextlib import ExitStack, contextmanager
 from pathlib import Path
 
 from okf_ext import readindex
+from okf_io import Document
 
 from graph_works_core.read_session import location
 from graph_works_core.read_session.bundle_backend import BundleSession
@@ -60,12 +61,15 @@ def _open(layout: WorkspaceLayout, *, reconcile: bool, stack: ExitStack) -> Read
         )
         if index.rebuilt_reason is not None:
             location.logger.warning("read index rebuilt (%s): %s", index.rebuilt_reason, db_path)
+        documents: dict[tuple[str, str], Document] = {}
         if reconcile or index.rebuilt_reason is not None:
-            result = readindex.reconcile(index)
+            result = readindex.reconcile(index, documents=documents)
             if result.unsettled:
                 raise readindex.IndexUnavailable(f"unsettled members: {result.unsettled}")
         view = stack.enter_context(readindex.read(index))
-        return IndexSession(index, view, root=root, db_path=db_path)
+        session = IndexSession(index, view, root=root, db_path=db_path, documents=documents)
+        stack.callback(session.release_documents)
+        return session
     except readindex.IndexBusy as exc:
         return _fallback(root, "busy", db_path, exc)
     except (readindex.IndexUnavailable, OSError) as exc:

@@ -17,7 +17,6 @@ from pathlib import PurePosixPath
 from types import MappingProxyType
 from urllib.parse import unquote
 
-from okf_io import _md
 from okf_io._md import BodyIndex, MdLink
 from okf_io.bundle import Bundle
 from okf_io.document import Document
@@ -180,7 +179,7 @@ def document_links(document: Document, *, source_id: str) -> tuple[Link, ...]:
     offset = document.body_line_offset
     found = [
         link
-        for md_link in _md.parse_body(document.body).links
+        for md_link in document.body_index().links
         if (link := _link_from(md_link, source=source_id, line=md_link.line + offset)) is not None
     ]
     found.sort(key=lambda link: (link.line or 0, link.raw, link.image))
@@ -190,11 +189,11 @@ def document_links(document: Document, *, source_id: str) -> tuple[Link, ...]:
 def document_headings(document: Document) -> tuple[Heading, ...]:
     """Read one document's headings with file-relative lines."""
     offset = document.body_line_offset
-    return tuple(Heading(h.level, h.text, h.line + offset, h.quoted) for h in _md.parse_body(document.body).headings)
+    return tuple(Heading(h.level, h.text, h.line + offset, h.quoted) for h in document.body_index().headings)
 
 
 def build(bundle: Bundle) -> LinkGraph:
-    """Build the graph. One markdown parse per concept, shared through ``bodies``.
+    """Build the graph. One markdown parse per concept, memoized on the ``Document``.
 
     Reserved files are not link sources: ``Link.source`` is a concept id, and
     "what cites this concept" is a question about prose, not about an index
@@ -206,7 +205,7 @@ def build(bundle: Bundle) -> LinkGraph:
 
     for concept_id in sorted(bundle.concepts):
         document = bundle.concepts[concept_id]
-        bodies[concept_id] = _md.parse_body(document.body)
+        bodies[concept_id] = document.body_index()
         collected.extend(document_links(document, source_id=concept_id))
 
     collected.sort(key=lambda link: (link.source, link.line or 0, link.raw, link.image))

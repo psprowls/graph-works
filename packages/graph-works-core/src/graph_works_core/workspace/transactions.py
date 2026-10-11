@@ -7,11 +7,11 @@ lands every effect plus its targeted postconditions or restores the snapshot.
 
 Postcondition validation is *differential*: a baseline is captured under the
 same lock before the first effect, and only failures whose count rises are the
-mutation's fault.  That doubles validation cost per mutation (~9s each on a
-large live bundle).  Two optimizations are known and deliberately deferred:
-reusing the planner's already-loaded bundle for the baseline, and restricting
-validation to the targeted members.  Both are separate work -- a gate that is
-only conditionally correct is worth nothing.
+mutation's fault. Findings may reuse a caller's matching planning corpus;
+structural conditions still read scoped pre-image pages fresh under the lock.
+A partial corpus is mapped and reloaded for postconditions, retaining clean
+unchanged Documents only after comparing fresh bytes. Newly escaping graph
+context completes the corpus through the same anchored loader.
 
 Every platform-specific primitive this module needs -- advisory locking, the
 NOREPLACE rename, descriptor-to-path resolution, st_dev/st_ino identity, the
@@ -35,7 +35,7 @@ import stat
 import sys
 import uuid
 from collections import Counter
-from collections.abc import Callable, Iterator, Mapping, Sequence
+from collections.abc import Callable, Collection, Iterator, Mapping, Sequence
 from contextlib import ExitStack, contextmanager, nullcontext, suppress
 from contextvars import ContextVar
 from dataclasses import dataclass, replace
@@ -46,8 +46,8 @@ from typing import IO, Literal, Protocol
 
 from okf_ext.moves import Move
 from okf_ext.writing import body_digest
-from okf_io import Bundle, Rule, parse, validate
-from okf_io.bundle import LOG_NAME
+from okf_io import Bundle, Document, Rule, parse, validate
+from okf_io.bundle import LOG_NAME, canonical_id
 from okf_io.bundle import _load_at as _load_bundle_at
 from work_tracker_okf.compose import rule_set
 from work_tracker_okf.dependencies import DependencyEdge, DependencyIssue, parse_dependencies
@@ -422,7 +422,14 @@ def _raw_descriptor(anchor: Anchor) -> int:
     return anchor.descriptor
 
 
-def _load_bundle_through(root: Anchor, path: Path, *, ignore: Sequence[str]) -> Bundle:
+def _load_bundle_through(
+    root: Anchor,
+    path: Path,
+    *,
+    ignore: Sequence[str],
+    only: Collection[str] | None = None,
+    reuse: Mapping[str, Document] | None = None,
+) -> Bundle:
     """Load the bundle at *path*, anchored as strongly as this tier allows.
 
     `okf_io.bundle._load_at` takes a raw descriptor and is the strong tier's
@@ -435,8 +442,10 @@ def _load_bundle_through(root: Anchor, path: Path, *, ignore: Sequence[str]) -> 
     This is the last consumer of `_raw_descriptor`.
     """
     if isinstance(root, anchors._PosixAnchor):
-        return _load_bundle_at(path, _raw_descriptor(root), ignore=with_clone_ignore(ignore), prune=CLONE_PRUNE)
-    return load_bundle_at(path, ignore=ignore)
+        return _load_bundle_at(
+            path, _raw_descriptor(root), ignore=with_clone_ignore(ignore), prune=CLONE_PRUNE, only=only, reuse=reuse
+        )
+    return load_bundle_at(path, ignore=ignore, only=only, reuse=reuse)
 
 
 @contextmanager
@@ -854,11 +863,36 @@ def _expand_directory_members(root: Anchor, effect_paths: dict[str, Path]) -> tu
     return tuple(sorted(scan))
 
 
+class _FreshDocuments:
+    """Invocation-local parse reuse; every lookup still reads the held root.
+
+    Members are keyed by raw ids, but identity is granted only after checking
+    the actual document path, fresh decoded bytes, and pristine state. This
+    cache is used before effects only; postcondition reload owns its separate
+    unmoved, unwritten seed set.
+    """
+
+    def __init__(self, members: Mapping[str, Document]) -> None:
+        self.members = dict(members)
+
+    def read(self, root: Anchor, path: Path, member: str) -> Document:
+        text = _read_bytes_at(root, member).decode("utf-8")
+        actual_path = path / member
+        prior = self.members.get(member)
+        if prior is not None and prior.path == actual_path and prior.raw_text == text and not prior._dirty:
+            return prior
+        document = parse(text, path=actual_path)
+        self.members[member] = document
+        return document
+
+
 def _preflight(
     layout: WorkspaceLayout,
     plan: WorkMutationPlan,
     root: Anchor | None = None,
     manifest_scratch: Path | None = None,
+    *,
+    documents: _FreshDocuments | None = None,
 ) -> dict[str, Path]:
     if not plan.ok:
         details = "; ".join(f"{refusal.path}: {refusal.kind}: {refusal.detail}" for refusal in plan.refusals)
@@ -884,7 +918,7 @@ def _preflight(
         for member in effect_paths:
             _validate_ancestor_chain(root, member)
 
-        _preflight_anchored(plan, root, manifest_scratch)
+        _preflight_anchored(plan, root, manifest_scratch, documents=documents)
     finally:
         if owns_manifest_scratch:
             _remove_entry(manifest_scratch)
@@ -931,7 +965,15 @@ def _line_ending_recovers_body_digest(current_text: str, expected_digest: str) -
     return "\r\n" not in current_text and (body_digest(current_text.replace("\n", "\r\n")) == expected_digest)
 
 
-def _preflight_anchored(plan: WorkMutationPlan, root: Anchor, manifest_scratch: Path) -> None:
+def _preflight_anchored(
+    plan: WorkMutationPlan,
+    root: Anchor,
+    manifest_scratch: Path,
+    *,
+    documents: _FreshDocuments | None = None,
+) -> None:
+    if documents is None:
+        documents = _FreshDocuments({})
     conditions = [condition.member for condition in plan.directory_preconditions]
     if len(conditions) != len(set(conditions)):
         raise ValueError("directory preconditions contain duplicate members")
@@ -978,8 +1020,7 @@ def _preflight_anchored(plan: WorkMutationPlan, root: Anchor, manifest_scratch: 
     if plan.move_plan is not None:
         for member, expected in plan.move_plan.digests.items():
             try:
-                content = _read_bytes_at(root, member).decode("utf-8")
-                current_document = parse(content, path=plan.root / member)
+                current_document = documents.read(root, plan.root, member)
             except (OSError, UnicodeDecodeError, ValueError) as exc:
                 raise ValueError(f"{member}: changed since planning ({exc}); re-plan") from exc
             if body_digest(current_document.body) != expected:
@@ -2223,11 +2264,26 @@ def _conditions_for(
     return tuple(conditions)
 
 
-def _item_conditions(item: WorkItem, by_path: dict[str, WorkItem]) -> tuple[tuple[str, str], ...]:
-    """`_conditions_for` over a loaded *item*, existence answered by *by_path*."""
-    return _conditions_for(
-        item.path, item.parent_path, item.dependency_edges, item.dependency_issues, by_path.__contains__
-    )
+def _item_conditions(
+    item: WorkItem, by_path: dict[str, WorkItem], bundle: Bundle | None = None
+) -> tuple[tuple[str, str], ...]:
+    """Answer from real items, or unparsed inventory on a partial corpus.
+
+    Selected unreadable files, ignored artifacts and reserved pages must not
+    become fictitious items merely because they have member identity.
+    """
+
+    def exists(path: str) -> bool:
+        if path in by_path:
+            return True
+        return (
+            bundle is not None
+            and bundle.partial is not None
+            and parse_item_path(path) is not None
+            and bundle.member_id(f"{path}.md") in bundle.unloaded
+        )
+
+    return _conditions_for(item.path, item.parent_path, item.dependency_edges, item.dependency_issues, exists)
 
 
 @dataclass(frozen=True, slots=True)
@@ -2356,10 +2412,12 @@ def _baseline_target_exists(root: Anchor, path: str) -> bool:
         return False
 
 
-def _scoped_baseline_conditions(plan: WorkMutationPlan, root: Anchor) -> Counter[tuple[str, str]]:
+def _scoped_baseline_conditions(
+    plan: WorkMutationPlan, root: Anchor, *, documents: _FreshDocuments | None = None
+) -> Counter[tuple[str, str]]:
     """Read only scoped pre-image pages and their targets under the held root.
 
-    Read each page fresh rather than consulting a caller-supplied bundle.
+    Read each page fresh; a prior parse is reused only after that read matches.
     Only sources admitted by the baseline loader may donate allowances:
     canonical item paths already exclude indexes, .git and root dot entries;
     also exclude IGNORE matches and reserved log pages. Unlike a non-item
@@ -2367,6 +2425,8 @@ def _scoped_baseline_conditions(plan: WorkMutationPlan, root: Anchor) -> Counter
     Missing or non-UTF-8 pages are not items; other read errors propagate.
     Keys use the plan's exact item-path mapping for the postcondition gate.
     """
+    if documents is None:
+        documents = _FreshDocuments({})
     conditions: Counter[tuple[str, str]] = Counter()
     for path in sorted(_condition_scope(plan)):
         location = parse_item_path(path)
@@ -2377,10 +2437,10 @@ def _scoped_baseline_conditions(plan: WorkMutationPlan, root: Anchor) -> Counter
         ):
             continue
         try:
-            text = _read_bytes_at(root, location.page).decode("utf-8")
+            document = documents.read(root, plan.root, location.page)
         except (FileNotFoundError, NotADirectoryError, UnicodeDecodeError):
             continue
-        dependencies = parse_dependencies(parse(text).fm_data(dates="iso").get("depends_on"))
+        dependencies = parse_dependencies(document.fm_data(dates="iso").get("depends_on"))
         mapped = plan.path_mapping.get(path, path)
         conditions.update(
             (mapped, kind)
@@ -2395,16 +2455,21 @@ def _scoped_baseline_conditions(plan: WorkMutationPlan, root: Anchor) -> Counter
     return conditions
 
 
-def _refuse_scoped_baseline(bundle: Bundle) -> None:
-    """Raise when *bundle* was pruned beyond the clone directories.
+def _refuse_scoped_baseline(bundle: Bundle, plan: WorkMutationPlan) -> None:
+    """Refuse a different corpus or unloaded members in the baseline scope.
 
-    The mutation gate validates the whole bundle (ADR 2026-08-25); a bundle
-    from `load_work_bundle` has never seen the wiki lane, and reusing it as a
-    baseline would validate a different corpus. A caller error, not content.
+    A bundle from `load_work_bundle` has never inventoried the wiki lane,
+    whereas an admitted partial baseline retains whole-bundle membership.
+    Missing inventory or scope coverage is a caller error, not content.
     """
     extra = sorted(root for root in bundle.pruned if not any(fnmatchcase(root, glob) for glob in CLONE_PRUNE))
     if extra:
         raise ValueError(f"baseline bundle is pruned beyond the clone glob: {', '.join(extra)}")
+    if bundle.partial is not None:
+        unloaded = {canonical_id(member) for member in bundle.unloaded}
+        missing = sorted(member for member in _baseline_scope(plan) if canonical_id(member) in unloaded)
+        if missing:
+            raise ValueError(f"partial baseline does not cover the baseline scope: {', '.join(missing)}")
 
 
 def _capture_validation_state(
@@ -2415,6 +2480,7 @@ def _capture_validation_state(
     repo_root: Path | None,
     repo_roots: tuple[Path, ...] = (),
     bundle: Bundle | None = None,
+    documents: _FreshDocuments | None = None,
 ) -> _ValidationState:
     """Validate the bundle as it stands and key the outcome post-mutation.
 
@@ -2430,14 +2496,16 @@ def _capture_validation_state(
       member of that scope.
     - The **conditions** half reads only `_condition_scope(plan)`'s pre-image
       pages and checks their parent and dependency targets through the anchored
-      root under the lock. It never consults a supplied bundle, which may
-      predate a concurrent edit. Unrelated items cannot grant allowances.
+      root under the lock. A supplied Document donates its parse only after
+      matching that fresh read, so concurrent edits still change allowances.
+      Unrelated items cannot grant allowances.
 
-    *bundle* lets the caller hand over a bundle it already loaded with the same
-    `ignore=IGNORE` set, so this function performs no full load. Without one it
-    performs exactly one, for findings. **Never pass a bundle loaded with a
-    different `ignore` set or a work-scoped `prune` set (refused)** -- that
-    would validate a different corpus.
+    *bundle* lets the caller hand over its planning corpus under the same
+    `ignore=IGNORE` lens, so this function performs no full load. Pure IGNORE
+    reclassification is equivalent to loading with that lens. Without a bundle
+    it performs exactly one full load for findings. A different ignore lens or
+    work-scoped prune set would validate a different corpus (pruning is refused).
+    A partial baseline must admit every inventoried member in `_baseline_scope(plan)`.
     """
     validation_root = layout.bundle_dir
     _assert_root_identity(validation_root, root)
@@ -2445,7 +2513,7 @@ def _capture_validation_state(
         bundle = _load_bundle_through(root, validation_root, ignore=IGNORE)
         _assert_root_identity(validation_root, root)
     else:
-        _refuse_scoped_baseline(bundle)
+        _refuse_scoped_baseline(bundle, plan)
     # `links=` deliberately left unwired: this function builds no `LinkGraph`
     # of its own before this call, and the postcondition pass in
     # `_validate_postconditions` validates a different bundle state (the
@@ -2463,7 +2531,12 @@ def _capture_validation_state(
         for finding in report.errors
         if finding.path is not None
     )
-    conditions = _scoped_baseline_conditions(plan, root)
+    if documents is None:
+        documents = _FreshDocuments(_document_members(bundle))
+    else:
+        for member, document in _document_members(bundle).items():
+            documents.members.setdefault(member, document)
+    conditions = _scoped_baseline_conditions(plan, root, documents=documents)
     _assert_root_identity(validation_root, root)
     return _ValidationState(findings=dict(findings), conditions=dict(conditions))
 
@@ -2497,6 +2570,96 @@ def only_stale_inventory(application: MutationApplication) -> bool:
     return all(detail.endswith(f": {STALE_INVENTORY_DETAIL}") for detail in details)
 
 
+def _document_members(bundle: Bundle) -> dict[str, Document]:
+    """Raw member ids for the corpus's parsed Documents, including reserved pages."""
+    documents = {f"{cid}.md": doc for cid, doc in bundle.concepts.items()}
+    for filename, collection in (("index.md", bundle.indexes), ("log.md", bundle.logs)):
+        documents.update(
+            {f"{directory}/{filename}" if directory else filename: doc for directory, doc in collection.items()}
+        )
+    return documents
+
+
+def _postcondition_load_set(plan: WorkMutationPlan, baseline: Bundle) -> tuple[frozenset[str], dict[str, Document]]:
+    """Map the admitted corpus; reuse only clean, unmoved, unwritten survivors.
+
+    The loader still reads every selected member fresh and compares its raw
+    bytes before accepting a seed, so a concurrent sibling edit is visible.
+    """
+    if baseline.partial is None:
+        raise ValueError("postcondition load set requires a partial baseline")
+    written = {write.member for write in plan.writes}
+    deleted = set(plan.deletes)
+    only = ({_map_member(plan.path_mapping, member) for member in baseline.partial} | written) - deleted
+    reuse = {
+        member: doc
+        for member, doc in _document_members(baseline).items()
+        if _map_member(plan.path_mapping, member) == member
+        and member not in written
+        and member not in deleted
+        and not doc._dirty
+    }
+    return frozenset(only), reuse
+
+
+def _complete_postcondition_context(
+    root: Anchor, path: Path, bundle: Bundle, *, plan: WorkMutationPlan | None = None
+) -> Bundle:
+    """Complete newly required lane or dependency context through the held root.
+
+    The fresh partial walk supplies the full inventory. New siblings in affected
+    lanes, and ancestors' direct children, must participate in the same rules
+    and index reconciliation as the full oracle. Admit the complete inventory
+    with clean seed reuse when either lane or dependency context escapes.
+    A directory failure or a new member appearing during completion requires
+    the original full loader.
+    """
+    if bundle.partial is None:
+        return bundle
+    by_path = {item.path: item for item in load_items(bundle)}
+    unloaded = {canonical_id(member) for member in bundle.unloaded}
+    escaping = any(
+        edge.path not in by_path and canonical_id(f"{edge.path}.md") in unloaded
+        for item in by_path.values()
+        for edge in item.dependency_edges
+    )
+    required_lanes: set[str] = set()
+    if plan is not None:
+        required_lanes.update(PurePosixPath(member).parent.as_posix() for member in _affected_index_members(plan))
+        paths = set(plan.validate_paths) | set(plan.path_mapping) | set(plan.path_mapping.values())
+        for write in plan.writes:
+            owner, separator, _artifact = write.member.partition("/references/")
+            if separator:
+                paths.add(owner)
+        for item_path in paths:
+            location = parse_item_path(item_path)
+            if location is not None:
+                required_lanes.add(location.lane)
+                required_lanes.update(f"{ancestor}/children" for ancestor in location.ancestor_paths)
+    incomplete_lanes = any(
+        location is not None and location.lane in required_lanes
+        for member in bundle.unloaded
+        if member.endswith(".md")
+        for location in (parse_item_path(member[:-3]),)
+    )
+    if bundle.unreadable_dirs:
+        return _load_bundle_through(root, path, ignore=IGNORE)
+    if not escaping and not incomplete_lanes:
+        return bundle
+    completed = _load_bundle_through(
+        root,
+        path,
+        ignore=IGNORE,
+        only=bundle.partial | bundle.unloaded,
+        reuse={member: doc for member, doc in _document_members(bundle).items() if not doc._dirty},
+    )
+    if completed.unloaded:
+        # The descriptor walk discovered Markdown that was absent from the
+        # initial inventory. Do not stamp an incomplete corpus as full.
+        return _load_bundle_through(root, path, ignore=IGNORE)
+    return replace(completed, partial=None)
+
+
 def _validate_postconditions(
     layout: WorkspaceLayout,
     plan: WorkMutationPlan,
@@ -2505,6 +2668,7 @@ def _validate_postconditions(
     repo_root: Path | None = None,
     repo_roots: tuple[Path, ...] = (),
     baseline: _ValidationState | None = None,
+    baseline_bundle: Bundle | None = None,
     excused: list[str] | None = None,
     allowed_new_findings: tuple[tuple[str, str], ...] = (),
 ) -> tuple[str, ...]:
@@ -2524,7 +2688,13 @@ def _validate_postconditions(
     validation_root = layout.bundle_dir
     try:
         _assert_root_identity(validation_root, root)
-        bundle = _load_bundle_through(root, validation_root, ignore=IGNORE)
+        if baseline_bundle is not None and baseline_bundle.partial is not None:
+            only, reuse = _postcondition_load_set(plan, baseline_bundle)
+            bundle = _load_bundle_through(root, validation_root, ignore=IGNORE, only=only, reuse=reuse)
+            _assert_root_identity(validation_root, root)
+            bundle = _complete_postcondition_context(root, validation_root, bundle, plan=plan)
+        else:
+            bundle = _load_bundle_through(root, validation_root, ignore=IGNORE)
         _assert_root_identity(validation_root, root)
         items = load_items(bundle)
     except (OSError, ValueError) as exc:
@@ -2585,7 +2755,7 @@ def _validate_postconditions(
         if item is None:
             failures.append(f"{path}: final work item did not reload")
             continue
-        for kind, message in _item_conditions(item, by_path):
+        for kind, message in _item_conditions(item, by_path, bundle):
             key = (path, kind)
             if condition_allowance[key] > 0:
                 condition_allowance[key] -= 1
@@ -2792,6 +2962,7 @@ def _apply_mutation_locked(
     repo_root: Path | None = None,
     repo_roots: tuple[Path, ...] = (),
     baseline_bundle: Bundle | None = None,
+    parse_reuse: Mapping[str, Document] | None = None,
     allowed_new_findings: tuple[tuple[str, str], ...] = (),
     validate_read_set: Callable[[], None] | None = None,
 ) -> MutationApplication:
@@ -2899,6 +3070,10 @@ def _apply_mutation_locked(
             effect_attempted = False
             phase = "preflight"
             baseline: _ValidationState | None = None
+            seeds = _document_members(baseline_bundle) if baseline_bundle is not None else {}
+            if parse_reuse is not None:
+                seeds.update(parse_reuse)
+            documents = _FreshDocuments(seeds)
             excused: list[str] = []
             root = locked_root.duplicate()
             try:
@@ -2908,7 +3083,7 @@ def _apply_mutation_locked(
                     _assert_root_identity(layout.bundle_dir, root)
                     preflight_initial_scratch = transaction_dir / "preflight-initial"
                     try:
-                        _preflight(layout, plan, root, preflight_initial_scratch)
+                        _preflight(layout, plan, root, preflight_initial_scratch, documents=documents)
                     finally:
                         _remove_entry(preflight_initial_scratch)
                     missing_directories = [member for member in plan.mkdirs if not _lexists_at(root, member)]
@@ -2921,13 +3096,19 @@ def _apply_mutation_locked(
                     staged = _stage_writes(plan, transaction_dir, root)
                     preflight_final_scratch = transaction_dir / "preflight-final"
                     try:
-                        _preflight(layout, plan, root, preflight_final_scratch)
+                        _preflight(layout, plan, root, preflight_final_scratch, documents=documents)
                     finally:
                         _remove_entry(preflight_final_scratch)
                     _verify_directory_modes(root, directory_modes)
                     try:
                         baseline = _capture_validation_state(
-                            layout, plan, root, repo_root=repo_root, repo_roots=repo_roots, bundle=baseline_bundle
+                            layout,
+                            plan,
+                            root,
+                            repo_root=repo_root,
+                            repo_roots=repo_roots,
+                            bundle=baseline_bundle,
+                            documents=documents,
                         )
                     except (OSError, ValueError) as exc:
                         baseline = None
@@ -3023,6 +3204,7 @@ def _apply_mutation_locked(
                         repo_root=repo_root,
                         repo_roots=repo_roots,
                         baseline=baseline,
+                        baseline_bundle=baseline_bundle,
                         excused=excused,
                         allowed_new_findings=allowed_new_findings,
                     )
@@ -3144,6 +3326,7 @@ def apply_mutation(
     repo_root: Path | None = None,
     repo_roots: tuple[Path, ...] = (),
     baseline_bundle: Bundle | None = None,
+    parse_reuse: Mapping[str, Document] | None = None,
     allowed_new_findings: tuple[tuple[str, str], ...] = (),
     validate_read_set: Callable[[], None] | None = None,
 ) -> MutationApplication:
@@ -3170,15 +3353,25 @@ def apply_mutation(
     a path resolving under any one of them -- or under *repo_root* -- is good.
     With neither given, validation falls back to `layout.repo_root`.
 
-    *baseline_bundle* is an optimisation with a hard precondition: it MUST have
-    been loaded from `layout.bundle_dir` with `ignore=work_tracker_okf.items.IGNORE`.
+    *baseline_bundle* is an optimisation with a hard precondition: it MUST
+    represent `layout.bundle_dir` under `ignore=work_tracker_okf.items.IGNORE`,
+    either by loading with that lens or pure IGNORE reclassification.
     A bundle pruned beyond the clone directories (`load_work_bundle`) is
     refused with `ValueError`.
     Supplying it saves the baseline's only full bundle load; conditions read
     scoped pre-image pages fresh under the lock regardless.
-    Callers in `work/commands.py` that load with `ignore=()` or a lane-narrowed
-    set (`run_reparent`, `run_release_adoption`) must NOT pass one; omitting
-    it restores that load and is always correct.
+    A partial baseline must cover `_baseline_scope(plan)`; its mapped corpus
+    is reloaded fresh under the lock for postconditions, with byte-identical
+    clean seed reuse. Newly escaping dependency context completes the corpus.
+    run_reparent passes its planning bundle reclassified through `IGNORE`,
+    which is the same corpus the gate loads; run_release_adoption still passes none.
+
+    *parse_reuse* donates planning Documents keyed by raw member id for this
+    invocation's pre-effect reads only. This includes reference artifacts
+    omitted by the baseline's IGNORE lens. Every lookup freshly reads through
+    the held root and checks clean state, actual path, and exact raw text.
+    These Documents never change validation membership or seed moved/written
+    postcondition members. The mapping is copied and retained only locally.
 
     *allowed_new_findings* is an explicit operation-specific exception to
     ADR 2026-08-25-the-work-mutation's default no-surplus guarantee. Each (post-mutation member, code)
@@ -3223,7 +3416,7 @@ def apply_mutation(
     per-mutation transaction directory does not.
     """
     if baseline_bundle is not None:
-        _refuse_scoped_baseline(baseline_bundle)
+        _refuse_scoped_baseline(baseline_bundle, plan)
     mode = commit_mode(layout) if commit is not None else None
     root = _open_root(layout.bundle_dir)
     try:
@@ -3248,6 +3441,7 @@ def apply_mutation(
                 repo_root=repo_root,
                 repo_roots=repo_roots,
                 baseline_bundle=baseline_bundle,
+                parse_reuse=parse_reuse,
                 allowed_new_findings=allowed_new_findings,
                 validate_read_set=validate_read_set,
             )

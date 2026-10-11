@@ -102,10 +102,7 @@ def _unreadable(exc: UnicodeDecodeError | OSError) -> Unreadable:
 
 def read_member(root: Path, member_id: str) -> Document | Unreadable:
     """Read and parse one raw member id, recording content and OS failures."""
-    try:
-        return Document.load(root.joinpath(*member_id.split("/")))
-    except (UnicodeDecodeError, OSError) as exc:
-        return _unreadable(exc)
+    return _read_or_reuse(root, None, member_id, root.joinpath(*member_id.split("/")), None)
 
 
 def canonical_id(value: str) -> str:
@@ -162,6 +159,13 @@ class Bundle:
     never visited. :meth:`member_id` still resolves a real file beneath one
     through a guarded filesystem probe. The field is keyword-only with an
     empty default so a subclass may still add a required field of its own.
+
+    ``unloaded`` lists raw markdown member ids present in the walk but not
+    parsed by ``only=``. Membership resolves them from this inventory without
+    a filesystem probe; document mappings and views see only parsed members.
+    ``partial`` records the raw markdown ids admitted by ``only=`` (including
+    unreadable ones), or ``None`` for a full load. Both fields are keyword-only
+    with empty defaults so subclasses may still add required fields.
     """
 
     root: Path
@@ -174,6 +178,11 @@ class Bundle:
     _canonical: Mapping[str, str]
     canonical_collisions: Mapping[str, tuple[str, ...]]
     pruned: frozenset[str] = field(default=frozenset(), kw_only=True)
+    unloaded: frozenset[str] = field(default=frozenset(), kw_only=True)
+    partial: frozenset[str] | None = field(default=None, kw_only=True)
+    # Directory failures remain in unreadable, but are not file members and
+    # must survive pure ignore-lens changes even when their name ends in .md.
+    unreadable_dirs: frozenset[str] = field(default=frozenset(), kw_only=True)
 
     def concept(self, concept_id: str) -> Document | None:
         return self.concepts.get(concept_id)
@@ -197,6 +206,8 @@ class Bundle:
     def _raw_member(self, member: str) -> bool:
         """Whether *member* (already stripped) names something, by exact match."""
         if member in self.assets or member in self.ignored:
+            return True
+        if member in self.unloaded:
             return True
         if not member.endswith(".md"):
             return False
@@ -551,7 +562,31 @@ def _track_canonical(canonical: dict[str, str], collisions: dict[str, list[str]]
     canonical[cid] = relative
 
 
-def _load(root: Path, *, ignore: Sequence[str], prune: Sequence[str], root_fd: int | None) -> Bundle:
+def _read_or_reuse(
+    root: Path, root_fd: int | None, relative: str, path: Path, reuse: Mapping[str, Document] | None
+) -> Document | Unreadable:
+    """Read once, reusing only a clean document for identical text and path."""
+    try:
+        raw = (root / relative).read_bytes() if root_fd is None else _read_bytes_at(root_fd, relative)
+        text = raw.decode("utf-8")
+        prior = None if reuse is None else reuse.get(relative)
+        if prior is not None and prior.path == path and prior.raw_text == text and not prior._dirty:
+            return prior
+        return Document.parse(text, path=path)
+    except (UnicodeDecodeError, OSError) as exc:
+        return _unreadable(exc)
+
+
+def _load(
+    root: Path,
+    *,
+    ignore: Sequence[str],
+    prune: Sequence[str],
+    root_fd: int | None,
+    only: Collection[str] | None,
+    reuse: Mapping[str, Document] | None,
+    inventory: Walk | None,
+) -> Bundle:
     """Walk *root* once and load every member.
 
     *ignore* patterns are ``fnmatch`` globs matched case-sensitively against
@@ -574,26 +609,32 @@ def _load(root: Path, *, ignore: Sequence[str], prune: Sequence[str], root_fd: i
     caller error and raises rather than producing a valid-looking empty
     ``Bundle`` (see :func:`_files`).
     """
+    if reuse is not None and only is None:
+        raise ValueError("reuse= requires only=")
+    wanted = None if only is None else {canonical_id(member) for member in only}
+    loaded: set[str] = set()
+    unloaded: set[str] = set()
     concepts: dict[str, Document] = {}
     indexes: dict[str, Document] = {}
     logs: dict[str, Document] = {}
     assets: set[str] = set()
     ignored: set[str] = set()
     unreadable: dict[str, str] = {}
+    unreadable_dirs: dict[str, str] = {}
     canonical: dict[str, str] = {}
     collisions: dict[str, list[str]] = {}
     pruned: set[str] = set()
 
     members: Iterator[Member]
     if root_fd is None:
-        result = walk(root, ignore=ignore, prune=prune)
-        unreadable.update(result.unreadable_dirs)
+        result = inventory if inventory is not None else walk(root, ignore=ignore, prune=prune)
+        unreadable_dirs.update(result.unreadable_dirs)
         pruned.update(result.pruned)
-        members = iter(result.members)
+        members = (Member(m.id, _classify(m.id, ignore=ignore), m.stat) for m in result.members)
     else:
         members = (
             Member(relative, _classify(relative, ignore=ignore), None)
-            for relative in _files_at(root_fd, unreadable=unreadable, prune=prune, pruned=pruned)
+            for relative in _files_at(root_fd, unreadable=unreadable_dirs, prune=prune, pruned=pruned)
         )
     for member in members:
         relative = member.id
@@ -606,13 +647,16 @@ def _load(root: Path, *, ignore: Sequence[str], prune: Sequence[str], root_fd: i
             assets.add(relative)
             _track_canonical(canonical, collisions, relative)
             continue
-        if root_fd is None:
+        if wanted is not None and canonical_id(relative) not in wanted:
+            unloaded.add(relative)
+            _track_canonical(canonical, collisions, relative)
+            continue
+        if wanted is not None:
+            loaded.add(relative)
+        if root_fd is None and (reuse is None or relative not in reuse):
             document = read_member(root, relative)
         else:
-            try:
-                document = Document.parse(_read_bytes_at(root_fd, relative).decode("utf-8"), path=path)
-            except (UnicodeDecodeError, OSError) as exc:
-                document = _unreadable(exc)
+            document = _read_or_reuse(root, root_fd, relative, path, reuse)
         if isinstance(document, Unreadable):
             unreadable[relative] = document.reason
             continue
@@ -624,6 +668,7 @@ def _load(root: Path, *, ignore: Sequence[str], prune: Sequence[str], root_fd: i
             concepts[relative[: -len(".md")]] = document
         _track_canonical(canonical, collisions, relative)
 
+    unreadable.update(unreadable_dirs)
     return Bundle(
         root=root,
         concepts=MappingProxyType(dict(sorted(concepts.items()))),
@@ -635,21 +680,59 @@ def _load(root: Path, *, ignore: Sequence[str], prune: Sequence[str], root_fd: i
         _canonical=MappingProxyType(dict(sorted(canonical.items()))),
         canonical_collisions=MappingProxyType({cid: tuple(ids) for cid, ids in sorted(collisions.items())}),
         pruned=frozenset(pruned),
+        unloaded=frozenset(unloaded),
+        partial=None if only is None else frozenset(loaded),
+        unreadable_dirs=frozenset(unreadable_dirs),
     )
 
 
-def load(root: Path, *, ignore: Sequence[str] = (), prune: Sequence[str] = ()) -> Bundle:
+def load(
+    root: Path,
+    *,
+    ignore: Sequence[str] = (),
+    prune: Sequence[str] = (),
+    only: Collection[str] | None = None,
+    reuse: Mapping[str, Document] | None = None,
+    inventory: Walk | None = None,
+) -> Bundle:
     """Walk *root* once and load every member through its configured path.
 
     ``prune=`` is an opt-in extension point: directories matching it are
     never listed (see :func:`_load`). The default ``()`` loads exactly what
     the walk always has.
+
+    ``only=None`` preserves the full load. With ``only=S``, only markdown
+    members whose raw or NFC-canonical id is in S are read and parsed; other
+    markdown members remain in ``Bundle.unloaded`` and canonical collision
+    tracking. ``Bundle.partial`` records the raw admitted ids. Assets and
+    ignored members are unchanged. Unreadable files are recorded only if
+    admitted; unreadable directories are always recorded. Membership answers
+    unloaded ids without probing the filesystem, while document mappings and
+    views see only parsed members.
+
+    ``reuse=`` requires ``only=`` or raises ``ValueError``. Each admitted file
+    is still read: a clean prior document keyed by its raw id is reused only
+    when its path and UTF-8-decoded raw text match exactly; otherwise it is
+    parsed again. Moved members therefore receive their new semantic path.
+
+    ``inventory=`` skips the walk and reclassifies its member ids under this
+    call's ``ignore=``. The caller must supply a walk from the same root with
+    the same ``prune=`` contract; the inventory carries no provenance to check.
+    Descriptor-rooted ``_load_at`` always takes its own guarded walk.
     """
-    return _load(root, ignore=ignore, prune=prune, root_fd=None)
+    return _load(root, ignore=ignore, prune=prune, root_fd=None, only=only, reuse=reuse, inventory=inventory)
 
 
-def _load_at(root: Path, root_fd: int, *, ignore: Sequence[str] = (), prune: Sequence[str] = ()) -> Bundle:
+def _load_at(
+    root: Path,
+    root_fd: int,
+    *,
+    ignore: Sequence[str] = (),
+    prune: Sequence[str] = (),
+    only: Collection[str] | None = None,
+    reuse: Mapping[str, Document] | None = None,
+) -> Bundle:
     """Load *root* through caller-owned *root_fd* while retaining semantic paths."""
     if not stat.S_ISDIR(os.fstat(root_fd).st_mode):
         raise NotADirectoryError(f"bundle root descriptor is not a directory: {root_fd}")
-    return _load(root, ignore=ignore, prune=prune, root_fd=root_fd)
+    return _load(root, ignore=ignore, prune=prune, root_fd=root_fd, only=only, reuse=reuse, inventory=None)

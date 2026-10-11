@@ -14,6 +14,7 @@ from graph_works_core.work import commands as work
 from graph_works_core.workspace import transactions
 from graph_works_core.workspace.commits import CommitOutcome
 from okf_io import load
+from work_tracker_okf import compose
 
 TODAY = date(2026, 8, 23)
 EPIC = "work/epic-a"
@@ -46,6 +47,28 @@ def _spec(layout, path: str) -> Path:
     artifact.parent.mkdir(parents=True, exist_ok=True)
     artifact.write_text("# Design\n", encoding="utf-8")
     return artifact
+
+
+def test_the_stage_artifact_path_never_reads_a_title(tmp_path: Path, monkeypatch) -> None:
+    layout = _layout(tmp_path)
+    path = "work/feature-ready"
+    _write(layout, path, phase="plan")
+    _spec(layout, path)
+    artifact = layout.bundle_dir / f"{path}/references/02-plan.md"
+    artifact.write_text("# Plan\n", encoding="utf-8")
+    original_load = compose.load
+
+    def reject_plan_title(source):
+        if source == artifact:
+            pytest.fail("_stage_artifact read a title")
+        return original_load(source)
+
+    monkeypatch.setattr(compose, "load", reject_plan_title)
+
+    result = work.run_next(layout, path, dry_run=True)
+
+    assert result.artifact is not None
+    assert result.artifact.rel == f"{path}/references/02-plan.md"
 
 
 def test_unknown_path_is_a_caller_error(tmp_path: Path) -> None:

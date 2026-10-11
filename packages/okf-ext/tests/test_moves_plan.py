@@ -934,7 +934,7 @@ def test_an_empty_mapping_strands_nothing_without_scanning(tmp_path, monkeypatch
     def explode(_body):  # pragma: no cover - must never be reached
         raise AssertionError("wikilinks() was called for an empty mapping")
 
-    monkeypatch.setattr(plan_module, "body_wikilinks", explode)
+    monkeypatch.setattr(plan_module, "document_wikilinks", explode)
     assert plan_module.stranded(bundle, {}) == ()
 
 

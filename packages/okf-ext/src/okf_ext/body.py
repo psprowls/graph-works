@@ -36,12 +36,14 @@ produce a token for the malformed case.
 from __future__ import annotations
 
 import re
+from collections.abc import Sequence
 from dataclasses import dataclass
 from functools import lru_cache
 
 from markdown_it import MarkdownIt
 from markdown_it.rules_block import StateBlock, reference
-from okf_io import Bundle
+from markdown_it.token import Token
+from okf_io import Bundle, Document
 
 #: One shared parser. `commonmark` deliberately, matching `okf_io._md`: no
 #: linkify, no GFM tables, so nothing here depends on a plugin set.
@@ -143,11 +145,15 @@ def _skeleton(body: str) -> _Skeleton:
     `sections()` and `prose_lines()` are both called for a single
     `read_section`, and `okf_io._md.parse_body` makes the same guarantee
     structural for the same reason. The heading walk and the code-range walk
-    both run over the one `tokens` list below rather than each calling
-    `_MD.parse(body)` for itself, for that same "parsed once" guarantee.
+    both run over the same token stream in `_skeleton_tokens`, preserving
+    that "parsed once" guarantee.
     """
+    return _skeleton_tokens(body, _MD.parse(body))
+
+
+def _skeleton_tokens(body: str, tokens: Sequence[Token]) -> _Skeleton:
+    """The heading and code walk over an already-parsed *body*. No parse here."""
     body_lines = split_lines(body)
-    tokens = _MD.parse(body)
     heads: list[tuple[int, int, str, int]] = []  # (start, level, text, body_start)
     quote_depth = 0
     in_heading = False
@@ -192,6 +198,10 @@ def _skeleton(body: str) -> _Skeleton:
     return _Skeleton(total=total, sections=tuple(found), code=frozenset(code))
 
 
+def _document_skeleton(document: Document) -> _Skeleton:
+    return _skeleton_tokens(document.body, document.markdown().tokens)
+
+
 def sections(body: str) -> tuple[Section, ...]:
     """Every heading in *body*, in document order, with the span it owns.
 
@@ -203,6 +213,11 @@ def sections(body: str) -> tuple[Section, ...]:
     precedent. A real section containing one therefore keeps running past it.
     """
     return _skeleton(body).sections
+
+
+def document_sections(document: Document) -> tuple[Section, ...]:
+    """The string reader's sections, using the Document's shared tokens."""
+    return _document_skeleton(document).sections
 
 
 def find_section(body: str, heading: str, *, level: int | None = None) -> Section | None:
@@ -271,6 +286,12 @@ def prose_lines(body: str) -> frozenset[int]:
     is somebody's example, not a table.
     """
     skeleton = _skeleton(body)
+    return frozenset(number for number in range(1, skeleton.total + 1) if number not in skeleton.code)
+
+
+def document_prose_lines(document: Document) -> frozenset[int]:
+    """:func:`prose_lines` over *document*'s memoized parse; no second parse."""
+    skeleton = _document_skeleton(document)
     return frozenset(number for number in range(1, skeleton.total + 1) if number not in skeleton.code)
 
 
@@ -358,7 +379,15 @@ def wikilinks(body: str) -> tuple[Wikilink, ...]:
     rule and `work_tracker_okf.archive`'s stranded-reference count both consume
     this rather than each parsing wikilinks for themselves.
     """
-    prose = prose_lines(body)
+    return _wikilinks(body, prose_lines(body))
+
+
+def document_wikilinks(document: Document) -> tuple[Wikilink, ...]:
+    """:func:`wikilinks` over *document*'s memoized parse; no second parse."""
+    return _wikilinks(document.body, document_prose_lines(document))
+
+
+def _wikilinks(body: str, prose: frozenset[int]) -> tuple[Wikilink, ...]:
     found: list[Wikilink] = []
     for number, raw_line in enumerate(split_lines(body), start=1):
         if number not in prose:
@@ -410,6 +439,9 @@ def resolve_wikilink(target: str, *, bundle: Bundle) -> str | None:
 __all__ = [
     "Section",
     "Wikilink",
+    "document_prose_lines",
+    "document_sections",
+    "document_wikilinks",
     "find_section",
     "normalized_text",
     "prose_lines",

@@ -69,7 +69,10 @@ def test_every_read_runs_warm_with_structural_counts(target) -> None:
     # Baseline values belong in recorded evidence: converted reads may count zero.
     for row in rows.values():
         if row.read in READS:
-            assert set(row.counts) == {"files_parsed", "link_graph_builds", "git_calls", "pages_hashed", "pages_tokenized"}
+            assert set(row.counts) == {
+                "files_parsed", "link_graph_builds", "git_calls", "pages_hashed", "pages_tokenized",
+                "walks", "markdown_parses",
+            }
         assert all(type(value) is int and value >= 0 for value in row.counts.values())
 
 
@@ -81,7 +84,10 @@ def test_cold_reads_run_in_a_fresh_process(target, monkeypatch) -> None:
     row = bench_reads.measure_cold(target, "work.status", 1)
     assert row.error is None, row.error
     assert row.mode == "cold" and row.repeats == 1
-    assert set(row.counts) == {"files_parsed", "link_graph_builds", "git_calls", "pages_hashed", "pages_tokenized"}
+    assert set(row.counts) == {
+        "files_parsed", "link_graph_builds", "git_calls", "pages_hashed", "pages_tokenized",
+        "walks", "markdown_parses",
+    }
     assert all(type(value) is int and value >= 0 for value in row.counts.values())
 
 
@@ -92,7 +98,10 @@ def test_one_shot_prints_counts(corpus) -> None:
         capture_output=True, text=True, encoding="utf-8", check=True,
     )
     counts = json.loads(done.stdout)["counts"]
-    assert set(counts) == {"files_parsed", "link_graph_builds", "git_calls", "pages_hashed", "pages_tokenized"}
+    assert set(counts) == {
+        "files_parsed", "link_graph_builds", "git_calls", "pages_hashed", "pages_tokenized",
+        "walks", "markdown_parses",
+    }
     assert all(type(value) is int and value >= 0 for value in counts.values())
 
 
@@ -162,4 +171,7 @@ def test_a_cached_real_read_can_record_zero_structural_work(target) -> None:
     row = bench_reads.measure_warm(target, "cached.status", lambda _: cached_status, 2)
     assert row.error is None
     assert row.repeats == 2 and row.counts_stable
-    assert row.counts == {"files_parsed": 0, "link_graph_builds": 0, "git_calls": 0, "pages_hashed": 0, "pages_tokenized": 0}
+    assert row.counts == {
+        "files_parsed": 0, "link_graph_builds": 0, "git_calls": 0, "pages_hashed": 0, "pages_tokenized": 0,
+        "walks": 0, "markdown_parses": 0,
+    }

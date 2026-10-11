@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections import Counter
 from datetime import date
 
 import ext_helpers
@@ -340,3 +341,31 @@ def test_the_line_offset_survives_a_crlf_document(tmp_path):
     found = run(load_bundle(tmp_path))
     assert len(found) == 1
     assert found[0].line == parse(text).body_line_offset + 1
+
+
+def test_render_wikilinks_reuse_document_tokens_with_exact_cold_findings(tmp_path, monkeypatch):
+    from markdown_it import MarkdownIt
+    from okf_ext import body
+
+    ext_helpers.write(
+        tmp_path / "item.md", "## H\n\n[[missing]] [[ ]] [[unclosed\n\n| A | B |\n| --- | --- |\n| x | y | extra |\n"
+    )
+    bundle = load_bundle(tmp_path)
+    from okf_ext.render.rule import _wikilinks
+
+    expected = run(bundle)
+    document = bundle.concepts["item"]
+    oracle = list(_wikilinks("item.md", document.body, document.body_line_offset, "warn", bundle))
+    assert Counter(finding for finding in expected if finding.code.startswith("render.wikilink")) == Counter(oracle)
+    bundle.concepts["item"].markdown()
+    body._skeleton.cache_clear()
+    calls = []
+    original = MarkdownIt.parse
+
+    def parse(self, text, env=None):
+        calls.append(text)
+        return original(self, text, env)
+
+    monkeypatch.setattr(MarkdownIt, "parse", parse)
+    assert run(bundle) == expected
+    assert len(calls) == 1  # render's table-enabled dialect still needs its own parse

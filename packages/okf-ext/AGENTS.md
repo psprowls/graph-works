@@ -251,6 +251,11 @@ failure modes with no signal at the API level:
   produce a false-positive candidate destination and refuse an otherwise
   legitimate, unrelated move (fails closed, pinned by a named regression test
   in `test_moves_plan.py`).
+- The touched scan matches the moved root's basename after percent decoding
+  and NFC, also ignoring whitespace for folded/wrapped YAML scalars. Any
+  backslash, ampersand or doubled single quote admits a candidate conservatively
+  because Markdown/YAML escapes can hide the basename. Extra candidates cost
+  parses; exact full/partial equivalence is pinned end to end.
 
 Do not attempt to "fix" any of these opportunistically inside an unrelated
 change — each is deliberate-and-documented with an explicit reason closing it

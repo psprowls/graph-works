@@ -303,3 +303,35 @@ def test_a_human_section_of_any_length_is_never_oversize(tmp_path):
     body = "## Summary\n\nShort.\n\n## Background\n\n" + "word " * 500 + "\n"
     bundle, section_set = build(tmp_path, {"a.md": doc(body)}, declarations=AGENT)
     assert oversize(bundle, section_set) == []
+
+
+def test_section_rule_reuses_document_tokens_and_preserves_string_findings(tmp_path, monkeypatch):
+    from markdown_it import MarkdownIt
+    from okf_ext import body
+
+    bundle, section_set = build(
+        tmp_path, {"item.md": doc("## Summary\n\n<!-- fill me in -->\n\n## Unknown\n")}, declarations=STRICT
+    )
+    from okf_ext.sections.rule import _findings
+
+    document = bundle.concepts["item"]
+    expected = list(
+        _findings(
+            document.body,
+            section_set.types["Feature"],
+            source=section_set.sources["Feature"],
+            path="item.md",
+            offset=document.body_line_offset,
+            severity="warn",
+        )
+    )
+    assert codes(bundle, section_set) == expected
+    for document in bundle.concepts.values():
+        document.markdown()
+    body._skeleton.cache_clear()
+
+    def unexpected(*args, **kwargs):
+        pytest.fail("section validation must use the Document token memo")
+
+    monkeypatch.setattr(MarkdownIt, "parse", unexpected)
+    assert codes(bundle, section_set) == expected

@@ -68,6 +68,7 @@ def test_public_surface():
         "MigrationChangeKind",
         "Parameter",
         "ParseError",
+        "ParsedMarkdown",
         "Report",
         "Rule",
         "RuleContext",

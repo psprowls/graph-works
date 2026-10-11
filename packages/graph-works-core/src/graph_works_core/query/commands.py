@@ -59,7 +59,7 @@ from graph_works_core.query import lexical_store
 from graph_works_core.query.prompts.code_reader import CODE_READER_SYSTEM
 from graph_works_core.query.prompts.librarian import build_librarian_system
 from graph_works_core.query.prompts.synthesizer import SYNTHESIZER_SYSTEM
-from graph_works_core.read_session import ReadSession, open_read_session
+from graph_works_core.read_session import ReadSession, open_read_session, reconciled_document
 from graph_works_core.workspace.bundle import load_workspace_bundle
 from graph_works_core.workspace.config import load_workspace_config
 from graph_works_core.workspace.errors import QueryError
@@ -706,16 +706,29 @@ def _rank(
 
 @dataclass(frozen=True)
 class _SessionCorpus:
-    """The session's concept ids and byte hashes, without parsed documents."""
+    """The session's concept ids and byte hashes; parsed only when reconcile has not."""
 
     root: Path
     hashes: Mapping[str, str]
+    session: ReadSession | None = None
+
+    def _retained(self, concept_id: str, sha256: str | None) -> Document | None:
+        if self.session is None or sha256 is None:
+            return None
+        return reconciled_document(self.session, f"{concept_id}.md", sha256)
 
     def page(self, concept_id: str, sha256: str) -> lexical_store.Prepared:
-        return lexical_store.prepare_page(self.root, concept_id, sha256, excerpt_chars=_CANDIDATE_EXCERPT_CHARS)
+        return lexical_store.prepare_page(
+            self.root,
+            concept_id,
+            sha256,
+            excerpt_chars=_CANDIDATE_EXCERPT_CHARS,
+            document=self._retained(concept_id, sha256),
+        )
 
     def text(self, concept_id: str) -> str:
-        result = read_member(self.root, f"{concept_id}.md")
+        retained = self._retained(concept_id, self.hashes.get(concept_id))
+        result = retained if retained is not None else read_member(self.root, f"{concept_id}.md")
         return result.raw_text if isinstance(result, Document) else ""
 
 
@@ -854,7 +867,7 @@ def plan_query_brief(
         if page is not None and page not in hashes:
             return _refused(query, page, embedder)
         _check_top_k(top_k)
-        corpus = _SessionCorpus(layout.bundle_dir, hashes)
+        corpus = _SessionCorpus(layout.bundle_dir, hashes, session)
         try:
             ranking = _session_ranking(query, layout, corpus, top_k=top_k, embedder=embedder)
         except lexical_store.LexicalBusy as exc:

@@ -60,6 +60,7 @@ from okf_ext.moves.plan import (
     stranded_summary,
     stranded_warning,
 )
+from okf_ext.moves.touched import TouchedScan, scan_touched
 from okf_ext.writing import FailureKind, WriteFailure
 
 #: `FailureKind` and `WriteFailure` are re-exported from the shared
@@ -102,6 +103,7 @@ __all__ = [
     "Refusal",
     "RefusalKind",
     "Stranded",
+    "TouchedScan",
     "Unrebased",
     "WriteFailure",
     "apply",
@@ -110,6 +112,7 @@ __all__ = [
     "plan_move_dir",
     "plan_move_many",
     "plan_repair",
+    "scan_touched",
     "stranded",
     "stranded_summary",
     "stranded_warning",

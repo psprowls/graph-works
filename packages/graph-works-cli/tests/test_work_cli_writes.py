@@ -363,12 +363,124 @@ def test_reparent_live_apply_updates_lane_indexes(workspace: Path) -> None:
     assert "work/index.md" in payload["indexes"]
 
 
+def _init_workspace_git(workspace: Path) -> str:
+    for args in (
+        ("init", "-b", "main"),
+        ("config", "user.name", "Test"),
+        ("config", "user.email", "test@example.com"),
+        ("add", "."),
+        ("commit", "-m", "Initial"),
+    ):
+        subprocess.run(["git", "-C", str(workspace), *args], check=True, capture_output=True)
+    return subprocess.run(
+        ["git", "-C", str(workspace), "rev-parse", "HEAD"], check=True, capture_output=True, text=True
+    ).stdout.strip()
+
+
+def test_reparent_batch_moves_every_path_in_one_commit(workspace: Path) -> None:
+    parent = file_item(workspace, "Parent", kind="Epic")
+    sources = [file_item(workspace, "A"), file_item(workspace, "B")]
+    before = _init_workspace_git(workspace)
+    result = runner.invoke(
+        app,
+        ["work", "reparent", *sources, "--parent", parent, "--workspace", str(workspace), "--json"],
+    )
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.stdout)
+    assert payload["sources"] == sources
+    assert payload["path_mapping"] == {
+        "work/feature-a": "work/epic-parent/children/feature-a",
+        "work/feature-b": "work/epic-parent/children/feature-b",
+    }
+    assert payload["applied"] is True and payload["rolled_back"] is False
+    assert payload["commit"]["status"] == "committed"
+    assert payload["commit"]["subject"] == "workspace: reparent feature-a, feature-b under epic-parent"
+    layout = resolve_workspace(str(workspace))
+    for source, destination in payload["path_mapping"].items():
+        assert not layout.bundle_dir.joinpath(f"{source}.md").exists()
+        assert layout.bundle_dir.joinpath(f"{destination}.md").is_file()
+    commits = subprocess.run(
+        ["git", "-C", str(workspace), "rev-list", "--count", f"{before}..HEAD"],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    assert commits.stdout.strip() == "1"
+    actual_commit = subprocess.run(
+        ["git", "-C", str(workspace), "log", "-1", "--format=%H%n%s"],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.splitlines()
+    assert actual_commit == [payload["commit"]["sha"], payload["commit"]["subject"]]
+
+
+def test_reparent_batch_refusal_moves_nothing(workspace: Path) -> None:
+    parent = file_item(workspace, "Parent", kind="Epic")
+    source = file_item(workspace, "A")
+    before_commit = _init_workspace_git(workspace)
+    bundle = resolve_workspace(str(workspace)).bundle_dir
+    before = {path.relative_to(bundle): path.read_bytes() for path in bundle.rglob("*") if path.is_file()}
+    result = runner.invoke(
+        app,
+        ["work", "reparent", source, "work/missing", "--parent", parent, "--workspace", str(workspace), "--json"],
+    )
+    assert result.exit_code == exit_codes.GENERIC
+    envelope = json.loads(result.stdout)["error"]
+    assert envelope["reason"] == "refused"
+    assert envelope["payload"]["sources"] == [source, "work/missing"]
+    assert envelope["payload"]["applied"] is False
+    assert bundle.joinpath(f"{source}.md").is_file()
+    assert {path.relative_to(bundle): path.read_bytes() for path in bundle.rglob("*") if path.is_file()} == before
+    after_commit = subprocess.run(
+        ["git", "-C", str(workspace), "rev-parse", "HEAD"], check=True, capture_output=True, text=True
+    ).stdout.strip()
+    assert after_commit == before_commit
+
+
+def test_reparent_single_path_json_has_no_sources_key(workspace: Path) -> None:
+    parent = file_item(workspace, "Parent", kind="Epic")
+    source = file_item(workspace, "A")
+    result = runner.invoke(
+        app,
+        ["work", "reparent", source, "--parent", parent, "--dry-run", "--workspace", str(workspace), "--json"],
+    )
+    assert result.exit_code == 0, result.output
+    assert "sources" not in json.loads(result.stdout)
+
+
+@pytest.mark.parametrize("dry_run", [False, True])
+def test_reparent_single_path_preserves_human_output_and_subject(workspace: Path, dry_run: bool) -> None:
+    parent = file_item(workspace, "Parent", kind="Epic")
+    source = file_item(workspace, "A")
+    _init_workspace_git(workspace)
+    args = ["work", "reparent", source, "--parent", parent, "--workspace", str(workspace)]
+    if dry_run:
+        args.append("--dry-run")
+    result = runner.invoke(app, args)
+    assert result.exit_code == 0, result.output
+    if dry_run:
+        assert result.stdout == "work/feature-a -> work/epic-parent/children/feature-a\n"
+        assert resolve_workspace(str(workspace)).bundle_dir.joinpath(f"{source}.md").is_file()
+    else:
+        commit = subprocess.run(
+            ["git", "-C", str(workspace), "log", "-1", "--format=%H"],
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+        assert result.stdout == (
+            "[ok] work mutation applied\n"
+            f"[ok] committed {commit[:12]} workspace: reparent feature-a under epic-parent\n"
+        )
+
+
 def test_incomplete_path_apply_emits_the_envelope(workspace: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(work_main.work, "run_reparent", lambda *_args, **_kwargs: object())
     monkeypatch.setattr(
         work_main.wire_work,
         "path_mutation_payload",
-        lambda _result: {
+        lambda _result, **_kwargs: {
             "path_mapping": {"work/feature-a": "work/epic-e/children/feature-a"},
             "indexes": [],
             "warnings": [],

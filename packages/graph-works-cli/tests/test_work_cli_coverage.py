@@ -338,7 +338,7 @@ def test_mutation_commands_map_workspace_and_io_failures(
     target = {"reparent": "run_reparent", "adopt": "run_release_adoption"}[name]
     monkeypatch.setattr(main.work, target, lambda *args, **kwargs: (_ for _ in ()).throw(error))
     calls = {
-        "reparent": lambda: main.reparent("work/a", "work/e", False, "", False),
+        "reparent": lambda: main.reparent(["work/a"], "work/e", False, "", False),
         "adopt": lambda: main.adopt("work/e", "work/r", False, "", False),
     }
     assert _exit_code(calls[name]) == code

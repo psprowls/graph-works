@@ -73,6 +73,18 @@ def test_mutation_payloads_include_commit_outcome() -> None:
     assert work.overturn_payload(overturn(applied=False))["commit"] is None
 
 
+def test_path_mutation_sources_only_projects_batches() -> None:
+    result = path_mutation(applied=False)
+    unchanged = work.path_mutation_payload(result)
+    assert "sources" not in unchanged
+    assert work.path_mutation_payload(result, sources=()) == unchanged
+    assert work.path_mutation_payload(result, sources=("work/a",)) == unchanged
+    payload = work.path_mutation_payload(result, sources=("work/a", "work/b"))
+    assert payload["sources"] == ["work/a", "work/b"]
+    assert list(payload)[:2] == ["path_mapping", "sources"]
+    assert json.loads(json.dumps(payload)) == payload
+
+
 def test_advance_projects_a_gate_bypass() -> None:
     assert work.advance_payload(advance(applied=True), "work/a")["gate_bypass"] is None
     assert work.advance_payload(advance(applied=True, bypass=True), "work/a")["gate_bypass"] == {

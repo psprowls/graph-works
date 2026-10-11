@@ -13,6 +13,7 @@ from okf_io import Heading, Link, ParseError, resolve_member
 from okf_io.bundle import MemberKind, canonical_id
 
 from okf_ext.readindex._sql import execute
+from okf_ext.readindex.content import StoredContent
 from okf_ext.readindex.model import Diagnostics, MemberRow
 from okf_ext.readindex.store import ReadIndex
 
@@ -108,6 +109,26 @@ class IndexView:
             (mid,),
         ).fetchone()
         return self._member_row(row) if row is not None else None
+
+    def stored_content(self, member_id: str) -> StoredContent | None:
+        """The stored columns a verified content read needs, for one exact raw markdown id."""
+        row = execute(
+            self._conn,
+            "SELECT sha256, fm_json, fm_exact, body_line_offset, parse_error, coercion_failures FROM members "
+            "WHERE id=? AND unreadable IS NULL AND kind IN ('concept', 'index', 'log')",
+            (member_id,),
+        ).fetchone()
+        if row is None:
+            return None
+        sha, fm, exact, offset, error, failures = row
+        return StoredContent(
+            cast(str | None, sha),
+            MappingProxyType(json.loads(cast(str, fm))) if fm is not None else None,
+            bool(exact),
+            cast(int | None, offset),
+            _parse_error(cast(str | None, error)),
+            frozenset(json.loads(cast(str, failures))),
+        )
 
     def outlinks(self, concept_id: str) -> tuple[Link, ...]:
         return tuple(

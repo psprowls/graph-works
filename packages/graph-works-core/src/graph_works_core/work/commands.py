@@ -60,19 +60,23 @@ from typing import Literal, Protocol
 from code_wiki_okf.config import Config
 from doc_wiki_okf.sources import SOURCE_TYPE, normalize_origin
 from okf_ext.bundle import SECTIONS_DIRNAME
+from okf_ext.moves import scan_touched
 from okf_ext.schemas import SchemaError
 from okf_ext.shape import load_sections
-from okf_io import Bundle, Unreadable, parse, read_member
+from okf_io import Bundle, Unreadable, build_frontmatter, parse
 from okf_io import validate as okf_validate
+from okf_io.bundle import canonical_id
 from okf_io.validate import Finding, Report
 from repositories_okf.repository import repository_rule
 from work_tracker_okf import decisions as _decisions
 from work_tracker_okf._selection import path_index
 from work_tracker_okf.compose import (
+    ArtifactBody,
     FilingCompositionPlan,
     plan_file_and_reconcile,
     rule_set,
-    stamp_for,
+    stage_artifact_for_source,
+    stage_artifact_ref,
 )
 from work_tracker_okf.decisions import Decision, DecisionPlan, ledger_ref
 from work_tracker_okf.dependencies import (
@@ -92,10 +96,11 @@ from work_tracker_okf.mutation import (
     PlannedWrite,
     WorkMutationPlan,
 )
-from work_tracker_okf.paths import ArtifactRef, checkpoint_ref, child_lane, item_page, references_dir
+from work_tracker_okf.paths import ArtifactRef, checkpoint_ref, child_lane, item_page, parse_item_path, references_dir
 from work_tracker_okf.pipeline import PACKAGED_DEFINITION, PipelineDefinition
 from work_tracker_okf.projection import ResumeSelection, Rollup, rollup, select_resume
-from work_tracker_okf.reparent import plan_release_adoption, plan_reparent
+from work_tracker_okf.reparent import plan_release_adoption, plan_reparent_many, reparent_load_set
+from work_tracker_okf.snapshot import WorkSnapshot
 from work_tracker_okf.sources import upsert
 from work_tracker_okf.vocabulary import PARENT_TYPES, SPEC_SOURCE_ID, TERMINAL_STATUSES
 from work_tracker_okf.workflow import Blocker, RouteResult, RouteState, Transition, route, state_for
@@ -103,10 +108,19 @@ from work_tracker_okf.workflow import Blocker, RouteResult, RouteState, Transiti
 from graph_works_core.guidance.assembly import Guidance, assemble_guidance, write_guidance
 from graph_works_core.read_session import ReadSession, borrow_read_session, open_read_session
 from graph_works_core.work import carried as _carried
+from graph_works_core.work.artifact_bodies import session_bodies
 from graph_works_core.work.carried import CarriedContext, SlotInput
 from graph_works_core.work.path_report import PathReport, StageArtifactReport, artifact_reports, path_report
 from graph_works_core.workspace import provenance
-from graph_works_core.workspace.bundle import load_work_bundle, load_workspace_bundle, work_scope
+from graph_works_core.workspace.bundle import (
+    load_partial_bundle,
+    load_work_bundle,
+    load_workspace_bundle,
+    reclassify_ignored,
+    with_clone_ignore,
+    with_clone_prune,
+    work_scope,
+)
 from graph_works_core.workspace.commits import (
     COMMIT_FAILED_PREFIX,
     CommitOutcome,
@@ -140,7 +154,12 @@ from graph_works_core.workspace.lane_facts import gather_lane_facts, has_lane_pa
 from graph_works_core.workspace.layout import WorkspaceLayout
 from graph_works_core.workspace.lint_repos import LintRepositories, work_lane_rules
 from graph_works_core.workspace.repos import declared_repositories, resolve_item_repo, resolve_repos
-from graph_works_core.workspace.transactions import MutationApplication, apply_mutation, only_stale_inventory
+from graph_works_core.workspace.transactions import (
+    MutationApplication,
+    _document_members,
+    apply_mutation,
+    only_stale_inventory,
+)
 from graph_works_core.workspace.work_schemas import drift_findings, inspect_work_schemas
 
 
@@ -399,32 +418,53 @@ def _owned_references(bundle_root: Path, path: str) -> tuple[str, ...]:
     return tuple(sorted(file.relative_to(bundle_root).as_posix() for file in directory.rglob("*") if file.is_file()))
 
 
-def run_item_read(layout: WorkspaceLayout, path: str, *, session: ReadSession | None = None) -> ItemRead:
-    """Read *path*'s work item and list its owned `references/`. Never writes.
+def _item_sources(frontmatter: Mapping[str, object], body: str, failures: frozenset[str]) -> tuple[ItemSource, ...]:
+    """Restore rejected source scalars lost in the ISO frontmatter projection."""
+    data = dict(frontmatter)
+    sources = data.get("sources")
+    entries = [sources] if isinstance(sources, Mapping) else sources
+    if isinstance(entries, (list, tuple)):
+        restored: list[object] = []
+        for ordinal, entry in enumerate(entries):
+            if isinstance(entry, Mapping):
+                entry = dict(entry)
+                for field_name in ("id", "resource", "title"):
+                    if f"sources.{ordinal}.{field_name}" in failures:
+                        entry[field_name] = None
+            restored.append(entry)
+        data["sources"] = restored
+    fm = build_frontmatter(data, body=body)
+    return tuple(ItemSource(source.id, source.resource, source.title) for source in fm.sources)
 
-    The session decides membership; every content field comes from one fresh
-    parse, so frontmatter and body share the same version of the page (D-002).
+
+def run_item_read(layout: WorkspaceLayout, path: str, *, session: ReadSession | None = None) -> ItemRead:
+    """Read one work item using the backend's coherent content version.
+
+    Owned references remain a live filesystem inventory. Never writes.
     """
     with borrow_read_session(layout, session) as session:
         known = path in item_index(session.work_snapshot())
-        detail = None if known else session.diagnostics(ignore=IGNORE).unreadable.get(f"{path}.md")
-    if not known:
-        return _refused_item(path, "unreadable" if detail is not None else "unknown-item", detail)
-    document = read_member(layout.bundle_dir, f"{path}.md")
-    if isinstance(document, Unreadable):
-        return _refused_item(path, "unreadable", document.reason)
-    error = document.parse_error
-    return ItemRead(
-        path=path,
-        frontmatter=MappingProxyType(document.fm_data(dates="iso")),
-        body=document.body,
-        sources=tuple(ItemSource(source.id, source.resource, source.title) for source in document.fm.sources),
-        references=_owned_references(layout.bundle_dir, path),
-        parse_error=None if error is None else f"{error.kind}: {error.message}",
-        coercion_failures=tuple(sorted(document.fm.coercion_failures)),
-        refusal=None,
-        detail=None,
-    )
+        if not known:
+            detail = session.diagnostics(ignore=IGNORE).unreadable.get(f"{path}.md")
+            return _refused_item(path, "unreadable" if detail is not None else "unknown-item", detail)
+        content = session.content(f"{path}.md")
+        if isinstance(content, Unreadable):
+            return _refused_item(path, "unreadable", content.reason)
+        if content is None:
+            return _refused_item(path, "unreadable", "known item's content is unavailable")
+        return ItemRead(
+            path=path,
+            frontmatter=MappingProxyType(dict(content.frontmatter)),
+            body=content.body,
+            sources=_item_sources(content.frontmatter, content.body, content.coercion_failures),
+            references=_owned_references(layout.bundle_dir, path),
+            parse_error=None
+            if content.parse_error is None
+            else f"{content.parse_error.kind}: {content.parse_error.message}",
+            coercion_failures=tuple(sorted(content.coercion_failures)),
+            refusal=None,
+            detail=None,
+        )
 
 
 TouchRefusal = Literal["unknown-item", "unreadable", "terminal", "inactive-phase"]
@@ -617,12 +657,16 @@ class NextResult:
 
 
 def _plan_source_normalization(
-    bundle_root: Path, item: WorkItem, *, definition: PipelineDefinition
+    bundle_root: Path,
+    item: WorkItem,
+    *,
+    definition: PipelineDefinition,
+    body_of: ArtifactBody | None = None,
 ) -> SourceNormalization | None:
     """Plan the canonical design stamp when the artifact exists and no
     authored source already owns that id.
     """
-    missing = missing_design_source(bundle_root, item, definition=definition)
+    missing = missing_design_source(bundle_root, item, definition=definition, body_of=body_of)
     if missing is None:
         return None
     ref, title = missing
@@ -676,21 +720,20 @@ def _apply_normalizations(
     return NextApplication(normalized=tuple(normalized), commits=tuple(commits)), tuple(warnings)
 
 
-def _stage_artifact(
-    bundle_root: Path, item: WorkItem, result: RouteResult, *, definition: PipelineDefinition
-) -> ArtifactRef | None:
+def _stage_artifact(item: WorkItem, result: RouteResult, *, definition: PipelineDefinition) -> ArtifactRef | None:
     """Where the dispatched stage writes its output, or `None`.
 
     `Transition.stamp_source` is the routing table's own statement of which
-    artifact this stage produces, and `compose.stamp_for` is its inverse back
-    to a path -- the same pair `_plan_source_normalization` already uses. A
-    stage that stamps nothing (execute, finish, a terminal or invalid item)
+    artifact this stage produces: `stage_artifact_ref` over the configured
+    artifact resolves the path only; the title `stamp_for` would read is never
+    needed here. A stage that stamps nothing (execute, finish, a terminal or invalid item)
     has no artifact, which is a shape and not a degrade.
     """
     if result.on_complete is None or result.on_complete.stamp_source is None:
         return None
-    ref, _title = stamp_for(bundle_root, item, result.on_complete.stamp_source, definition=definition)
-    return ref
+    return stage_artifact_ref(
+        item.path, stage_artifact_for_source(definition=definition, source_id=result.on_complete.stamp_source)
+    )
 
 
 def _load_config(layout: WorkspaceLayout) -> DispatchConfig | WorkspaceError:
@@ -736,6 +779,8 @@ def _plan_route(
     *,
     descend: bool,
     definition: PipelineDefinition,
+    planned: WorkSnapshot | None = None,
+    body_of: ArtifactBody | None = None,
 ) -> tuple[NextResult, WorkItem]:
     """The dry-run routing preview for *path* over already-read items.
 
@@ -743,6 +788,9 @@ def _plan_route(
     normalizations are applied to the in-memory items only, so routing sees
     the repaired state without the page being touched. `run_next`,
     `run_dispatch_explain` and `run_work_queue` all route through here.
+    *planned* is a routing overlay the caller already built over *items*
+    (`run_work_queue` builds one per pass); `None` builds it here.
+    *body_of* supplies verified artifact bodies for titles (the queue's session); `None` reads files.
     """
     requested = next((item for item in items if item.path == path), None)
     if requested is None:
@@ -751,7 +799,9 @@ def _plan_route(
             raise ValueError(f"{path}.md {detail}")
         raise ValueError(f"unknown work item {path!r}")
 
-    planned_items = routing_items(root, items, definition=definition)
+    planned_items = (
+        planned if planned is not None else routing_items(root, items, definition=definition, body_of=body_of)
+    )
     descent_result = descend_to_leaf(planned_items, path, definition=definition) if descend else None
     selected_path = descent_result.leaf if descent_result is not None and descent_result.leaf is not None else path
     selected = next(item for item in items if item.path == selected_path)
@@ -760,7 +810,7 @@ def _plan_route(
     normalizations = tuple(
         change
         for item in normalization_items
-        if (change := _plan_source_normalization(root, item, definition=definition)) is not None
+        if (change := _plan_source_normalization(root, item, definition=definition, body_of=body_of)) is not None
     )
     state = state_for(
         planned_items,
@@ -783,7 +833,7 @@ def _plan_route(
         child_rollup=state.child_rollup,
         descent=descent_result,
         normalizations=normalizations,
-        artifact=_stage_artifact(root, selected, computed, definition=definition),
+        artifact=_stage_artifact(selected, computed, definition=definition),
         path=report,
         artifacts=artifact_reports(root, selected_path, definition, report),
     )
@@ -963,7 +1013,7 @@ def run_next(
         state=persisted_state,
         route=persisted_route,
         child_rollup=persisted_state.child_rollup,
-        artifact=_stage_artifact(persisted_bundle.root, selected, persisted_route, definition=definition),
+        artifact=_stage_artifact(selected, persisted_route, definition=definition),
         path=report,
         artifacts=artifact_reports(persisted_bundle.root, preview.selected_path, definition, report),
         application=application,
@@ -1048,21 +1098,38 @@ def run_work_queue(layout: WorkspaceLayout, *, session: ReadSession | None = Non
     rather than a failure of the read.
     Epics waiting on their children are included with that blocker, so no
     active item is silently dropped.
+    The read session stays open for the whole pass: it supplies the snapshot and every artifact
+    body a title needs, so an unchanged primed index parses nothing (epic D-005, D-010).
+    The routing overlay is built once at the first eligible item and never outlives the call.
     """
-    with borrow_read_session(layout, session) as session:
-        items = session.work_snapshot()
-        unreadable = session.diagnostics(ignore=IGNORE).unreadable
     config = _load_config(layout)
     definition = _definition_of(config)
     entries: list[QueueEntry] = []
-    for item in sorted(items, key=lambda candidate: candidate.path):
-        if item.archived or item.work_status in TERMINAL_STATUSES:
-            continue
-        preview, _selected = _plan_route(
-            layout, layout.bundle_dir, unreadable, items, item.path, descend=False, definition=definition
-        )
-        resolution, preflight = _resolve_dispatch_with(config, preview.state, preview.route)
-        entries.append(QueueEntry(item, replace(preview, dispatch_resolution=resolution, dispatch_preflight=preflight)))
+    with borrow_read_session(layout, session) as session:
+        items = session.work_snapshot()
+        unreadable = session.diagnostics(ignore=IGNORE).unreadable
+        body_of = session_bodies(session)
+        planned: WorkSnapshot | None = None
+        for item in sorted(items, key=lambda candidate: candidate.path):
+            if item.archived or item.work_status in TERMINAL_STATUSES:
+                continue
+            if planned is None:
+                planned = routing_items(layout.bundle_dir, items, definition=definition, body_of=body_of)
+            preview, _selected = _plan_route(
+                layout,
+                layout.bundle_dir,
+                unreadable,
+                items,
+                item.path,
+                descend=False,
+                definition=definition,
+                planned=planned,
+                body_of=body_of,
+            )
+            resolution, preflight = _resolve_dispatch_with(config, preview.state, preview.route)
+            entries.append(
+                QueueEntry(item, replace(preview, dispatch_resolution=resolution, dispatch_preflight=preflight))
+            )
     return tuple(entries)
 
 
@@ -1343,28 +1410,84 @@ class PathMutationResult:
     application: MutationApplication | None = None
 
 
+def _plan_reparent_partial(
+    layout: WorkspaceLayout, source_paths: Sequence[str], parent_path: str
+) -> tuple[Bundle, WorkMutationPlan]:
+    """Scan names, close context, load once and plan; complete unsafe graph context."""
+    lanes = {location.lane for path in (*source_paths, parent_path) if (location := parse_item_path(path)) is not None}
+    scan = scan_touched(
+        layout.bundle_dir,
+        source_paths,
+        ignore=with_clone_ignore(),
+        prune=with_clone_prune(),
+        extra={"work/index.md", *(f"{lane}/index.md" for lane in lanes)},
+    )
+    warnings = scan.warnings
+    if not scan.complete:
+        bundle = load_workspace_bundle(layout, ignore=())
+    else:
+        only = reparent_load_set((m.id for m in scan.inventory.members), scan.members, source_paths, parent_path)
+        bundle = load_partial_bundle(layout.bundle_dir, only=only, inventory=scan.inventory)
+        items = load_items(bundle)
+        by_path = item_index(list(items))
+        unloaded = frozenset(canonical_id(member) for member in bundle.unloaded)
+        if any(
+            edge.path not in by_path and canonical_id(f"{edge.path}.md") in unloaded
+            for item in items
+            for edge in item.dependency_edges
+        ):
+            # Names cannot supply a target's terminal state or outgoing edges.
+            # Admit the whole inventory, reusing clean parsed seed Documents;
+            # never expand the pure name closure by inspecting dependencies.
+            reuse = {f"{cid}.md": doc for cid, doc in bundle.concepts.items()}
+            for directory, doc in bundle.indexes.items():
+                reuse[f"{directory}/index.md" if directory else "index.md"] = doc
+            for directory, doc in bundle.logs.items():
+                reuse[f"{directory}/log.md" if directory else "log.md"] = doc
+            bundle = load_partial_bundle(
+                layout.bundle_dir,
+                only=frozenset(m.id for m in scan.inventory.members if m.id.endswith(".md")),
+                inventory=scan.inventory,
+                reuse=reuse,
+            )
+            if bundle.unloaded:
+                raise ValueError("dependency fallback did not admit the complete Markdown inventory")
+            bundle = replace(bundle, partial=None)
+            warnings = (*warnings, "dependency context reaches unloaded members; using a full load from the inventory")
+    plan = plan_reparent_many(bundle, load_items(bundle), source_paths, parent_path)
+    return bundle, replace(plan, warnings=(*plan.warnings, *warnings))
+
+
 def run_reparent(
     layout: WorkspaceLayout,
-    source_path: str,
+    source_paths: str | Sequence[str],
     parent_path: str,
     *,
     dry_run: bool = True,
 ) -> PathMutationResult:
-    # Loaded with ignore=() (not IGNORE) -- do not pass this bundle as baseline_bundle,
-    # it would silently validate a different corpus than the postcondition gate expects.
-    bundle = load_workspace_bundle(layout, ignore=())
-    plan = plan_reparent(bundle, load_items(bundle), source_path, parent_path)
+    sources = (source_paths,) if isinstance(source_paths, str) else tuple(source_paths)
+    bundle, plan = _plan_reparent_partial(layout, sources, parent_path)
+    if dry_run or not plan.ok:
+        return PathMutationResult(plan)
+    # run_reparent passes its planning bundle reclassified through IGNORE,
+    # which is the same corpus the gate loads; run_release_adoption still passes none.
+    baseline = reclassify_ignored(bundle, IGNORE) if bundle.partial is not None else None
     return PathMutationResult(
         plan,
-        None
-        if dry_run or not plan.ok
-        else apply_mutation(
+        apply_mutation(
             layout,
             plan,
             repo_roots=_repo_roots(layout),
-            commit=WorkspaceCommit(f"workspace: reparent {item_stem(source_path)} under {item_stem(parent_path)}"),
+            baseline_bundle=baseline,
+            parse_reuse=_document_members(bundle),
+            commit=WorkspaceCommit(_reparent_subject(sources, parent_path)),
         ),
     )
+
+
+def _reparent_subject(sources: Sequence[str], parent_path: str) -> str:
+    names = ", ".join(item_stem(source) for source in sources)
+    return f"workspace: reparent {names} under {item_stem(parent_path)}"
 
 
 def run_release_adoption(
@@ -1374,8 +1497,8 @@ def run_release_adoption(
     *,
     dry_run: bool = True,
 ) -> PathMutationResult:
-    # Loaded with ignore=() (not IGNORE) -- do not pass this bundle as baseline_bundle,
-    # it would silently validate a different corpus than the postcondition gate expects.
+    # run_reparent passes its planning bundle reclassified through IGNORE,
+    # which is the same corpus the gate loads; run_release_adoption still passes none.
     bundle = load_workspace_bundle(layout, ignore=())
     plan = plan_release_adoption(bundle, load_items(bundle), source_path, release_path)
     return PathMutationResult(

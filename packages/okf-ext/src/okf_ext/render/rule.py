@@ -11,13 +11,10 @@ because parsing is the expensive part, and one rule walking the bundle once is
 what makes that structural -- with four separate `Rule` objects, sharing a
 parse would need a closure-level cache whose correctness nothing enforces.
 
-**This is a second parse of each concept body, knowingly.** okf-io already
-parses every concept in `build_link_graph` and memoizes a `BodyIndex` on
-`LinkGraph.bodies`, but that index carries links, headings, list items, code
-blocks and footnotes -- not the `html_block`, `html_inline`, `blockquote_open`
-and `table_open` tokens these four rules read. Widening it is a change to the
-core for a tier-2 convenience, and reaching into `okf_io._md` would
-couple this package to a private module of the one it sits above.
+**The table-enabled dialect needs its own parse.** Document's shared tokens
+use CommonMark without tables, so this rule retains its table-enabled stream
+for HTML, callouts and table checks. Wikilinks use the Document's CommonMark
+tokens, shared with other readers, rather than parsing that body again.
 """
 
 from __future__ import annotations
@@ -29,7 +26,7 @@ from markdown_it import MarkdownIt
 from markdown_it.token import Token
 from okf_io import Bundle, Document, Finding, Rule, RuleContext, Severity
 
-from okf_ext.body import resolve_wikilink
+from okf_ext.body import Wikilink, document_wikilinks, resolve_wikilink
 from okf_ext.body import wikilinks as body_wikilinks
 
 #: The topic prefix this rule set claims. `validate()` raises the moment an
@@ -344,7 +341,15 @@ def _callouts(
             )
 
 
-def _wikilinks(path: str, body: str, offset: int, severity: Severity, bundle: Bundle) -> Iterator[Finding]:
+def _wikilinks(
+    path: str,
+    body: str,
+    offset: int,
+    severity: Severity,
+    bundle: Bundle,
+    *,
+    occurrences: tuple[Wikilink, ...] | None = None,
+) -> Iterator[Finding]:
     """The two wikilink codes, both built from `okf_ext.body.wikilinks`'s single scan.
 
     A malformed occurrence (`target is None`) yields `render.wikilink`; a
@@ -359,7 +364,8 @@ def _wikilinks(path: str, body: str, offset: int, severity: Severity, bundle: Bu
     No test exercises that case and this mirrors wiki-io's own ported
     behaviour for every case that matters.
     """
-    for occurrence in body_wikilinks(body):
+    matches = body_wikilinks(body) if occurrences is None else occurrences
+    for occurrence in matches:
         line = occurrence.line + offset
         if occurrence.target is None:
             if occurrence.raw.endswith("]]"):
@@ -449,7 +455,9 @@ def render_rule(*, severity: Severity = "warn") -> Rule:
             tokens = parser.parse(body)
             yield from _angle_brackets(path, tokens, offset, severity)
             yield from _callouts(path, tokens, lines, offset, severity)
-            yield from _wikilinks(path, body, offset, severity, context.bundle)
+            yield from _wikilinks(
+                path, body, offset, severity, context.bundle, occurrences=document_wikilinks(document)
+            )
             yield from _table_pipes(path, tokens, lines, offset, severity)
 
     return rule

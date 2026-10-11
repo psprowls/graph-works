@@ -19,7 +19,7 @@ else below `cli.py`.
 from __future__ import annotations
 
 import re
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, replace
 from datetime import date
 from pathlib import Path
@@ -203,6 +203,18 @@ def _first_h1(body: str) -> str | None:
     return None
 
 
+ArtifactBody = Callable[[ArtifactRef], str | None]
+"""An artifact's body (text after frontmatter, as `Document.body`), or `None` to read the file.
+
+`None` is "cannot serve this one", never "absent": the authoritative read
+below still decides between a title, the fallback, and a raised error.
+"""
+
+
+def _title_from(body: str, fallback: str) -> str:
+    return _first_h1(body) or fallback
+
+
 def _title_for(target: Path, fallback: str) -> str:
     """*target*'s own H1, or *fallback*.
 
@@ -212,7 +224,7 @@ def _title_for(target: Path, fallback: str) -> str:
     """
     if not target.is_file():
         return fallback
-    return _first_h1(load(target).body) or fallback
+    return _title_from(load(target).body, fallback)
 
 
 def stage_artifact_for_source(definition: PipelineDefinition, source_id: str) -> ArtifactSpec:
@@ -236,7 +248,14 @@ def stage_artifact_ref(item_path: str, artifact: ArtifactSpec) -> ArtifactRef:
     return ArtifactRef(rel=f"{references_dir(item_path).rel}/{artifact.file}", source_id=artifact.source)
 
 
-def stamp_for(root: Path, item: WorkItem, source_id: str, *, definition: PipelineDefinition) -> tuple[ArtifactRef, str]:
+def stamp_for(
+    root: Path,
+    item: WorkItem,
+    source_id: str,
+    *,
+    definition: PipelineDefinition,
+    body_of: ArtifactBody | None = None,
+) -> tuple[ArtifactRef, str]:
     """The `ArtifactRef` *source_id* names for *item*, and the title to stamp.
 
     Resolves `Transition.stamp_source` through *definition*'s stage artifacts,
@@ -249,11 +268,17 @@ def stamp_for(root: Path, item: WorkItem, source_id: str, *, definition: Pipelin
     `Design spec — The filing writer` and the two would disagree cosmetically
     forever.
 
+    *body_of* lets a caller that already holds verified bodies — the work
+    queue's read session — title the artifact without a parse; the scanner
+    and fallback are unchanged, and `None` from it falls through to the file.
+
     Raises `KeyError` for an id no configured stage artifact carries. Caller
     error: nothing else is stamped by this path.
     """
     ref = stage_artifact_ref(item.path, stage_artifact_for_source(definition, source_id))
-    return ref, _title_for(ref.path(root), f"{_STAMP_LABELS.get(source_id, 'Artifact')} — {item.title}")
+    fallback = f"{_STAMP_LABELS.get(source_id, 'Artifact')} — {item.title}"
+    body = None if body_of is None else body_of(ref)
+    return ref, _title_from(body, fallback) if body is not None else _title_for(ref.path(root), fallback)
 
 
 def apply_decision_and_register(

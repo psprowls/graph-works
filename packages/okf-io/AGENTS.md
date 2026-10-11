@@ -158,6 +158,27 @@ that skips recomputing it, not a change in behaviour.
 
 `prune=` on `load_bundle()` / `bundle._load_at()` is another of okf-io's extension points: `fnmatchcase` globs matched against a *directory's* bundle-relative path (`*` crosses `/`). A matching directory is never listed — both walks check it at the moment the child would be pushed — and its id lands in `Bundle.pruned`; nothing beneath it appears in any other field, not even `unreadable`. The `.git`, root-dot and directory-symlink exclusions win, and the bundle root is never pruned. `prune` is independent of `ignore=`: `ignored` must stay a complete file enumeration because work-tracker's reparent/adopt/archive and the index writers depend on it, which is why pruning is opt-in rather than inferred from ignore patterns (epic ledger entry 015). `member_id` / `has_member` still answer for a real file beneath a pruned root through an uncached, path-rooted `lstat` probe that refuses empty, `.`, `..` and `.git` components and intermediate symlinks, so a link into a present file resolves and one into an absent file is an ordinary `links.broken` warn. `Bundle.pruned` is keyword-only with an empty default so a `Bundle` subclass can still add a required field.
 
+`only=` on `load_bundle()` / `bundle._load_at()` is the seventh extension point.
+`only=None` preserves the full load. With `only=S`, a concept, index or log is
+read and parsed only when its raw id or NFC-canonical id matches S; every other
+markdown member lands in `Bundle.unloaded` and still participates in canonical
+identity and collision tracking. Assets and ignored members are unchanged.
+`unreadable` records failures only for attempted file reads, plus unreadable
+directories. `member_id` / `has_member` resolve unloaded members from inventory
+without a filesystem probe. Document mappings and views see only parsed members;
+rules see only parsed members, while cross-document rules resolve targets through
+`member_id`. `Bundle.partial` records the raw admitted markdown ids, including
+failed reads, or `None` for a full load; both new fields are keyword-only with
+defaults so subclasses may add required fields. `reuse=` maps raw ids to prior
+documents and requires `only=` (`ValueError` otherwise). The loader still reads
+each selected file and returns the same object only if it is clean, its path
+matches and its UTF-8-decoded text equals `raw_text` exactly; changed, dirty or
+moved members are parsed again. `inventory=` on `load_bundle()` accepts a walk
+the caller took from the same root with the same `prune=` contract, reclassifies
+its members under the load's own `ignore=`, and skips a second directory walk.
+The walk has no provenance to verify that caller contract. `_load_at` accepts
+`only=` and `reuse=` but always walks through its descriptor security boundary.
+
 `_common.py` is underscore-prefixed precisely to keep it out of the registry —
 adding a non-rule helper module means prefixing it too.
 

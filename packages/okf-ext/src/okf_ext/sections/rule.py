@@ -13,7 +13,7 @@ from collections.abc import Iterable, Iterator
 
 from okf_io import Finding, Rule, RuleContext, Severity
 
-from okf_ext.body import Section, normalized_text, sections
+from okf_ext.body import Section, document_sections, normalized_text, sections
 from okf_ext.shape import SectionSet, TypeSections, word_count
 
 #: The topic prefix this rule set claims. `validate()` raises the moment an
@@ -56,8 +56,13 @@ def _findings(
     path: str,
     offset: int,
     severity: Severity,
+    body_sections: tuple[Section, ...] | None = None,
 ) -> Iterator[Finding]:
-    considered = _considered(body, declaration)
+    if body_sections is None:
+        considered = _considered(body, declaration)
+    else:
+        levels = {spec.level for spec in declaration.sections}
+        considered = tuple(section for section in body_sections if section.level in levels)
     declared = {spec.heading.casefold() for spec in declaration.sections}
 
     for spec in declaration.sections:
@@ -183,6 +188,7 @@ def section_rule(section_set: SectionSet, *, severity: Severity = "warn") -> Rul
                 path=path,
                 offset=document.body_line_offset,
                 severity=severity,
+                body_sections=document_sections(document),
             )
 
     return rule

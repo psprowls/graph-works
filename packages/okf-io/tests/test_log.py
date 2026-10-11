@@ -281,3 +281,28 @@ def test_diff_renders_a_unified_diff_of_the_append():
     assert "a/log.md" in diff
     assert "b/log.md" in diff
     assert f"+- {NEW}" in diff
+
+
+def test_log_read_append_and_reserved_validation_share_document_tokens(tmp_path, monkeypatch):
+    from markdown_it import MarkdownIt
+    from okf_io import _md, load_bundle, validate
+
+    path = tmp_path / "log.md"
+    write(path, "# History\n\n## not a date\n\n- old\n")
+    bundle = load_bundle(tmp_path)
+    document = bundle.logs[""]
+    expected = log.parse(document)
+    expected_findings = validate(bundle, today=date(2026, 8, 22)).findings
+    expected_append = log.append(document, "new", on=date(2026, 8, 22))
+    document.markdown()
+    _md.parse_body.cache_clear()
+
+    def unexpected(*args, **kwargs):
+        pytest.fail("Document consumers must share its existing Markdown tokens")
+
+    monkeypatch.setattr(MarkdownIt, "parse", unexpected)
+    assert log.parse(document) == expected
+    assert validate(bundle, today=date(2026, 8, 22)).findings == expected_findings
+    appended = log.append(document, "new", on=date(2026, 8, 22))
+    assert appended.before == expected_append.before
+    assert appended.after == expected_append.after

@@ -2,7 +2,7 @@ from pathlib import Path
 from types import MappingProxyType
 
 import pytest
-from okf_io import load_bundle
+from okf_io import Document, load_bundle
 from work_helpers import load_written_items, make_item, write_item
 from work_tracker_okf.mutation import (
     DirectoryPrecondition,
@@ -256,28 +256,35 @@ _PAGE_WITH_DANGLING_SOURCE = (
 
 def test_rebase_item_sources_rewrites_a_dangling_pointer() -> None:
     mapping = {"work/bug-old": "work/_archive/bug-old"}
+    document = Document.parse(_PAGE_WITH_DANGLING_SOURCE.decode("utf-8"))
 
-    after = _rebase_item_sources(_PAGE_WITH_DANGLING_SOURCE, mapping)
+    edits = _rebase_item_sources(document, "work/bug-old.md", (), mapping)
 
-    assert b"/work/_archive/bug-old/references/01-design.md" in after
-    assert b"/work/bug-old/references/01-design.md" not in after
+    assert [(edit.key, edit.old, edit.new) for edit in edits] == [
+        (
+            "sources.0.resource",
+            "/work/bug-old/references/01-design.md",
+            "/work/_archive/bug-old/references/01-design.md",
+        )
+    ]
 
 
-def test_rebase_item_sources_is_a_byte_identity_no_op_when_nothing_matches() -> None:
+def test_rebase_item_sources_needs_no_extra_edits_when_nothing_matches() -> None:
     mapping = {"work/some-other-item": "work/_archive/some-other-item"}
+    document = Document.parse(_PAGE_WITH_DANGLING_SOURCE.decode("utf-8"))
 
-    after = _rebase_item_sources(_PAGE_WITH_DANGLING_SOURCE, mapping)
+    edits = _rebase_item_sources(document, "work/bug-old.md", (), mapping)
 
-    assert after == _PAGE_WITH_DANGLING_SOURCE
+    assert edits == ()
 
 
-def test_rebase_item_sources_leaves_unrelated_frontmatter_untouched() -> None:
+def test_rebase_item_sources_leaves_the_original_document_untouched() -> None:
     mapping = {"work/bug-old": "work/_archive/bug-old"}
+    document = Document.parse(_PAGE_WITH_DANGLING_SOURCE.decode("utf-8"))
 
-    after = _rebase_item_sources(_PAGE_WITH_DANGLING_SOURCE, mapping)
+    _rebase_item_sources(document, "work/bug-old.md", (), mapping)
 
-    assert b"title: T\n" in after
-    assert b"phase: execute\n" in after
+    assert document.serialize().encode("utf-8") == _PAGE_WITH_DANGLING_SOURCE
 
 
 def test_dangling_stamped_resource_is_rebased_by_the_planner(tmp_path: Path) -> None:

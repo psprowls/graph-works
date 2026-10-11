@@ -6032,13 +6032,13 @@
       "short_help": "Move a complete work subtree beneath PARENT_PATH.",
       "usage": [
         "[OPTIONS]",
-        "{path}"
+        "{path}..."
       ],
       "arguments": [
         {
           "name": "path",
           "required": true,
-          "nargs": 1
+          "nargs": -1
         }
       ],
       "options": [

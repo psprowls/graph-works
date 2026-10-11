@@ -32,12 +32,13 @@ rather than in the shared layer; hoist it the day a second capability wants it.
 from __future__ import annotations
 
 import re
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 from dataclasses import dataclass
 
 from markdown_it import MarkdownIt
+from okf_io import Document
 
-from okf_ext.body import _reference, prose_lines, split_lines
+from okf_ext.body import _reference, document_prose_lines, prose_lines, split_lines
 
 #: One shared parser. `commonmark` deliberately, matching `okf_io._md` and
 #: `okf_ext.body`: no linkify, so a bare URL in prose does not become an edge.
@@ -284,7 +285,15 @@ def destinations(body: str) -> tuple[Candidate, ...]:
     `okf_io.links.parse_destination` has spoken. Locating and resolving stay
     apart so neither has to know about the other's edge cases.
     """
-    prose = prose_lines(body)
+    return _destinations(body, prose_lines(body))
+
+
+def document_destinations(document: Document) -> tuple[Candidate, ...]:
+    """:func:`destinations` over *document*'s memoized parse; no second parse."""
+    return _destinations(document.body, document_prose_lines(document))
+
+
+def _destinations(body: str, prose: frozenset[int]) -> tuple[Candidate, ...]:
     body_lines = split_lines(body)
     masked_lines = list(body_lines)
     for run in _prose_runs(prose, len(body_lines)):
@@ -317,10 +326,19 @@ def reference_definitions(body: str) -> tuple[RefDef, ...]:
     references = env.get("references")
     if not isinstance(references, dict):
         return ()
+    return _definitions(body, references)
+
+
+def document_reference_definitions(document: Document) -> tuple[RefDef, ...]:
+    """:func:`reference_definitions` over *document*'s memoized parse."""
+    return _definitions(document.body, document.markdown().references)
+
+
+def _definitions(body: str, references: Mapping[str, object]) -> tuple[RefDef, ...]:
     lines = split_lines(body)
     found: list[RefDef] = []
     for label, info in references.items():
-        if not isinstance(info, dict):
+        if not isinstance(info, Mapping):
             continue
         href = info.get("href")
         span = info.get("map")
@@ -342,5 +360,7 @@ __all__ = [
     "Candidate",
     "RefDef",
     "destinations",
+    "document_destinations",
+    "document_reference_definitions",
     "reference_definitions",
 ]

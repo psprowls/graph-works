@@ -391,3 +391,31 @@ def test_the_factory_adds_the_same_one_rule_for_repo_roots(tmp_path: Path) -> No
     from work_tracker_okf._rules._common import LaneConfig
 
     assert len(plan.rules(LaneConfig(repo_roots=(tmp_path,)))) == 2
+
+
+@pytest.mark.parametrize(
+    "body",
+    [MISSING_DONE_WHEN, MALFORMED, NO_SECTION, EMPTY_PLAN_BODY, OK_TABLE.replace("Ship it", "packages/missing.py")],
+)
+def test_plan_table_and_action_rules_share_document_tokens_with_exact_findings(tmp_path, monkeypatch, body):
+    from markdown_it import MarkdownIt
+    from okf_ext import body as body_mod
+    from okf_ext.tables.read import _scan
+    from okf_io import RuleContext, build_link_graph, load_bundle
+    from work_tracker_okf._rules import plan
+
+    write_item(tmp_path, "feature-x", "type: Feature\nwork_status: accepted\nphase: execute\n", body=body)
+    bundle = load_bundle(tmp_path)
+    context = RuleContext(bundle=bundle, links=build_link_graph(bundle), today=TODAY)
+    actions = plan._actions((tmp_path,), tmp_path)
+    expected = (*plan.table(context), *actions(context))
+    for document in bundle.concepts.values():
+        document.markdown()
+    body_mod._skeleton.cache_clear()
+    _scan.cache_clear()
+
+    def unexpected(*args, **kwargs):
+        pytest.fail("plan validation must share the Document CommonMark tokens")
+
+    monkeypatch.setattr(MarkdownIt, "parse", unexpected)
+    assert (*plan.table(context), *actions(context)) == expected

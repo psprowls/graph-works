@@ -166,18 +166,15 @@ def test_markdown_projection_materialized_before_writer_lock(tmp_path, monkeypat
         {f"p{i:04}.md": f"---\ntitle: P{i}\n{source}---\n# Heading {i}\n[x](other.md)\n" for i in range(count)},
     )
     with open_index(tmp_path / "i.db", root) as index:
-        real = _md.parse_body
-        real.cache_clear()
+        real = _md.tokenize
         calls = []
 
         def observed(body):
-            before = real.cache_info().misses
-            result = real(body)
-            calls.append((index.connection.in_transaction, real.cache_info().misses > before))
-            return result
+            calls.append(index.connection.in_transaction)
+            return real(body)
 
-        monkeypatch.setattr(_md, "parse_body", observed)
+        monkeypatch.setattr(_md, "tokenize", observed)
         reconcile(index)
-        assert sum(miss for _, miss in calls) >= count
-        assert not any(locked for locked, _ in calls)
+        assert len(calls) >= count
+        assert not any(calls)
         assert_view_equivalent(index)

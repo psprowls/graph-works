@@ -31,7 +31,15 @@ def _bundle(root: Path, names: tuple[str, ...] = ("a", "b", "c")) -> Path:
 def test_counts_start_at_zero() -> None:
     with counting() as counts:
         pass
-    assert counts.as_dict() == {"files_parsed": 0, "link_graph_builds": 0, "git_calls": 0, "pages_hashed": 0, "pages_tokenized": 0}
+    assert counts.as_dict() == {
+        "files_parsed": 0,
+        "link_graph_builds": 0,
+        "git_calls": 0,
+        "pages_hashed": 0,
+        "pages_tokenized": 0,
+        "markdown_parses": 0,
+        "walks": 0,
+    }
 
 
 def test_every_parse_counts_once(tmp_path: Path) -> None:
@@ -122,7 +130,15 @@ def test_counting_is_not_reentrant() -> None:
 
 
 def test_counts_is_a_plain_dataclass() -> None:
-    assert Counts(1, 2, 3).as_dict() == {"files_parsed": 1, "link_graph_builds": 2, "git_calls": 3, "pages_hashed": 0, "pages_tokenized": 0}
+    assert Counts(1, 2, 3).as_dict() == {
+        "files_parsed": 1,
+        "link_graph_builds": 2,
+        "git_calls": 3,
+        "pages_hashed": 0,
+        "pages_tokenized": 0,
+        "markdown_parses": 0,
+        "walks": 0,
+    }
 
 
 def test_counts_pages_hashed_and_tokenized(tmp_path: Path) -> None:

@@ -72,8 +72,16 @@ def probes(monkeypatch: pytest.MonkeyPatch) -> Counter[str]:
     from graph_works_core.query import commands as q
     from graph_works_core.query import lexical_store as ls
     from okf_ext.readindex import sync
+    from okf_io import Document
 
     seen: Counter[str] = Counter()
+    real_parse = Document.parse.__func__
+
+    def counted_parse(cls, text, *, path=None):
+        seen["doc_parses"] += 1
+        return real_parse(cls, text, path=path)
+
+    monkeypatch.setattr(Document, "parse", classmethod(counted_parse))
 
     def wrap(module, name, key, weight=lambda *a, **k: 1):
         real = getattr(module, name)

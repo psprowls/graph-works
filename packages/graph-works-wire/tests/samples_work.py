@@ -924,6 +924,9 @@ WORK: dict[str, tuple[Callable[[], object], ...]] = {
     "work.path_mutation_payload": (
         lambda: work.path_mutation_payload(path_mutation(applied=True)),
         lambda: work.path_mutation_payload(path_mutation(applied=False)),
+        lambda: work.path_mutation_payload(path_mutation(applied=False), sources=()),
+        lambda: work.path_mutation_payload(path_mutation(applied=False), sources=("work/a",)),
+        lambda: work.path_mutation_payload(path_mutation(applied=True), sources=("work/a", "work/b")),
     ),
     "work.decision_payload": (
         lambda: work.decision_payload(decision(planned=True)),

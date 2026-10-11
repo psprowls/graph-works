@@ -1003,9 +1003,10 @@ def archive_payload(run: ArchiveRun, *, dry_run: bool) -> dict[str, Any]:
     }
 
 
-def path_mutation_payload(result: PathMutationResult) -> dict[str, Any]:
+def path_mutation_payload(result: PathMutationResult, *, sources: Sequence[str] | None = None) -> dict[str, Any]:
     return {
         "path_mapping": dict(result.plan.path_mapping),
+        **({"sources": list(sources)} if sources is not None and len(sources) > 1 else {}),
         "indexes": [write.member for write in result.plan.writes if write.member.endswith("index.md")],
         "warnings": [*result.plan.warnings, *(() if result.application is None else result.application.warnings)],
         "refusals": [_refusal(refusal) for refusal in result.plan.refusals],

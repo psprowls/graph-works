@@ -26,9 +26,10 @@ could still read as a footnote reference.
 from __future__ import annotations
 
 import re
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from functools import lru_cache
+from types import MappingProxyType
 
 from markdown_it import MarkdownIt
 from markdown_it.rules_block import StateBlock, reference
@@ -66,6 +67,32 @@ def _reference(state: StateBlock, start_line: int, end_line: int, silent: bool) 
 
 # The commonmark reference rule has no alternate chains; retain that setup.
 _MD.block.ruler.at("reference", _reference)
+
+
+@dataclass(frozen=True, slots=True, eq=False)
+class ParsedMarkdown:
+    """One markdown-it parse of a body: block tokens and reference definitions.
+
+    ``references`` is markdown-it's ``env["references"]``. Definitions vanish
+    from the token stream, so this is where a consumer can still read them.
+    Identity equality: ``Token`` is mutable, and two parses are never interchangeable.
+    """
+
+    tokens: tuple[Token, ...]
+    references: Mapping[str, Mapping[str, object]]
+
+
+def tokenize(body: str) -> ParsedMarkdown:
+    """Parse *body* once with the shared parser. ``Document.markdown`` is the cache."""
+    env: dict[str, object] = {}
+    tokens = tuple(_MD.parse(body, env))
+    raw = env.get("references")
+    references: dict[str, Mapping[str, object]] = (
+        {str(k): MappingProxyType(dict(v)) for k, v in raw.items() if isinstance(v, dict)}
+        if isinstance(raw, dict)
+        else {}
+    )
+    return ParsedMarkdown(tokens, MappingProxyType(references))
 
 
 @dataclass(frozen=True, slots=True)
@@ -293,16 +320,8 @@ def _first_link(text: str) -> tuple[str | None, str | None]:
     return None, None
 
 
-@lru_cache(maxsize=512)  # generous headroom for one process's largest bundle walk; not tuned
-def parse_body(body: str) -> BodyIndex:
-    """Index *body*. Memoized, so no consumer can parse the same body twice.
-
-    Spec §9.3 requires one parse per body. Two call sites want the same one --
-    ``links.build`` for the graph and ``models._scan_citations`` for the
-    citations fallback -- so the guarantee is made structural here rather than
-    left as a convention both modules have to remember. ``BodyIndex`` is
-    frozen, so sharing one is safe.
-    """
+def index_tokens(body: str, parsed: ParsedMarkdown) -> BodyIndex:
+    """Index an already-parsed *body*. Pure: no parse happens here."""
     links: list[MdLink] = []
     code_blocks: list[CodeBlock] = []
     headings: list[Heading] = []
@@ -318,7 +337,7 @@ def parse_body(body: str) -> BodyIndex:
     quote_depth = 0
     item_stack: list[_OpenItem] = []
 
-    for token in _MD.parse(body):
+    for token in parsed.tokens:
         if token.type == "heading_open":
             in_heading = True
             heading_line = _line_of(token.map)
@@ -379,6 +398,12 @@ def parse_body(body: str) -> BodyIndex:
     )
 
 
+@lru_cache(maxsize=512)  # generous headroom for one process's largest bundle walk; not tuned
+def parse_body(body: str) -> BodyIndex:
+    """Index *body* from a string. ``Document.body_index`` is the memoized document path."""
+    return index_tokens(body, tokenize(body))
+
+
 def code_blocks_under(index: BodyIndex, heading: str) -> tuple[CodeBlock, ...]:
     """Code blocks whose nearest preceding heading is *heading* (case-folded)."""
     wanted = heading.casefold()
@@ -397,7 +422,7 @@ def paragraphs_under(index: BodyIndex, heading: str) -> tuple[Paragraph, ...]:
     return tuple(item for item in index.paragraphs if item.heading == wanted)
 
 
-def citations_section(body: str) -> CitationsSection | None:
+def citations_section(body: str, *, index: BodyIndex | None = None) -> CitationsSection | None:
     """Locate a v0.1 ``# Citations`` section: what it holds, and where it sits.
 
     One locator, two callers. ``models._scan_citations`` reads the entries for
@@ -416,11 +441,11 @@ def citations_section(body: str) -> CitationsSection | None:
     fenced block or a blockquote leaves a line uncovered, and the section is
     not pure.
 
-    Takes the body rather than a ``BodyIndex`` because ``parse_body`` is
-    memoized: passing the text cannot desync the entries from the lines they
-    were located in, and costs nothing.
+    An optional *index* reuses a document's already-indexed body. String-only
+    callers retain the memoized ``parse_body`` path.
     """
-    index = parse_body(body)
+    if index is None:
+        index = parse_body(body)
     # A blockquoted heading is somebody else's content, exactly like a
     # blockquoted `[1] ...` line -- so it is never the anchor, and (below) it
     # is never what ends the section either. A real section that happens to

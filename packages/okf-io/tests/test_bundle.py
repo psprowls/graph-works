@@ -117,12 +117,20 @@ def test_an_unreadable_subdirectory_becomes_unreadable_not_a_silent_drop(tmp_pat
     denied_dir.chmod(0o000)
     try:
         loaded = bundle.load(tmp_path)
+        descriptor = os.open(tmp_path, os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            anchored = bundle._load_at(tmp_path, descriptor)
+        finally:
+            os.close(descriptor)
     finally:
         denied_dir.chmod(0o755)
     assert set(loaded.concepts) == {"outside"}
     assert "denied/inside" not in loaded.concepts
     assert "denied" in loaded.unreadable
     assert "could not be read" in loaded.unreadable["denied"]
+    assert loaded.unreadable_dirs == anchored.unreadable_dirs == {"denied"}
+    assert set(anchored.unreadable) == set(loaded.unreadable) == {"denied"}
+    assert "Permission denied" in anchored.unreadable["denied"]
 
 
 def test_a_nonexistent_root_raises(tmp_path):
@@ -258,6 +266,7 @@ def test_descriptor_rooted_load_matches_path_load_and_leaves_caller_fd_open(tmp_
     assert actual.assets == expected.assets
     assert actual.ignored == expected.ignored
     assert actual.unreadable == expected.unreadable
+    assert actual.unreadable_dirs == expected.unreadable_dirs == frozenset()
     assert tuple(actual.concepts) == tuple(expected.concepts)
     assert tuple(actual.indexes) == tuple(expected.indexes)
     assert tuple(actual.logs) == tuple(expected.logs)

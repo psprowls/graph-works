@@ -1,7 +1,8 @@
 """Materialize display reads into rows without a connection or Document.
 
 The snapshot outlives its source session and serves handler threads without
-filesystem access. Ignore overlays retain the producer's alias and graph rules.
+probing existence; `content()` alone reads the one file it serves. Ignore overlays
+retain the producer's alias and graph rules.
 """
 
 from __future__ import annotations
@@ -10,11 +11,12 @@ import threading
 from collections.abc import Mapping, Sequence
 from copy import deepcopy
 from dataclasses import dataclass, replace
-from pathlib import PurePosixPath
+from pathlib import Path, PurePosixPath
 from types import MappingProxyType
+from typing import cast
 
-from okf_ext.readindex import Diagnostics, MemberRow, member_row
-from okf_io import Heading, Link
+from okf_ext.readindex import Diagnostics, MemberRow, PageContent, StoredContent, member_row, read_content
+from okf_io import Heading, Link, Unreadable
 from okf_io.bundle import MemberKind, canonical_id
 from work_tracker_okf.items import IGNORE
 from work_tracker_okf.snapshot import WorkSnapshot
@@ -92,6 +94,8 @@ class SnapshotSession:
         backlinks: Mapping[str, tuple[str, ...]],
         broken: tuple[Link, ...],
         headings: Mapping[str, tuple[Heading, ...]],
+        content_root: Path | None,
+        stored: Mapping[str, StoredContent | None],
         diagnostics: Diagnostics,
         work: WorkSnapshot,
         all_work: WorkSnapshot,
@@ -111,6 +115,8 @@ class SnapshotSession:
         self._backlinks = backlinks
         self._broken = broken
         self._headings = headings
+        self._content_root = content_root
+        self._stored = stored
         self._diagnostics = diagnostics
         self._overlays: dict[tuple[str, ...], _Overlay] = {}
         self._overlay_lock = threading.Lock()
@@ -261,6 +267,14 @@ class SnapshotSession:
     def headings(self, member_id: str) -> tuple[Heading, ...]:
         return self._headings.get(member_id, ())
 
+    def content(self, member_id: str) -> PageContent | Unreadable | None:
+        """Read one file in the calling thread; a verified captured row costs no parse (item D-001)."""
+        if member_id not in self._stored:
+            return None
+        if self._content_root is None:
+            return Unreadable("content root was not captured")
+        return read_content(self._content_root, member_id, self._stored[member_id])
+
     def diagnostics(self, *, ignore: Sequence[str] = ()) -> Diagnostics:
         return self._overlay(ignore).diagnostics
 
@@ -288,6 +302,15 @@ def materialize(session: ReadSession) -> SnapshotSession:
     diagnostics = session.diagnostics()
     all_diagnostics = session.diagnostics(ignore=("*",))
     unreadable_files = frozenset(diagnostics.unreadable) - frozenset(all_diagnostics.unreadable)
+    root: object = getattr(session, "content_root", None)
+    stored_of: object = getattr(session, "stored_content", None)
+    markdown = sorted(
+        {row.id for row in rows if row.kind in ("concept", "index", "log")}
+        | {mid for mid in unreadable_files if mid.endswith(".md")}
+    )
+    stored: Mapping[str, StoredContent | None] = MappingProxyType(
+        {mid: cast(StoredContent | None, stored_of(mid)) if callable(stored_of) else None for mid in markdown}
+    )
     concepts = [row.concept_id for row in rows if row.concept_id is not None]
     outlinks = MappingProxyType({cid: session.outlinks(cid) for cid in concepts})
     backlinks = MappingProxyType({cid: session.backlinks(cid) for cid in concepts})
@@ -310,6 +333,8 @@ def materialize(session: ReadSession) -> SnapshotSession:
         backlinks=backlinks,
         broken=session.broken(),
         headings=headings,
+        content_root=root if isinstance(root, Path) else None,
+        stored=stored,
         diagnostics=replace(
             diagnostics,
             unreadable=MappingProxyType(dict(diagnostics.unreadable)),

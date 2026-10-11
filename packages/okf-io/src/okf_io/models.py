@@ -9,7 +9,7 @@ to the ``validate`` module.
 from __future__ import annotations
 
 import re
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from datetime import date, datetime
 from types import MappingProxyType
@@ -537,7 +537,7 @@ def _build_attester(
     )
 
 
-def _scan_citations(body: str) -> tuple[Source, ...]:
+def _scan_citations(body: str, *, body_index: Callable[[], _md.BodyIndex] | None = None) -> tuple[Source, ...]:
     """Collect a v0.1 body ``# Citations`` list.
 
     Delegates to ``_md.citations_section``, the locator the migration rewriter
@@ -560,7 +560,7 @@ def _scan_citations(body: str) -> tuple[Source, ...]:
     ``pure`` is not consulted. Purity gates the *rewrite*; a section holding
     prose beside its citations still carries citations to read.
     """
-    section = _md.citations_section(body)
+    section = _md.citations_section(body, index=body_index() if body_index is not None else None)
     if section is None:
         return ()
     out: list[Source] = []
@@ -572,12 +572,15 @@ def _scan_citations(body: str) -> tuple[Source, ...]:
     return tuple(out)
 
 
-def build_frontmatter(fm_raw: Mapping[str, Any], *, body: str = "") -> Frontmatter:
+def build_frontmatter(
+    fm_raw: Mapping[str, Any], *, body: str = "", body_index: Callable[[], _md.BodyIndex] | None = None
+) -> Frontmatter:
     """Build the typed view. **Never raises.**
 
     *body* feeds the ``# Citations`` read fallback (see
     ``_scan_citations``): when a document has no ``sources`` in its
     frontmatter, *body* is scanned for a v0.1-era citations list.
+    *body_index* lazily supplies a document's memoized index for that fallback.
     """
     failures: set[str] = set()
     fallbacks: set[str] = set()
@@ -600,7 +603,7 @@ def build_frontmatter(fm_raw: Mapping[str, Any], *, body: str = "") -> Frontmatt
     sources = _build_sources(fm_raw.get("sources"), "sources", failures)
     # Read fallback: v0.1 put citations in the body, not in `sources`.
     if not sources and body:
-        cited = _scan_citations(body)
+        cited = _scan_citations(body, body_index=body_index)
         if cited:
             sources = cited
             fallbacks.add("sources")

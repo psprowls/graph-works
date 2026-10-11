@@ -13,7 +13,7 @@ import re
 from collections.abc import Iterable
 from pathlib import Path, PurePosixPath
 
-from okf_ext.tables import Column, TableSpec, read_section
+from okf_ext.tables import Column, TableSpec, document_read_section
 from okf_io import Finding, Rule, RuleContext, Severity
 
 from work_tracker_okf._rules._common import LaneConfig, with_documents
@@ -70,7 +70,7 @@ def table(ctx: RuleContext) -> Iterable[Finding]:
     `SectionRead.matched` is what a future message could name.
     """
     for item, document in with_documents(ctx):
-        read = read_section(document.body, _HEADING, PLAN_TABLE_SPEC)
+        read = document_read_section(document, _HEADING, PLAN_TABLE_SPEC)
         if item.work_status == "accepted" and read.state not in ("ok", "empty"):
             yield _finding(
                 "plan.accepted-without-plan",
@@ -150,7 +150,7 @@ def _actions(repo_roots: tuple[Path, ...], vault_root: Path | None) -> Rule:
 
     def rule(ctx: RuleContext) -> Iterable[Finding]:
         for item, document in with_documents(ctx):
-            read = read_section(document.body, _HEADING, PLAN_TABLE_SPEC)
+            read = document_read_section(document, _HEADING, PLAN_TABLE_SPEC)
             if read.state != "ok":
                 continue
             for row in read.rows:

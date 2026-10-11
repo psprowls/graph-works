@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 
-from okf_io._md import parse_body
 from okf_io.log import iso_date
 from okf_io.validate import Finding, Rule, RuleContext
 
@@ -65,10 +64,8 @@ def indexes(ctx: RuleContext) -> Iterable[Finding]:
 def logs(ctx: RuleContext) -> Iterable[Finding]:
     """§9: date headings MUST use ISO 8601 `YYYY-MM-DD`.
 
-    Reads the body through the memoized ``parse_body``. This is the one place a
-    rule indexes a body the graph does not hold -- ``LinkGraph.bodies`` is
-    keyed by concept id, and a log is not a concept -- so the memo is what
-    keeps "one parse per body" true.
+    Reads the body's headings through the Document's memoized token index,
+    shared with log readers and other consumers of that same Document.
 
     `log.md` frontmatter is deliberately not flagged: §8 restricts it in
     `index.md`, §9 says nothing of the sort, and `acme_retail/log.md` carries
@@ -78,7 +75,7 @@ def logs(ctx: RuleContext) -> Iterable[Finding]:
         document = ctx.bundle.logs[directory_id]
         path = _reserved_path(directory_id, "log.md")
         offset = document.body_line_offset
-        for heading in parse_body(document.body).headings:
+        for heading in document.body_index().headings:
             if heading.level != 2:
                 continue
             if iso_date(heading.text) is None:

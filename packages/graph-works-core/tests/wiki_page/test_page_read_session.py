@@ -1,4 +1,4 @@
-"""`page_read` over a read session: exact-id parity, one-file parse, stored edges."""
+"""`page_read` over a read session: exact-id parity, warm-zero parses, stored edges."""
 
 from __future__ import annotations
 
@@ -7,11 +7,10 @@ import sys
 import unicodedata
 
 import pytest
-from graph_works_core.read_session import bundle_backend, open_read_session
-from graph_works_core.wiki_page import commands as wiki_commands
+from graph_works_core.read_session import BundleSession, bundle_backend, materialize, open_read_session
 from graph_works_core.wiki_page import page_read, run_page_read
 from okf_ext import readindex
-from okf_ext.readindex import sync
+from okf_io.document import Document
 from read_model_helpers import age_bundle, new_layout, oracle_page_read, populate_generated, write
 
 
@@ -25,12 +24,14 @@ def layout(tmp_path):
 
 @pytest.fixture
 def counters(monkeypatch):
-    seen = {"core_parse": [], "index_parse": [], "graphs": 0, "loads": 0, "reconciles": 0}
-    real_core, real_sync = wiki_commands.read_member, sync.read_member
-    monkeypatch.setattr(
-        wiki_commands, "read_member", lambda root, mid: seen["core_parse"].append(mid) or real_core(root, mid)
-    )
-    monkeypatch.setattr(sync, "read_member", lambda root, mid: seen["index_parse"].append(mid) or real_sync(root, mid))
+    seen = {"parses": [], "graphs": 0, "loads": 0, "reconciles": 0}
+    real_parse = Document.parse
+
+    def parse(cls, text, *, path=None):
+        seen["parses"].append(path)
+        return real_parse(text, path=path)
+
+    monkeypatch.setattr(Document, "parse", classmethod(parse))
     real_graph, real_load = bundle_backend.build_link_graph, bundle_backend.load_bundle_at
 
     def graph(*a, **k):
@@ -43,9 +44,9 @@ def counters(monkeypatch):
 
     real_reconcile = readindex.reconcile
 
-    def reconcile(index):
+    def reconcile(index, **kwargs):
         seen["reconciles"] += 1
-        return real_reconcile(index)
+        return real_reconcile(index, **kwargs)
 
     monkeypatch.setattr(bundle_backend, "build_link_graph", graph)
     monkeypatch.setattr(bundle_backend, "load_bundle_at", load)
@@ -54,8 +55,7 @@ def counters(monkeypatch):
 
 
 def _reset(seen) -> None:
-    seen["core_parse"].clear()
-    seen["index_parse"].clear()
+    seen["parses"].clear()
     seen["graphs"] = seen["loads"] = seen["reconciles"] = 0
 
 
@@ -64,12 +64,11 @@ def test_page_read_matches_the_full_load(layout) -> None:
         assert run_page_read(layout, page_id) == oracle_page_read(layout, page_id)
 
 
-def test_warm_page_read_parses_one_file_and_builds_no_graph(layout, counters) -> None:
+def test_warm_page_read_parses_no_files_and_builds_no_graph(layout, counters) -> None:
     run_page_read(layout, "docs/p")  # warm-up: builds the index
     _reset(counters)
     run_page_read(layout, "docs/p")
-    assert counters["core_parse"] == ["docs/p.md"]
-    assert counters["index_parse"] == []
+    assert counters["parses"] == []
     assert (counters["graphs"], counters["loads"]) == (0, 0)
 
 
@@ -81,8 +80,7 @@ def test_unrelated_pages_do_not_change_the_cost(layout, counters) -> None:
     run_page_read(layout, "docs/p")  # warm again after the additions
     _reset(counters)
     result = run_page_read(layout, "docs/p")
-    assert counters["core_parse"] == ["docs/p.md"]
-    assert counters["index_parse"] == []
+    assert counters["parses"] == []
     assert (counters["graphs"], counters["loads"]) == (0, 0)
     assert len([b for b in result.backlinks if b.startswith("docs/extra/")]) == 50
 
@@ -140,3 +138,45 @@ def test_one_session_serves_two_reads_without_reconciling_again(layout, counters
         second = page_read(session, layout, "docs/p")
     assert first == second
     assert counters["reconciles"] == 1
+
+    assert counters["parses"] == []
+
+
+@pytest.mark.parametrize("edited", ["docs/p.md", "docs/café.md"])
+def test_one_edit_parses_only_the_edited_file(layout, counters, edited) -> None:
+    run_page_read(layout, "docs/p")
+    write(layout, edited, "---\ntitle: Edited\n---\nUpdated body.\n")
+    age_bundle(layout)
+    _reset(counters)
+    result = run_page_read(layout, "docs/p")
+    assert counters["parses"] == [layout.bundle_dir / edited]
+    assert (counters["graphs"], counters["loads"]) == (0, 0)
+    if edited == "docs/p.md":
+        assert result.frontmatter["title"] == "Edited"
+        assert result.body == "Updated body.\n"
+
+
+def test_materialized_session_serves_warm_page_after_source_closes(layout, counters) -> None:
+    with open_read_session(layout) as source:
+        assert source.backend == "index"
+        snapshot = materialize(source)
+        expected = page_read(source, layout, "docs/p")
+    _reset(counters)
+    assert run_page_read(layout, "docs/p", session=snapshot) == expected
+    assert counters["parses"] == []
+    assert counters["reconciles"] == 0
+
+
+def test_bundle_page_keeps_the_pinned_content(layout, counters) -> None:
+    source = BundleSession(layout.bundle_dir, fallback=None)
+    expected = page_read(source, layout, "docs/p")
+    write(layout, "docs/p.md", "---\ntitle: Later\n---\nLater body.\n")
+    _reset(counters)
+    assert run_page_read(layout, "docs/p", session=source) == expected
+    assert counters["parses"] == []
+
+
+def test_page_frontmatter_is_read_only(layout) -> None:
+    result = run_page_read(layout, "docs/p")
+    with pytest.raises(TypeError):
+        result.frontmatter["title"] = "Changed"

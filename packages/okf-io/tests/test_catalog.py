@@ -213,8 +213,8 @@ def test_output_does_not_depend_on_mapping_order():
     assert validate(shuffled, today=GOLDEN_TODAY).findings == _fresh_golden_report().findings
 
 
-def test_one_parse_per_body(monkeypatch):
-    """Asserted by counting markdown-it invocations, not by inspection."""
+def test_one_parse_per_document_body(monkeypatch):
+    """Each concept owns one parse, including the frontmatter citations fallback."""
     _md.parse_body.cache_clear()
     calls: list[str] = []
     original = _md._MD.parse
@@ -225,8 +225,16 @@ def test_one_parse_per_body(monkeypatch):
 
     monkeypatch.setattr(_md._MD, "parse", counting)
     loaded = bundle.load(NONCONFORMANT)
+    for document in loaded.concepts.values():
+        _ = document.fm
+        document.body_index()
+    assert len(calls) == len(loaded.concepts)
+    calls.clear()
     validate(loaded, today=GOLDEN_TODAY)
-    assert len(calls) == len(set(calls))
+    assert len(calls) == len(loaded.logs)
+    calls.clear()
+    validate(loaded, today=GOLDEN_TODAY)
+    assert calls == []
 
 
 def test_tolerance_an_unknown_type_is_not_an_error(tmp_path):

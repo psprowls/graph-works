@@ -31,7 +31,7 @@ from okf_io import Bundle, Document, build_link_graph
 from okf_io.bundle import INDEX_NAME, LOG_NAME, canonical_id
 from okf_io.links import is_external, parse_destination, resolve_path, resolve_reference
 
-from okf_ext.body import wikilinks as body_wikilinks
+from okf_ext.body import document_wikilinks
 from okf_ext.moves import locate
 from okf_ext.moves.model import FrontmatterPath, Move, MovePlan, RefEdit, ReferenceField, Refusal, Stranded, Unrebased
 from okf_ext.writing import body_digest
@@ -292,7 +292,7 @@ def _body_edits(
     edits: list[RefEdit] = []
     unrebased: list[Unrebased] = []
     located_into_moved = 0
-    for candidate in locate.destinations(document.body):
+    for candidate in locate.document_destinations(document):
         path_part, _fragment, external = parse_destination(candidate.text)
         if external or not path_part:
             continue
@@ -583,7 +583,7 @@ def stranded(
         if document.parse_error is not None or not document.body:
             continue
         offset = document.body_line_offset
-        for occurrence in body_wikilinks(document.body):
+        for occurrence in document_wikilinks(document):
             if occurrence.target is None:
                 continue  # malformed: `render.wikilink`'s concern, not this one's
             candidate = _stranded_candidate(occurrence.target, keys)
@@ -711,7 +711,7 @@ def _plan_moves(
             )
             continue
 
-        for definition in locate.reference_definitions(document.body):
+        for definition in locate.document_reference_definitions(document):
             if is_external(definition.href):
                 continue
             href_path = parse_destination(definition.href)[0]

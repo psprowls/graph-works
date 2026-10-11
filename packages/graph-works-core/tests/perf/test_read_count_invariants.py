@@ -46,16 +46,9 @@ PROBES = (
 )
 WORK_PROBES = ("work.status", "work.list", "work.item", "work.queue")
 SIZES = (100, 1_000)
-DISPLAY_PARSE_BUGS = {
-    "work.item": "work/bug-work-item-warm-read-breaks-the",
-    "work.queue": "work/bug-work-queue-read-count-invariants",
-    "wiki.page": "work/bug-wiki-page-warm-read-breaks-the",
-    "wiki.tree": "work/bug-wiki-tree-warm-zero-parses",
-}
+DISPLAY_PARSE_BUGS: dict[str, str] = {}
 EDIT_PARSE_BUGS = {
     **DISPLAY_PARSE_BUGS,
-    "search.brief-lexical": "work/bug-search-brief-one-edit-reparse",
-    "search.brief-hybrid": "work/bug-search-brief-one-edit-reparse",
 }
 
 
@@ -190,6 +183,17 @@ def test_one_file_edit_parses_one_file(tmp_path: Path, probe: str) -> None:
         assert READS[probe](target) is not None
     assert counts.files_parsed == 1, probe
     assert counts.link_graph_builds == 0, probe
+
+
+def test_work_queue_one_file_edit_parses_one_file_at_1000_items(tmp_path: Path) -> None:
+    corpus = generate(tmp_path / "corpus", items=1_000, wiki_pages=10)
+    target = _target(corpus)
+    _prime("work.queue", target)
+    edited = corpus.layout.bundle_dir / "work/feature-00004.md"
+    edited.write_text(edited.read_text(encoding="utf-8") + "\nEdited.\n", encoding="utf-8", newline="\n")
+    with _bounded_counting(1) as counts:
+        assert READS["work.queue"](target) is not None
+    assert (counts.files_parsed, counts.link_graph_builds) == (1, 0)
 
 
 @pytest.mark.parametrize("probe", WORK_PROBES)

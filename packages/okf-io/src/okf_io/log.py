@@ -16,7 +16,6 @@ from dataclasses import dataclass
 from datetime import date
 
 from okf_io import _edit
-from okf_io._md import parse_body
 from okf_io.document import Document, rendered_with_body
 
 #: §9's heading level for a dated section.
@@ -125,7 +124,7 @@ def parse(document: Document) -> Log:
     **Only ``##`` headings are recognized as dated sections:** headings at any
     other level (``#``, ``###``, etc.) are invisible to this parser.
     """
-    index = parse_body(document.body)
+    index = document.body_index()
     starts = [h for h in index.headings if h.level == _SECTION_LEVEL]
     sections: list[LogSection] = []
     for position, heading in enumerate(starts):
@@ -276,7 +275,7 @@ def append(
 
     body = document.body
     parsed = parse(document)
-    index = parse_body(body)
+    index = document.body_index()
     marker = _edit.bullet_marker(body, index.list_items, "-")
     newline = _edit.newline_of(body)
     bullet = f"{marker} {text.strip()}"

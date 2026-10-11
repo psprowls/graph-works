@@ -483,7 +483,7 @@ def test_the_documented_tables_surface_is_present() -> None:
     the bundle pair."""
     from okf_ext import tables
 
-    for name in ("read", "read_all", "read_section", "splice_text", "plan_row", "apply"):
+    for name in ("read", "read_all", "read_section", "document_read_section", "splice_text", "plan_row", "apply"):
         assert callable(getattr(tables, name))
 
 
@@ -492,7 +492,16 @@ def test_the_documented_body_surface_is_present() -> None:
     `capability` fixture -- asserted here so the surface is pinned somewhere."""
     from okf_ext import body
 
-    for name in ("sections", "find_section", "normalized_text", "prose_lines", "split_lines"):
+    for name in (
+        "sections",
+        "find_section",
+        "normalized_text",
+        "prose_lines",
+        "document_prose_lines",
+        "document_sections",
+        "document_wikilinks",
+        "split_lines",
+    ):
         assert callable(getattr(body, name))
     assert body.Section.__dataclass_fields__.keys() == {"heading", "level", "start", "body_start", "stop"}
 
@@ -519,9 +528,10 @@ def test_the_documented_moves_surface_is_present() -> None:
     """Spec §4 of the moves work item: four planners, one `apply`."""
     from okf_ext import moves
 
-    for name in ("plan_move", "plan_move_dir", "plan_move_many", "plan_repair", "apply"):
+    for name in ("plan_move", "plan_move_dir", "plan_move_many", "plan_repair", "apply", "scan_touched"):
         assert callable(getattr(moves, name))
     assert moves.REFERENCE_KEYS[0] == "resource"
+    assert moves.TouchedScan.__dataclass_fields__.keys() == {"inventory", "members", "complete", "warnings"}
 
 
 def test_the_tables_capability_claims_no_topic_prefix() -> None:

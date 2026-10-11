@@ -1,8 +1,10 @@
 """Read one wiki page with its frontmatter and link neighbourhood, and the root index as a tree.
 
 Both reads run over a `ReadSession` (`graph_works_core.read_session`): the
-page's frontmatter and body come from parsing that one file, its links from the
-session's stored edges, and tree titles from stored member rows. `run_*` opens a
+page's frontmatter and body come from verified session content without parsing
+unchanged exact indexed rows, its links from the
+session's stored edges. The tree outlines the root index's verified session
+content the same way, with titles from stored member rows. `run_*` opens a
 session (which reconciles the read index) around the session-taking `page_read`
 and `wiki_tree`. No `ignore=` overlay: reference pages are readable too.
 """
@@ -14,7 +16,7 @@ from dataclasses import dataclass
 from types import MappingProxyType
 from typing import Literal, Protocol
 
-from okf_io import Unreadable, read_member
+from okf_io import Unreadable
 from okf_io.bundle import INDEX_NAME
 from okf_io.index import IndexEntry, IndexHeading, outline
 from okf_io.links import Link, parse_destination, resolve_path
@@ -90,14 +92,14 @@ def page_read(session: ReadSession, layout: WorkspaceLayout, page_id: str) -> Pa
     row = _concept_row(session, f"{page_id}.md")
     if row is None:
         return _unknown(page_id)
-    document = read_member(layout.bundle_dir, row.id)
-    if isinstance(document, Unreadable):
+    content = session.content(row.id)
+    if content is None or isinstance(content, Unreadable):
         return _unknown(page_id)
-    error = document.parse_error
+    error = content.parse_error
     return PageRead(
         id=page_id,
-        frontmatter=MappingProxyType(document.fm_data(dates="iso")),
-        body=document.body,
+        frontmatter=MappingProxyType(content.frontmatter),
+        body=content.body,
         outlinks=tuple(_link(link) for link in session.outlinks(page_id)),
         backlinks=tuple(session.backlinks(page_id)),
         broken=tuple(_link(link) for link in session.broken(page_id)),
@@ -184,8 +186,8 @@ def wiki_tree(session: ReadSession, layout: WorkspaceLayout) -> WikiTree:
     row = session.member(INDEX_NAME)
     if row is None or row.id != INDEX_NAME or row.kind != "index":
         return WikiTree(())
-    index = read_member(layout.bundle_dir, INDEX_NAME)
-    if isinstance(index, Unreadable):
+    index = session.content(INDEX_NAME)
+    if index is None or isinstance(index, Unreadable):
         return WikiTree(())
     ownership = _root_ownership(layout)
     groups: list[tuple[IndexHeading, list[IndexHeading]]] = []

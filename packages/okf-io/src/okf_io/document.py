@@ -13,7 +13,8 @@ from ruamel.yaml.comments import CommentedMap
 from ruamel.yaml.error import YAMLError
 from ruamel.yaml.scalarbool import ScalarBoolean
 
-from okf_io import _yaml
+from okf_io import _md, _yaml
+from okf_io._md import BodyIndex, ParsedMarkdown
 from okf_io._yaml import Split, Style
 from okf_io.models import PREFERRED_KEY_ORDER, Frontmatter, build_frontmatter
 
@@ -167,6 +168,29 @@ class Document:
     _style: Style
     _dirty: bool = False
     _view: Frontmatter | None = field(default=None, repr=False)
+    _markdown: tuple[str, ParsedMarkdown] | None = field(default=None, repr=False, compare=False)
+    _index: tuple[str, BodyIndex] | None = field(default=None, repr=False, compare=False)
+
+    def markdown(self) -> ParsedMarkdown:
+        """The body's one markdown-it parse, memoized on the identity of ``body``.
+
+        Keyed on identity, not equality, so a direct ``doc.body = ...`` assignment
+        (which bypasses :meth:`set_body`) still invalidates it, and a shallow
+        ``dataclasses.replace`` clone shares the parse until its own body changes.
+        """
+        memo = self._markdown
+        if memo is None or memo[0] is not self.body:
+            memo = (self.body, _md.tokenize(self.body))
+            self._markdown = memo
+        return memo[1]
+
+    def body_index(self) -> BodyIndex:
+        """``_md.index_tokens`` over :meth:`markdown`, memoized the same way."""
+        memo = self._index
+        if memo is None or memo[0] is not self.body:
+            memo = (self.body, _md.index_tokens(self.body, self.markdown()))
+            self._index = memo
+        return memo[1]
 
     @classmethod
     def parse(cls, text: str, *, path: Path | None = None) -> Document:
@@ -234,7 +258,7 @@ class Document:
     def fm(self) -> Frontmatter:
         """The memoized typed view."""
         if self._view is None:
-            self._view = build_frontmatter(self.fm_raw, body=self.body)
+            self._view = build_frontmatter(self.fm_raw, body=self.body, body_index=self.body_index)
         return self._view
 
     @property
@@ -388,6 +412,7 @@ class Document:
         :func:`_yaml.join` reassembles the file from ``_split.body``, so an
         assignment to ``body`` alone leaves ``save()`` writing the pre-edit
         body while every reader agrees it changed.
+        The markdown memo follows the body by identity.
         """
         self._require_mutable()
         self.body = body

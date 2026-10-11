@@ -55,6 +55,17 @@ class MemberRow:
 
 
 @dataclass(frozen=True, slots=True)
+class PageContent:
+    """One member's frontmatter, body and parse result, from a single version of its bytes."""
+
+    id: str
+    frontmatter: Mapping[str, object]
+    body: str
+    parse_error: ParseError | None
+    coercion_failures: frozenset[str]
+
+
+@dataclass(frozen=True, slots=True)
 class Diagnostics:
     """Content failures and membership diagnostics for a pinned generation."""
 

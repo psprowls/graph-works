@@ -101,7 +101,7 @@ def test_busy_bundle_backend_gives_the_same_answers(tmp_path: Path, monkeypatch)
     populate_generated(layout)
     expected = (oracle_page_read(layout, "docs/p"), oracle_wiki_tree(layout))
 
-    def busy(index):
+    def busy(index, **kwargs):
         raise readindex.IndexBusy("test lock contention")
 
     monkeypatch.setattr(readindex, "reconcile", busy)

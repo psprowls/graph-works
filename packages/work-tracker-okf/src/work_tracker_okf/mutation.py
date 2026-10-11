@@ -11,7 +11,7 @@ from pathlib import Path, PurePosixPath
 from types import MappingProxyType
 from typing import Literal, Protocol
 
-from okf_ext.moves import Move, MovePlan, ReferenceField, materialize, plan_move_many, stranded
+from okf_ext.moves import Move, MovePlan, RefEdit, ReferenceField, materialize, plan_move_many, stranded
 from okf_io import Bundle, Document
 from okf_io.bundle import INDEX_NAME, LOG_NAME, canonical_id
 from okf_io.links import resolve_reference
@@ -132,6 +132,7 @@ def _all_members(bundle: Bundle) -> tuple[str, ...]:
     members.update(f"{directory}/{LOG_NAME}" if directory else LOG_NAME for directory in bundle.logs)
     members.update(bundle.ignored)
     members.update(bundle.unreadable)
+    members.update(bundle.unloaded)
     return tuple(sorted(members))
 
 
@@ -630,9 +631,24 @@ def _reserved_aliases(
         logs=MappingProxyType(dict(sorted(logs.items()))),
         assets=bundle.assets,
         ignored=frozenset(ignored),
-        unreadable=bundle.unreadable,
-        _canonical=bundle._canonical,
-        canonical_collisions=bundle.canonical_collisions,
+        unreadable=MappingProxyType(
+            {member_aliases.get(member, member): error for member, error in bundle.unreadable.items()}
+        ),
+        _canonical=MappingProxyType(
+            {canonical: member_aliases.get(member, member) for canonical, member in bundle._canonical.items()}
+        ),
+        canonical_collisions=MappingProxyType(
+            {
+                canonical: tuple(member_aliases.get(member, member) for member in members)
+                for canonical, members in bundle.canonical_collisions.items()
+            }
+        ),
+        pruned=bundle.pruned,
+        unreadable_dirs=bundle.unreadable_dirs,
+        unloaded=frozenset(member_aliases.get(member, member) for member in bundle.unloaded),
+        partial=None
+        if bundle.partial is None
+        else frozenset(member_aliases.get(member, member) for member in bundle.partial),
         aliases=MappingProxyType(member_aliases),
     )
     return virtual, member_aliases, source_aliases, destination_aliases
@@ -773,7 +789,12 @@ def _prepare_reference_markdown(
     }
     refusals: list[MutationRefusal] = []
     for member in sorted(parsed_members):
-        if not member.endswith(".md") or member in loaded or not os.path.lexists(bundle.root / member):
+        if (
+            not member.endswith(".md")
+            or member in loaded
+            or member in bundle.unloaded
+            or not os.path.lexists(bundle.root / member)
+        ):
             continue
         try:
             document = Document.load(bundle.root / member)
@@ -863,33 +884,55 @@ def _prefix_rebase(resource: str, path_mapping: Mapping[str, str]) -> str | None
     return None
 
 
-def _rebase_item_sources(after: bytes, path_mapping: Mapping[str, str]) -> bytes:
-    """Rebase every root-absolute `sources[].resource` in one rendered item page.
+def _rebase_item_sources(
+    document: Document,
+    member: str,
+    edits: tuple[RefEdit, ...],
+    path_mapping: Mapping[str, str],
+) -> tuple[RefEdit, ...]:
+    """Supplement generic edits using original source values, without reparsing.
 
-    Operates on already-rendered bytes through `Document` so okf-io's
-    minimal-splice round-trip guarantee still holds for every other line in
-    the page. Returns *after* unchanged (same object) when nothing rebases.
+    Generic edits have already handled extant targets and relative references.
+    Prefix rebasing only fills their remaining owned absolute pointers. Keep
+    edits anchored to the original value so the materializer can serialize all
+    changes once on its isolated Document clone, preserving authored YAML.
     """
-    document = Document.parse(after.decode("utf-8"))
     sources = document.fm_raw.get("sources")
     if not isinstance(sources, list):
-        return after
-    changed = False
-    for entry in sources:
+        return edits
+    existing = {edit.key: edit for edit in edits if edit.member == member and edit.where == "frontmatter"}
+    replacements: dict[str, RefEdit] = {}
+    additions: list[RefEdit] = []
+    for index, entry in enumerate(sources):
         if not isinstance(entry, dict):
             continue
         resource = entry.get("resource")
         if not isinstance(resource, str):
             continue
-        rebased = _prefix_rebase(resource, path_mapping)
+        key = f"sources.{index}.resource"
+        prior = existing.get(key)
+        rebased = _prefix_rebase(prior.new if prior is not None else resource, path_mapping)
         if rebased is None:
             continue
-        entry["resource"] = rebased
-        changed = True
-    if not changed:
-        return after
-    document.mark_dirty()
-    return document.serialize().encode("utf-8")
+        if prior is not None:
+            replacements[key] = replace(prior, new=rebased)
+        else:
+            additions.append(
+                RefEdit(
+                    member=member,
+                    where="frontmatter",
+                    target=resolve_reference(resource, source_id=member) or resource,
+                    old=resource,
+                    new=rebased,
+                    key=key,
+                )
+            )
+    return tuple(
+        replacements.get(edit.key, edit)
+        if edit.member == member and edit.where == "frontmatter" and edit.key is not None
+        else edit
+        for edit in edits
+    ) + tuple(additions)
 
 
 def _plan_path_mutation(
@@ -903,7 +946,7 @@ def _plan_path_mutation(
 ) -> WorkMutationPlan:
     """Materialize one path mapping without applying any filesystem effect.
 
-    Two rebasing passes run over the moved bytes, deliberately not redundant:
+    Two reference policies share the same materialization:
     okf-ext's `materialize()` rebases by *resolved identity* -- a
     `sources[].resource` whose target is an existing bundle member. This
     function additionally rebases a moved item page's own `sources[]` by
@@ -979,20 +1022,22 @@ def _plan_path_mutation(
         opaque,
     )
     all_refusals.extend(_move_refusals(generic))
+    materialization_edits = generic.edits
+    for source in frozen_mapping:
+        document = planning_bundle.concepts.get(source)
+        if document is not None:
+            materialization_edits = _rebase_item_sources(
+                document,
+                f"{source}.md",
+                materialization_edits,
+                frozen_mapping,
+            )
     effects = None
     try:
         if generic.ok:
-            effects = materialize(planning_bundle, generic)
+            effects = materialize(planning_bundle, replace(generic, edits=materialization_edits))
     except ValueError as exc:
         all_refusals.append(MutationRefusal("", "materialize-error", str(exc)))
-    if effects is not None:
-        rebased_writes = dict(effects.writes)
-        for destination in frozen_mapping.values():
-            page_member = f"{destination}.md"
-            if page_member not in rebased_writes or parse_item_path(destination) is None:
-                continue
-            rebased_writes[page_member] = _rebase_item_sources(rebased_writes[page_member], frozen_mapping)
-        effects = replace(effects, writes=rebased_writes)
     rendered = {} if effects is None else effects.writes
     index_writes, index_deletes, index_members, index_refusals = _index_effects(
         bundle.root,

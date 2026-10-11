@@ -7,8 +7,8 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from types import MappingProxyType
 
-from okf_ext.readindex import Diagnostics, MemberRow, member_row
-from okf_io import Bundle, Document, Heading, Link, LinkGraph, build_link_graph, document_headings
+from okf_ext.readindex import Diagnostics, MemberRow, PageContent, StoredContent, content_of, member_row
+from okf_io import Bundle, Document, Heading, Link, LinkGraph, Unreadable, build_link_graph, document_headings
 from okf_io.bundle import MemberKind
 from work_tracker_okf.items import IGNORE, load_items
 from work_tracker_okf.snapshot import WorkSnapshot
@@ -34,6 +34,7 @@ class _Loaded:
     bundle: Bundle
     graph: LinkGraph
     rows: Mapping[str, MemberRow]
+    documents: Mapping[str, Document]
 
 
 class BundleSession:
@@ -70,7 +71,7 @@ class BundleSession:
             rows = MappingProxyType(
                 {row.id: replace(row, sha256=None) for row in sorted(projected, key=lambda r: r.id)}
             )
-            self._loads[key] = _Loaded(bundle, build_link_graph(bundle), rows)
+            self._loads[key] = _Loaded(bundle, build_link_graph(bundle), rows, MappingProxyType(_documents(bundle)))
         return self._loads[key]
 
     def concept_hashes(self, *, ignore: Sequence[str] = ()) -> Mapping[str, str] | None:
@@ -111,8 +112,25 @@ class BundleSession:
         return links if source is None else tuple(link for link in links if link.source == source)
 
     def headings(self, member_id: str) -> tuple[Heading, ...]:
-        doc = _documents(self._load().bundle).get(member_id)
+        doc = self._load().documents.get(member_id)
         return document_headings(doc) if doc is not None else ()
+
+    @property
+    def content_root(self) -> Path:
+        return self._root
+
+    def stored_content(self, member_id: str) -> StoredContent | None:
+        """Full loads keep no stored rows; a snapshot of this session parses on read."""
+        return None
+
+    def content(self, member_id: str) -> PageContent | Unreadable | None:
+        """Project the pinned full load's Document: no parse beyond the load (item D-002)."""
+        loaded = self._load()
+        doc = loaded.documents.get(member_id)
+        if doc is not None:
+            return content_of(member_id, doc)
+        reason = loaded.bundle.unreadable.get(member_id)
+        return Unreadable(reason) if reason is not None and member_id.endswith(".md") else None
 
     def diagnostics(self, *, ignore: Sequence[str] = ()) -> Diagnostics:
         bundle = self._load(ignore).bundle

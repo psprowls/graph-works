@@ -251,15 +251,27 @@ an implementation detail.
 - **okf-io is the pure core** (ADR-0005). Every other package depends on it
 (directly or via `okf-ext`), never the reverse. Schema validation, harvesters,
 servers, wiki generation — none of those belong here. The core instead
-exposes six extension points, all shipped and contract-tested before any
+exposes seven extension points, all shipped and contract-tested before any
 consumer exists: `extra_rules=` on `validate()`, `Document.fm_data(dates="iso")`
 (plain-data projection, `json.dumps`-able with no encoder), `ignore=` on
 `load_bundle()` (an ignored member is "not a concept", not "not there"),
 `describe=` on `update_index()`, `scope=` on `validate()` / `RuleContext`
 (a `frozenset[str] | None` of bundle-relative member paths that constrains
-per-document rule iteration), and `prune=` on `load_bundle()` (a matching
+per-document rule iteration), `prune=` on `load_bundle()` (a matching
 directory is "present but not modelled": never listed, recorded in
-`Bundle.pruned`, still resolvable by `member_id` through a filesystem probe). `validate(links=)` is a related optimisation
+`Bundle.pruned`, still resolvable by `member_id` through a filesystem probe),
+and `only=` on `load_bundle()` (with `reuse=` and `inventory=`): a partial
+load that parses only named markdown members, answers every other one from
+the walk inventory (`Bundle.unloaded`, never probed), and records raw admitted
+ids in `Bundle.partial`. `only=None` preserves the full load; selection matches
+raw or NFC-canonical ids. Assets and ignored members are unchanged; unreadable
+files are recorded only when selected, and unreadable directories always are.
+Document mappings and views see only parsed members. `reuse=` requires `only=`
+and still reads each selected file, returning a clean prior document only for
+the same path and identical UTF-8-decoded raw text. `inventory=` is caller-supplied
+from the same root with the same `prune=` and is reclassified under the load's
+own `ignore=` without a second walk; `_load_at` always walks through its
+descriptor boundary. `validate(links=)` is a related optimisation
 parameter, not an extension point — passing a pre-built `LinkGraph` skips
 recomputing it and changes no behaviour.
 - `okf_io.validate` **is the function, not the submodule.** Use

@@ -2,7 +2,7 @@
 
 Declared here, satisfied structurally by `workflow_orca.port.OrcaCliPort`,
 which does not import this package. The TypedDicts below are mirrored item
-for item in that module; `graph_works_cli.work_cli.orca.orca_port()` is the
+for item in that module; `gw_cli.work_cli.orca.orca_port()` is the
 typed assignment `just types` checks, and a CLI test compares the two sets
 of annotations at runtime. Every failure crosses the seam as
 `subagents_io.backend.BackendError`.

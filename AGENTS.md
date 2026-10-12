@@ -25,7 +25,7 @@ couple to:
 | `-okf`               | 2, OKF-aware   | band 1 plus the OKF document model                                                                                                                                     |
 | `gw-<slice>` | 3, application | a tree over `gw-kernel`: pipeline and wiki depend on kernel; orchestrate and work depend on pipeline and kernel; only kernel resolves a workspace root |
 | `workflow-<backend>` | beside band 1  | vendor/system coupling lives here — one package per dispatch backend                                                                                                   |
-| `graph-works-<interface>` (including `graph-works-serve`) | 4, interface | every application slice; interfaces never import each other — what they share (the JSON projections) lives in graph-works-wire, which imports no interface               |
+| `gw-<interface>` (including `gw-serve`) | 4, interface | every application slice; interfaces never import each other — what they share (the JSON projections) lives in gw-wire, which imports no interface               |
 
 
 Each package carries its own `AGENTS.md` (via a `CLAUDE.md` that just
@@ -53,9 +53,9 @@ spans packages.
 | `gw-orchestrate` | 3, application slice | Work planning, dispatch, placement, gates, advancement and integration over resolved kernel workspace primitives. |
 | `gw-work` | 3, application slice | Work-item commands and archive operations over kernel and pipeline services. |
 | `gw-wiki` | 3, application slice | Wiki scan, ingest, query, lint, proposals, display reads, repository operations and agent support over resolved kernel primitives. |
-| `graph-works-wire` | 4        | Every typed result projected to plain JSON data — the one copy the CLI and graph-works-serve emit. Pure: no interface framework, no I/O, no encoding. |
-| `graph-works-cli`  | 4        | `gw`: a thin Typer interface over the five application slices (ADR-0013 — logic stays in the slices, this package routes/parses/formats/traces).                              |
-| `graph-works-serve` | 4      | `gw-serve`: loopback HTTP sidecar over the application slices — read and plan/apply mutation routes, guard, `serve.json`, route catalog. |
+| `gw-wire` | 4        | Every typed result projected to plain JSON data — the one copy the CLI and gw-serve emit. Pure: no interface framework, no I/O, no encoding. |
+| `gw-cli`  | 4        | `gw`: a thin Typer interface over the five application slices (ADR-0013 — logic stays in the slices, this package routes/parses/formats/traces).                              |
+| `gw-serve` | 4      | `gw-serve`: loopback HTTP sidecar over the application slices — read and plan/apply mutation routes, guard, `serve.json`, route catalog. |
 
 
 Dependencies point down the bands and down the application tree: `gw-pipeline`
@@ -69,8 +69,8 @@ deliberately the only package that resolves a workspace root or reads
 `gw_pipeline.transcript_capture` may delegate to kernel discovery. Kernel never
 imports slices; pipeline never imports work/orchestrate/wiki or interfaces.
 Every package beneath kernel receives resolved paths as
-arguments. Above the application slices sits the interface band: `graph-works-cli`,
-`graph-works-wire`, and `graph-works-serve`. import-linter states both
+arguments. Above the application slices sits the interface band: `gw-cli`,
+`gw-wire`, and `gw-serve`. import-linter states both
 edges — the wire never imports an interface, and no application slice imports the
 interface band.
 
@@ -134,7 +134,7 @@ Every other package resolves its own dependency closure and runs under
 `--package`:
 
 ```bash
-uv run --package graph-works-cli pytest packages/graph-works-cli/tests -k work
+uv run --package gw-cli pytest packages/gw-cli/tests -k work
 uv run --package models-io --extra bedrock --extra vercel pytest packages/models-io/tests
 uv run --package code-graph-io mypy --strict --platform linux packages/code-graph-io/src
 uv run --package code-graph-io mypy --strict --platform win32 packages/code-graph-io/src

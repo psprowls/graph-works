@@ -657,7 +657,7 @@ def create_control_plane(layout: WorkspaceLayout) -> list[Path]:
 #: The CLI invocation. The bare `gw` on PATH is the **legacy** binary until
 #: `2026-08-21-bug-gw-path-resolves-donor-cli` lands, so the default names the
 #: package explicitly. `--gw` overrides it.
-DEFAULT_GW = "uv run --package graph-works-cli gw"
+DEFAULT_GW = "uv run --package gw-cli gw"
 
 PROJECTION_BASENAME = "config.json"
 

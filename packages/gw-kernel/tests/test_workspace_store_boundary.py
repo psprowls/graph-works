@@ -4,7 +4,7 @@
 the write-side layers: `config_io.set_key` is read-mutate-write over
 `store.read()`, and `LayeredYamlStore` is deliberately read-only, so a write
 routed through the merged view becomes a `TypeError`. A caller that needs to
-write names a layer instead — `graph_works_cli.config_cli.main._store` reads
+write names a layer instead — `gw_cli.config_cli.main._store` reads
 `.base` / `.overlay` off the `LayeredYamlStore` `workspace_store` already
 built, rather than constructing its own `PlainYamlStore`, which is why that
 module is not one of the two permitted sites below. The type system cannot

@@ -49,7 +49,7 @@ def main() -> int:
         f"{prefix}/entities/apps/index.md",
         f"{prefix}/entities/dependencies/index.md",
         f"{prefix}/entities/dependencies/pypi/index.md",
-        f"{prefix}/entities/packages/graph-works-cli.md",
+        f"{prefix}/entities/packages/gw-cli.md",
         f"{prefix}/entities/packages/index.md",
         f"{prefix}/entities/test-suites/index.md",
         f"{prefix}/entities/test-suites/packages__code-wiki-okf__tests.md",

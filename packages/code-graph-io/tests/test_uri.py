@@ -48,10 +48,10 @@ def test_app_uri_shape() -> None:
 
 def test_subpkg_uri_preserves_dotted_path() -> None:
     # Lock: dotted Python import path, NOT slash-separated FS path
-    result = subpkg_uri(RepoContext("local", "graph-works"), "graph-works-cli", "graph_works_cli.graph_cli")
-    assert result == "subpkg:local/graph-works/graph-works-cli/graph_works_cli.graph_cli"
-    assert "graph_works_cli.graph_cli" in result
-    assert "graph_works_cli/graph_cli" not in result
+    result = subpkg_uri(RepoContext("local", "graph-works"), "gw-cli", "gw_cli.graph_cli")
+    assert result == "subpkg:local/graph-works/gw-cli/gw_cli.graph_cli"
+    assert "gw_cli.graph_cli" in result
+    assert "gw_cli/graph_cli" not in result
 
 
 def test_file_uri_preserves_forward_slashes() -> None:

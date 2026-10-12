@@ -1,0 +1,233 @@
+# AGENTS.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
+`gw` — a thin Typer CLI over `gw-kernel` (ADR 2026-08-13-command-modules: all logic stays in core, this package
+routes, parses, formats, and traces). Python >=3.12. Tests are pytest.
+
+## Commands
+
+From the repo root (this package resolves its own dependency closure, so it runs under `--package`,
+not a bare `uv run`):
+
+```bash
+uv run --package gw-cli pytest packages/gw-cli/tests
+uv run --package gw-cli mypy --strict --platform linux packages/gw-cli/src
+uv run --package gw-cli mypy --strict --platform win32 packages/gw-cli/src
+uv run --package gw-cli pytest packages/gw-cli/tests --cov=gw_cli \
+    --cov-branch --cov-report=term-missing --cov-fail-under=95
+```
+
+These are exactly `just test` / `just types` / `just cov`'s per-package lines for this package (see
+root `justfile`); `just check` runs the whole workspace, not just this one. `just types` runs the
+`mypy` line twice, once per `--platform` arm.
+
+Subset examples:
+
+```bash
+uv run --package gw-cli pytest packages/gw-cli/tests/test_graph_cli.py
+uv run --package gw-cli pytest -k "surface or describe_surface"
+```
+
+`test_surface_freeze.py` and `test_describe_surface.py` check the CLI tree against
+`tests/fixtures/surface.golden.json` — regenerate that fixture deliberately, alongside the command
+change that moved it, never as an incidental side effect.
+
+## Architecture
+
+### Command surface
+
+`cli.py` builds the root Typer app (`gw`), wires the `-v/-vv` verbose callback, `version`, `help
+[--json]`. The root is a `LazyRootGroup` (`lazy_group.py`): every other root entry is a `RootEntry` in
+`ROOT_REGISTRY` (name, kind, first-paragraph help, module, attribute) whose module is imported only when that
+command runs. Adding a root command or group means adding a `RootEntry` and nothing in `cli.py`. `gw --help`
+renders from registry stubs, so `tests/test_lazy_root_group.py` is what keeps the help text honest; `.commands`
+loads everything (the walkers need that). The entries are:
+
+- `graph_cli` — `gw graph build|describe|find|export`, code-graph queries.
+- `wiki_cli` — `gw wiki lint|drift|stats|index|archive|proposals|proposal|claims ...`; archive and
+  proposal mutation commands route through core's vertical calls, while index and proposal listing
+  retain their lower-layer calls. Root-level aliases `gw bootstrap|scan|ingest|query` are `ROOT_REGISTRY`
+  entries.
+- `work_cli` — `gw work ...` (the work-item pipeline verbs, `decision` sub-app,
+  `gate` sub-app (`run|wait|check`), `reconcile-context`), plus root-level aliases `gw next` and `gw archive` listed in
+  `ROOT_REGISTRY`. `gw next` is a genuine alias — it reuses `gw work
+  next`'s own callback object rather than a copy (see `util_cli/main.py`'s `work_next_callback()`),
+  so the two can never drift.
+
+  `gw work orchestrate` produces a saved plan; `gw work dispatch KEY --plan FILE|- --run RUN`
+  executes one selected entry through core's journal and the `work_cli/orca.py` adapter.
+  `gw work reroute KEY --run RUN --reason TEXT` supersedes a settled Task and journals
+  optional `--agent`, `--model`, and `--effort` overrides for the next dispatch.
+
+  `gw work wait --run RUN [--ack DELIVERY_ID] [--timeout-s N]` is the coordinator's one wait:
+  core's `orchestrate/wait.py` strips heartbeats, self-acks deliveries holding nothing real,
+  absorbs duplicate completions and rebinds once on `consumer_fenced`; a real delivery is
+  returned unacked, and the next wait's `--ack` acks it.
+
+  `gw work next` has one blocker source the routing table cannot see: a malformed
+  configured stage skill. `entry_for()` is called under a `WorkspaceError` guard
+  and its message is appended to `blockers[]` with `action` nulled, rather than
+  failing the command — the command owns a blockers channel and the workflow skill
+  already stops on one. `gw work advance` and `gw work orchestrate` own no such
+  channel and keep the `WorkspaceError` → `SCHEMA_MISMATCH` mapping.
+
+  `gw work next --file auto|<path>|""` only parses into core's `GuidanceRequest`
+  (`""` → no write); assembly and the write are `run_next`'s. With `--json` the
+  three guidance keys are payload data and nothing extra reaches stderr; text
+  mode prints one summary line and routes each guidance warning through
+  `rendering.warn`.
+- `repo_cli` — `gw repo add|restore|advance`, reference repositories in the `repositories/` lane (routes to `gw_wiki.repositories`); it injects a structural rescan into `run_repo_advance`.
+- `config_cli` — `gw config get|list|set|unset|sync|hooks enable|disable`, the sole programmatic
+  writer for `workspace.yaml` catalog keys. `set`/`unset --local` write the gitignored, per-machine
+  `workspace.local.yaml` overlay instead. `set`/`unset` refresh `.gw/cache/config.json`
+  automatically; `sync` is the manual refresh after a hand edit.
+- `agent_config_cli` — `gw agent-config show`, a read-only report over core's agent configuration
+  model. It injects home, environment, and platform; JSON is projected by `gw-wire`.
+- `util_cli` — diagnostics: `gw util describe-surface [--json]`, `platform`, `line-endings`, `log`, `read-index`, `tokens`, `trace`.
+
+Every workspace-backed sub-app command takes `--workspace PATH` and calls
+`workspace_resolution.resolve_workspace()` first (D-002): explicit path -> `GRAPH_WORKS_DIR` env -> cwd git walk-up, all via
+`gw_kernel.workspace.discovery.resolve()`. A refusal there prints `Error: ...` to stderr and
+exits `exit_codes.NOT_INITIALIZED` — precedence and discovery logic live in core, never here.
+`gw agent-config show --project PATH` is the deliberate read-only exception: it bypasses workspace
+resolution and reports that one directory directly. The five new archive/proposal mutation callbacks
+opt into a JSON workspace refusal envelope; their human behavior remains unchanged. Click/Typer
+parse-time failures (for example, missing required arguments and unknown flags) remain native parser
+errors, not JSON envelopes.
+
+### `exit_codes.py` — the one numbering, CLI-wide (ADR 2026-08-13-command-modules rule 1)
+
+Re-exports `code_graph_io.exit_codes` by explicit name (not `from x import *`), so every sub-app
+imports from inside this package and `test_exit_codes.py` can pin the identity. Every sub-app maps
+its own typed result onto the closest-fitting code here rather than inventing a second numbering:
+missing workspace -> `NOT_INITIALIZED`, unresolved slug/entity match -> `AMBIGUOUS`, stale routing
+checkout -> `STALE`, uncaught error -> `GENERIC`.
+
+### Error-message convention — one shared writer (D-026)
+
+The CLI-wide convention is `Error: <message>` on stderr. `errors.echo_error()` owns the
+prefix and restyles core's leading lowercase `error: `; `errors.exit_error()` adds the exit
+code and optional exception cause. `graph_cli._emit()` uses the writer alone because its
+result owns the exit code. All other human error exits delegate to `exit_error()`, including
+`work_cli.rendering.fail()` after its context-aware JSON refusal envelope is emitted.
+`wiki_cli/errors.py` remains a re-export shim. JSON messages retain their original text.
+
+### The `--json` refusal envelope — explicit-mode commands (D-004/D-007)
+
+A `--json` command that opts into the shared refusal helper still exits non-zero, but prints a
+structured document on stdout before it does, instead of leaving stdout empty. This covers `gw work`
+and the explicit archive/proposal verbs (`gw archive`, `gw wiki archive`, and `gw wiki proposal
+file|approve|reject`):
+
+```json
+{
+  "error": {
+    "command": "work archive",
+    "reason": "refused",
+    "message": "archive refused; nothing was applied",
+    "exit_code": 1,
+    "payload": { "...the verb payload the CLI already computed, or null..." }
+  }
+}
+```
+
+`work_cli/rendering.py`'s `fail()` remains the single choke point every `gw work` exit site routes
+through (65 call sites as of D-004); the explicit-mode helper takes a required `reason=` from a closed vocabulary
+(`refused`, `incomplete-apply`, `conflict`, `incomplete`, `usage`, `workspace`, `unresolved`,
+`not-a-repo`, `io`) and an optional `payload=` — the verb payload already computed for a
+post-payload refusal, `None` for a pre-payload failure (an argument-parse or workspace-resolution
+error, where no payload was ever built). `"error" in doc` is the discriminator: no success
+projection in `gw_wire` carries a top-level `error` key or is a single-key object, so a
+refusal document can never be misread as a result.
+
+The `gw work` mechanism is a `ContextVar` (`rendering._JSON_MODE`, plus `_COMMAND_NAME` for the
+envelope's `command` field), set by `rendering.json_option()` — the one `--json` declaration every
+`gw work` command must use instead of hand-writing `typer.Option(False, "--json", ...)` — and reset
+by `cli.py`'s root callback before each subcommand's own option parsing runs. `fail()` asserts rather
+than defaults when the var was never set, so a command that skips `json_option()` fails loudly in its
+own test suite instead of silently never emitting an envelope; archive/proposal commands use the
+explicit-mode helper instead and do not participate in that ContextVar state.
+
+This is scoped to the opted-in command families: `gw help --json`'s own `{"status": "error", ...}` failure
+shape (`cli.py`) predates this and is deliberately not converged onto it — `status` collides with
+`work_status`/`document_status` elsewhere in the work lane, and reconciling the two shapes is out of
+scope for this item.
+
+### Formatting — delegate for `graph`, bespoke everywhere else (D-003)
+
+`code_graph_io.render` ships a generic `render()` dispatcher, a `describe_block()` sectioned-spine
+builder, and one `format_<kind>` per graph entity kind, built for exactly the `GraphTarget`/
+`GraphResult` shape `gw_kernel.graph.commands` returns. `gw graph`'s four verbs
+(`build`/`describe`/`find`/`export`) delegate directly to that: each command resolves a `GraphTarget`,
+calls one core function, and routes the returned `output`/`error` strings to stdout/stderr before
+exiting `result.exit_code` — no behavior beyond routing (ADR 2026-08-13-command-modules rule 5).
+
+Every `--json` result is a projection from `gw_wire` (`work`, `wiki`, `config`, `util`),
+imported directly — never re-exported — and encoded by `json_output.encode` (`indent=2`). The
+sub-apps' `rendering.py` modules (`work_cli`, `config_cli`) hold only the emit/exit policy and the
+human renderers; `wiki_cli` has none. `tests/test_projection_residue.py` fails if a `*_payload`
+function or an inline `json.dumps` of a result reappears here; `tests/test_json_goldens.py` pins
+every `--json` output byte for byte (regenerate only with `GW_REGEN_JSON_GOLDENS=1`, and only for a
+deliberate shape change).
+
+### Typer-tree introspection — shared by `help --json` and `describe-surface`
+
+`introspection.py` holds one walker (`command_to_help_entry()`) used by both `gw help [PATH]
+--json` (single node, `cli.py`) and `gw util describe-surface --json` (every node, groups and
+leaves, `util_cli/describe.py`) — one payload shape, so the two views cannot drift apart.
+`describe_surface()` sorts entries by `path` for byte-stable output, which is what makes
+`tests/fixtures/surface.golden.json` a meaningful fixture rather than a snapshot of incidental
+ordering.
+
+**The `typer.core` vs `click` gotcha this workspace's resolved `typer` creates:** `typer.main.
+get_command()` here returns `typer._click.core.Command` instances — typer's own internal fork,
+*not* `click.core.Command`/`Option`/`Argument`/`Group`. `isinstance(param, click.Option)` silently
+returns `False` for every param under this version instead of erroring, which is the dangerous
+failure mode — it reports empty option/subcommand lists rather than crashing. `introspection.py`
+checks `typer.core.TyperOption`/`TyperArgument`/`TyperGroup` instead (typer's own public re-exports
+of the classes `get_command()` actually returns), plus one `typing.cast` where a real
+`click.Context` is constructed from typer's command object. Reuse this pattern for any new
+command-tree introspection; do not copy `isinstance(x, click.*)` checks from older reference code —
+they silently no-op here.
+
+### `--trace` is out of scope for this package (D-024)
+
+`gw_wiki.scan.commands` and `gw_wiki.query.commands` already write JSONL traces
+unconditionally to `layout.cache_dir / "traces"`. There is no write-side CLI flag anywhere — `gw
+util trace <file>` (`util_cli/trace.py`) is a read-side renderer for whatever JSONL file the caller
+points it at; it was never wired to a write-side flag and there is nothing to build here.
+
+### The provenance guard (`provenance.py`)
+
+`warn_if_stale_routing()` warns, on stderr only, when the running `gw`'s routing code
+(`gw_kernel` / `work-tracker-okf`) was loaded from a different checkout than the one the
+current working directory belongs to *and* that other checkout's routing sources genuinely differ
+by git content (not just "is a different worktree" — that alone would fire on nearly every
+invocation and be filtered out as noise). It only fires at call sites that are actually
+routing-sensitive — `gw work next`/`advance`/`orchestrate` (and their root aliases) — not globally
+from `cli.py`. Every resolution failure (no source checkout found, git not runnable, etc.) degrades
+to silence: a guard that guesses is worse than no guard. Kill switch:
+`GRAPH_WORKS_PROVENANCE_GUARD=0`, for one call only (`GRAPH_WORKS_PROVENANCE_GUARD=0 gw <args>`) —
+never exported into a session, where it leaks into gate runs. The provenance tests clear it
+themselves, so an inherited value cannot fail them.
+
+### `gw-kernel` is a real dependency — no deferred-import pattern
+
+`gw-kernel` is a real, `py.typed`, `mypy --strict`-clean workspace member and a pinned
+dependency (`gw-kernel>=0.7,<0.8` in `pyproject.toml`, workspace-sourced via
+`[tool.uv.sources]`). `workspace_resolution.py` imports it at module level; `provenance.py` imports
+it inside `_source_checkout_root()` because only the provenance guard needs it there — that is an
+ownership choice, not a fallback for a package that might not exist. Do not reintroduce a
+missing-package fallback or `sys.modules` test-injection pattern for a `gw_kernel` import in
+this package; tests patch the real `gw_kernel.workspace.discovery.resolve` via
+`monkeypatch.setattr` on the module reference `workspace_resolution.py` holds.
+
+### Verbose logging (`logging_config.py`)
+
+`-v`/`-vv` installs stderr-only logging handlers (INFO / DEBUG on the root logger), idempotently —
+stdout stays clean so `gw -v scan ... --json | jq` still works. The fan-out trace logger
+(`subagents_io.pool.trace`) gets its own handler with a bare `%(message)s` formatter and
+`propagate=False`, so live per-item completion lines during `gw scan`/orchestration stay
+byte-identical to what `gw util trace` renders from the JSONL file afterward — don't let a future
+formatter change on the root handler leak a level/name prefix into that stream.

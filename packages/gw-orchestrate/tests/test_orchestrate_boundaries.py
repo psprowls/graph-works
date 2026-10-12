@@ -53,7 +53,7 @@ def offenders(source: str, *, module: str) -> list[str]:
         "from gw_kernel import workspace",
         "from gw_work import commands",
         "import gw_kernel as kernel",
-        "import graph_works_cli",
+        "import gw_cli",
         "import undeclared_external",
         "import gw_kernel.workspace_other",
         "import gw_orchestrate_other",

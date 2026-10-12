@@ -31,8 +31,8 @@ handle reaches a passive mailbox, not the worker.
 
 `gw` being on PATH doesn't prove it's this repo's build — a stale entry point can
 own the name. Verify identity, not presence: `gw util describe-surface --json
->/dev/null 2>&1 || echo "gw is not graph-works-cli — use: uv run --package
-graph-works-cli gw …"`.
+>/dev/null 2>&1 || echo "gw is not gw-cli — use: uv run --package
+gw-cli gw …"`.
 
 ## 0. Preconditions
 
@@ -47,7 +47,7 @@ explanation — no degraded mode, no partial loop:
    enabled; stop and say so (do not try to work around it).
 3. `gw` resolvable **as this repo's build**: `gw util describe-surface --json
    >/dev/null 2>&1` exits 0. If it doesn't — absent from PATH, or present but
-   naming a different CLI — fall back to `uv run --package graph-works-cli gw
+   naming a different CLI — fall back to `uv run --package gw-cli gw
    --help` from the workspace's repo root.
 4. Workspace resolves: `GRAPH_WORKS_DIR` is set, or discovery from cwd
    succeeds. `gw work status` fails loudly if not — treat that failure as a

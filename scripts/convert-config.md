@@ -44,7 +44,7 @@ review: one line per key, what became of it, and why.
 | `--repo-path` | from `repo-directory` | Override the scan target. |
 | `--bundle-dir` | `wiki` | Value for `layout.bundle_dir`. |
 | `--no-sync` | off | Skip the `gw config sync` shell-out, for a workspace whose CLI is not yet swapped. Leaves the conversion **half done**. |
-| `--gw` | `uv run --package graph-works-cli gw` | The CLI invocation. The bare `gw` on PATH is the *legacy* binary until `2026-08-21-bug-gw-path-resolves-donor-cli` lands. |
+| `--gw` | `uv run --package gw-cli gw` | The CLI invocation. The bare `gw` on PATH is the *legacy* binary until `2026-08-21-bug-gw-path-resolves-donor-cli` lands. |
 | `-h`, `--help` | | Usage. |
 
 Exit code is `0` on success, `2` if `WORKSPACE` is not a directory, and `1` for

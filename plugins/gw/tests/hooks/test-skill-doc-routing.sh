@@ -371,7 +371,7 @@ assert_output \
 # The misconfig message must not prescribe a command that cannot do the job.
 # Two CLIs are in play until the cutover epic lands: the `gw` on PATH is still
 # the donor CLI, whose `bootstrap` builds a vault rather than writing a
-# `workspace.yaml`, while graph-works-cli's `bootstrap` does write one. The same
+# `workspace.yaml`, while gw-cli's `bootstrap` does write one. The same
 # verb name means different things on either side of the cutover; the marker
 # file is true on both. Delete these rows once one `gw` is unambiguous.
 for forbidden in "gw bootstrap" "gw workspace init" "gw init"; do

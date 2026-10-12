@@ -73,9 +73,9 @@ UNITS: tuple[Unit, ...] = (
     _pkg("gw-wiki"),
     _pkg("workflow-local"),
     _pkg("workflow-orca"),
-    _pkg("graph-works-wire"),
-    _pkg("graph-works-cli"),
-    _pkg("graph-works-serve"),
+    _pkg("gw-wire"),
+    _pkg("gw-cli"),
+    _pkg("gw-serve"),
 )
 
 ALIASES: dict[str, str] = {"okf-ext": "okf-io"}
@@ -116,7 +116,7 @@ def gate_manifest(root: Path, *, cpu_count: int, jobs: int) -> dict[str, object]
         {
             "name": "plugin",
             "inputs": ["plugins/**"],
-            "depends_on": ["graph-works-cli"],
+            "depends_on": ["gw-cli"],
             "command": "just test-plugin",
             "env": {},
         }

@@ -66,7 +66,7 @@ def test_legacy_parsing_and_frontmatter_writes_are_isolated_to_migration_module(
 
 
 def test_legacy_boundary_scans_cli_and_plain_imports(tmp_path: Path) -> None:
-    rogue = tmp_path / "packages/graph-works-cli/src/graph_works_cli/rogue.py"
+    rogue = tmp_path / "packages/gw-cli/src/gw_cli/rogue.py"
     rogue.parent.mkdir(parents=True)
     rogue.write_text("import work_tracker_okf.migration\n", encoding="utf-8")
     second = tmp_path / "packages/code-wiki-okf/src/code_wiki_okf/rogue_from.py"

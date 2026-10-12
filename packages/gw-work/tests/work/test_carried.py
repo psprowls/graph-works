@@ -376,7 +376,7 @@ def test_slot_fill_default_data_is_an_empty_read_only_mapping() -> None:
 
 def test_module_is_read_only_and_imports_no_interface() -> None:
     source = Path(carried.__file__).read_text(encoding="utf-8")
-    for forbidden in ("write_text", "write_bytes", "graph_works_cli", "graph_works_wire", "graph_works_serve"):
+    for forbidden in ("write_text", "write_bytes", "gw_cli", "gw_wire", "gw_serve"):
         assert forbidden not in source
 
 

@@ -59,7 +59,7 @@ def setup(tmp_path, monkeypatch, *, scalar=True, nested=False, base_checkout=Fal
 
 
 def test_next_projects_shared_targets_and_nonfinish_is_empty(tmp_path, monkeypatch):
-    from graph_works_wire.work import next_payload
+    from gw_wire.work import next_payload
     from gw_work.commands import run_next
 
     layout, items, path = setup(tmp_path, monkeypatch)
@@ -74,7 +74,7 @@ def test_next_projects_shared_targets_and_nonfinish_is_empty(tmp_path, monkeypat
 
 
 def test_next_blocks_entire_finish_when_one_target_is_unverified(tmp_path, monkeypatch):
-    from graph_works_wire.work import next_payload
+    from gw_wire.work import next_payload
     from gw_work.commands import run_next
 
     layout, _items, path = setup(tmp_path, monkeypatch)

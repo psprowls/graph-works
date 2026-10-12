@@ -126,7 +126,7 @@ def test_cli_entrypoint_runs() -> None:
         capture_output=True,
         text=True,
     )
-    assert done.returncode == 0 and "graph-works-serve" in done.stdout
+    assert done.returncode == 0 and "gw-serve" in done.stdout
     assert shlex.split(done.stdout)[0] == "okf-io"
 
 
@@ -150,7 +150,7 @@ def test_gate_manifest_units_and_dependencies_match_the_tables() -> None:
     assert data["units"][-1] == {
         "name": "plugin",
         "inputs": ["plugins/**"],
-        "depends_on": ["graph-works-cli"],
+        "depends_on": ["gw-cli"],
         "command": "just test-plugin",
         "env": {},
     }
@@ -248,3 +248,14 @@ def test_wiki_unit_identity() -> None:
     assert unit.cov == ("--cov=gw_wiki",)
     assert unit.floor == 95
     assert sum(u.name == "gw-wiki" for u in UNITS) == 1
+
+
+def test_interface_units_are_renamed() -> None:
+    for name, module in (("gw-wire", "gw_wire"), ("gw-cli", "gw_cli"), ("gw-serve", "gw_serve")):
+        unit = resolve(name)
+        assert unit.uv_flags == ("--package", name)
+        assert unit.src == (f"packages/{name}/src",)
+        assert unit.testpath == f"packages/{name}/tests"
+        assert unit.cov == (f"--cov={module}",)
+        assert sum(u.name == name for u in UNITS) == 1
+    assert not any(u.name.startswith("graph-works-") for u in UNITS)

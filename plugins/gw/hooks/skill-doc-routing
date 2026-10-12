@@ -134,7 +134,7 @@ fi
 # The message names the missing marker and stops short of naming a verb that
 # creates it, because the `gw` on PATH before the cutover is still the donor
 # CLI, whose `bootstrap` builds a vault (`raw/` and `work/` siblings, an
-# out-of-repo workspace env var), not a `workspace.yaml`. graph-works-cli's own
+# out-of-repo workspace env var), not a `workspace.yaml`. gw-cli's own
 # `bootstrap` does write one — it wraps `gw_kernel.workspace.init` — so
 # the verb name `gw bootstrap` is correct on one side of the cutover and wrong
 # on the other, which is exactly why it cannot be named here. The marker file is

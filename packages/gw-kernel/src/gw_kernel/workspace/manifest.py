@@ -415,7 +415,7 @@ def manifest_store(path: str | Path) -> LayeredYamlStore:
 
     A **read** seam (D-004) that also hands back the write-side layers.
     `set_value` below is the one other site that names `PlainYamlStore`
-    itself; `graph_works_cli.config_cli.main._store` writes by reading
+    itself; `gw_cli.config_cli.main._store` writes by reading
     `.base` / `.overlay` off the `LayeredYamlStore` this function already
     built, rather than constructing its own. `config_io.set_key` is
     read-mutate-write and this layered store is deliberately read-only, which

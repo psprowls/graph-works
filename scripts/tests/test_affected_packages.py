@@ -43,12 +43,12 @@ def test_graph_keys_are_units_and_okf_ext_folds() -> None:
 def test_okf_io_closure_is_every_declared_dependent() -> None:
     assert reverse_closure(GRAPH, {"okf-io"}) == {
         "okf-io", "code-wiki-okf", "doc-wiki-okf", "work-tracker-okf", "repositories-okf",
-        "gw-kernel", "gw-wiki", "gw-pipeline", "gw-work", "gw-orchestrate", "graph-works-wire", "graph-works-cli", "graph-works-serve",
+        "gw-kernel", "gw-wiki", "gw-pipeline", "gw-work", "gw-orchestrate", "gw-wire", "gw-cli", "gw-serve",
     }
 
 
 def test_test_only_dependencies_widen_the_closure() -> None:
-    assert "graph-works-serve" in reverse_closure(GRAPH, {"graph-works-cli"})
+    assert "gw-serve" in reverse_closure(GRAPH, {"gw-cli"})
 
 
 def test_stdout_has_no_carriage_returns() -> None:
@@ -60,7 +60,7 @@ def test_stdout_has_no_carriage_returns() -> None:
 def test_subagents_io_closure() -> None:
     assert reverse_closure(GRAPH, {"subagents-io"}) == {
         "subagents-io", "workflow-local", "workflow-orca",
-        "gw-kernel", "gw-wiki", "gw-pipeline", "gw-work", "gw-orchestrate", "graph-works-wire", "graph-works-cli", "graph-works-serve",
+        "gw-kernel", "gw-wiki", "gw-pipeline", "gw-work", "gw-orchestrate", "gw-wire", "gw-cli", "gw-serve",
     }
 
 
@@ -68,13 +68,13 @@ def test_kernel_path_selects_interface_dependents() -> None:
     selection = _sel("packages/gw-kernel/src/gw_kernel/hooks.py")
     assert selection.mode == "packages"
     assert set(selection.units) == {
-        "gw-kernel", "gw-wiki", "gw-pipeline", "gw-work", "gw-orchestrate", "graph-works-wire", "graph-works-cli", "graph-works-serve",
+        "gw-kernel", "gw-wiki", "gw-pipeline", "gw-work", "gw-orchestrate", "gw-wire", "gw-cli", "gw-serve",
     }
 
 
 def test_leaf_package_selects_itself() -> None:
-    sel = _sel("packages/graph-works-serve/src/graph_works_serve/app.py")
-    assert (sel.mode, sel.plugin, sel.units) == ("packages", False, ("graph-works-serve",))
+    sel = _sel("packages/gw-serve/src/gw_serve/app.py")
+    assert (sel.mode, sel.plugin, sel.units) == ("packages", False, ("gw-serve",))
 
 
 def test_okf_ext_path_maps_to_okf_io_unit() -> None:
@@ -169,7 +169,7 @@ def test_missing_main_is_a_clear_error(repo: Path, capsys: pytest.CaptureFixture
 
 def test_orchestrate_path_selects_only_slice_and_interfaces() -> None:
     selection = _sel("packages/gw-orchestrate/src/gw_orchestrate/commands.py")
-    assert set(selection.units) == {"gw-orchestrate", "graph-works-cli", "graph-works-serve", "graph-works-wire"}
+    assert set(selection.units) == {"gw-orchestrate", "gw-cli", "gw-serve", "gw-wire"}
     assert "gw-kernel" not in selection.units
 
 
@@ -177,7 +177,7 @@ def test_work_path_selects_slice_and_consumers_without_kernel() -> None:
     selection = _sel("packages/gw-work/src/gw_work/commands.py")
     assert selection.mode == "packages"
     assert selection.plugin is False
-    assert set(selection.units) == {"gw-work", "gw-wiki", "gw-orchestrate", "graph-works-cli", "graph-works-serve", "graph-works-wire"}
+    assert set(selection.units) == {"gw-work", "gw-wiki", "gw-orchestrate", "gw-cli", "gw-serve", "gw-wire"}
     assert "gw-kernel" not in selection.units
 
 
@@ -187,7 +187,7 @@ def test_pipeline_path_selects_consumers_without_kernel() -> None:
     assert selection.plugin is False
     assert set(selection.units) == {
         "gw-pipeline", "gw-orchestrate", "gw-work", "gw-wiki",
-        "graph-works-cli", "graph-works-serve", "graph-works-wire",
+        "gw-cli", "gw-serve", "gw-wire",
     }
     assert "gw-kernel" not in selection.units
     assert "gw-wiki" in selection.units
@@ -197,8 +197,8 @@ def test_wiki_path_selects_interfaces_but_not_kernel():
     selection = _sel("packages/gw-wiki/src/gw_wiki/scan/commands.py")
     assert selection.mode == "packages"
     assert set(selection.units) == {
-        "gw-wiki", "graph-works-cli", "graph-works-serve", "graph-works-wire",
+        "gw-wiki", "gw-cli", "gw-serve", "gw-wire",
     }
-    assert "gw-wiki" in GRAPH["graph-works-cli"]
+    assert "gw-wiki" in GRAPH["gw-cli"]
     assert "gw-work" in GRAPH["gw-wiki"]  # dev-only is intentionally counted
     assert "gw-wiki" not in GRAPH["gw-kernel"]

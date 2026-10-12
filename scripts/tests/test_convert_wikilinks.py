@@ -162,9 +162,9 @@ def item_vault(vault: Path) -> Path:
     """The work-lane shapes this sweep has to repair, drawn from the live bundle."""
     page(
         vault,
-        "work/_archive/epic-graph-works-cli.md",
+        "work/_archive/epic-gw-cli.md",
         "# CLI\n",
-        frontmatter="title: graph-works-cli — port the gw binary\n",
+        frontmatter="title: gw-cli — port the gw binary\n",
     )
     page(
         vault,
@@ -183,15 +183,15 @@ def item_vault(vault: Path) -> Path:
 
 def test_work_prefixed_dated_slug_resolves_to_the_current_item(vault: Path) -> None:
     item_vault(vault)
-    page(vault, "notes.md", "See [[work/2026-08-11-epic-graph-works-cli]].\n")
+    page(vault, "notes.md", "See [[work/2026-08-11-epic-gw-cli]].\n")
     out = convert(vault, read="notes.md", backfill=False)
-    assert "[graph-works-cli — port the gw binary](/work/_archive/epic-graph-works-cli.md)" in out
+    assert "[gw-cli — port the gw binary](/work/_archive/epic-gw-cli.md)" in out
 
 
 def test_archive_prefixed_dated_slug_resolves(vault: Path) -> None:
     item_vault(vault)
-    page(vault, "notes.md", "See [[work/_archive/2026-08-11-epic-graph-works-cli]].\n")
-    assert "(/work/_archive/epic-graph-works-cli.md)" in convert(vault, read="notes.md", backfill=False)
+    page(vault, "notes.md", "See [[work/_archive/2026-08-11-epic-gw-cli]].\n")
+    assert "(/work/_archive/epic-gw-cli.md)" in convert(vault, read="notes.md", backfill=False)
 
 
 def test_bare_dated_slug_without_work_prefix_resolves(vault: Path) -> None:
@@ -390,7 +390,7 @@ def artifact_vault(vault: Path) -> Path:
     )
     page(
         vault,
-        "work/_archive/epic-graph-works-cli/references/_archive/00-decisions.md",
+        "work/_archive/epic-gw-cli/references/_archive/00-decisions.md",
         "# Decisions\n",
         frontmatter="title: decision ledger\n",
     )
@@ -411,16 +411,16 @@ def test_trailing_md_suffix_is_not_doubled(vault: Path) -> None:
     """Without the `.md` strip the candidate becomes `…/00-decisions.md.md`;
     that single bug accounted for 21 of the live bundle's artifact hits."""
     artifact_vault(vault)
-    page(vault, "notes.md", "See [[work/2026-08-11-epic-graph-works-cli/00-decisions.md]].\n")
-    assert "(/work/_archive/epic-graph-works-cli/references/_archive/00-decisions.md)" in convert(
+    page(vault, "notes.md", "See [[work/2026-08-11-epic-gw-cli/00-decisions.md]].\n")
+    assert "(/work/_archive/epic-gw-cli/references/_archive/00-decisions.md)" in convert(
         vault, read="notes.md", backfill=False
     )
 
 
 def test_references_archive_variant_is_searched(vault: Path) -> None:
     artifact_vault(vault)
-    page(vault, "notes.md", "See [[work/2026-08-11-epic-graph-works-cli/references/00-decisions]].\n")
-    assert "(/work/_archive/epic-graph-works-cli/references/_archive/00-decisions.md)" in convert(
+    page(vault, "notes.md", "See [[work/2026-08-11-epic-gw-cli/references/00-decisions]].\n")
+    assert "(/work/_archive/epic-gw-cli/references/_archive/00-decisions.md)" in convert(
         vault, read="notes.md", backfill=False
     )
 
@@ -429,14 +429,14 @@ def test_unresolvable_artifact_demotes_to_the_item_page(vault: Path) -> None:
     """The item page is the durable identity and its `references/index.md`
     reaches the artifact; a dangling artifact link would reach nothing."""
     artifact_vault(vault)
-    page(vault, "notes.md", "See [[work/2026-08-11-epic-graph-works-cli/references/99-gone]].\n")
+    page(vault, "notes.md", "See [[work/2026-08-11-epic-gw-cli/references/99-gone]].\n")
     out = convert(vault, read="notes.md", backfill=False)
-    assert "[graph-works-cli — port the gw binary](/work/_archive/epic-graph-works-cli.md)" in out
+    assert "[gw-cli — port the gw binary](/work/_archive/epic-gw-cli.md)" in out
 
 
 def test_demotion_is_reported_as_its_own_step(vault: Path) -> None:
     artifact_vault(vault)
-    page(vault, "notes.md", "See [[work/2026-08-11-epic-graph-works-cli/references/99-gone]].\n")
+    page(vault, "notes.md", "See [[work/2026-08-11-epic-gw-cli/references/99-gone]].\n")
     result = run(vault, write=False, relative=False, backfill=False)
     assert [c.step for c in result.conversions] == ["demoted"]
 
@@ -454,9 +454,9 @@ def test_artifact_under_an_unresolvable_item_is_left_alone(vault: Path) -> None:
 
 def test_anchor_is_preserved_through_step_2_item_resolution(vault: Path) -> None:
     item_vault(vault)
-    page(vault, "notes.md", "See [[work/2026-08-11-epic-graph-works-cli#8-1-mode-skeletons]].\n")
+    page(vault, "notes.md", "See [[work/2026-08-11-epic-gw-cli#8-1-mode-skeletons]].\n")
     out = convert(vault, read="notes.md", backfill=False)
-    assert "(/work/_archive/epic-graph-works-cli.md#8-1-mode-skeletons)" in out
+    assert "(/work/_archive/epic-gw-cli.md#8-1-mode-skeletons)" in out
 
 
 def test_anchor_is_preserved_through_step_3_artifact_resolution(vault: Path) -> None:
@@ -478,9 +478,9 @@ def test_anchor_is_dropped_on_demotion(vault: Path) -> None:
     against the original artifact almost never exists there, so it must not
     be carried across."""
     artifact_vault(vault)
-    page(vault, "notes.md", "See [[work/2026-08-11-epic-graph-works-cli/references/99-gone#8-1-mode-skeletons]].\n")
+    page(vault, "notes.md", "See [[work/2026-08-11-epic-gw-cli/references/99-gone#8-1-mode-skeletons]].\n")
     out = convert(vault, read="notes.md", backfill=False)
-    assert "[graph-works-cli — port the gw binary](/work/_archive/epic-graph-works-cli.md)" in out
+    assert "[gw-cli — port the gw binary](/work/_archive/epic-gw-cli.md)" in out
     assert "#8-1-mode-skeletons" not in out
 
 
@@ -593,10 +593,10 @@ def test_mapping_records_each_distinct_target_once(vault: Path) -> None:
     page(
         vault,
         "notes.md",
-        "Twice: [[work/2026-08-11-epic-graph-works-cli]] and [[work/2026-08-11-epic-graph-works-cli]].\n",
+        "Twice: [[work/2026-08-11-epic-gw-cli]] and [[work/2026-08-11-epic-gw-cli]].\n",
     )
     result = run(vault, write=False, relative=False, backfill=False)
-    assert result.mapping["work/2026-08-11-epic-graph-works-cli"] == ("work/_archive/epic-graph-works-cli.md", "item")
+    assert result.mapping["work/2026-08-11-epic-gw-cli"] == ("work/_archive/epic-gw-cli.md", "item")
 
 
 def test_mapping_records_the_step_that_resolved_it(vault: Path) -> None:
@@ -604,25 +604,25 @@ def test_mapping_records_the_step_that_resolved_it(vault: Path) -> None:
     page(
         vault,
         "notes.md",
-        "A [[entities/pkg_okf-io]] and a [[work/2026-08-11-epic-graph-works-cli/references/99-gone]].\n",
+        "A [[entities/pkg_okf-io]] and a [[work/2026-08-11-epic-gw-cli/references/99-gone]].\n",
     )
     result = run(vault, write=False, relative=False, backfill=False)
     assert result.mapping["entities/pkg_okf-io"][1] == "exact"
-    assert result.mapping["work/2026-08-11-epic-graph-works-cli/references/99-gone"][1] == "demoted"
+    assert result.mapping["work/2026-08-11-epic-gw-cli/references/99-gone"][1] == "demoted"
 
 
 def test_report_prints_the_map_on_a_dry_run(vault: Path, capsys) -> None:
     item_vault(vault)
-    page(vault, "notes.md", "See [[work/2026-08-11-epic-graph-works-cli]].\n")
+    page(vault, "notes.md", "See [[work/2026-08-11-epic-gw-cli]].\n")
     report(run(vault, write=False, relative=False, backfill=False), write=False)
     out = capsys.readouterr().out
     assert "target map" in out
-    assert "work/2026-08-11-epic-graph-works-cli -> work/_archive/epic-graph-works-cli.md" in out
+    assert "work/2026-08-11-epic-gw-cli -> work/_archive/epic-gw-cli.md" in out
 
 
 def test_report_map_groups_by_step(vault: Path, capsys) -> None:
     artifact_vault(vault)
-    page(vault, "notes.md", "A [[entities/pkg_okf-io]] and a [[work/2026-08-11-epic-graph-works-cli]].\n")
+    page(vault, "notes.md", "A [[entities/pkg_okf-io]] and a [[work/2026-08-11-epic-gw-cli]].\n")
     report(run(vault, write=False, relative=False, backfill=False), write=False)
     out = capsys.readouterr().out
     assert "[exact]" in out

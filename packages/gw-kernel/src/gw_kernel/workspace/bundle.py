@@ -2,8 +2,8 @@
 
 Every load appends the repositories lane's clone glob and prunes the clone directory,
 so the walk never lists inside a materialized clone (okf-io `prune=`).
-`tests/test_bundle_load_guard.py` fails if any module in gw-kernel, graph-works-cli or
-graph-works-serve imports `okf_io.load_bundle` instead of calling these.
+`tests/test_bundle_load_guard.py` fails if any module in gw-kernel, gw-cli or
+gw-serve imports `okf_io.load_bundle` instead of calling these.
 
 `work_scope` defines the work partition. Projection readers use `load_work_bundle`
 to prune every other top-level directory without listing it; lint uses

@@ -1,11 +1,11 @@
 """Startup benchmark for `gw`: median wall time per probe, and an -X importtime aggregate.
 
 Evidence, not a gate (D-004): wall-clock thresholds flake on a contended host. The
-deterministic regression guard is packages/graph-works-cli/tests/test_lazy_startup.py.
+deterministic regression guard is packages/gw-cli/tests/test_lazy_startup.py.
 
 Run under the CLI's environment so the probes see its dependencies:
 
-    uv run --package graph-works-cli python scripts/bench_startup.py --runs 10 --importtime
+    uv run --package gw-cli python scripts/bench_startup.py --runs 10 --importtime
 """
 
 from __future__ import annotations
@@ -21,9 +21,9 @@ PROBES: dict[str, list[str]] = {
     "empty interpreter": ["-c", "pass"],
     "import gw_kernel": ["-c", "import gw_kernel"],
     "import subagents_io": ["-c", "import subagents_io"],
-    "gw version": ["-m", "graph_works_cli.cli", "version"],
-    "gw work status --help": ["-m", "graph_works_cli.cli", "work", "status", "--help"],
-    "gw next --help": ["-m", "graph_works_cli.cli", "next", "--help"],
+    "gw version": ["-m", "gw_cli.cli", "version"],
+    "gw work status --help": ["-m", "gw_cli.cli", "work", "status", "--help"],
+    "gw next --help": ["-m", "gw_cli.cli", "next", "--help"],
 }
 
 

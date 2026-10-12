@@ -17,9 +17,9 @@ SRC_ROOTS = tuple(
     PACKAGES / name / "src"
     for name in (
         "gw-kernel",
-        "graph-works-cli",
-        "graph-works-serve",
-        "graph-works-wire",
+        "gw-cli",
+        "gw-serve",
+        "gw-wire",
         "gw-orchestrate",
         "gw-work",
         "gw-pipeline",
@@ -127,9 +127,9 @@ def test_boundary_admits_only_named_core_seams(relative: str) -> None:
         CORE / "read_session" / "index.txt",
         CORE / "util" / "read_index_extra.py",
         CORE / "workspace" / "read_index.py",
-        SRC_ROOTS[1] / "graph_works_cli" / "read_session" / "index.py",
-        SRC_ROOTS[2] / "graph_works_serve" / "util" / "read_index.py",
-        SRC_ROOTS[3] / "graph_works_wire" / "read_session" / "index.py",
+        SRC_ROOTS[1] / "gw_cli" / "read_session" / "index.py",
+        SRC_ROOTS[2] / "gw_serve" / "util" / "read_index.py",
+        SRC_ROOTS[3] / "gw_wire" / "read_session" / "index.py",
     ],
 )
 def test_boundary_rejects_other_locations(path: Path) -> None:

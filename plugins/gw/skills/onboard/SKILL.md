@@ -15,8 +15,8 @@ workspace itself, or the repo's `.claude/settings.local.json`; `gw` is the sole 
 
 - Run `gw` from the repo. `gw` being on PATH doesn't prove it's this repo's build —
   a stale entry point can own the name. Verify identity, not presence: `gw util
-  describe-surface --json >/dev/null 2>&1 || echo "gw is not graph-works-cli —
-  use: uv run --package graph-works-cli gw ..."`.
+  describe-surface --json >/dev/null 2>&1 || echo "gw is not gw-cli —
+  use: uv run --package gw-cli gw ..."`.
 - When step 0 finds no workspace, Q1–Q3 and the apply step are required — that's the
   creation path, not a toggle. The feature questions after it (Q4) are optional: "No"
   runs nothing and moves on.
@@ -114,7 +114,7 @@ AskUserQuestion: "Enable session transcript capture for the active work item?"
 - "No" → run nothing
 
 `transcript` is the whole hook-feature vocabulary — `HookFeature` in
-`graph_works_cli.config_cli` declares that one value and `HookWiring.for_feature`
+`gw_cli.config_cli` declares that one value and `HookWiring.for_feature`
 refuses any other. Off-switch: `gw config hooks disable transcript`.
 
 ## Closing

@@ -139,9 +139,9 @@ def setup(tmp_path, monkeypatch, *, scalar=True, nested=False, base_checkout=Fal
 
 @pytest.mark.parametrize("scalar", [True, False])
 def test_next_and_orchestrate_have_identical_finish_targets(tmp_path, monkeypatch, scalar):
-    from graph_works_wire.work import next_payload, orchestrate_payload
     from gw_orchestrate import commands
     from gw_pipeline import finish
+    from gw_wire.work import next_payload, orchestrate_payload
     from gw_work.commands import run_next
 
     layout, _items, path = setup(tmp_path, monkeypatch, scalar=scalar)

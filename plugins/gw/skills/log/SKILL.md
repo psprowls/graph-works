@@ -34,7 +34,7 @@ unlabelled list entries are also valid OKF. `gw util log` is append-only.
 
 Resolve the workspace, then pass its absolute log path as an argument. Run the
 recipe below using a Python environment containing `okf_io`; in this repository
-use `uv run --package graph-works-cli python` in place of `python`. Forward the
+use `uv run --package gw-cli python` in place of `python`. Forward the
 requested `--last`, `--op`, and `--since` arguments after the path. These are
 recipe arguments, not `gw util log` flags. This reads the file without writing.
 

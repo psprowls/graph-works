@@ -43,7 +43,7 @@ Code plugin this repo publishes and the one Claude Code installs and loads
 - [`packages/gw-kernel`](packages/gw-kernel) — what a workspace
   is: discovery, the layout object, the manifest, and init. Band 3: the one
   package that knows what a workspace is.
-- [`packages/graph-works-cli`](packages/graph-works-cli) — `gw`, the
+- [`packages/gw-cli`](packages/gw-cli) — `gw`, the
   graph-works CLI: a thin Typer interface over `gw-kernel` (ADR-0013).
 
 Each package carries its own `README.md` and an `AGENTS.md` (reached from a

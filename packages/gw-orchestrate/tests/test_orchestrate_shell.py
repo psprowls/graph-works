@@ -2086,7 +2086,7 @@ def test_unsafe_undeclared_anchor_worktree_refuses_adoption_and_use(
 @pytest.mark.parametrize("tagged", [False, True])
 def test_explicit_repo_override_projects_dispatch_metadata(tmp_path: Path, tagged: bool) -> None:
     """The singular Python override serializes without resolving foreign assignments."""
-    from graph_works_wire.work import orchestrate_payload
+    from gw_wire.work import orchestrate_payload
 
     layout = _workspace(tmp_path / "workspace")
     repo = _git_repo(tmp_path / "code")

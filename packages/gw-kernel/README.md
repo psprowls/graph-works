@@ -355,7 +355,7 @@ stable from v1 forward:
 is the only one a consumer needs. Everything a successful command has to say —
 including the notice `find` appends when the 50-row cap fires — is in `output`.
 
-There is no Typer surface and no tracing here — `graph-works-cli` builds the
+There is no Typer surface and no tracing here — `gw-cli` builds the
 command line over these functions, and timing an invocation is the concern of
 whoever invokes.
 

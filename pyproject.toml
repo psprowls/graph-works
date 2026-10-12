@@ -30,10 +30,10 @@ gw-kernel = { workspace = true }
 gw-wiki = { workspace = true }
 gw-pipeline = { workspace = true }
 gw-work = { workspace = true }
-graph-works-wire = { workspace = true }
+gw-wire = { workspace = true }
 workflow-local = { workspace = true }
 workflow-orca = { workspace = true }
-graph-works-cli = { workspace = true }
+gw-cli = { workspace = true }
 
 [dependency-groups]
 dev = [
@@ -96,10 +96,10 @@ select = ["E", "F", "I", "UP", "B", "SIM", "RUF", "ANN", "PTH"]
 "packages/gw-pipeline/tests/**" = ["ANN"]
 "packages/gw-work/tests/**" = ["ANN"]
 "packages/gw-orchestrate/tests/**" = ["ANN"]
-"packages/graph-works-wire/tests/**" = ["ANN"]
+"packages/gw-wire/tests/**" = ["ANN"]
 "packages/workflow-local/tests/**" = ["ANN"]
 "packages/workflow-orca/tests/**" = ["ANN"]
-"packages/graph-works-cli/tests/**" = ["ANN"]
+"packages/gw-cli/tests/**" = ["ANN"]
 "packages/gw-wiki/src/gw_wiki/prompts/_fragments/*.py" = ["E501"]
 "packages/gw-wiki/src/gw_wiki/query/prompts/code_reader.py" = ["E501"]
 "packages/gw-wiki/src/gw_wiki/query/prompts/synthesizer.py" = ["E501"]
@@ -174,7 +174,7 @@ precision = 2
 root_packages = [
     "okf_io", "okf_ext", "code_graph_io", "config_io", "models_io", "subagents_io",
     "code_wiki_okf", "work_tracker_okf", "doc_wiki_okf", "repositories_okf", "gw_kernel", "gw_pipeline", "gw_orchestrate", "gw_work", "gw_wiki",
-    "workflow_local", "workflow_orca", "graph_works_cli", "graph_works_serve", "graph_works_wire", "plugin_fork_io",
+    "workflow_local", "workflow_orca", "gw_cli", "gw_serve", "gw_wire", "plugin_fork_io",
 ]
 # Lets a forbidden contract name an external package (typer, click).
 include_external_packages = true
@@ -268,7 +268,7 @@ source_modules = [
     "okf_io", "okf_ext", "code_wiki_okf", "work_tracker_okf", "doc_wiki_okf", "repositories_okf",
     "config_io", "subagents_io", "models_io", "code_graph_io", "plugin_fork_io",
 ]
-forbidden_modules = ["gw_kernel", "gw_pipeline", "gw_orchestrate", "gw_work", "gw_wiki", "graph_works_serve"]
+forbidden_modules = ["gw_kernel", "gw_pipeline", "gw_orchestrate", "gw_work", "gw_wiki", "gw_serve"]
 
 [[tool.importlinter.contracts]]
 name = "plugin-fork-io never imports workspace siblings"
@@ -277,7 +277,7 @@ source_modules = ["plugin_fork_io"]
 forbidden_modules = [
     "okf_io", "okf_ext", "code_graph_io", "config_io", "models_io",
     "subagents_io", "code_wiki_okf", "work_tracker_okf", "doc_wiki_okf", "repositories_okf",
-    "gw_kernel", "gw_pipeline", "gw_wiki", "graph_works_cli", "graph_works_serve", "graph_works_wire", "workflow_local", "workflow_orca",
+    "gw_kernel", "gw_pipeline", "gw_wiki", "gw_cli", "gw_serve", "gw_wire", "workflow_local", "workflow_orca",
 ]
 
 # The seam only works in one direction. `independence` forbids every edge AMONG
@@ -306,8 +306,8 @@ name = "Backends never import each other"
 type = "independence"
 modules = ["workflow_local", "workflow_orca"]
 
-# The interface band sits above gw-kernel: `graph-works-cli` and
-# `graph-works-serve`, with `graph-works-wire` as the one home of every
+# The interface band sits above gw-kernel: `gw-cli` and
+# `gw-serve`, with `gw-wire` as the one home of every
 # typed-result -> JSON projection they share. Two edges would undo that
 # placement, and until now no contract stated either.
 #
@@ -318,21 +318,21 @@ modules = ["workflow_local", "workflow_orca"]
 [[tool.importlinter.contracts]]
 name = "The wire never imports an interface"
 type = "forbidden"
-source_modules = ["graph_works_wire"]
-forbidden_modules = ["graph_works_cli", "graph_works_serve", "typer", "click"]
+source_modules = ["gw_wire"]
+forbidden_modules = ["gw_cli", "gw_serve", "typer", "click"]
 allow_indirect_imports = true
 
 # Interfaces never import each other (ADR-0058): what they share lives in
-# graph-works-wire. The CLI must not pull a web server; serve must not pull Typer.
+# gw-wire. The CLI must not pull a web server; serve must not pull Typer.
 [[tool.importlinter.contracts]]
 name = "Interfaces never import each other"
 type = "independence"
-modules = ["graph_works_cli", "graph_works_serve"]
+modules = ["gw_cli", "gw_serve"]
 
 [[tool.importlinter.contracts]]
 name = "Serve never imports a CLI framework"
 type = "forbidden"
-source_modules = ["graph_works_serve"]
+source_modules = ["gw_serve"]
 forbidden_modules = ["typer", "click"]
 allow_indirect_imports = true
 
@@ -343,8 +343,8 @@ allow_indirect_imports = true
 name = "The application band is a tree of five slices beneath the interfaces"
 type = "layers"
 layers = [
-    "graph_works_cli | graph_works_serve",
-    "graph_works_wire",
+    "gw_cli | gw_serve",
+    "gw_wire",
     "gw_orchestrate | gw_work",
     "gw_pipeline | gw_wiki",
     "gw_kernel",
@@ -380,7 +380,7 @@ modules = [
 [[tool.importlinter.contracts]]
 name = "Display interfaces use the kernel read-session seam for the read index"
 type = "forbidden"
-source_modules = ["graph_works_cli", "graph_works_serve", "graph_works_wire"]
+source_modules = ["gw_cli", "gw_serve", "gw_wire"]
 forbidden_modules = ["okf_ext.readindex"]
 allow_indirect_imports = true
 

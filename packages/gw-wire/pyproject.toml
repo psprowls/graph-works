@@ -1,0 +1,39 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "gw-wire"
+version = "0.2.0"
+description = "Typed graph-works results projected to plain JSON data, shared by every interface (CLI, serve)."
+authors = [
+  { name = "Patrick Sprowls", email = "psprowls@gmail.com" },
+]
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+  "gw-pipeline>=0.1,<0.2",
+  "gw-work>=0.1,<0.2",
+  "gw-orchestrate>=0.1,<0.2",
+  "gw-kernel>=0.7,<0.8",
+  "gw-wiki>=0.1,<0.2",
+  "config-io>=0.2,<0.3",
+  "doc-wiki-okf>=0.3.2,<0.4",
+  "okf-ext>=0.5.2,<0.6",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/gw_wire"]
+
+[tool.uv.sources]
+gw-pipeline = { workspace = true }
+gw-work = { workspace = true }
+gw-orchestrate = { workspace = true }
+gw-kernel = { workspace = true }
+gw-wiki = { workspace = true }
+config-io = { workspace = true }
+doc-wiki-okf = { workspace = true }
+okf-ext = { workspace = true }
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

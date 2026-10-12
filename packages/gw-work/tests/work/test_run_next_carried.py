@@ -6,8 +6,8 @@ from datetime import date
 from pathlib import Path
 
 import pytest
-from graph_works_wire.work import next_payload
 from gw_kernel import apply_init, plan_init
+from gw_wire.work import next_payload
 from gw_work import carried
 from gw_work import commands as work
 from gw_work.carried import CarriedContext, Slot, SlotFill, SlotInput

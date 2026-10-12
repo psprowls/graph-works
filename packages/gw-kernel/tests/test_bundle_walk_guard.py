@@ -15,8 +15,8 @@ SRC_ROOTS = tuple(
     PACKAGES / name / "src"
     for name in (
         "gw-kernel",
-        "graph-works-cli",
-        "graph-works-serve",
+        "gw-cli",
+        "gw-serve",
         "gw-orchestrate",
         "gw-work",
         "gw-pipeline",
@@ -94,7 +94,7 @@ ALLOWLIST = {
         "iterdir",
     ): "Captured transaction entry restore",
     (
-        "packages/graph-works-cli/src/graph_works_cli/wiki_cli/scan.py",
+        "packages/gw-cli/src/gw_cli/wiki_cli/scan.py",
         "_reset_results_dir",
         "iterdir",
     ): "Scan results cleanup",

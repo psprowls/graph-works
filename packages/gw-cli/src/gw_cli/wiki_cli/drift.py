@@ -1,0 +1,99 @@
+"""The `gw wiki drift` command -- claude_code-backend brief, or the full judge+propose pipeline."""
+
+from __future__ import annotations
+
+import asyncio
+from datetime import UTC, datetime
+
+import typer
+from code_graph_io import GraphNotInitializedError, SchemaMismatchError, open_reader
+from gw_kernel.graph import commands as graph_commands
+from gw_kernel.workspace.config import load_workspace_config
+from gw_kernel.workspace.errors import WorkspaceError
+from gw_kernel.workspace.repos import resolve_repo
+from gw_wiki.agent_substrate.roles import role_spec
+from gw_wiki.lint_drift.propagate_drift import plan_drift_brief, run_propagate_drift
+from gw_wire.wiki import drift_brief_payload, drift_payload
+from models_io import ModelsIoError
+
+from gw_cli.json_output import encode
+from gw_cli.wiki_cli.errors import exit_error
+from gw_cli.workspace_resolution import resolve_workspace
+
+
+def drift(
+    backend: str = typer.Option(None, "--backend"),
+    only: str = typer.Option(None, "--only"),
+    dry_run: bool = typer.Option(True, "--dry-run/--no-dry-run"),
+    json_output: bool = typer.Option(False, "--json"),
+    workspace: str = typer.Option("", "--workspace"),
+    repo_name: str = typer.Option("", "--repo-name", help="Select among several declared repositories."),
+) -> None:
+    """Propose curated-page updates for entities whose code moved.
+
+    Reads the code graph as of the last `gw scan` -- it does not rebuild the
+    graph itself. Run `gw scan` first if the graph needs refreshing.
+
+    `--repo-name` selects the declared repository drift falls back to for an
+    entity no declared checkout contains. Required when `workspace.yaml`
+    declares several; optional with one.
+    """
+    layout = resolve_workspace(workspace)
+    try:
+        resolved_backend = role_spec("drift_propagator", layout=layout, backend_override=backend).backend
+    except (KeyError, WorkspaceError) as exc:
+        exit_error(str(exc), cause=exc)
+
+    try:
+        config = load_workspace_config(layout)
+    except (OSError, ValueError) as exc:
+        exit_error(str(exc), cause=exc)
+
+    if not repo_name and len(config.repos) > 1:
+        declared = sorted(entry.name for entry in config.repos)
+        exit_error(
+            f"{layout.manifest_path}: {len(config.repos)} repositories declared ({declared}); "
+            "pass --repo-name to choose one"
+        )
+    try:
+        repo_root, _ = resolve_repo(layout, repo_name=repo_name or None)
+    except ValueError as exc:
+        exit_error(str(exc), cause=exc)
+
+    target = graph_commands.graph_target(layout)
+    try:
+        reader = open_reader(graph_dir=target.graph_dir)
+    except (GraphNotInitializedError, SchemaMismatchError) as exc:
+        exit_error(f"cannot open the code graph at {target.graph_dir}: {exc}", cause=exc)
+
+    if resolved_backend == "claude_code":
+        if only:
+            exit_error("--only is not supported under the claude_code backend")
+        try:
+            brief = plan_drift_brief(layout, config, reader, repo_root=repo_root)
+        except (ModelsIoError, OSError, ValueError) as exc:
+            exit_error(str(exc), cause=exc)
+        if json_output:
+            typer.echo(encode(drift_brief_payload(brief)))
+        else:
+            for t in brief.targets:
+                typer.echo(
+                    f"{t.concept_id} ({len(t.candidates)} changed entit{'y' if len(t.candidates) == 1 else 'ies'})"
+                )
+        return
+
+    now = datetime.now(UTC)
+    try:
+        result = asyncio.run(
+            run_propagate_drift(layout, config, reader, at=now, repo_root=repo_root, dry_run=dry_run, only=only)
+        )
+    except (ModelsIoError, OSError, ValueError) as exc:
+        exit_error(str(exc), cause=exc)
+
+    if json_output:
+        typer.echo(encode(drift_payload(result)))
+    else:
+        typer.echo(f"Considered {result.entities_considered}, judged {result.pages_judged}, stale {result.pages_stale}")
+    if result.errors:
+        for error in result.errors:
+            typer.echo(f"Warning: {error}", err=True)

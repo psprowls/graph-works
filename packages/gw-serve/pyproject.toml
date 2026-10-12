@@ -1,0 +1,49 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "gw-serve"
+# Ships at gw's version -- gw-cli's (ADR 2026-09-18-the-control-plane-splits); test_package.py pins the two equal.
+version = "0.4.0"
+description = "gw-serve: a loopback HTTP sidecar over gw-kernel, emitting gw-wire projections."
+authors = [
+  { name = "Patrick Sprowls", email = "psprowls@gmail.com" },
+]
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+  "gw-work>=0.1,<0.2",
+  "gw-orchestrate>=0.1,<0.2",
+  "gw-kernel>=0.7,<0.8",
+  "gw-wiki>=0.1,<0.2",
+  "gw-wire>=0.2,<0.3",
+  "config-io>=0.2,<0.3",
+  "starlette>=0.40",
+  "uvicorn>=0.30",
+  "watchfiles>=1.0,<2",
+]
+
+[project.scripts]
+gw-serve = "gw_serve.main:run"
+
+[dependency-groups]
+# Test-only: route/CLI twin assertions invoke `gw … --json` in-process.
+# Never a runtime edge -- test_serve_boundaries.py and import-linter forbid it in src.
+dev = ["gw-cli"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/gw_serve"]
+
+[tool.uv.sources]
+gw-work = { workspace = true }
+gw-orchestrate = { workspace = true }
+gw-kernel = { workspace = true }
+gw-wiki = { workspace = true }
+gw-wire = { workspace = true }
+gw-cli = { workspace = true }
+config-io = { workspace = true }
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]

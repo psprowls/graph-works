@@ -17,7 +17,7 @@ import pytest
 PACKAGE = Path(__file__).resolve().parents[1]
 SRC = PACKAGE / "src" / "gw_wiki"
 KERNEL_SEAMS = frozenset({"workspace", "graph", "read_session", "guidance"})
-INTERFACES = frozenset({"graph_works_cli", "graph_works_serve", "graph_works_wire"})
+INTERFACES = frozenset({"gw_cli", "gw_serve", "gw_wire"})
 DECLARED = frozenset(
     dependency.split("[", 1)[0].split(">", 1)[0].replace("-", "_")
     for dependency in tomllib.loads((PACKAGE / "pyproject.toml").read_text(encoding="utf-8"))["project"]["dependencies"]
@@ -136,9 +136,9 @@ def _fixture(tmp_path: Path, source: str, module: str = "gw_wiki/query/injected.
     [
         "import gw_work",
         "from gw_orchestrate import X",
-        "import graph_works_cli",
-        "from graph_works_serve import routes",
-        "from graph_works_wire import project",
+        "import gw_cli",
+        "from gw_serve import routes",
+        "from gw_wire import project",
         "from gw_kernel import resolve",
         "import gw_kernel",
         "from gw_kernel import work",
@@ -240,9 +240,9 @@ def test_tests_accept_kernel_fixtures_and_work(tmp_path: Path, source: str) -> N
     [
         "import gw_orchestrate",
         "from gw_orchestrate import commands as run",
-        "import graph_works_cli",
-        "from graph_works_serve import routes",
-        "from graph_works_wire import project",
+        "import gw_cli",
+        "from gw_serve import routes",
+        "from gw_wire import project",
         "from ...gw_orchestrate import commands",
     ],
 )

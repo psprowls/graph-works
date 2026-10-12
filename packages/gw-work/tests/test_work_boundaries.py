@@ -11,7 +11,7 @@ import pytest
 SRC = Path(__file__).resolve().parents[1] / "src/gw_work"
 TESTS = Path(__file__).resolve().parent
 SIBLINGS = {"gw_orchestrate", "gw_wiki"}
-INTERFACES = {"graph_works_cli", "graph_works_serve", "graph_works_wire"}
+INTERFACES = {"gw_cli", "gw_serve", "gw_wire"}
 DISCOVERY = "gw_kernel.workspace.discovery"
 
 
@@ -230,7 +230,7 @@ def manifest_reads(tree: ast.AST, aliases: dict[str, str]) -> list[str]:
         "from ..gw_orchestrate import commands",
         "import gw_kernel as kernel",
         "from gw_kernel import workspace",
-        "import graph_works_wire as wire",
+        "import gw_wire as wire",
         "from gw_kernel.workspace import discovery as d",
         "from gw_kernel.workspace.discovery import resolve as r",
         "import gw_kernel.workspace as ws\nws.discovery.resolve()",

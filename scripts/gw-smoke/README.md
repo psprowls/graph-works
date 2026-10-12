@@ -1,6 +1,6 @@
-# Manual smoke test: `gw` (graph-works-cli) against this repo
+# Manual smoke test: `gw` (gw-cli) against this repo
 
-Goal: exercise the **new** `gw` (this repo's `packages/graph-works-cli`) end to end —
+Goal: exercise the **new** `gw` (this repo's `packages/gw-cli`) end to end —
 bootstrap, scan (all three modes), lint, query, work — against `agent-workspace` itself.
 The deterministic flow also asserts the canonical placement tree, completes deterministic
 human-owned prose, runs strict validation with zero findings, and proves a second structural scan
@@ -237,7 +237,7 @@ Inspect the canonical repository-owned lanes and global Dependencies:
 
 ```bash
 find "$TEST_WS/okf/repositories" -name '*.md' | sort | head -20
-cat "$TEST_WS/okf/repositories/graph-works/packages/graph-works-cli.md"
+cat "$TEST_WS/okf/repositories/graph-works/packages/gw-cli.md"
 cat "$TEST_WS/okf/repositories/graph-works/repository.md"
 cat "$TEST_WS/okf/dependencies/pypi/code-graph-io.md"
 tail -20 "$TEST_WS/okf/log.md"
@@ -357,7 +357,7 @@ $GW scan --apply \
 Check the sections actually landed:
 
 ```bash
-grep -A2 "^## Purpose" "$TEST_WS"/okf/repositories/graph-works/packages/graph-works-cli.md
+grep -A2 "^## Purpose" "$TEST_WS"/okf/repositories/graph-works/packages/gw-cli.md
 ```
 
 Try it again with a **stale** short head to confirm the guard rail fires (exit code 2,
@@ -396,14 +396,14 @@ on Bedrock with no valid session, `Ctrl-C` to bail). Confirm credentials first �
 get-caller-identity` for Bedrock roles, a real `AI_GATEWAY_API_KEY` for Vercel-backed ones:
 
 ```bash
-$GW query --query "what does graph-works-cli depend on" --workspace "$TEST_WS"
+$GW query --query "what does gw-cli depend on" --workspace "$TEST_WS"
 ```
 
 ## 8. Graph verbs (bypass the wiki, hit the code graph directly)
 
 ```bash
 $GW graph build --workspace "$TEST_WS"
-$GW graph describe graph-works-cli --kind package --workspace "$TEST_WS"   # --kind required: a bare name that's
+$GW graph describe gw-cli --kind package --workspace "$TEST_WS"   # --kind required: a bare name that's
                                                                             # both a package and an app is ambiguous
 $GW graph find --kind package --workspace "$TEST_WS"
 $GW graph export --out "$TEST_WS/../graph.graphml" --workspace "$TEST_WS"  # ~12k nodes / ~80k edges for this repo
@@ -413,7 +413,7 @@ $GW graph export --out "$TEST_WS/../graph.graphml" --workspace "$TEST_WS"  # ~12
 
 ```bash
 $GW work file --title "smoke test item" --kind Spike \
-  --summary "exercise gw work file" --affects "packages/graph-works-cli" \
+  --summary "exercise gw work file" --affects "packages/gw-cli" \
   --effort small --name "smoke-test-item" \
   --workspace "$TEST_WS" --dry-run
 $GW work status --workspace "$TEST_WS"

@@ -142,7 +142,7 @@ def test_transcript_capture_resolves_the_active_canonical_path() -> None:
 
 def test_public_managed_artifact_payloads_do_not_use_legacy_doc_keys() -> None:
     paths = (
-        ROOT / "packages" / "graph-works-cli" / "src" / "graph_works_cli" / "work_cli" / "rendering.py",
+        ROOT / "packages" / "gw-cli" / "src" / "gw_cli" / "work_cli" / "rendering.py",
         ROOT / "plugins" / "gw" / "skills" / "workflow" / "SKILL.md",
     )
     findings = [str(path.relative_to(ROOT)) for path in paths if "spec_doc" in path.read_text(encoding="utf-8")]
@@ -153,12 +153,12 @@ def test_public_managed_artifact_payloads_do_not_use_legacy_doc_keys() -> None:
 def test_private_descriptor_loader_is_versioned_as_a_synchronized_dependency() -> None:
     manifests = {
         name: ROOT / "packages" / name / "pyproject.toml"
-        for name in ("okf-io", "work-tracker-okf", "gw-kernel", "graph-works-cli")
+        for name in ("okf-io", "work-tracker-okf", "gw-kernel", "gw-cli")
     }
     with manifests["okf-io"].open("rb") as handle:
         assert tomllib.load(handle)["project"]["version"] == "0.2.6"
 
-    for name in ("work-tracker-okf", "gw-kernel", "graph-works-cli"):
+    for name in ("work-tracker-okf", "gw-kernel", "gw-cli"):
         with manifests[name].open("rb") as handle:
             dependencies = tomllib.load(handle)["project"]["dependencies"]
         floor = "0.2.6" if name == "gw-kernel" else "0.2.5"

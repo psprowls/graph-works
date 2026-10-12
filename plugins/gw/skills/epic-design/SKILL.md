@@ -33,8 +33,8 @@ returns — never derive it from a page stem.
 
 `gw` being on PATH doesn't prove it's this repo's build — a stale entry point can
 own the name. Verify identity, not presence: `gw util describe-surface --json
->/dev/null 2>&1 || echo "gw is not graph-works-cli — use: uv run --package
-graph-works-cli gw …"`.
+>/dev/null 2>&1 || echo "gw is not gw-cli — use: uv run --package
+gw-cli gw …"`.
 
 ## Checklist
 

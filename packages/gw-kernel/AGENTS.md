@@ -112,7 +112,7 @@ with `workspace.repos`' precedence but degrading instead of refusing.
 
 `events/` is the one vertical with no command entry point: it is a pure
 `classify` (in `rules.py`) plus its closed vocabulary (`model.py`), consumed
-by `graph-works-serve`'s watcher. It deliberately does not import
+by `gw-serve`'s watcher. It deliberately does not import
 `workspace.dispatch_config`; the caller passes the dispatch document paths.
 
 ### The four things "what a workspace is" means concretely
@@ -177,7 +177,7 @@ because `discovery.resolve` calls `read(path)` before a layout exists.
 `PlainYamlStore` construction inside the seam itself: only `manifest_store`
 and `set_value` construct it, and `tests/test_workspace_store_boundary.py`
 pins the permitted construction sites at exactly those two.
-`graph_works_cli.config_cli.main._store` calls `workspace_store` like any
+`gw_cli.config_cli.main._store` calls `workspace_store` like any
 other reader, then writes by naming a layer already on the `LayeredYamlStore`
 it got back — `.base` or `.overlay` — rather than constructing its own
 `PlainYamlStore`. That is what let the seam's return type change (the layered

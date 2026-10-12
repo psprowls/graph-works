@@ -3,7 +3,7 @@
 `sys.stdout` is built by the interpreter with `newline=None`, which translates every `"\n"`
 written through it to `os.linesep` -- CRLF on Windows. `typer.echo` writes through that stream,
 so every `--json` payload the CLI emits was CRLF on Windows even though no `open()` call is
-involved anywhere near it. Mirrors `graph-works-cli`'s `test_stdout_newlines.py`.
+involved anywhere near it. Mirrors `gw-cli`'s `test_stdout_newlines.py`.
 
 The process test below has to cross a real process boundary: `typer.testing.CliRunner`
 substitutes its own text wrapper for `sys.stdout`, so the whole in-process suite is

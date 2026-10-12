@@ -20,7 +20,7 @@ SRC = PACKAGE / "src/gw_pipeline"
 TESTS = PACKAGE / "tests"
 LOWER = frozenset({"work_tracker_okf", "okf_io", "okf_ext", "code_graph_io", "config_io"})
 SIBLINGS = frozenset({"gw_work", "gw_orchestrate", "gw_wiki"})
-INTERFACES = frozenset({"graph_works_cli", "graph_works_serve", "graph_works_wire"})
+INTERFACES = frozenset({"gw_cli", "gw_serve", "gw_wire"})
 DISCOVERY = "gw_kernel.workspace.discovery"
 TRANSCRIPT = "gw_pipeline.transcript_capture"
 SUPPORT = ("gw_pipeline.testing", "gw_pipeline.test_support", "gw_kernel.testing")
@@ -266,9 +266,9 @@ def manifest_reads(tree: ast.AST, aliases: dict[str, str]) -> list[str]:
         "from gw_kernel import (workspace, resolve as r)",
         "import os, gw_kernel as kernel",
         "from ... import gw_kernel",
-        "import graph_works_cli as cli",
-        "from graph_works_serve import routes",
-        "from graph_works_wire import work",
+        "import gw_cli as cli",
+        "from gw_serve import routes",
+        "from gw_wire import work",
         "import undeclared_external",
     ],
 )

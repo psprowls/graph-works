@@ -83,7 +83,7 @@ _ENTITY_PREFIXES = ("unit_tests_", "agent_plugin_", "domain_", "repo_", "pkg_", 
 #: on the line still points where it did.
 _MASK = "\x00"
 #: The dated-slug form every pre-migration work item carried
-#: (`2026-08-11-epic-graph-works-cli`). The date is what makes a bare slug safe
+#: (`2026-08-11-epic-gw-cli`). The date is what makes a bare slug safe
 #: to match against basenames: an undated bare name like `01-design-spec`
 #: matches 170+ files in this bundle, which is why `okf_ext.body.resolve_wikilink`
 #: declines shortest-path resolution outright.

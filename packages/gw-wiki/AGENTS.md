@@ -150,7 +150,7 @@ all, and re-recording material whose page already exists is refused rather than
 merged — provided the model's title still resolves to that same page. Since the
 ingestor's `title` decides the path, a re-ingest whose model retitles the
 material lands a second page instead. Keying the refusal on `origin` instead is
-an open question on graph-works-cli.
+an open question on gw-cli.
 
 **The suggest phase is best-effort.** A reasoner or extractor failure yields
 zero proposals, records the reason in `IngestResult.proposal_status` (not on the page),

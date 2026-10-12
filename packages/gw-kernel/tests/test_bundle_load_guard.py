@@ -15,8 +15,8 @@ SRC_ROOTS = tuple(
     PACKAGES / name / "src"
     for name in (
         "gw-kernel",
-        "graph-works-cli",
-        "graph-works-serve",
+        "gw-cli",
+        "gw-serve",
         "gw-orchestrate",
         "gw-work",
         "gw-pipeline",

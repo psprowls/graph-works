@@ -40,7 +40,7 @@ def test_render_package_owned_frontmatter_and_files_section() -> None:
         test_suites=[SuiteDescription(name="okf-io-tests", uri="", kind="pytest", file_count=12)],
         internal_dependencies=["code-graph-io"],
         internal_dependents=["code-wiki-okf"],
-        used_by=["graph-works-cli", "graph-works"],
+        used_by=["gw-cli", "graph-works"],
         versions_in_use=["okf-io>=0.2", "okf-io>=0.2.4"],
     )
     render = render_package(desc, repo_name="agent-workspace")
@@ -50,7 +50,7 @@ def test_render_package_owned_frontmatter_and_files_section() -> None:
         "depends_on": ["code-graph-io"],
         "test_suites": ["okf-io-tests"],
         "entry_points": ["okf-io"],
-        "used_by": ["graph-works-cli", "graph-works"],
+        "used_by": ["gw-cli", "graph-works"],
         "versions_in_use": ["okf-io>=0.2", "okf-io>=0.2.4"],
     }
     assert render.sections.keys() == {"Files"}

@@ -24,7 +24,7 @@ left as a gap for a future item. Neither does `work_tracker_okf.cli`'s own
 
 Eight names are re-exported rather than defined here -- `DependencyEdge`,
 `DependencyIssue`, `DependencyParse`, `parse_dependencies`, `Decision`,
-`ChildRollup`, `Transition` and `WorkItem`. `graph-works-cli` is forbidden to
+`ChildRollup`, `Transition` and `WorkItem`. `gw-cli` is forbidden to
 import `work_tracker_okf` at all (its own boundary test asserts it): `run_file`
 takes typed dependency edges, and the CLI's renderers destructure decisions,
 child rollups and routing transitions out of `NextResult`/`DecisionCommandResult`
@@ -36,7 +36,7 @@ import order.
 Front-door note: none of this module's symbols are re-exported through
 `gw_kernel` package root. `run_lint` would collide with the
 already-hoisted `gw_wiki.lint_drift.lint.run_lint`, and no consumer
-forces a naming resolution yet -- `graph-works-cli`, the only planned caller,
+forces a naming resolution yet -- `gw-cli`, the only planned caller,
 is a sibling epic, and CLI wiring is explicitly out of scope here. Reachable at
 `gw_work.commands.*` until that consumer decides how to
 disambiguate.

@@ -965,7 +965,7 @@ def cmd_entities(args: argparse.Namespace) -> PhaseReport:
     # --- step 3: regenerate ----------------------------------------------
     if args.write and args.scan:
         completed = subprocess.run(
-            ["uv", "run", "--package", "graph-works-cli", "gw", "scan", "--workspace", str(vault.parent)],
+            ["uv", "run", "--package", "gw-cli", "gw", "scan", "--workspace", str(vault.parent)],
             capture_output=True,
             text=True,
             check=False,

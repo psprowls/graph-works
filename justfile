@@ -1,6 +1,6 @@
 # Workspace task runner — okf-io, okf-ext, code-graph-io, code-wiki-okf,
 # work-tracker-okf, config-io, plugin-fork-io, models-io, subagents-io, doc-wiki-okf, repositories-okf,
-# gw-kernel, gw-pipeline, gw-work, gw-orchestrate, gw-wiki, workflow-local, workflow-orca, graph-works-wire, graph-works-cli, graph-works-serve.
+# gw-kernel, gw-pipeline, gw-work, gw-orchestrate, gw-wiki, workflow-local, workflow-orca, gw-wire, gw-cli, gw-serve.
 # Each recipe is exactly the command a future CI job will call.
 #
 # okf-io and okf-ext share the root `testpaths` and run under a plain
@@ -128,7 +128,7 @@ test:
     ncpu=$(uv run python -c "import os; print(os.cpu_count() or 1)")
     workers=$(( ncpu / jobs )); [ "$workers" -ge 1 ] || workers=1
     export PYTEST_XDIST_AUTO_NUM_WORKERS="$workers"
-    pkgs=(_test-okf _test-code-graph-io _test-code-wiki-okf _test-work-tracker-okf _test-config-io _test-plugin-fork-io _test-models-io _test-subagents-io _test-doc-wiki-okf _test-repositories-okf _test-gw-kernel _test-gw-pipeline _test-gw-work _test-gw-orchestrate _test-gw-wiki _test-workflow-local _test-workflow-orca _test-graph-works-wire _test-graph-works-cli _test-graph-works-serve)
+    pkgs=(_test-okf _test-code-graph-io _test-code-wiki-okf _test-work-tracker-okf _test-config-io _test-plugin-fork-io _test-models-io _test-subagents-io _test-doc-wiki-okf _test-repositories-okf _test-gw-kernel _test-gw-pipeline _test-gw-work _test-gw-orchestrate _test-gw-wiki _test-workflow-local _test-workflow-orca _test-gw-wire _test-gw-cli _test-gw-serve)
     printf '%s\n' "${pkgs[@]}" | xargs -P "$jobs" -I{} just {}
 
 _test-okf:
@@ -165,12 +165,12 @@ _test-workflow-local:
     uv run --package workflow-local pytest packages/workflow-local/tests -n auto
 _test-workflow-orca:
     uv run --package workflow-orca pytest packages/workflow-orca/tests -n auto
-_test-graph-works-wire:
-    uv run --package graph-works-wire pytest packages/graph-works-wire/tests -n auto
-_test-graph-works-cli:
-    uv run --package graph-works-cli pytest packages/graph-works-cli/tests -n auto
-_test-graph-works-serve:
-    uv run --package graph-works-serve pytest packages/graph-works-serve/tests -n auto
+_test-gw-wire:
+    uv run --package gw-wire pytest packages/gw-wire/tests -n auto
+_test-gw-cli:
+    uv run --package gw-cli pytest packages/gw-cli/tests -n auto
+_test-gw-serve:
+    uv run --package gw-serve pytest packages/gw-serve/tests -n auto
 
 # Branch coverage — GATED, per package. Same bounded two-axis fan-out as
 # `test` (`-n auto` per package, `GW_COV_JOBS`-many packages at once, CPUs
@@ -202,7 +202,7 @@ cov:
     ncpu=$(uv run python -c "import os; print(os.cpu_count() or 1)")
     workers=$(( ncpu / jobs )); [ "$workers" -ge 1 ] || workers=1
     export PYTEST_XDIST_AUTO_NUM_WORKERS="$workers"
-    pkgs=(_cov-okf _cov-code-graph-io _cov-code-wiki-okf _cov-work-tracker-okf _cov-config-io _cov-plugin-fork-io _cov-models-io _cov-subagents-io _cov-doc-wiki-okf _cov-repositories-okf _cov-gw-kernel _cov-gw-pipeline _cov-gw-work _cov-gw-orchestrate _cov-gw-wiki _cov-workflow-local _cov-workflow-orca _cov-graph-works-wire _cov-graph-works-cli _cov-graph-works-serve)
+    pkgs=(_cov-okf _cov-code-graph-io _cov-code-wiki-okf _cov-work-tracker-okf _cov-config-io _cov-plugin-fork-io _cov-models-io _cov-subagents-io _cov-doc-wiki-okf _cov-repositories-okf _cov-gw-kernel _cov-gw-pipeline _cov-gw-work _cov-gw-orchestrate _cov-gw-wiki _cov-workflow-local _cov-workflow-orca _cov-gw-wire _cov-gw-cli _cov-gw-serve)
     printf '%s\n' "${pkgs[@]}" | xargs -P "$jobs" -I{} just {}
 
 _cov-okf:
@@ -237,12 +237,12 @@ _cov-workflow-orca:
     COVERAGE_FILE=.coverage.workflow-orca uv run --package workflow-orca pytest packages/workflow-orca/tests --cov=workflow_orca --cov-branch --cov-report=term-missing --cov-fail-under=95 -n auto
 _cov-gw-wiki:
     COVERAGE_FILE=.coverage.gw-wiki uv run --package gw-wiki pytest packages/gw-wiki/tests --cov=gw_wiki --cov-branch --cov-report=term-missing --cov-fail-under=95 -n auto
-_cov-graph-works-wire:
-    COVERAGE_FILE=.coverage.graph-works-wire uv run --package graph-works-wire pytest packages/graph-works-wire/tests --cov=graph_works_wire --cov-branch --cov-report=term-missing --cov-fail-under=95 -n auto
-_cov-graph-works-cli:
-    COVERAGE_FILE=.coverage.graph-works-cli uv run --package graph-works-cli pytest packages/graph-works-cli/tests --cov=graph_works_cli --cov-branch --cov-report=term-missing --cov-fail-under=95 -n auto
-_cov-graph-works-serve:
-    COVERAGE_FILE=.coverage.graph-works-serve uv run --package graph-works-serve pytest packages/graph-works-serve/tests --cov=graph_works_serve --cov-branch --cov-report=term-missing --cov-fail-under=95 -n auto
+_cov-gw-wire:
+    COVERAGE_FILE=.coverage.gw-wire uv run --package gw-wire pytest packages/gw-wire/tests --cov=gw_wire --cov-branch --cov-report=term-missing --cov-fail-under=95 -n auto
+_cov-gw-cli:
+    COVERAGE_FILE=.coverage.gw-cli uv run --package gw-cli pytest packages/gw-cli/tests --cov=gw_cli --cov-branch --cov-report=term-missing --cov-fail-under=95 -n auto
+_cov-gw-serve:
+    COVERAGE_FILE=.coverage.gw-serve uv run --package gw-serve pytest packages/gw-serve/tests --cov=gw_serve --cov-branch --cov-report=term-missing --cov-fail-under=95 -n auto
 
 # workflow-local's coverage arm. POSIX-only: the package refuses to construct on
 # Windows by design (D-002), so a line-coverage floor there measures a suite that
@@ -444,7 +444,7 @@ test-plugin: preflight
     echo "--- test-doc-layout-claims"
     bash tests/test-doc-layout-claims.sh
     echo "--- test_log_recipe"
-    uv run --package graph-works-cli python tests/test_log_recipe.py
+    uv run --package gw-cli python tests/test_log_recipe.py
     echo "--- test-entry-point-skills"
     bash tests/test-entry-point-skills.sh
     echo "--- skills/shared/resolve-workspace"

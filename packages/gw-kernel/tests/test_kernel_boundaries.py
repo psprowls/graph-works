@@ -112,9 +112,9 @@ def test_only_display_read_modules_import_display_cache() -> None:
 @pytest.mark.parametrize(
     ("module", "source"),
     [
-        ("graph_works_serve/routes.py", "import gw_kernel.workspace.display_cache as cache"),
-        ("graph_works_serve/routes.py", "from gw_kernel.workspace.display_cache import open_display_cache"),
-        ("graph_works_serve/routes.py", "from gw_kernel.workspace import display_cache as cache"),
+        ("gw_serve/routes.py", "import gw_kernel.workspace.display_cache as cache"),
+        ("gw_serve/routes.py", "from gw_kernel.workspace.display_cache import open_display_cache"),
+        ("gw_serve/routes.py", "from gw_kernel.workspace import display_cache as cache"),
         ("gw_pipeline/transactions.py", "from gw_kernel.workspace import display_cache"),
         ("gw_wiki/query/commands.py", "from gw_kernel.workspace import display_cache"),
         ("gw_pipeline/transactions.py", "from gw_kernel.workspace.display_cache import open_display_cache"),

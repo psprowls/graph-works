@@ -9,7 +9,7 @@ function like `provenance.clear_active_work` -- this module is the
 composition, same as it always was for the pointer clear.
 
 Clearing the pointer is *behaviour*, so it belongs here rather than in the CLI
-that will route to this function: the graph-works-cli design rule is a thin
+that will route to this function: the gw-cli design rule is a thin
 Typer CLI with all logic in core.
 
 Both plans are computed against one bundle snapshot, but applying them is a

@@ -2,7 +2,7 @@
 
 Layer-2 vertical. A pure `classify` over the workspace layout and the
 work-item path grammar -- the one place that knows both -- so
-`graph-works-serve`'s watcher owns only the I/O loop. Not hoisted to the
+`gw-serve`'s watcher owns only the I/O loop. Not hoisted to the
 `gw_kernel` front door: `classify` is too generic a name there.
 """
 

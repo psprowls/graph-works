@@ -10,9 +10,9 @@ from typing import Any
 import pytest
 from graph_works_cli.cli import app
 from graph_works_cli.work_cli import main as work_cli
-from graph_works_core.orchestrate.stage_advance import run_stage_advance
-from graph_works_core.workspace.layout import WorkspaceLayout
 from graph_works_serve import mutations
+from gw_kernel.workspace.layout import WorkspaceLayout
+from gw_orchestrate.stage_advance import run_stage_advance
 from httpx import Response
 from mutation_helpers import make_client, seed_plan_doc, serve_workspace, snapshot, write_item
 from starlette.testclient import TestClient
@@ -208,8 +208,8 @@ def test_tampered_digest_writes_nothing(env: Env) -> None:
 
 def test_multi_repository_public_lifecycle(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Real Git evidence survives planning, placement, partial receipt and restart."""
-    from graph_works_core import apply_init, plan_init
-    from graph_works_core.orchestrate.finish_receipt import run_record_finish
+    from gw_kernel import apply_init, plan_init
+    from gw_orchestrate.finish_receipt import run_record_finish
     from okf_io import load
 
     monkeypatch.setattr(mutations, "now", lambda: AT)

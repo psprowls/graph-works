@@ -1,16 +1,16 @@
 """`gw wiki claims` — refresh, show, closure.
 
 ADR 2026-08-13-command-modules: this module routes, parses, formats, and traces. The index, the
-closure and item resolution belong to `graph_works_core.guidance` and are not restated here.
+closure and item resolution belong to `gw_kernel.guidance` and are not restated here.
 """
 
 from __future__ import annotations
 
 import typer
-from graph_works_core.guidance.claims import ClaimRow
-from graph_works_core.guidance.commands import run_claims_closure, run_claims_refresh, run_claims_show
-from graph_works_core.workspace.errors import WorkspaceConfigError
 from graph_works_wire.wiki import claims_closure_payload, claims_refresh_payload, claims_rows_payload
+from gw_kernel.guidance.claims import ClaimRow
+from gw_kernel.guidance.commands import run_claims_closure, run_claims_refresh, run_claims_show
+from gw_kernel.workspace.errors import WorkspaceConfigError
 
 from graph_works_cli import exit_codes
 from graph_works_cli.errors import fail

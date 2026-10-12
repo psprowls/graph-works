@@ -3,7 +3,7 @@
 `plan_placement` decides whether an observed `worktree`/`branch` pair may be
 written onto an item; `apply_placement` writes an accepted plan into a
 `Document`. Neither reads git, Orca, the clock or the filesystem -- the caller
-supplies the observation and `today=`, and `graph-works-core` serializes the
+supplies the observation and `today=`, and `gw-kernel` serializes the
 write with `gw work advance` under the decision owner's lock.
 
 A placement plan never carries a routing transition. Recording where a stage

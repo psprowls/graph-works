@@ -8,7 +8,7 @@ This package owns the path-native work domain: the item filesystem grammar,
 the closed vocabulary, the `WorkItem` projection, lifecycle/hierarchy rules,
 and the writers (filing, reparenting, archiving, decision ledgers, indexes).
 Keep workspace discovery, configuration, process execution, and transactional
-journaling in `graph-works-core`; keep CLI parsing and rendering in the CLI
+journaling in `gw-kernel`; keep CLI parsing and rendering in the CLI
 packages — `cli.py` here is a thin `typer` wrapper, not where domain logic
 belongs.
 
@@ -90,7 +90,7 @@ managed-artifact and dependency-graph code from inventing ad hoc path joins.
   filenames in `paths.MANAGED_ARTIFACTS` (`00-decisions.md` through
   `04-finish-results.md`).
 - `gw work next`'s stamped `sources[]` entry (`missing_design_source` /
-  `_apply_normalizations` in `graph_works_core.work.commands`) is frontmatter
+  `_apply_normalizations` in `gw_work.commands`) is frontmatter
   only — this package never writes a body citation for it. If a body citation
   is wanted to satisfy `provenance.source-uncited` (`okf_io/_rules/provenance.py`;
   §5.1 — a bare footnote *definition* with no inline `[^id]` reference already
@@ -115,7 +115,7 @@ managed-artifact and dependency-graph code from inventing ad hoc path joins.
   writes).
 - `repo:` names the item's code repository and is inherited down the physical
   chain (`hierarchy.declared_repo`: the item, then `reversed(ancestor_paths)`,
-  nearest wins). This package returns names only; `graph_works_core.workspace.repos.resolve_item_repo`
+  nearest wins). This package returns names only; `gw_kernel.workspace.repos.resolve_item_repo`
   maps them to paths. `repo_stamps[name]` holds `{worktree, branch}` for a
   repository other than the item's own — the scalar pair keeps meaning "own".
   `plan_placement(repo=)` is passed a name only for a foreign repository.

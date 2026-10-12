@@ -40,11 +40,11 @@ Code plugin this repo publishes and the one Claude Code installs and loads
   lane over OKF v0.2: source reading, ingest briefs, and proposals.
 - [`packages/work-tracker-okf`](packages/work-tracker-okf) — work-item
   tracking as an OKF v0.2 lane: declarations, vocabulary, and the item view.
-- [`packages/graph-works-core`](packages/graph-works-core) — what a workspace
+- [`packages/gw-kernel`](packages/gw-kernel) — what a workspace
   is: discovery, the layout object, the manifest, and init. Band 3: the one
   package that knows what a workspace is.
 - [`packages/graph-works-cli`](packages/graph-works-cli) — `gw`, the
-  graph-works CLI: a thin Typer interface over `graph-works-core` (ADR-0013).
+  graph-works CLI: a thin Typer interface over `gw-kernel` (ADR-0013).
 
 Each package carries its own `README.md` and an `AGENTS.md` (reached from a
 `CLAUDE.md` that just `@`-imports it) with its module layout and gotchas. The
@@ -58,7 +58,7 @@ The suffix is a band, and a permission:
 |---|---|---|
 | `-io` | 1, foundation | stdlib and declared third party only — never a sibling package, never a workspace path; `os` only where a package's own boundary test names a narrow, tested exemption |
 | `-okf` | 2, OKF-aware | band 1 plus the OKF document model |
-| `-core` | 3, application | everything below it; exactly one package knows what a workspace is |
+| `gw-kernel` | 3, application | everything below it; exactly one package knows what a workspace is |
 | `workflow-<backend>` | beside band 1 | **vendor and system coupling lives here** — one package per backend, `workflow-orca` beside `workflow-local` |
 
 `workflow-<backend>` exists so the band-1 seam can ship with a real
@@ -164,3 +164,10 @@ never `hatch-vcs`. The release machinery is documented here but not wired up:
 - Future sibling packages declare real bounds, e.g. `okf-io>=0.1,<0.2`.
 
 No publish workflow exists yet.
+
+
+Shared pipeline services live in [`gw-pipeline`](packages/gw-pipeline/README.md).
+Kernel owns workspace discovery/layout, bundle locks/pending commits and anchors;
+pipeline owns the journaled engine and shared finish/placement/guidance services.
+Only pipeline transcript capture delegates discovery to kernel. Pipeline source
+and tests do not import work/orchestrate/wiki or interface packages.

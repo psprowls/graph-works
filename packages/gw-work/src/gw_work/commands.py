@@ -1,0 +1,2090 @@
+"""Composed commands for the work-tracking vertical: `file`, `next`, `status`,
+`lint`, `regen-indexes`, subtree relocation, and decision-ledger operations --
+what `work_tracker_okf` ships as primitives plus `work_tracker_okf.compose`,
+composed through a `WorkspaceLayout` the way the archive vertical already does
+for `plan_archive`/`apply_archive`. `advance`, `archive`, and `sync-children`
+remain out of scope here, as explained below.
+
+Every function here takes a `WorkspaceLayout` and, where a schema/section
+declaration is needed, a `code_wiki_okf.config.Config` for
+`config.declarations_dir` -- the same pair
+`gw_wiki.ingest.commands`, `gw_wiki.scan.commands`, and
+`gw_wiki.query.commands` already take, rather than re-deriving a
+declarations path from `layout.bundle_dir` as the standalone
+`work_tracker_okf.cli` does.
+
+`advance`, `archive` and `sync-children` are deliberately absent.
+`gw_orchestrate.stage_advance.run_stage_advance` already composes
+`work_tracker_okf.compose.advance_and_stamp` with worktree provenance and a
+results stub; `gw_work.archive.commands.run_archive` already composes
+`work_tracker_okf.archive`.
+`sync-children` has no `WorkspaceLayout`-aware caller anywhere yet and is
+left as a gap for a future item. Neither does `work_tracker_okf.cli`'s own
+`init`, which this item does not touch.
+
+Eight names are re-exported rather than defined here -- `DependencyEdge`,
+`DependencyIssue`, `DependencyParse`, `parse_dependencies`, `Decision`,
+`ChildRollup`, `Transition` and `WorkItem`. `graph-works-cli` is forbidden to
+import `work_tracker_okf` at all (its own boundary test asserts it): `run_file`
+takes typed dependency edges, and the CLI's renderers destructure decisions,
+child rollups and routing transitions out of `NextResult`/`DecisionCommandResult`
+-- without the re-export the CLI could construct or type-annotate none of it.
+`WorkItem` is re-exported because the board's list read returns it. They are
+listed in `__all__` so the re-export is a contract rather than an accident of
+import order.
+
+Front-door note: none of this module's symbols are re-exported through
+`gw_kernel` package root. `run_lint` would collide with the
+already-hoisted `gw_wiki.lint_drift.lint.run_lint`, and no consumer
+forces a naming resolution yet -- `graph-works-cli`, the only planned caller,
+is a sibling epic, and CLI wiring is explicitly out of scope here. Reachable at
+`gw_work.commands.*` until that consumer decides how to
+disambiguate.
+
+Nothing here reads the clock: `on`/`today` are always caller-supplied, as
+everywhere else in this package and in `work-tracker-okf`.
+"""
+
+from __future__ import annotations
+
+import hashlib
+import os
+import time
+from collections.abc import Callable, Iterable, Mapping, Sequence
+from dataclasses import dataclass, field, replace
+from datetime import date
+from pathlib import Path
+from types import MappingProxyType
+from typing import Literal, Protocol
+
+from code_wiki_okf.config import Config
+from doc_wiki_okf.sources import SOURCE_TYPE, normalize_origin
+from gw_kernel.read_session import ReadSession, borrow_read_session, open_read_session
+from gw_kernel.workspace import provenance
+from gw_kernel.workspace.bundle import (
+    load_partial_bundle,
+    load_work_bundle,
+    load_workspace_bundle,
+    reclassify_ignored,
+    with_clone_ignore,
+    with_clone_prune,
+    work_scope,
+)
+from gw_kernel.workspace.commits import (
+    COMMIT_FAILED_PREFIX,
+    CommitOutcome,
+    WorkspaceCommit,
+    commit_mode,
+    item_stem,
+)
+from gw_kernel.workspace.dispatch import (
+    AttributeValue,
+    DispatchResolution,
+    DispatchRule,
+    dispatch_attributes,
+    packaged_rules_matching,
+    resolve_dispatch,
+    rule_matches,
+)
+from gw_kernel.workspace.dispatch_artifacts import missing_design_source, routing_items
+from gw_kernel.workspace.dispatch_config import DispatchConfig, load_dispatch_config
+from gw_kernel.workspace.errors import WorkspaceError
+from gw_kernel.workspace.lane_facts import gather_lane_facts, has_lane_pages, repository_notes, runner
+from gw_kernel.workspace.layout import WorkspaceLayout
+from gw_kernel.workspace.lint_repos import LintRepositories, work_lane_rules
+from gw_kernel.workspace.repos import declared_repositories, resolve_item_repo, resolve_repos
+from gw_kernel.workspace.work_schemas import drift_findings, inspect_work_schemas
+from gw_pipeline.decision_owner import (
+    DecisionContext,
+    DecisionOwner,
+    decision_context,
+    hold_for,
+    locked_decision_owner,
+)
+from gw_pipeline.execute_return import pending_return
+from gw_pipeline.finish import FinishTarget, resolve_finish_targets
+from gw_pipeline.guidance.assembly import Guidance, assemble_guidance, write_guidance
+from gw_pipeline.landed import stale_spec_for
+from gw_pipeline.transactions import (
+    MutationApplication,
+    _document_members,
+    apply_mutation,
+    only_stale_inventory,
+)
+from okf_ext.bundle import SECTIONS_DIRNAME
+from okf_ext.moves import scan_touched
+from okf_ext.schemas import SchemaError
+from okf_ext.shape import load_sections
+from okf_io import Bundle, Unreadable, build_frontmatter, parse
+from okf_io import validate as okf_validate
+from okf_io.bundle import canonical_id
+from okf_io.validate import Finding, Report
+from repositories_okf.repository import repository_rule
+from work_tracker_okf import decisions as _decisions
+from work_tracker_okf._selection import path_index
+from work_tracker_okf.compose import (
+    ArtifactBody,
+    FilingCompositionPlan,
+    plan_file_and_reconcile,
+    rule_set,
+    stage_artifact_for_source,
+    stage_artifact_ref,
+)
+from work_tracker_okf.decisions import Decision, DecisionPlan, ledger_ref
+from work_tracker_okf.dependencies import (
+    DependencyEdge,
+    DependencyIssue,
+    DependencyParse,
+    parse_dependencies,
+)
+from work_tracker_okf.filing import FilingSeed
+from work_tracker_okf.hierarchy import ChildRollup, DescendResult, decision_owner
+from work_tracker_okf.hierarchy import descend as descend_to_leaf
+from work_tracker_okf.holds import check_hold, prepare_checkpoint
+from work_tracker_okf.indexes import LaneIndexPlan, plan_indexes, strip_legacy_markers
+from work_tracker_okf.items import IGNORE, WORK_DIR, WorkItem, item_index, load_items, unreadable_detail
+from work_tracker_okf.mutation import (
+    DirectoryPrecondition,
+    PlannedWrite,
+    WorkMutationPlan,
+)
+from work_tracker_okf.paths import ArtifactRef, checkpoint_ref, child_lane, item_page, parse_item_path, references_dir
+from work_tracker_okf.pipeline import PACKAGED_DEFINITION, PipelineDefinition
+from work_tracker_okf.projection import ResumeSelection, Rollup, rollup, select_resume
+from work_tracker_okf.reparent import plan_release_adoption, plan_reparent_many, reparent_load_set
+from work_tracker_okf.snapshot import WorkSnapshot
+from work_tracker_okf.sources import upsert
+from work_tracker_okf.vocabulary import PARENT_TYPES, SPEC_SOURCE_ID, TERMINAL_STATUSES
+from work_tracker_okf.workflow import Blocker, RouteResult, RouteState, Transition, route, state_for
+
+from gw_work import carried as _carried
+from gw_work.artifact_bodies import session_bodies
+from gw_work.carried import CarriedContext, SlotInput
+from gw_work.path_report import PathReport, StageArtifactReport, artifact_reports, path_report
+
+
+def _digest(content: bytes) -> str:
+    return hashlib.sha256(content).hexdigest()
+
+
+def _repo_roots(layout: WorkspaceLayout) -> tuple[Path, ...]:
+    """Every code repo `workspace.yaml` declares, for `apply_mutation`'s
+    postcondition validation -- never `layout.repo_root`, which is a `.git`
+    walk-up that lands on the vault in a split topology. All of them, not
+    one: a path resolving under any declared repo is good, so a workspace
+    declaring several never has to choose (and never refuses) here. Every
+    `apply_mutation` call site in this module calls this instead of
+    re-deriving it. Empty when none are declared, which `apply_mutation`
+    treats as no override.
+    """
+    return resolve_repos(layout)
+
+
+def _materialize(value: object) -> object:
+    if isinstance(value, Mapping):
+        return {key: _materialize(nested) for key, nested in value.items()}
+    if isinstance(value, tuple):
+        return [_materialize(nested) for nested in value]
+    return value
+
+
+def _planned_write(
+    member: str,
+    before: bytes | None,
+    after: bytes,
+    *,
+    source_member: str | None = None,
+) -> PlannedWrite:
+    """Retain the planner's preimage instead of resnapshotting live state."""
+    return PlannedWrite(member, _digest(before) if before is not None else None, after, source_member)
+
+
+def _write_plan(
+    root: Path,
+    operation: Literal["file", "indexes"],
+    writes: Sequence[PlannedWrite],
+    *,
+    mkdirs: Sequence[str] = (),
+    validate_paths: Sequence[str] = (),
+    warnings: Sequence[str] = (),
+    directory_preconditions: Sequence[DirectoryPrecondition] = (),
+) -> WorkMutationPlan:
+    planned = tuple(sorted(writes, key=lambda write: write.member))
+    directories = tuple(
+        sorted(set(mkdirs) | {Path(write.member).parent.as_posix() for write in planned if "/" in write.member})
+    )
+    return WorkMutationPlan(
+        root=root,
+        operation=operation,
+        path_mapping=MappingProxyType({}),
+        move_plan=None,
+        moves=(),
+        writes=planned,
+        deletes=(),
+        mkdirs=directories,
+        warnings=tuple(warnings),
+        refusals=(),
+        validate_paths=tuple(sorted(set(validate_paths))),
+        directory_preconditions=tuple(sorted(directory_preconditions, key=lambda condition: condition.member)),
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class FilingRun:
+    """A path-native filing plan and its optional journaled application."""
+
+    plan: FilingCompositionPlan
+    application: MutationApplication | None = None
+
+
+def _filing_mutation(bundle: Bundle, plan: FilingCompositionPlan) -> WorkMutationPlan:
+    filing = plan.filing
+    document = parse("", path=filing.target)
+    for key, value in filing.frontmatter.items():
+        document.set(key, _materialize(value))
+    document.set_body(filing.body)
+    writes = [
+        _planned_write(f"{filing.path}.md", None, document.serialize().encode("utf-8")),
+        *(
+            _planned_write(
+                index.path.relative_to(bundle.root).as_posix(),
+                index.before.encode("utf-8") if index.before is not None else None,
+                index.after.encode("utf-8"),
+            )
+            for index in plan.indexes
+        ),
+    ]
+    if plan.log is not None:
+        log_path = Path(plan.log.path) if plan.log.path is not None else bundle.root / "log.md"
+        log_member = log_path.relative_to(bundle.root).as_posix() if log_path.is_absolute() else log_path.as_posix()
+        writes.append(_planned_write(log_member, plan.log.before.encode("utf-8"), plan.log.after.encode("utf-8")))
+    writes.append(_planned_write(f"{filing.path}/references/.gitkeep", None, b""))
+    owned_member = filing.owned_directory.relative_to(bundle.root).as_posix()
+    return _write_plan(
+        bundle.root,
+        "file",
+        writes,
+        mkdirs=filing.required_directories,
+        validate_paths=(filing.path,),
+        warnings=plan.warnings,
+        directory_preconditions=(DirectoryPrecondition(owned_member, None),),
+    )
+
+
+def run_file(
+    layout: WorkspaceLayout,
+    config: Config,
+    *,
+    type: str,
+    title: str,
+    description: str,
+    on: date,
+    name: str | None = None,
+    effort: str | None = None,
+    blast_radius: str | None = None,
+    version: str | None = None,
+    target_date: date | None = None,
+    owner: str | None = None,
+    repo: str | None = None,
+    parent_path: str | None = None,
+    depends_on: Sequence[DependencyEdge] = (),
+    affects: Sequence[str] = (),
+    tags: Sequence[str] = (),
+    dry_run: bool = True,
+) -> FilingRun:
+    """Plan one graph-aware page/index/log filing and optionally apply it.
+
+    Re-plans after a concurrent sibling advance (see `_until_inventory_current`).
+    """
+    seed = FilingSeed(
+        type=type,
+        title=title,
+        description=description,
+        on=on,
+        name=name,
+        effort=effort,
+        blast_radius=blast_radius,
+        version=version,
+        target_date=target_date,
+        owner=owner,
+        repo=repo,
+        parent_path=parent_path,
+        depends_on=tuple(depends_on),
+        affects=tuple(affects),
+        tags=tuple(tags),
+        declared_repos={name: str(path) for name, path in declared_repositories(layout).items()},
+    )
+    sections = load_sections(config.declarations_dir / SECTIONS_DIRNAME)
+
+    def attempt() -> FilingRun:
+        bundle = load_workspace_bundle(layout, ignore=IGNORE)
+        outcome = plan_file_and_reconcile(bundle, load_items(bundle), seed, sections)
+        if dry_run or outcome.plan.refusal is not None:
+            return FilingRun(plan=outcome.plan)
+        return FilingRun(
+            plan=outcome.plan,
+            application=apply_mutation(
+                layout,
+                _filing_mutation(bundle, outcome.plan),
+                repo_roots=_repo_roots(layout),
+                baseline_bundle=bundle,
+                commit=WorkspaceCommit(
+                    f"workspace: file {item_stem(outcome.plan.filing.path)}",
+                    items=tuple(p for p in (outcome.plan.filing.path, parent_path) if p),
+                ),
+            ),
+        )
+
+    # A sibling advance between planning the parent's lane index and the
+    # locked apply rolls the filing back as stale; re-plan from a fresh load.
+    result = attempt()
+    snapshot_retries = 0
+    for _ in range(STALE_INVENTORY_ATTEMPTS - 1):
+        application = result.application
+        if application is None:
+            break
+        if application.snapshot_retryable:
+            # apply_mutation has released both locks before we wait/reload.
+            time.sleep(0.05 * (2**snapshot_retries))
+            snapshot_retries += 1
+        elif not only_stale_inventory(application):
+            break
+        result = attempt()
+    return result
+
+
+@dataclass(frozen=True, slots=True)
+class StatusReport:
+    """The rollup and the item worth resuming, read together the way a
+    status display wants them."""
+
+    rollup: Rollup
+    resume: ResumeSelection | None
+
+
+def run_status(layout: WorkspaceLayout, *, session: ReadSession | None = None) -> StatusReport:
+    """Count the active items and name the one worth resuming. Never writes."""
+    with borrow_read_session(layout, session) as session:
+        items = session.work_snapshot()
+    return StatusReport(rollup=rollup(items), resume=select_resume(items))
+
+
+def run_work_list(layout: WorkspaceLayout, *, session: ReadSession | None = None) -> tuple[WorkItem, ...]:
+    """Every active work item, sorted by canonical path. Never writes.
+
+    Archived items are left out, the same population `rollup` counts, so a
+    board built from this agrees with `gw work status`.
+    """
+    with borrow_read_session(layout, session) as session:
+        items = session.work_snapshot()
+    return tuple(sorted((item for item in items if not item.archived), key=lambda item: item.path))
+
+
+@dataclass(frozen=True, slots=True)
+class ItemSource:
+    """One `sources[]` entry, as authored."""
+
+    id: str | None
+    resource: str | None
+    title: str | None
+
+
+@dataclass(frozen=True, slots=True)
+class ItemRead:
+    """One work item read whole: frontmatter, body, sources and owned references.
+
+    An unknown or unreadable target is a `refusal`, never a raise (ADR 2026-08-13-command-modules rule 5).
+    """
+
+    path: str
+    frontmatter: Mapping[str, object]
+    body: str
+    sources: tuple[ItemSource, ...]
+    references: tuple[str, ...]
+    parse_error: str | None
+    coercion_failures: tuple[str, ...]
+    refusal: Literal["unknown-item", "unreadable"] | None
+    detail: str | None
+
+
+def _refused_item(path: str, refusal: Literal["unknown-item", "unreadable"], detail: str | None) -> ItemRead:
+    return ItemRead(path, MappingProxyType({}), "", (), (), None, (), refusal, detail)
+
+
+def _owned_references(bundle_root: Path, path: str) -> tuple[str, ...]:
+    directory = bundle_root / path / "references"
+    if not directory.is_dir():
+        return ()
+    return tuple(sorted(file.relative_to(bundle_root).as_posix() for file in directory.rglob("*") if file.is_file()))
+
+
+def _item_sources(frontmatter: Mapping[str, object], body: str, failures: frozenset[str]) -> tuple[ItemSource, ...]:
+    """Restore rejected source scalars lost in the ISO frontmatter projection."""
+    data = dict(frontmatter)
+    sources = data.get("sources")
+    entries = [sources] if isinstance(sources, Mapping) else sources
+    if isinstance(entries, (list, tuple)):
+        restored: list[object] = []
+        for ordinal, entry in enumerate(entries):
+            if isinstance(entry, Mapping):
+                entry = dict(entry)
+                for field_name in ("id", "resource", "title"):
+                    if f"sources.{ordinal}.{field_name}" in failures:
+                        entry[field_name] = None
+            restored.append(entry)
+        data["sources"] = restored
+    fm = build_frontmatter(data, body=body)
+    return tuple(ItemSource(source.id, source.resource, source.title) for source in fm.sources)
+
+
+def run_item_read(layout: WorkspaceLayout, path: str, *, session: ReadSession | None = None) -> ItemRead:
+    """Read one work item using the backend's coherent content version.
+
+    Owned references remain a live filesystem inventory. Never writes.
+    """
+    with borrow_read_session(layout, session) as session:
+        known = path in item_index(session.work_snapshot())
+        if not known:
+            detail = session.diagnostics(ignore=IGNORE).unreadable.get(f"{path}.md")
+            return _refused_item(path, "unreadable" if detail is not None else "unknown-item", detail)
+        content = session.content(f"{path}.md")
+        if isinstance(content, Unreadable):
+            return _refused_item(path, "unreadable", content.reason)
+        if content is None:
+            return _refused_item(path, "unreadable", "known item's content is unavailable")
+        return ItemRead(
+            path=path,
+            frontmatter=MappingProxyType(dict(content.frontmatter)),
+            body=content.body,
+            sources=_item_sources(content.frontmatter, content.body, content.coercion_failures),
+            references=_owned_references(layout.bundle_dir, path),
+            parse_error=None
+            if content.parse_error is None
+            else f"{content.parse_error.kind}: {content.parse_error.message}",
+            coercion_failures=tuple(sorted(content.coercion_failures)),
+            refusal=None,
+            detail=None,
+        )
+
+
+TouchRefusal = Literal["unknown-item", "unreadable", "terminal", "inactive-phase"]
+
+
+@dataclass(frozen=True, slots=True)
+class ActiveWorkTouch:
+    """The active-work pointer stamped for the session about to run.
+
+    A refusal writes nothing and leaves any existing pointer as it was: an
+    item that cannot be captured is not a reason to un-point capture at
+    whatever the session had.
+    """
+
+    path: str
+    phase: str | None
+    pointer_path: Path | None
+    refusal: TouchRefusal | None
+    detail: str | None
+
+
+def run_touch_active_work(layout: WorkspaceLayout, path: str, *, today: date) -> ActiveWorkTouch:
+    """Stamp the active-work pointer to *path*'s **current** phase. Nothing else.
+
+    The start-of-session half of the pointer's contract. `gw work advance`
+    stamps only on an entry transition, and most stages have none, so
+    `/gw:workflow` calls this before every stage skill. Then the
+    `SessionEnd` transcript capture labels the session with the phase it
+    ran, not the phase its closing advance moved the item into. Idempotent.
+    A failed write degrades to `pointer_path=None` (provenance never fails).
+    """
+    bundle = load_work_bundle(layout)
+    item = item_index(load_items(bundle)).get(path)
+    if item is None:
+        detail = unreadable_detail(bundle, path)
+        if detail is not None:
+            return ActiveWorkTouch(path, None, None, "unreadable", detail)
+        return ActiveWorkTouch(path, None, None, "unknown-item", f"unknown path {path!r}")
+    if item.work_status in TERMINAL_STATUSES:
+        return ActiveWorkTouch(
+            path, item.phase, None, "terminal", f"work_status {item.work_status!r} is terminal; nothing to capture"
+        )
+    if item.phase not in provenance.ACTIVE_WORK_PHASES:
+        return ActiveWorkTouch(
+            path,
+            item.phase,
+            None,
+            "inactive-phase",
+            f"phase {item.phase!r} is not an active-work phase; expected one of "
+            f"{sorted(provenance.ACTIVE_WORK_PHASES)}",
+        )
+    written = provenance.write_active_work(layout, path, item.phase, updated=today.isoformat())
+    return ActiveWorkTouch(path, item.phase, written, None, None)
+
+
+@dataclass(frozen=True, slots=True)
+class PendingIngest:
+    """One terminal item whose design spec has no ingested `Source` page."""
+
+    path: str
+    work_status: str
+    resource: str
+    origin: str
+
+
+@dataclass(frozen=True, slots=True)
+class IngestQueueReport:
+    """Every pending item, in canonical path order."""
+
+    pending: tuple[PendingIngest, ...]
+
+
+class _SourceRow(Protocol):
+    """Frontmatter fields consumed from the read session's member rows."""
+
+    @property
+    def kind(self) -> str: ...
+
+    @property
+    def type(self) -> str | None: ...
+
+    @property
+    def fm(self) -> Mapping[str, object] | None: ...
+
+
+def _ingested_origins(rows: Iterable[_SourceRow], bundle_dir: Path) -> frozenset[str]:
+    """Every normalized `origin` some `Source` row already carries.
+
+    A `Source` page with **no** `origin` contributes nothing. It is not evidence
+    of anything -- only 10 of the live vault's Source pages populate the field
+    -- so its item stays queued. The queue therefore over-reports rather than
+    under-reports, which is the correct direction of error: a re-ingest is
+    idempotent (it appends a `## Re-ingest <date>` section) and costs a human
+    one "already done, skip", while an under-report silently loses a design
+    spec.
+    """
+    origins: set[str] = set()
+    for row in rows:
+        if row.kind != "concept" or row.type != SOURCE_TYPE or row.fm is None:
+            continue
+        stored = row.fm.get("origin")
+        if isinstance(stored, str) and stored:
+            origins.add(normalize_origin(stored, bundle_dir))
+    return frozenset(origins)
+
+
+def run_ingest_queue(layout: WorkspaceLayout) -> IngestQueueReport:
+    """Terminal items whose `design` source is not yet recorded as ingested.
+    Never writes, and never reads the clock.
+
+    **Derived, never stored.** There is no frontmatter field, no migration and
+    no second source of truth that can drift from `sources[]`. The predicate is
+    exactly: terminal `work_status`, a `sources[]` entry with
+    `id: design`, and no `Source` page whose (normalized) `origin` identifies
+    that artifact.
+
+    **Band 3 by necessity.** It needs the item's `sources[]`
+    (`work-tracker-okf`) and the set of `Source` pages with their `origin`
+    (`doc-wiki-okf`, which owns `normalize_origin`). Band-2 packages may not
+    couple sideways, so the composition of two band-2 lanes belongs here --
+    the same reason `gw_work.archive.commands` holds the work-item and
+    wiki archive halves together.
+
+    Read-only for the same reason `run_next` is: a queue that mutates while you
+    look at it cannot be polled safely.
+    """
+    with open_read_session(layout) as session:
+        ingested = _ingested_origins(
+            session.members(kind="concept", type=SOURCE_TYPE, ignore=IGNORE), layout.bundle_dir
+        )
+        items = session.work_snapshot()
+    pending: list[PendingIngest] = []
+    for item in items:
+        if item.work_status not in TERMINAL_STATUSES:
+            continue
+        resource = next(
+            (source.resource for source in item.sources if source.id == SPEC_SOURCE_ID and source.resource),
+            None,
+        )
+        if resource is None:
+            continue
+        origin = normalize_origin(str(layout.bundle_dir / resource.lstrip("/")), layout.bundle_dir)
+        if origin in ingested:
+            continue
+        pending.append(PendingIngest(path=item.path, work_status=item.work_status, resource=resource, origin=origin))
+    return IngestQueueReport(pending=tuple(sorted(pending, key=lambda entry: entry.path)))
+
+
+@dataclass(frozen=True, slots=True)
+class SourceNormalization:
+    """One missing canonical design source to stamp on an item page."""
+
+    path: str
+    page: Path
+    ref: ArtifactRef
+    title: str
+
+
+@dataclass(frozen=True, slots=True)
+class NextApplication:
+    """The source normalizations that persisted during this invocation."""
+
+    normalized: tuple[str, ...] = ()
+    commits: tuple[CommitOutcome, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class NextResult:
+    """The requested and selected routing state, preview, and application."""
+
+    requested_path: str
+    selected_path: str
+    state: RouteState
+    route: RouteResult
+    child_rollup: ChildRollup | None
+    descent: DescendResult | None
+    normalizations: tuple[SourceNormalization, ...]
+    artifact: ArtifactRef | None = None
+    dispatch_resolution: DispatchResolution | None = None
+    dispatch_preflight: str | None = None
+    application: NextApplication = NextApplication()
+    warnings: tuple[str, ...] = ()
+    finish_targets: tuple[FinishTarget, ...] = ()
+    guidance: Guidance | None = None
+    guidance_file: Path | None = None
+    repository_notes: tuple[str, ...] = ()
+    carried: CarriedContext = field(default_factory=CarriedContext)
+    path: PathReport | None = None
+    artifacts: tuple[StageArtifactReport, ...] = ()
+
+
+def _plan_source_normalization(
+    bundle_root: Path,
+    item: WorkItem,
+    *,
+    definition: PipelineDefinition,
+    body_of: ArtifactBody | None = None,
+) -> SourceNormalization | None:
+    """Plan the canonical design stamp when the artifact exists and no
+    authored source already owns that id.
+    """
+    missing = missing_design_source(bundle_root, item, definition=definition, body_of=body_of)
+    if missing is None:
+        return None
+    ref, title = missing
+    return SourceNormalization(path=item.path, page=bundle_root / item.page_path, ref=ref, title=title)
+
+
+def _apply_normalizations(
+    layout: WorkspaceLayout,
+    changes: Sequence[SourceNormalization],
+    *,
+    bundle: Bundle | None = None,
+) -> tuple[NextApplication, tuple[str, ...]]:
+    normalized: list[str] = []
+    commits: list[CommitOutcome] = []
+    warnings: list[str] = []
+    for change in changes:
+        try:
+            before = change.page.read_bytes()
+            document = parse(before.decode("utf-8"), path=change.page)
+            if any(source.id == change.ref.source_id for source in document.fm.sources):
+                continue
+            if upsert(document, change.ref, title=change.title):
+                member = change.page.relative_to(layout.bundle_dir).as_posix()
+                mutation = _write_plan(
+                    layout.bundle_dir,
+                    "file",
+                    (_planned_write(member, before, document.serialize().encode("utf-8")),),
+                    validate_paths=(change.path,),
+                )
+                application = apply_mutation(
+                    layout,
+                    mutation,
+                    repo_roots=_repo_roots(layout),
+                    baseline_bundle=bundle,
+                    commit=WorkspaceCommit(
+                        f"workspace: normalize {item_stem(change.path)} sources", items=(change.path,)
+                    ),
+                )
+                if application.commit is not None:
+                    commits.append(application.commit)
+                if application.ok:
+                    normalized.append(change.path)
+                    warnings.extend(w for w in application.warnings if w.startswith(COMMIT_FAILED_PREFIX))
+                else:
+                    warnings.extend(
+                        f"{change.path}: design source normalization failed: {failure}"
+                        for failure in application.failures
+                    )
+        except OSError as exc:
+            warnings.append(f"{change.path}: design source normalization failed: {exc}")
+    return NextApplication(normalized=tuple(normalized), commits=tuple(commits)), tuple(warnings)
+
+
+def _stage_artifact(item: WorkItem, result: RouteResult, *, definition: PipelineDefinition) -> ArtifactRef | None:
+    """Where the dispatched stage writes its output, or `None`.
+
+    `Transition.stamp_source` is the routing table's own statement of which
+    artifact this stage produces: `stage_artifact_ref` over the configured
+    artifact resolves the path only; the title `stamp_for` would read is never
+    needed here. A stage that stamps nothing (execute, finish, a terminal or invalid item)
+    has no artifact, which is a shape and not a degrade.
+    """
+    if result.on_complete is None or result.on_complete.stamp_source is None:
+        return None
+    return stage_artifact_ref(
+        item.path, stage_artifact_for_source(definition=definition, source_id=result.on_complete.stamp_source)
+    )
+
+
+def _load_config(layout: WorkspaceLayout) -> DispatchConfig | WorkspaceError:
+    """The workspace's dispatch configuration, or the error loading it raised."""
+    try:
+        return load_dispatch_config(layout)
+    except WorkspaceError as exc:
+        return exc
+
+
+def _definition_of(config: DispatchConfig | WorkspaceError) -> PipelineDefinition:
+    """Route load errors with packaged defaults for display only.
+
+    `_resolve_dispatch_with` blocks every offered transition on a load error (D-004).
+    """
+    return PACKAGED_DEFINITION if isinstance(config, WorkspaceError) else config.definition
+
+
+def _offers_transition(computed: RouteResult) -> bool:
+    return any((computed.dispatch, computed.on_dispatch, computed.on_complete, computed.on_return, computed.repair))
+
+
+def _resolve_dispatch_with(
+    config: DispatchConfig | WorkspaceError, state: RouteState, computed: RouteResult
+) -> tuple[DispatchResolution | None, str | None]:
+    """Fold the dispatch with workspace rules; load errors block any offered transition."""
+    if isinstance(config, WorkspaceError):
+        return None, (str(config) if _offers_transition(computed) else None)
+    if computed.dispatch is None:
+        return None, None
+    try:
+        return resolve_dispatch(dispatch_attributes(state, computed.dispatch), rules=config.rules), None
+    except WorkspaceError as exc:
+        return None, str(exc)
+
+
+def _plan_route(
+    layout: WorkspaceLayout,
+    root: Path,
+    unreadable: Mapping[str, str],
+    items: Sequence[WorkItem],
+    path: str,
+    *,
+    descend: bool,
+    definition: PipelineDefinition,
+    planned: WorkSnapshot | None = None,
+    body_of: ArtifactBody | None = None,
+) -> tuple[NextResult, WorkItem]:
+    """The dry-run routing preview for *path* over already-read items.
+
+    Resolves no dispatch and writes nothing: the planned source
+    normalizations are applied to the in-memory items only, so routing sees
+    the repaired state without the page being touched. `run_next`,
+    `run_dispatch_explain` and `run_work_queue` all route through here.
+    *planned* is a routing overlay the caller already built over *items*
+    (`run_work_queue` builds one per pass); `None` builds it here.
+    *body_of* supplies verified artifact bodies for titles (the queue's session); `None` reads files.
+    """
+    requested = next((item for item in items if item.path == path), None)
+    if requested is None:
+        detail = unreadable.get(f"{path}.md")
+        if detail is not None:
+            raise ValueError(f"{path}.md {detail}")
+        raise ValueError(f"unknown work item {path!r}")
+
+    planned_items = (
+        planned if planned is not None else routing_items(root, items, definition=definition, body_of=body_of)
+    )
+    descent_result = descend_to_leaf(planned_items, path, definition=definition) if descend else None
+    selected_path = descent_result.leaf if descent_result is not None and descent_result.leaf is not None else path
+    selected = next(item for item in items if item.path == selected_path)
+
+    normalization_items = (requested,) if requested.path == selected.path else (requested, selected)
+    normalizations = tuple(
+        change
+        for item in normalization_items
+        if (change := _plan_source_normalization(root, item, definition=definition, body_of=body_of)) is not None
+    )
+    state = state_for(
+        planned_items,
+        selected_path,
+        hold=hold_for(planned_items, root, selected_path),
+        stale_spec=stale_spec_for(layout, planned_items, selected),
+    )
+    assert state is not None
+    computed = route(state, definition=definition)
+    if pending_return(layout, selected_path) is not None:
+        message = "execute return is pending; inspect or resume the same return before dispatch"
+        computed = RouteResult(None, message, blockers=(Blocker("invalid", message),))
+        normalizations = ()
+    report = path_report(state, computed, definition)
+    preview = NextResult(
+        requested_path=path,
+        selected_path=selected_path,
+        state=state,
+        route=computed,
+        child_rollup=state.child_rollup,
+        descent=descent_result,
+        normalizations=normalizations,
+        artifact=_stage_artifact(selected, computed, definition=definition),
+        path=report,
+        artifacts=artifact_reports(root, selected_path, definition, report),
+    )
+    return preview, selected
+
+
+def _plan_next(
+    layout: WorkspaceLayout, path: str, *, descend: bool, definition: PipelineDefinition
+) -> tuple[NextResult, Bundle, WorkItem]:
+    """Load the bundle once and plan *path* over it (`_plan_route`)."""
+    bundle = load_workspace_bundle(layout, ignore=IGNORE)
+    items = load_items(bundle)
+    preview, selected = _plan_route(
+        layout, bundle.root, bundle.unreadable, items, path, descend=descend, definition=definition
+    )
+    if preview.route.dispatch is not None and preview.route.dispatch.stage == "finish":
+        finish = resolve_finish_targets(layout, items, preview.selected_path)
+        preview = replace(preview, finish_targets=finish.targets, dispatch_preflight="; ".join(finish.blockers) or None)
+    return preview, bundle, selected
+
+
+@dataclass(frozen=True, slots=True)
+class GuidanceRequest:
+    """Ask `run_next` to assemble guidance. `target`: `"auto"` is the selected
+    item's `references/guidance-<phase>.md`; a `Path` is used as given; `None`
+    assembles without writing."""
+
+    target: Literal["auto"] | Path | None = "auto"
+
+
+def _with_guidance(
+    layout: WorkspaceLayout,
+    result: NextResult,
+    bundle: Bundle,
+    items: Sequence[WorkItem],
+    request: GuidanceRequest | None,
+) -> NextResult:
+    """Assemble for the selected leaf at the dispatched stage -- only for a usable
+    dispatch (the same test `next_payload` uses to null `action`).
+
+    Guidance never changes routing (design spec section 3.6): an `OSError` or
+    `ValueError` escaping assembly -- e.g. the tokenizer failing to fetch its
+    encoding -- becomes an empty `Guidance` carrying one warning, and no file
+    is written."""
+    dispatch = result.route.dispatch
+    if (
+        request is None
+        or dispatch is None
+        or result.dispatch_resolution is None
+        or result.dispatch_preflight is not None
+    ):
+        return result
+    item = next((candidate for candidate in items if candidate.path == result.selected_path), None)
+    if item is None:
+        return result
+    phase = dispatch.stage
+    try:
+        guidance = assemble_guidance(layout, bundle, items, item, phase=phase)
+    except (OSError, ValueError) as exc:
+        unavailable = Guidance(phase, (), (f"guidance unavailable: {exc}",), "", 0)
+        return replace(result, guidance=unavailable, guidance_file=None)
+    target = request.target
+    if target == "auto":
+        target = layout.bundle_dir / references_dir(item.path).rel / f"guidance-{phase}.md"
+    written: Path | None = None
+    if target is not None:
+        try:
+            written = write_guidance(guidance, target)
+        except OSError as exc:
+            guidance = replace(guidance, warnings=(*guidance.warnings, f"guidance file not written: {target}: {exc}"))
+    return replace(result, guidance=guidance, guidance_file=written)
+
+
+def _with_carried(
+    layout: WorkspaceLayout,
+    result: NextResult,
+    bundle: Bundle,
+    items: Sequence[WorkItem],
+) -> NextResult:
+    """Attach the carried-context frame for the selected leaf at the dispatched
+    stage -- under `_with_guidance`'s usable-dispatch test, on every call
+    (dry run or not, guidance requested or not; it is read-only).
+
+    Never changes routing (ledger D-004): producer `OSError`/`ValueError`
+    already degrade inside `assemble_carried`. The registry is read from the
+    module at call time so a test can substitute `carried.SLOTS`."""
+    dispatch = result.route.dispatch
+    if dispatch is None or result.dispatch_resolution is None or result.dispatch_preflight is not None:
+        return result
+    item = next((candidate for candidate in items if candidate.path == result.selected_path), None)
+    if item is None:
+        return result
+    inp = SlotInput(layout=layout, bundle=bundle, items=tuple(items), item=item, stage=dispatch.stage)
+    return replace(result, carried=_carried.assemble_carried(inp, slots=_carried.SLOTS))
+
+
+def _with_repository_notes(layout: WorkspaceLayout, result: NextResult, items: Sequence[WorkItem]) -> NextResult:
+    """Advisory pin lag for the selected item's repository."""
+    by_path = {item.path: item for item in items}
+    selected = by_path.get(result.selected_path)
+    if selected is None:
+        return result
+    try:
+        repo = resolve_item_repo(layout, selected, by_path)
+    except WorkspaceError:
+        return result
+    return replace(result, repository_notes=repository_notes(layout, repo.name))
+
+
+def run_next(
+    layout: WorkspaceLayout,
+    path: str,
+    *,
+    descend: bool = False,
+    dry_run: bool = True,
+    guidance: GuidanceRequest | None = None,
+) -> NextResult:
+    """Route with the workspace pipeline.path and optionally descend to *path*'s leaf.
+
+    Resolves the hold for *this path* specifically, not just "the owner has
+    some open decision" — the behavioral improvement over the standalone
+    `work_tracker_okf.cli`, which does not resolve decision holds from a real
+    ledger.
+
+    Dry-run is the default. An `effort=` override is not exposed here or by the
+    standalone CLI.
+
+    Writes: the canonical design-source repair (applied branch only) and,
+    only when *guidance* is passed, the assembled guidance file (when it
+    admitted anything and has a target) plus the claims cache under
+    `<cache_dir>/claims/`. With no *guidance* request it writes exactly what it
+    always did; `test_run_next.py` and `test_run_next_guidance.py` pin both.
+    The carried-context frame (`NextResult.carried`) is read-only and assembled
+    on every call for a usable dispatch.
+    `path` / `artifacts` report the resolved path and every configured stage artifact;
+    both are empty for terminal, invalid or unreadable-config items.
+    """
+    config = _load_config(layout)
+    definition = _definition_of(config)
+    preview, bundle, selected = _plan_next(layout, path, descend=descend, definition=definition)
+    if dry_run:
+        resolution, preflight = _resolve_dispatch_with(config, preview.state, preview.route)
+        resolved = replace(
+            preview, dispatch_resolution=resolution, dispatch_preflight=preview.dispatch_preflight or preflight
+        )
+        items: Sequence[WorkItem] = load_items(bundle)
+        guided = _with_guidance(layout, resolved, bundle, items if guidance else (), guidance)
+        result = _with_repository_notes(layout, _with_carried(layout, guided, bundle, items), items)
+        return replace(result, path=None, artifacts=()) if isinstance(config, WorkspaceError) else result
+
+    application, warnings = _apply_normalizations(layout, preview.normalizations, bundle=bundle)
+    persisted_bundle = load_workspace_bundle(layout, ignore=IGNORE)
+    persisted_items = load_items(persisted_bundle)
+    persisted_state = state_for(
+        persisted_items,
+        preview.selected_path,
+        stale_spec=stale_spec_for(
+            layout, persisted_items, next(item for item in persisted_items if item.path == preview.selected_path)
+        ),
+        hold=hold_for(
+            persisted_items,
+            persisted_bundle.root,
+            preview.selected_path,
+        ),
+    )
+    assert persisted_state is not None
+    persisted_route = route(persisted_state, definition=definition)
+    if pending_return(layout, preview.selected_path) is not None:
+        message = "execute return is pending; inspect or resume the same return before dispatch"
+        persisted_route = RouteResult(None, message, blockers=(Blocker("invalid", message),))
+    resolution, preflight = _resolve_dispatch_with(config, persisted_state, persisted_route)
+    report = path_report(persisted_state, persisted_route, definition)
+    applied = replace(
+        preview,
+        dispatch_resolution=resolution,
+        dispatch_preflight=preview.dispatch_preflight or preflight,
+        state=persisted_state,
+        route=persisted_route,
+        child_rollup=persisted_state.child_rollup,
+        artifact=_stage_artifact(selected, persisted_route, definition=definition),
+        path=report,
+        artifacts=artifact_reports(persisted_bundle.root, preview.selected_path, definition, report),
+        application=application,
+        warnings=warnings,
+    )
+    items = tuple(persisted_items)
+    guided = _with_guidance(layout, applied, persisted_bundle, items, guidance)
+    result = _with_repository_notes(layout, _with_carried(layout, guided, persisted_bundle, items), items)
+    return replace(result, path=None, artifacts=()) if isinstance(config, WorkspaceError) else result
+
+
+@dataclass(frozen=True, slots=True)
+class DispatchExplanation:
+    """Why *path* resolves to its dispatch profile, rule by rule.
+
+    `next_result` is the dry-run `NextResult` `/v1/work/next` projects, with
+    this read's resolution or preflight folded in, so an interface derives
+    blockers through the one function both use. With no dispatch -- a
+    blocked, terminal or gate item, or a profile the fold refuses --
+    `attributes`, `packaged_rules` and `resolution` are `None` and no rule is
+    marked matched.
+    """
+
+    path: str
+    attributes: Mapping[str, AttributeValue] | None
+    packaged_rules: tuple[DispatchRule, ...] | None
+    rules: tuple[tuple[DispatchRule, bool], ...]
+    resolution: DispatchResolution | None
+    next_result: NextResult
+
+
+def run_dispatch_explain(layout: WorkspaceLayout, path: str) -> DispatchExplanation:
+    """Explain `gw next`'s dispatch fold for *path*, without descending. Never writes.
+
+    Unlike `run_next`, a malformed dispatch file is not folded into a
+    preflight blocker: it raises `WorkspaceError`, because the rules are this
+    read's subject rather than an input to something else. A profile the fold
+    refuses (`DispatchProfileError`) is still the preflight `next` reports.
+    Raises `ValueError` for an unknown or unreadable *path*.
+    """
+    config = load_dispatch_config(layout)
+    preview, _bundle, _selected = _plan_next(layout, path, descend=False, definition=config.definition)
+    rules = config.rules
+    unmatched = tuple((rule, False) for rule in rules)
+    dispatch = preview.route.dispatch
+    if dispatch is None:
+        return DispatchExplanation(path, None, None, unmatched, None, preview)
+    attributes = dispatch_attributes(preview.state, dispatch)
+    try:
+        resolution = resolve_dispatch(attributes, rules=rules)
+    except WorkspaceError as exc:
+        return DispatchExplanation(path, None, None, unmatched, None, replace(preview, dispatch_preflight=str(exc)))
+    return DispatchExplanation(
+        path=path,
+        attributes=attributes,
+        packaged_rules=packaged_rules_matching(attributes),
+        rules=tuple((rule, rule_matches(rule.match, attributes)) for rule in rules),
+        resolution=resolution,
+        next_result=replace(preview, dispatch_resolution=resolution),
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class QueueEntry:
+    """One active, non-terminal item and the dry-run `NextResult` for it.
+
+    `result` is what `run_next(layout, item.path, dry_run=True)` returns, so an
+    interface derives skill, mode and blockers through the functions
+    `/v1/work/next` uses.
+    """
+
+    item: WorkItem
+    result: NextResult
+
+
+def run_work_queue(layout: WorkspaceLayout, *, session: ReadSession | None = None) -> tuple[QueueEntry, ...]:
+    """Route every active, non-terminal item as a dry-run `run_next` would. Never writes.
+
+    The work items (through the read session) and dispatch config are each read once for the whole
+    queue. A malformed dispatch file is each item's preflight blocker whenever
+    its route offers a dispatch or a transition, exactly as `next` reports it,
+    rather than a failure of the read.
+    Epics waiting on their children are included with that blocker, so no
+    active item is silently dropped.
+    The read session stays open for the whole pass: it supplies the snapshot and every artifact
+    body a title needs, so an unchanged primed index parses nothing (epic D-005, D-010).
+    The routing overlay is built once at the first eligible item and never outlives the call.
+    """
+    config = _load_config(layout)
+    definition = _definition_of(config)
+    entries: list[QueueEntry] = []
+    with borrow_read_session(layout, session) as session:
+        items = session.work_snapshot()
+        unreadable = session.diagnostics(ignore=IGNORE).unreadable
+        body_of = session_bodies(session)
+        planned: WorkSnapshot | None = None
+        for item in sorted(items, key=lambda candidate: candidate.path):
+            if item.archived or item.work_status in TERMINAL_STATUSES:
+                continue
+            if planned is None:
+                planned = routing_items(layout.bundle_dir, items, definition=definition, body_of=body_of)
+            preview, _selected = _plan_route(
+                layout,
+                layout.bundle_dir,
+                unreadable,
+                items,
+                item.path,
+                descend=False,
+                definition=definition,
+                planned=planned,
+                body_of=body_of,
+            )
+            resolution, preflight = _resolve_dispatch_with(config, preview.state, preview.route)
+            entries.append(
+                QueueEntry(item, replace(preview, dispatch_resolution=resolution, dispatch_preflight=preflight))
+            )
+    return tuple(entries)
+
+
+def run_lint(
+    layout: WorkspaceLayout,
+    config: Config,
+    *,
+    repo_root: Path | None = None,
+    repo_roots: tuple[Path, ...] = (),
+    repositories: LintRepositories | None = None,
+    strict: bool = False,
+    today: date,
+    path: str | None = None,
+) -> Report:
+    """Report conformance and lane findings for this workspace's work bundle.
+    Never writes.
+
+    `work_tracker_okf.compose.rule_set` fed to `okf_io.validate` — single
+    bundle, single lane. This is **not** a replacement for
+    `gw_wiki.lint_drift.lint.run_mechanical`'s two-lane workspace
+    check; it is the fast, synchronous, LLM-free "does the work lane conform"
+    check `work_tracker_okf.cli` already provides, now
+    `WorkspaceLayout`-shaped. Interfaces pass `repositories=` to check each
+    item's own or inherited repository, using the union for untagged items.
+    The legacy `repo_root`/`repo_roots` pair remains available for test
+    injection; it cannot be combined with `repositories=`.
+    `repo_root=None` with no `repo_roots` skips
+    `targets.affects-missing` (`plan.action-target-missing` still checks the
+    vault root), the same contract `work_tracker_okf.compose.rule_set`
+    documents. `repo_roots` is every declared repo in a multi-repository
+    workspace: a path resolving under any of them is good.
+
+    `path` narrows the report to one item's page and everything beneath its
+    owned directory, including a parent's subtree. Cross-document rules still
+    read the whole lane; only findings about this item are kept. Workspace
+    schema findings are kept under a path scope because they block every
+    item's advance. An unknown path raises `LookupError`.
+
+    `strict=True` promotes every warning to an error first, which fails even
+    a conformant vault. A caller wiring this into an acceptance gate wants
+    `strict=False`.
+    """
+    if repositories is not None and (repo_root is not None or repo_roots):
+        raise ValueError("pass repositories= or repo_root=/repo_roots=, not both")
+    # Lint retains ignored-member identity pending the separate pruned-resolver
+    # fix; projection readers keep using load_work_bundle's pruning.
+    partition = work_scope(layout)
+    bundle = load_workspace_bundle(layout, ignore=partition.as_ignore())
+    if path is not None and path not in item_index(load_items(bundle)):
+        raise LookupError(f"unknown work item {path!r}")
+    inspection = inspect_work_schemas(layout, declarations_dir=config.declarations_dir)
+    schema = drift_findings(layout, inspection)
+
+    def incomplete(detail: str, source: Path) -> Report:
+        named = source.relative_to(layout.root).as_posix() if source.is_relative_to(layout.root) else source.as_posix()
+        return Report(
+            (
+                *schema,
+                Finding("workspace.declarations-invalid", "error", f"work rules not loaded: {detail}", "§5", named),
+            )
+        )
+
+    unavailable = tuple(state for state in inspection.files if state.state in ("missing", "unsafe"))
+    if unavailable:
+        detail = "; ".join(f"{state.path}: {state.detail}" for state in unavailable)
+        return incomplete(detail, unavailable[0].path)
+    try:
+        rules = (
+            work_lane_rules(layout, config, repositories)
+            if repositories is not None
+            else rule_set(
+                layout.bundle_dir,
+                repo_root=repo_root,
+                repo_roots=repo_roots,
+                vault_root=layout.bundle_dir,
+                declarations_dir=config.declarations_dir,
+                definition=load_dispatch_config(layout).definition,
+            )
+        )
+    except SchemaError as exc:
+        # Only owned drift earns this recovery report. Custom declaration and
+        # section/configuration failures keep their existing exception contract.
+        failed = next((state for state in inspection.drifted if str(exc).startswith(f"{state.path.name}:")), None)
+        if failed is None:
+            raise
+        return incomplete(str(exc), failed.path)
+    if path is None and has_lane_pages(layout):
+        git = runner(layout)
+        if not isinstance(git, str):
+            # The work bundle hides the repository pages, so read them from the lane.
+            behind = repository_rule(gather_lane_facts(layout, git), codes=frozenset({"repository.behind-track"}))
+            rules = (*rules, behind)
+    if path is None:
+        report = okf_validate(bundle, today=today, extra_rules=rules, strict=strict)
+        return Report(report.findings + schema)
+    page, owned = f"{path}.md", f"{path}/"
+    scope = frozenset(f"{cid}.md" for cid in bundle.concepts if cid == path or cid.startswith(owned))
+    report = okf_validate(bundle, today=today, extra_rules=rules, strict=strict, scope=scope)
+    return Report(
+        tuple(f for f in report.findings if f.path is not None and (f.path == page or f.path.startswith(owned)))
+        + schema
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class RegenIndexesResult:
+    """Every required lane index plan plus an optional journaled application.
+
+    `marker_strips` are the non-required `work/` indexes this run migrates off
+    the legacy ``graph-works:work-items`` markers without reconciling them:
+    each plan's `after` is its `before` with only the two marker lines
+    removed. They are written by the same `mutation` as `plans`.
+    """
+
+    plans: tuple[LaneIndexPlan, ...]
+    mutation: WorkMutationPlan
+    application: MutationApplication | None = None
+    marker_strips: tuple[LaneIndexPlan, ...] = ()
+
+
+def _absent_index_lane_preconditions(root: Path, items: Sequence[WorkItem]) -> Mapping[str, DirectoryPrecondition]:
+    """Retain ownership of lanes absent before the domain planner reads them.
+
+    The lane set must equal `work_tracker_okf.indexes._required_lanes`' -- a
+    precondition on a lane the planner never plans is a claim on a directory
+    nothing creates. It is duplicated rather than imported so the vertical
+    stays independent of `work_tracker_okf.indexes`' private helper, and the
+    copy stays small.
+    """
+    lanes = {"work", "work/_archive"}
+    for item in items:
+        if not item.archived and item.type in PARENT_TYPES:
+            lanes.add(child_lane(item.path))
+    conditions = {lane: DirectoryPrecondition(lane, None) for lane in sorted(lanes) if not os.path.lexists(root / lane)}
+    return MappingProxyType(conditions)
+
+
+def _legacy_marker_strips(
+    bundle: Bundle,
+    items: Sequence[WorkItem],
+    reconciled: frozenset[str],
+) -> tuple[tuple[LaneIndexPlan, ...], tuple[str, ...]]:
+    """Strip-only migration plans for `work/` indexes the reconcile pass skips.
+
+    `plan_indexes` covers only the required lanes, so a lane index nothing
+    requires any more -- an archived parent's `children/`, an active parent's
+    inert `children/_archive/` -- would keep its legacy marker lines forever.
+    Every other `index.md` under `work/` (the bundle's own walk,
+    `bundle.indexes`) that still carries them is planned here with just those
+    two lines removed; its entries are never reconciled.
+
+    One guard, because the transaction's postcondition gate checks every
+    written lane index against a full reconcile and rolls the whole run back
+    on a stale one: a file is stripped only when stripping alone already
+    equals that full reconcile. A lane whose own entries are out of date
+    keeps its markers, untouched, and is named in a warning instead.
+    """
+    marked: list[str] = []
+    for directory in sorted(bundle.indexes):
+        if directory in reconciled or not (directory == WORK_DIR or directory.startswith(f"{WORK_DIR}/")):
+            continue
+        try:
+            text = (bundle.root / directory / "index.md").read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            continue
+        if strip_legacy_markers(text) != text:
+            marked.append(directory)
+    if not marked:
+        return (), ()
+    strips: list[LaneIndexPlan] = []
+    warnings: list[str] = []
+    for plan in plan_indexes(bundle.root, items, lanes=marked):
+        if plan.before is None:
+            continue
+        stripped = strip_legacy_markers(plan.before)
+        if stripped == plan.before:
+            continue
+        member = plan.path.relative_to(bundle.root).as_posix()
+        if plan.after != stripped:
+            warnings.append(
+                f"{member}: legacy work-items markers left in place; its entries are stale, "
+                "so stripping the markers alone would leave an index the reconcile check rejects"
+            )
+            continue
+        strips.append(plan)
+    return tuple(strips), tuple(warnings)
+
+
+#: How many times a lane-index-writing run applies before it reports a
+#: stale-inventory rollback as-is. Each retry follows a sibling write that has
+#: already committed, so under auto-drive's normal concurrency a third
+#: collision in a row is not expected; the bound only rules out livelock.
+STALE_INVENTORY_ATTEMPTS = 3
+
+
+def _until_inventory_current[R](run: Callable[[], R], application_of: Callable[[R], MutationApplication | None]) -> R:
+    """Run *run* (load, plan, apply) until its application is not a
+    stale-inventory rollback, at most `STALE_INVENTORY_ATTEMPTS` times.
+
+    Such a writer plans lane indexes from item pages it read *before* taking
+    the bundle lock, and its preconditions cover only the index bytes. A
+    sibling's `gw work advance` rewrites only its own page, so it passes
+    preflight, and the postcondition rolls the write back. Re-planning from a
+    fresh load is the fix. Every other outcome -- success, a dry run, a
+    refusal, any other failure -- returns at once. The same approach as
+    `work_tracker_okf.decisions._apply_until_current`.
+    """
+    result = run()
+    for _ in range(STALE_INVENTORY_ATTEMPTS - 1):
+        application = application_of(result)
+        if application is None or not only_stale_inventory(application):
+            return result
+        result = run()
+    return result
+
+
+def _regen_indexes_once(layout: WorkspaceLayout, *, dry_run: bool) -> RegenIndexesResult:
+    """One load, plan and (unless `dry_run`) apply of `run_regen_indexes`."""
+    bundle = load_workspace_bundle(layout, ignore=IGNORE)
+    items = load_items(bundle)
+    lane_preconditions = _absent_index_lane_preconditions(bundle.root, items)
+    plans = plan_indexes(bundle.root, items)
+    changed_lanes = {plan.lane for plan in plans if plan.changed}
+    marker_strips, strip_warnings = _legacy_marker_strips(bundle, items, frozenset(plan.lane for plan in plans))
+    mutation = _write_plan(
+        bundle.root,
+        "indexes",
+        tuple(
+            _planned_write(
+                plan.path.relative_to(bundle.root).as_posix(),
+                plan.before.encode("utf-8") if plan.before is not None else None,
+                plan.after.encode("utf-8"),
+            )
+            for plan in (*plans, *marker_strips)
+            if plan.changed
+        ),
+        warnings=strip_warnings,
+        directory_preconditions=tuple(
+            condition for lane, condition in lane_preconditions.items() if lane in changed_lanes
+        ),
+    )
+    application = (
+        None
+        if dry_run
+        else apply_mutation(
+            layout,
+            mutation,
+            repo_roots=_repo_roots(layout),
+            baseline_bundle=bundle,
+            commit=WorkspaceCommit("workspace: regenerate work indexes"),
+        )
+    )
+    return RegenIndexesResult(plans=plans, mutation=mutation, application=application, marker_strips=marker_strips)
+
+
+def run_regen_indexes(layout: WorkspaceLayout, *, dry_run: bool = True) -> RegenIndexesResult:
+    """Reconcile every required root and parent-owned work lane.
+
+    The same run also migrates every other `work/` index still carrying the
+    legacy marker lines, stripping only those lines (see
+    `_legacy_marker_strips`).
+
+    A sibling advance that lands between the plan and its locked apply makes
+    the postcondition roll the write back as stale; the run then re-plans from
+    a fresh load (`_until_inventory_current`). The result is the last attempt.
+    """
+    return _until_inventory_current(
+        lambda: _regen_indexes_once(layout, dry_run=dry_run),
+        lambda result: result.application,
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class PathMutationResult:
+    """A canonical subtree mutation and its optional journaled application."""
+
+    plan: WorkMutationPlan
+    application: MutationApplication | None = None
+
+
+def _plan_reparent_partial(
+    layout: WorkspaceLayout, source_paths: Sequence[str], parent_path: str
+) -> tuple[Bundle, WorkMutationPlan]:
+    """Scan names, close context, load once and plan; complete unsafe graph context."""
+    lanes = {location.lane for path in (*source_paths, parent_path) if (location := parse_item_path(path)) is not None}
+    scan = scan_touched(
+        layout.bundle_dir,
+        source_paths,
+        ignore=with_clone_ignore(),
+        prune=with_clone_prune(),
+        extra={"work/index.md", *(f"{lane}/index.md" for lane in lanes)},
+    )
+    warnings = scan.warnings
+    if not scan.complete:
+        bundle = load_workspace_bundle(layout, ignore=())
+    else:
+        only = reparent_load_set((m.id for m in scan.inventory.members), scan.members, source_paths, parent_path)
+        bundle = load_partial_bundle(layout.bundle_dir, only=only, inventory=scan.inventory)
+        items = load_items(bundle)
+        by_path = item_index(list(items))
+        unloaded = frozenset(canonical_id(member) for member in bundle.unloaded)
+        if any(
+            edge.path not in by_path and canonical_id(f"{edge.path}.md") in unloaded
+            for item in items
+            for edge in item.dependency_edges
+        ):
+            # Names cannot supply a target's terminal state or outgoing edges.
+            # Admit the whole inventory, reusing clean parsed seed Documents;
+            # never expand the pure name closure by inspecting dependencies.
+            reuse = {f"{cid}.md": doc for cid, doc in bundle.concepts.items()}
+            for directory, doc in bundle.indexes.items():
+                reuse[f"{directory}/index.md" if directory else "index.md"] = doc
+            for directory, doc in bundle.logs.items():
+                reuse[f"{directory}/log.md" if directory else "log.md"] = doc
+            bundle = load_partial_bundle(
+                layout.bundle_dir,
+                only=frozenset(m.id for m in scan.inventory.members if m.id.endswith(".md")),
+                inventory=scan.inventory,
+                reuse=reuse,
+            )
+            if bundle.unloaded:
+                raise ValueError("dependency fallback did not admit the complete Markdown inventory")
+            bundle = replace(bundle, partial=None)
+            warnings = (*warnings, "dependency context reaches unloaded members; using a full load from the inventory")
+    plan = plan_reparent_many(bundle, load_items(bundle), source_paths, parent_path)
+    return bundle, replace(plan, warnings=(*plan.warnings, *warnings))
+
+
+def run_reparent(
+    layout: WorkspaceLayout,
+    source_paths: str | Sequence[str],
+    parent_path: str,
+    *,
+    dry_run: bool = True,
+) -> PathMutationResult:
+    sources = (source_paths,) if isinstance(source_paths, str) else tuple(source_paths)
+    bundle, plan = _plan_reparent_partial(layout, sources, parent_path)
+    if dry_run or not plan.ok:
+        return PathMutationResult(plan)
+    # run_reparent passes its planning bundle reclassified through IGNORE,
+    # which is the same corpus the gate loads; run_release_adoption still passes none.
+    baseline = reclassify_ignored(bundle, IGNORE) if bundle.partial is not None else None
+    return PathMutationResult(
+        plan,
+        apply_mutation(
+            layout,
+            plan,
+            repo_roots=_repo_roots(layout),
+            baseline_bundle=baseline,
+            parse_reuse=_document_members(bundle),
+            commit=WorkspaceCommit(_reparent_subject(sources, parent_path)),
+        ),
+    )
+
+
+def _reparent_subject(sources: Sequence[str], parent_path: str) -> str:
+    names = ", ".join(item_stem(source) for source in sources)
+    return f"workspace: reparent {names} under {item_stem(parent_path)}"
+
+
+def run_release_adoption(
+    layout: WorkspaceLayout,
+    source_path: str,
+    release_path: str,
+    *,
+    dry_run: bool = True,
+) -> PathMutationResult:
+    # run_reparent passes its planning bundle reclassified through IGNORE,
+    # which is the same corpus the gate loads; run_release_adoption still passes none.
+    bundle = load_workspace_bundle(layout, ignore=())
+    plan = plan_release_adoption(bundle, load_items(bundle), source_path, release_path)
+    return PathMutationResult(
+        plan,
+        None
+        if dry_run or not plan.ok
+        else apply_mutation(
+            layout,
+            plan,
+            repo_roots=_repo_roots(layout),
+            commit=WorkspaceCommit(f"workspace: adopt children into {item_stem(release_path)}", items=(release_path,)),
+        ),
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class DecisionCommandResult:
+    """Domain-native decision entries, rollup, and optional mutation outcome."""
+
+    owner: DecisionOwner
+    entries: tuple[Decision, ...]
+    counts: Mapping[str, int]
+    warnings: tuple[str, ...]
+    plan: DecisionPlan | None = None
+    application: MutationApplication | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class OverturnPlan:
+    """A decision supersession and its peer follow-up filing, preflighted together."""
+
+    decision: DecisionPlan
+    filing: FilingCompositionPlan
+    refusal: Literal["decision-refused", "follow-up-refused"] | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class OverturnApplication:
+    """The single journaled application of both overturn effects."""
+
+    mutation: MutationApplication | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class OverturnResult:
+    """The resolved owner, full preflight, and observable overturn effects."""
+
+    owner: DecisionOwner
+    plan: OverturnPlan
+    application: OverturnApplication = OverturnApplication()
+    warnings: tuple[str, ...] = ()
+
+
+class OverturnApplyError(OSError):
+    """Retained result error type for callers that choose to reject a failed journal."""
+
+
+def _optional_bytes(path: Path) -> bytes | None:
+    try:
+        return path.read_bytes()
+    except FileNotFoundError:
+        return None
+
+
+def _decision_mutation(
+    context: DecisionContext,
+    plan: DecisionPlan,
+    ledger_before: bytes | None,
+    extra_writes: Sequence[PlannedWrite] = (),
+) -> WorkMutationPlan:
+    owner_path = context.owner.owner_path
+    owner_page = item_page(owner_path).path(context.bundle.root)
+    owner_before = owner_page.read_bytes()
+    owner_document = parse(owner_before.decode("utf-8"), path=owner_page)
+    upsert(owner_document, ledger_ref(owner_path), title="Decisions")
+    ledger_member = context.owner.ledger.relative_to(context.bundle.root).as_posix()
+    owner_member = item_page(owner_path).rel
+    ledger_text = _decisions.render(_decisions.parse(plan.snapshot.text).preamble, plan.after)
+    return _write_plan(
+        context.bundle.root,
+        "file",
+        (
+            _planned_write(ledger_member, ledger_before, ledger_text.encode("utf-8")),
+            _planned_write(owner_member, owner_before, owner_document.serialize().encode("utf-8")),
+            *extra_writes,
+        ),
+        validate_paths=(owner_path,),
+        warnings=plan.warnings,
+    )
+
+
+def _apply_decision(
+    layout: WorkspaceLayout,
+    context: DecisionContext,
+    plan: DecisionPlan,
+    ledger_before: bytes | None,
+    extra_writes: Sequence[PlannedWrite] = (),
+    *,
+    label: str,
+    verb: str,
+    allowed_new_findings: tuple[tuple[str, str], ...] = (),
+) -> MutationApplication | None:
+    if plan.refusal is not None:
+        return None
+    return apply_mutation(
+        layout,
+        _decision_mutation(context, plan, ledger_before, extra_writes),
+        repo_roots=_repo_roots(layout),
+        baseline_bundle=context.bundle,
+        allowed_new_findings=allowed_new_findings,
+        commit=WorkspaceCommit(
+            f"workspace: {verb} {item_stem(context.owner.owner_path)} decision {label}",
+            items=(context.owner.owner_path,),
+        ),
+    )
+
+
+def _decision_result(
+    context: DecisionContext,
+    plan: DecisionPlan,
+    application: MutationApplication | None,
+) -> DecisionCommandResult:
+    entries = plan.after
+    warnings = plan.warnings if application is None else application.warnings
+    if application is not None and not application.ok:
+        persisted = _decisions.load(context.owner.ledger)
+        entries = tuple(persisted.entries)
+        warnings = (*warnings, *application.failures, *persisted.warnings)
+    return DecisionCommandResult(
+        owner=context.owner,
+        entries=entries,
+        counts=MappingProxyType(_decisions.counts(entries)),
+        warnings=warnings,
+        plan=plan,
+        application=application,
+    )
+
+
+def run_decision_add(
+    layout: WorkspaceLayout,
+    path: str,
+    *,
+    question: str,
+    status: str = "open",
+    answer: str | None = None,
+    rationale: str | None = None,
+    if_wrong: str | None = None,
+    affects: Sequence[str] = (),
+    on: date,
+    decided_by: str,
+    hold: str | None = None,
+    phase: str | None = None,
+    checkpoint: Path | None = None,
+    dry_run: bool = True,
+) -> DecisionCommandResult:
+    """Plan an append in *path*'s owner ledger and optionally apply it.
+
+    With `hold`, the entry is a typed hold (design §6). Every hold check runs
+    against the projection re-read inside the decision-owner lock -- the lock
+    `gw work advance` also takes -- and the ledger entry plus a park's
+    checkpoint are applied as one journaled mutation before it is released.
+    """
+    if hold is None and (phase is not None or checkpoint is not None):
+        raise ValueError("--phase and --checkpoint are only valid with --hold park|skip")
+    if hold is not None and hold not in _decisions.HOLD_SHAPES:
+        raise ValueError(f"unknown hold {hold!r}; expected one of {sorted(_decisions.HOLD_SHAPES)}")
+    draft = checkpoint.read_bytes().decode("utf-8") if checkpoint is not None else None
+    target_affects = tuple(affects) or ((path,) if hold is not None else ())
+
+    def planned(context: DecisionContext) -> tuple[DecisionPlan, tuple[PlannedWrite, ...]]:
+        ledger = context.owner.ledger
+        checkpoint_ref_value: str | None = None
+        extra: tuple[PlannedWrite, ...] = ()
+        if hold is not None:
+            item = path_index(context.items)[path]
+            refused = check_hold(
+                item,
+                status=status,
+                hold=hold,
+                phase=phase,
+                affects=target_affects,
+                has_checkpoint=draft is not None,
+            )
+            if refused is not None:
+                return _decisions.plan_refusal(ledger, refused.refusal, refused.detail), ()
+            if hold == "park":
+                assert phase is not None and draft is not None
+                decision_id, _number = _decisions.next_id(_decisions.load(ledger).entries)
+                ref = checkpoint_ref(path, phase, decision_id)
+                if ref.path(context.bundle.root).exists():
+                    detail = f"{ref.rel} already exists; checkpoints are never overwritten"
+                    return _decisions.plan_refusal(ledger, "checkpoint-exists", detail), ()
+                stamped, invalid = prepare_checkpoint(
+                    draft,
+                    item_path=path,
+                    phase=phase,
+                    decision_id=decision_id,
+                )
+                if invalid is not None:
+                    return _decisions.plan_refusal(ledger, invalid.refusal, invalid.detail), ()
+                checkpoint_ref_value = ref.resource
+                extra = (_planned_write(ref.rel, None, stamped.encode("utf-8")),)
+        plan = _decisions.plan_append(
+            ledger,
+            question=question,
+            status=status,
+            answer=answer,
+            rationale=rationale,
+            if_wrong=if_wrong,
+            affects=target_affects,
+            on=on,
+            decided_by=decided_by,
+            hold=hold,
+            phase=phase,
+            checkpoint=checkpoint_ref_value,
+        )
+        if checkpoint_ref_value is not None and plan.primary is not None:
+            assert checkpoint_ref_value.endswith(f"-{plan.primary.id}.md"), "allocation moved under the lock"
+        return plan, extra
+
+    if dry_run:
+        context = decision_context(layout, path)
+        plan, _extra = planned(context)
+        application = None
+    else:
+        commit_mode(layout)
+        with locked_decision_owner(layout, path) as context:
+            ledger_before = _optional_bytes(context.owner.ledger)
+            plan, extra = planned(context)
+            allowed_new_findings: tuple[tuple[str, str], ...] = ()
+            owner_path = context.owner.owner_path
+            owner_item = path_index(context.items)[owner_path]
+            entry = plan.primary
+            # A finish owner reports the finding even when the affected item
+            # is a child. Only a real, nonterminal hold in this owner's ledger
+            # earns the exception; unnamed/unresolvable questions do not.
+            if (
+                owner_item.phase == "finish"
+                and entry is not None
+                and any(
+                    not item.archived
+                    and item.work_status not in TERMINAL_STATUSES
+                    and item.phase != "done"
+                    and _decisions.holds_for((entry,), item.path)
+                    and decision_owner(context.items, item.path) == owner_path
+                    for item in context.items
+                )
+            ):
+                allowed_new_findings = ((item_page(owner_path).rel, "decisions.open-at-finish"),)
+            application = _apply_decision(
+                layout,
+                context,
+                plan,
+                ledger_before,
+                extra,
+                label=plan.primary.id if plan.primary else "ledger",
+                verb="add",
+                allowed_new_findings=allowed_new_findings,
+            )
+    return _decision_result(context, plan, application)
+
+
+def run_decision_answer(
+    layout: WorkspaceLayout,
+    path: str,
+    decision_id: str,
+    *,
+    answer: str,
+    rationale: str | None = None,
+    on: date,
+    decided_by: str,
+    dry_run: bool = True,
+    before_apply: Callable[[DecisionCommandResult], None] | None = None,
+) -> DecisionCommandResult:
+    """Plan an answer in *path*'s nearest-owner ledger and optionally apply it."""
+
+    def planned(context: DecisionContext) -> DecisionPlan:
+        return _decisions.plan_update(
+            context.owner.ledger,
+            decision_id,
+            answer=answer,
+            rationale=rationale,
+            on=on,
+            decided_by=decided_by,
+        )
+
+    if dry_run:
+        context = decision_context(layout, path)
+        plan = planned(context)
+        application = None
+    else:
+        commit_mode(layout)
+        with locked_decision_owner(layout, path) as context:
+            ledger_before = _optional_bytes(context.owner.ledger)
+            plan = planned(context)
+            if before_apply is not None:
+                before_apply(_decision_result(context, plan, None))
+            application = _apply_decision(layout, context, plan, ledger_before, label=decision_id, verb="answer")
+    return _decision_result(context, plan, application)
+
+
+def run_decision_amend(
+    layout: WorkspaceLayout,
+    path: str,
+    decision_id: str,
+    *,
+    answer: str,
+    note: str,
+    rationale: str | None = None,
+    affects: Sequence[str] | None = None,
+    on: date,
+    decided_by: str,
+    dry_run: bool = True,
+) -> DecisionCommandResult:
+    """Plan refining an answered decision in *path*'s nearest-owner ledger and optionally apply it."""
+
+    def planned(context: DecisionContext) -> DecisionPlan:
+        return _decisions.plan_amend(
+            context.owner.ledger,
+            decision_id,
+            answer=answer,
+            note=note,
+            rationale=rationale,
+            affects=affects,
+            on=on,
+            decided_by=decided_by,
+        )
+
+    if dry_run:
+        context = decision_context(layout, path)
+        plan = planned(context)
+        application = None
+    else:
+        commit_mode(layout)
+        with locked_decision_owner(layout, path) as context:
+            ledger_before = _optional_bytes(context.owner.ledger)
+            plan = planned(context)
+            application = _apply_decision(layout, context, plan, ledger_before, label=decision_id, verb="amend")
+    return _decision_result(context, plan, application)
+
+
+def run_decision_list(
+    layout: WorkspaceLayout,
+    path: str,
+    *,
+    status: str | None = None,
+    affects: str | None = None,
+    cites: str | None = None,
+) -> DecisionCommandResult:
+    """Read and filter *path*'s nearest-owner ledger without writing."""
+    context = decision_context(layout, path)
+    parsed = _decisions.load(context.owner.ledger)
+    selected = tuple(_decisions.query(parsed.entries, status=status, affects=affects, cites=cites))
+    return DecisionCommandResult(
+        owner=context.owner,
+        entries=selected,
+        counts=MappingProxyType(_decisions.counts(parsed.entries)),
+        warnings=tuple(parsed.warnings),
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class OpenDecision:
+    """One open ledger entry, the ledger it lives in, and the active items it holds."""
+
+    owner_path: str
+    ledger: Path
+    held: tuple[str, ...]
+    decision: Decision
+
+
+def run_open_decisions(layout: WorkspaceLayout, *, session: ReadSession | None = None) -> tuple[OpenDecision, ...]:
+    """Every `status: open` entry in the ledger of every active item's decision owner. Never writes.
+
+    Each owner's ledger is read once, and an absent ledger reads as empty, as
+    `gw work decision list` does. Archived items are dropped before any ledger
+    is read. `held` is the entry's `affects` paths that are active items whose
+    own decision owner is this ledger's owner, in `affects` order: exactly the
+    items `hold_for` would report this entry as holding.
+    """
+    with borrow_read_session(layout, session) as session:
+        items = session.work_snapshot()
+    active = tuple(item for item in items if not item.archived)
+    active_paths = {item.path for item in active}
+    owners = sorted({owner for item in active if (owner := decision_owner(items, item.path)) is not None})
+    found: list[OpenDecision] = []
+    for owner in owners:
+        ledger = _decisions.ledger_ref(owner).path(layout.bundle_dir)
+        for entry in sorted(_decisions.load(ledger).entries, key=lambda decision: decision.number):
+            if entry.status != "open":
+                continue
+            held = tuple(
+                path for path in entry.affects if path in active_paths and decision_owner(items, path) == owner
+            )
+            found.append(OpenDecision(owner_path=owner, ledger=ledger, held=held, decision=entry))
+    return tuple(found)
+
+
+def run_decision_supersede(
+    layout: WorkspaceLayout,
+    path: str,
+    decision_id: str,
+    *,
+    question: str,
+    answer: str,
+    rationale: str | None = None,
+    affects: Sequence[str] | None = None,
+    on: date,
+    decided_by: str,
+    dry_run: bool = True,
+) -> DecisionCommandResult:
+    """Plan a supersession in *path*'s nearest-owner ledger and optionally apply it."""
+
+    def planned(context: DecisionContext) -> DecisionPlan:
+        return _decisions.plan_supersede(
+            context.owner.ledger,
+            decision_id,
+            question=question,
+            answer=answer,
+            rationale=rationale,
+            affects=affects,
+            on=on,
+            decided_by=decided_by,
+        )
+
+    if dry_run:
+        context = decision_context(layout, path)
+        plan = planned(context)
+        application = None
+    else:
+        commit_mode(layout)
+        with locked_decision_owner(layout, path) as context:
+            ledger_before = _optional_bytes(context.owner.ledger)
+            plan = planned(context)
+            application = _apply_decision(layout, context, plan, ledger_before, label=decision_id, verb="supersede")
+    return _decision_result(context, plan, application)
+
+
+def _merge_write_mutations(root: Path, *plans: WorkMutationPlan) -> WorkMutationPlan:
+    writes: dict[str, PlannedWrite] = {}
+    for plan in plans:
+        for write in plan.writes:
+            if write.member in writes and writes[write.member] != write:
+                raise ValueError(f"conflicting planned writes for {write.member}")
+            writes[write.member] = write
+    return _write_plan(
+        root,
+        "file",
+        tuple(writes.values()),
+        mkdirs=tuple(directory for plan in plans for directory in plan.mkdirs),
+        validate_paths=tuple(path for plan in plans for path in plan.validate_paths),
+        warnings=tuple(warning for plan in plans for warning in plan.warnings),
+        directory_preconditions=tuple(condition for plan in plans for condition in plan.directory_preconditions),
+    )
+
+
+def run_decision_overturn(
+    layout: WorkspaceLayout,
+    config: Config,
+    path: str,
+    decision_id: str,
+    *,
+    answer: str,
+    rationale: str | None,
+    follow_up_title: str,
+    follow_up_type: str = "TechDebt",
+    follow_up_affects: Sequence[str] = (),
+    on: date,
+    decided_by: str,
+    dry_run: bool = True,
+) -> OverturnResult:
+    """Preflight a decision supersession and peer follow-up before either write."""
+
+    def planned(context: DecisionContext) -> OverturnPlan:
+        decision = _decisions.plan_supersede(
+            context.owner.ledger,
+            decision_id,
+            question=follow_up_title,
+            answer=answer,
+            rationale=rationale,
+            affects=None,
+            on=on,
+            decided_by=decided_by,
+        )
+        replacement_id = decision.primary.id if decision.primary is not None else "unallocated"
+        filing_outcome = plan_file_and_reconcile(
+            context.bundle,
+            context.items,
+            FilingSeed(
+                type=follow_up_type,
+                title=follow_up_title,
+                description=f"Follow-up from overturned decision {replacement_id} — see the owner's decisions ledger",
+                on=on,
+                parent_path=None,
+                depends_on=(),
+                affects=tuple(follow_up_affects),
+            ),
+            load_sections(config.declarations_dir / SECTIONS_DIRNAME),
+        )
+        refusal: Literal["decision-refused", "follow-up-refused"] | None = (
+            "decision-refused"
+            if decision.refusal is not None
+            else "follow-up-refused"
+            if filing_outcome.plan.refusal is not None
+            else None
+        )
+        return OverturnPlan(decision=decision, filing=filing_outcome.plan, refusal=refusal)
+
+    if dry_run:
+        context = decision_context(layout, path)
+        combined = planned(context)
+        return OverturnResult(owner=context.owner, plan=combined)
+    commit_mode(layout)
+    with locked_decision_owner(layout, path) as context:
+        ledger_before = _optional_bytes(context.owner.ledger)
+        combined = planned(context)
+        if combined.refusal is not None:
+            return OverturnResult(owner=context.owner, plan=combined)
+        mutation = _merge_write_mutations(
+            context.bundle.root,
+            _decision_mutation(context, combined.decision, ledger_before),
+            _filing_mutation(context.bundle, combined.filing),
+        )
+        application = apply_mutation(
+            layout,
+            mutation,
+            repo_roots=_repo_roots(layout),
+            baseline_bundle=context.bundle,
+            commit=WorkspaceCommit(
+                f"workspace: overturn {item_stem(context.owner.owner_path)} decision {decision_id}",
+                items=(context.owner.owner_path, combined.filing.filing.path),
+            ),
+        )
+    return OverturnResult(
+        owner=context.owner,
+        plan=combined,
+        application=OverturnApplication(mutation=application),
+        warnings=(*application.failures, *application.warnings),
+    )
+
+
+__all__ = [
+    "ChildRollup",
+    "Decision",
+    "DecisionCommandResult",
+    "DecisionContext",
+    "DecisionOwner",
+    "DependencyEdge",
+    "DependencyIssue",
+    "DependencyParse",
+    "DispatchExplanation",
+    "FilingRun",
+    "GuidanceRequest",
+    "IngestQueueReport",
+    "NextApplication",
+    "NextResult",
+    "OpenDecision",
+    "OverturnApplication",
+    "OverturnApplyError",
+    "OverturnPlan",
+    "OverturnResult",
+    "PathMutationResult",
+    "PendingIngest",
+    "QueueEntry",
+    "RegenIndexesResult",
+    "SourceNormalization",
+    "StatusReport",
+    "Transition",
+    "WorkItem",
+    "parse_dependencies",
+    "run_decision_add",
+    "run_decision_amend",
+    "run_decision_answer",
+    "run_decision_list",
+    "run_decision_overturn",
+    "run_decision_supersede",
+    "run_dispatch_explain",
+    "run_file",
+    "run_ingest_queue",
+    "run_lint",
+    "run_next",
+    "run_open_decisions",
+    "run_regen_indexes",
+    "run_release_adoption",
+    "run_reparent",
+    "run_status",
+    "run_work_list",
+    "run_work_queue",
+]

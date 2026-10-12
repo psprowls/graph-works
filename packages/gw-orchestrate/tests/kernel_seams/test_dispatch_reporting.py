@@ -1,0 +1,193 @@
+"""The two dispatch consumers resolve the same leaf snapshot."""
+
+import subprocess
+from datetime import date
+from pathlib import Path
+
+import pytest
+from gw_kernel import apply_init, plan_init
+from gw_orchestrate.commands import run_orchestrate
+from gw_work.commands import run_next
+
+TODAY = date(2026, 8, 23)
+
+
+def _layout(tmp_path: Path):
+    repo = tmp_path / "repo"
+    (repo / ".git").mkdir(parents=True)
+    (repo / "packages/a").mkdir(parents=True)
+    layout = apply_init(plan_init(repo / ".works", today=TODAY, topic="Next")).layout
+    (layout.bundle_dir / "work").mkdir(parents=True, exist_ok=True)
+    return layout
+
+
+def _write(layout, path: str, *, type: str = "Feature", phase: str = "design") -> None:
+    page = layout.bundle_dir / f"{path}.md"
+    page.parent.mkdir(parents=True, exist_ok=True)
+    page.write_text(
+        f"---\ntype: {type}\ntitle: {path}\ndescription: d\nstatus: stable\nwork_status: open\n"
+        f"phase: {phase}\neffort: medium\nopened: 2026-08-01\nupdated: 2026-08-01\naffects:\n"
+        f"- packages/a\n---\n\n## Summary\nd\n\n## Plan\n\n| Action | Done when | Rationale |\n"
+        f"| --- | --- | --- |\n",
+        encoding="utf-8",
+    )
+
+
+def _spec(layout, path: str) -> Path:
+    artifact = layout.bundle_dir / f"{path}/references/01-design.md"
+    artifact.parent.mkdir(parents=True, exist_ok=True)
+    artifact.write_text("# Design\n", encoding="utf-8")
+    return artifact
+
+
+def _init_git_repo(layout) -> Path:
+    """Replace the workspace fixture's marker with a real tracked repository."""
+    repo = layout.root.parent
+    (repo / ".git").rmdir()
+    for args in (
+        ("init", "-b", "main"),
+        ("config", "user.email", "t@example.com"),
+        ("config", "user.name", "T"),
+        ("add", "."),
+        ("commit", "-m", "fixture"),
+    ):
+        subprocess.run(["git", *args], cwd=repo, check=True, capture_output=True, text=True)
+    return repo
+
+
+def _git_worktree(layout, target: Path, branch: str) -> Path:
+    repo = _init_git_repo(layout)
+    subprocess.run(
+        ["git", "worktree", "add", "-b", branch, str(target)],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    return target
+
+
+@pytest.mark.parametrize(
+    ("kind", "phase", "spec", "rule_name"),
+    [
+        ("Feature", "design", False, "design"),
+        ("Bug", "design", False, "design-bug"),
+        ("Feature", "design", True, "design-reconcile"),
+        ("Epic", "design", False, "design-parent"),
+        ("Epic", "plan", False, "plan-parent"),
+        ("Feature", "plan", False, "plan"),
+        ("Feature", "execute", False, "execute"),
+        ("Feature", "execute", True, "execute-planned"),
+        ("Feature", "finish", False, "finish"),
+    ],
+)
+def test_next_and_orchestrate_share_resolution(tmp_path: Path, kind, phase, spec, rule_name):
+    layout = _layout(tmp_path)
+    worktree = _git_worktree(layout, tmp_path / "feature-worktree", "feature/a")
+    path = "work/feature-a"
+    _write(layout, path, type=kind, phase=phase)
+    page = layout.bundle_dir / f"{path}.md"
+    page.write_text(
+        page.read_text().replace(
+            "effort: medium", f"effort: medium\nblast_radius: package\nworktree: {worktree}\nbranch: feature/a"
+        ),
+        encoding="utf-8",
+    )
+    if spec:
+        _spec(layout, path)
+        if phase == "execute":
+            from okf_io import load
+
+            document = load(page)
+            document.set("sources", [{"id": "plan", "resource": f"/{path}/references/02-plan.md"}])
+            page.write_text(document.serialize(), encoding="utf-8")
+            (layout.bundle_dir / f"{path}/references/02-plan.md").write_text("# Plan\n", encoding="utf-8")
+    shared = layout.root / "dispatch.yaml"
+    shared.write_text(
+        "version: 1\npipeline:\n  attributes: [stage, type, effort, blast_radius, has_spec, has_plan]\n"
+        "  rules:\n  - match: {}\n    model: inherited\n    reasoning_effort: high\n"
+        '  - match: {stage: finish}\n    prompt_tail: "merge {merge_target}"\n',
+        encoding="utf-8",
+    )
+    (layout.root / "dispatch.local.yaml").write_text(
+        "version: 1\npipeline:\n  rules:\n  - name: local-agent\n    match: {blast_radius: package}\n"
+        "    agent: codex\n",
+        encoding="utf-8",
+    )
+    next_result = run_next(layout, path, dry_run=False)
+    planned_result = run_orchestrate(layout, path)
+    planned = planned_result.dispatches[0]
+    assert next_result.route.dispatch.stage == phase
+    resolution = next_result.dispatch_resolution
+    assert planned.agent == resolution.profile.agent == "codex"
+    assert planned.model == resolution.profile.model is None
+    assert planned.reasoning_effort == resolution.profile.reasoning_effort is None
+    assert planned.skill == resolution.profile.skill
+    assert planned_result.plan.dispatch_resolutions[planned.key] == resolution
+    assert resolution.provenance["model"].reason == "agent-change"
+
+
+def test_unregistered_canonical_design_agrees_without_mutation(tmp_path):
+    layout = _layout(tmp_path)
+    path = "work/feature-a"
+    _write(layout, path)
+    _spec(layout, path)
+    _init_git_repo(layout)
+    before = (layout.bundle_dir / f"{path}.md").read_bytes()
+    next_result = run_next(layout, path)
+    result = run_orchestrate(layout, path)
+    assert next_result.dispatch_resolution.profile.skill == result.dispatches[0].skill == "gw:reconciling-spec"
+    assert next_result.application.normalized == ()
+    assert (layout.bundle_dir / f"{path}.md").read_bytes() == before
+
+
+def test_descended_next_resolves_leaf_attributes_and_keeps_transitions(tmp_path):
+    from okf_io import load
+    from work_tracker_okf.workflow import route
+
+    layout = _layout(tmp_path)
+    worktree = _git_worktree(layout, tmp_path / "epic-worktree", "epic/a")
+    parent = "work/epic-a"
+    child = f"{parent}/children/feature-a"
+    _write(layout, parent, type="Epic", phase="execute")
+    _write(layout, child)
+    page = layout.bundle_dir / f"{parent}.md"
+    document = load(page)
+    document.set("worktree", str(worktree))
+    document.set("branch", "epic/a")
+    page.write_text(document.serialize(), encoding="utf-8")
+    (layout.root / "dispatch.local.yaml").write_text(
+        "pipeline:\n  rules:\n  - match: {type: Feature}\n    agent: codex\n", encoding="utf-8"
+    )
+    next_result = run_next(layout, parent, descend=True)
+    plan_result = run_orchestrate(layout, parent)
+    assert plan_result.dispatches, plan_result.blocked
+    planned = plan_result.dispatches[0]
+    assert next_result.selected_path == planned.slug == child
+    assert next_result.descent.path == (parent, child)
+    assert next_result.dispatch_resolution.profile.agent == planned.agent == "codex"
+    assert next_result.route == route(next_result.state)
+    assert next_result.route.on_complete.phase == "plan"
+    assert next_result.route.blockers == ()
+
+
+def test_satisfied_parent_gate_has_transition_but_no_dispatch_profile(tmp_path):
+    from okf_io import load
+
+    layout = _layout(tmp_path)
+    parent = "work/epic-a"
+    child = f"{parent}/children/feature-a"
+    _write(layout, parent, type="Epic", phase="execute")
+    _write(layout, child, phase="done")
+    page = layout.bundle_dir / f"{child}.md"
+    document = load(page)
+    document.set("work_status", "resolved")
+    page.write_text(document.serialize(), encoding="utf-8")
+    result = run_next(layout, parent)
+    planned = run_orchestrate(layout, parent)
+    assert result.dispatch_resolution is None
+    assert result.dispatch_preflight is None
+    assert result.route.on_complete.phase == "finish"
+    assert planned.dispatches == ()
+    assert planned.dispatch_resolutions == {}
+    assert planned.advances[0].path == parent

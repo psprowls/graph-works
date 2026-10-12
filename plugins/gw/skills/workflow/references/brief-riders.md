@@ -77,7 +77,7 @@ names the execute-stage skills outright, telling the reader to use
 `superpowers:verification-before-completion` before claiming success. That is a
 harder self-chain than `brainstorming`, which merely *may* wander into
 `writing-plans` and carries a STOP line anyway. The `diagnosis` variant is
-design-only (`graph_works_core/workspace/pipeline.py:11`), so a Bug entering the
+design-only (`gw_kernel/workspace/pipeline.py:11`), so a Bug entering the
 pipeline lands here at `design` and is invited to implement in the same session.
 
 **The rider must be self-sufficient.** There is no patched copy to point at, so
@@ -291,15 +291,16 @@ resolves an item; the rider leaves the stock skill unmodified.
 >
 > **Integration strategy.** Offer the integration choice as `squash`, `merge` (merge commit, `--no-ff`) or `ff` (fast-forward), listing each code target's `default_strategy` from `finish_targets` first. Integrate every code target with `gw work integrate <work-path> --repo <name> --strategy <choice> --apply --json` in place of the stock skill's own `git merge`: gw merges in the target worktree and records the receipt. Never run `git merge` for a code repository. `_workspace` targets keep `gw work merge-workspace` (workspace `main`) or an anchor merge followed by `record --repo _workspace`. A refusal holds the entire finish; `receipt-refused` means the integration landed and only `record` is needed. When the human says a target is integrated but gw cannot verify it (rebase, external squash, PR merged upstream), record it with `gw work accept-integration <work-path> --repo <name> --evidence <sha> --reason "<why>" --by <human>` — never with a hand `gw work advance`. Keep source worktrees and branches until verification.
 >
-> **Receipt procedure.** Use the absolute installed plugin path and the core runtime (from an external
+> **Receipt procedure.** Use the absolute installed plugin path and the orchestration runtime (from an external
 > checkout add `--project <graph-works source root>` to `uv run`, or use an
-> installed interpreter with graph-works-core). Run before merging:
+> installed interpreter with gw-orchestrate or the complete gw CLI runtime).
+> Run before merging:
 >
-> `uv run --package graph-works-core python <plugin>/skills/finishing-relay/references/finish-receipt.py inspect <work-path> --workspace <workspace>`
+> `uv run --package gw-pipeline python <plugin>/skills/finishing-relay/references/finish-receipt.py inspect <work-path> --workspace <workspace>`
 >
 > After each workspace-anchor target's merge and merged-result checks, run:
 >
-> `uv run --package graph-works-core python <plugin>/skills/finishing-relay/references/finish-receipt.py record <work-path> --workspace <workspace> --repo <name>`
+> `uv run --package gw-orchestrate python <plugin>/skills/finishing-relay/references/finish-receipt.py record <work-path> --workspace <workspace> --repo <name>`
 >
 > `record` commits the receipt itself; do not commit the workspace.
 > If receipt writing fails after a merge, retry `record`:

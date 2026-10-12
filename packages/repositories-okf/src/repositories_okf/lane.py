@@ -1,7 +1,7 @@
 """The repositories lane's constants: where it lives, what it declares, and what it hides.
 
 `CLONE_GLOB` is the one pattern every graph-works bundle load appends (see
-`graph_works_core.workspace.bundle`). okf-io's `*` crosses `/`, so it covers a clone's whole
+`gw_kernel.workspace.bundle`). okf-io's `*` crosses `/`, so it covers a clone's whole
 subtree. `PRUNE_GLOB` separately matches the clone directory itself, keeping its foreign
 content outside the bundle model.
 """

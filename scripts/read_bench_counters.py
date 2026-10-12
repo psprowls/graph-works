@@ -13,7 +13,7 @@ restores them on exit, including on an exception:
   `probe_git` included) construct one; a process whose program is git counts.
 
 - `okf_ext.search.index.term_postings` and its public alias -- pages tokenized.
-- `graph_works_core.query.commands._page_hashes` -- pages hashed on the oracle path.
+- `gw_wiki.query.commands._page_hashes` -- pages hashed on the oracle path.
 - `markdown_it.MarkdownIt.parse` -- markdown parsed through every parser instance.
 - `okf_io.bundle._files` and `okf_io.bundle._files_at` -- one walk per call.
 
@@ -40,7 +40,7 @@ _document = importlib.import_module("okf_io.document")
 _links = importlib.import_module("okf_io.links")
 _search = importlib.import_module("okf_ext.search")
 _search_index = importlib.import_module("okf_ext.search.index")
-_query = importlib.import_module("graph_works_core.query.commands")
+_query = importlib.import_module("gw_wiki.query.commands")
 
 _GIT_NAMES = frozenset({"git", "git.exe"})
 

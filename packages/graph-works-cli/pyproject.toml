@@ -5,14 +5,18 @@ build-backend = "hatchling.build"
 [project]
 name = "graph-works-cli"
 version = "0.3.12"
-description = "gw: the graph-works CLI — a thin Typer interface over graph-works-core (ADR 2026-08-13-command-modules)."
+description = "gw: the graph-works CLI — a thin Typer interface over gw-kernel (ADR 2026-08-13-command-modules)."
 authors = [
   { name = "Patrick Sprowls", email = "psprowls@gmail.com" },
 ]
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
-  "graph-works-core>=0.6.9,<0.7",
+  "gw-pipeline>=0.1,<0.2",
+  "gw-work>=0.1,<0.2",
+  "gw-orchestrate>=0.1,<0.2",
+  "gw-kernel>=0.7,<0.8",
+  "gw-wiki>=0.1,<0.2",
   "graph-works-wire>=0.1.8,<0.2",
   "models-io>=0.2,<0.3",
   "code-graph-io>=0.3.2,<0.4",
@@ -34,7 +38,11 @@ gw = "graph_works_cli.cli:main"
 packages = ["src/graph_works_cli"]
 
 [tool.uv.sources]
-graph-works-core = { workspace = true }
+gw-pipeline = { workspace = true }
+gw-work = { workspace = true }
+gw-orchestrate = { workspace = true }
+gw-kernel = { workspace = true }
+gw-wiki = { workspace = true }
 graph-works-wire = { workspace = true }
 models-io = { workspace = true }
 code-graph-io = { workspace = true }

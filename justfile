@@ -1,6 +1,6 @@
 # Workspace task runner — okf-io, okf-ext, code-graph-io, code-wiki-okf,
 # work-tracker-okf, config-io, plugin-fork-io, models-io, subagents-io, doc-wiki-okf, repositories-okf,
-# graph-works-core, workflow-local, workflow-orca, graph-works-wire, graph-works-cli, graph-works-serve.
+# gw-kernel, gw-pipeline, gw-work, gw-orchestrate, gw-wiki, workflow-local, workflow-orca, graph-works-wire, graph-works-cli, graph-works-serve.
 # Each recipe is exactly the command a future CI job will call.
 #
 # okf-io and okf-ext share the root `testpaths` and run under a plain
@@ -82,7 +82,7 @@ lint:
 #
 # Depends on `sync`: this is the recipe that fails without it.
 #
-# The 32 unit x arm jobs run concurrently (`GW_TYPES_JOBS`, default: host CPU
+# The 40 unit x arm jobs run concurrently (`GW_TYPES_JOBS`, default: host CPU
 # count), each with its own `--cache-dir .mypy_cache/<arm>/<unit>`: a shared
 # cache made the two arms invalidate each other every run, and concurrent mypy
 # processes must never share one. Each job stays its own `uv run --package`
@@ -128,7 +128,7 @@ test:
     ncpu=$(uv run python -c "import os; print(os.cpu_count() or 1)")
     workers=$(( ncpu / jobs )); [ "$workers" -ge 1 ] || workers=1
     export PYTEST_XDIST_AUTO_NUM_WORKERS="$workers"
-    pkgs=(_test-okf _test-code-graph-io _test-code-wiki-okf _test-work-tracker-okf _test-config-io _test-plugin-fork-io _test-models-io _test-subagents-io _test-doc-wiki-okf _test-repositories-okf _test-graph-works-core _test-workflow-local _test-workflow-orca _test-graph-works-wire _test-graph-works-cli _test-graph-works-serve)
+    pkgs=(_test-okf _test-code-graph-io _test-code-wiki-okf _test-work-tracker-okf _test-config-io _test-plugin-fork-io _test-models-io _test-subagents-io _test-doc-wiki-okf _test-repositories-okf _test-gw-kernel _test-gw-pipeline _test-gw-work _test-gw-orchestrate _test-gw-wiki _test-workflow-local _test-workflow-orca _test-graph-works-wire _test-graph-works-cli _test-graph-works-serve)
     printf '%s\n' "${pkgs[@]}" | xargs -P "$jobs" -I{} just {}
 
 _test-okf:
@@ -151,8 +151,16 @@ _test-doc-wiki-okf:
     uv run --package doc-wiki-okf pytest packages/doc-wiki-okf/tests -n auto
 _test-repositories-okf:
     uv run --package repositories-okf pytest packages/repositories-okf/tests -n auto
-_test-graph-works-core:
-    uv run --package graph-works-core pytest packages/graph-works-core/tests -n auto
+_test-gw-kernel:
+    uv run --package gw-kernel pytest packages/gw-kernel/tests -n auto
+_test-gw-pipeline:
+    uv run --package gw-pipeline pytest packages/gw-pipeline/tests -n auto
+_test-gw-work:
+    uv run --package gw-work pytest packages/gw-work/tests -n auto
+_test-gw-orchestrate:
+    uv run --package gw-orchestrate pytest packages/gw-orchestrate/tests -n auto
+_test-gw-wiki:
+    uv run --package gw-wiki pytest packages/gw-wiki/tests -n auto
 _test-workflow-local:
     uv run --package workflow-local pytest packages/workflow-local/tests -n auto
 _test-workflow-orca:
@@ -194,7 +202,7 @@ cov:
     ncpu=$(uv run python -c "import os; print(os.cpu_count() or 1)")
     workers=$(( ncpu / jobs )); [ "$workers" -ge 1 ] || workers=1
     export PYTEST_XDIST_AUTO_NUM_WORKERS="$workers"
-    pkgs=(_cov-okf _cov-code-graph-io _cov-code-wiki-okf _cov-work-tracker-okf _cov-config-io _cov-plugin-fork-io _cov-models-io _cov-subagents-io _cov-doc-wiki-okf _cov-repositories-okf _cov-graph-works-core _cov-workflow-local _cov-workflow-orca _cov-graph-works-wire _cov-graph-works-cli _cov-graph-works-serve)
+    pkgs=(_cov-okf _cov-code-graph-io _cov-code-wiki-okf _cov-work-tracker-okf _cov-config-io _cov-plugin-fork-io _cov-models-io _cov-subagents-io _cov-doc-wiki-okf _cov-repositories-okf _cov-gw-kernel _cov-gw-pipeline _cov-gw-work _cov-gw-orchestrate _cov-gw-wiki _cov-workflow-local _cov-workflow-orca _cov-graph-works-wire _cov-graph-works-cli _cov-graph-works-serve)
     printf '%s\n' "${pkgs[@]}" | xargs -P "$jobs" -I{} just {}
 
 _cov-okf:
@@ -217,10 +225,18 @@ _cov-doc-wiki-okf:
     COVERAGE_FILE=.coverage.doc-wiki-okf uv run --package doc-wiki-okf pytest packages/doc-wiki-okf/tests --cov=doc_wiki_okf --cov-branch --cov-report=term-missing --cov-fail-under=95 -n auto
 _cov-repositories-okf:
     COVERAGE_FILE=.coverage.repositories-okf uv run --package repositories-okf pytest packages/repositories-okf/tests --cov=repositories_okf --cov-branch --cov-report=term-missing --cov-fail-under=95 -n auto
-_cov-graph-works-core:
-    COVERAGE_FILE=.coverage.graph-works-core uv run --package graph-works-core pytest packages/graph-works-core/tests --cov=graph_works_core --cov-branch --cov-report=term-missing --cov-fail-under=95 -n auto
+_cov-gw-kernel:
+    COVERAGE_FILE=.coverage.gw-kernel uv run --package gw-kernel pytest packages/gw-kernel/tests --cov=gw_kernel --cov-branch --cov-report=term-missing --cov-fail-under=95 -n auto
+_cov-gw-pipeline:
+    COVERAGE_FILE=.coverage.gw-pipeline uv run --package gw-pipeline pytest packages/gw-pipeline/tests --cov=gw_pipeline --cov-branch --cov-report=term-missing --cov-fail-under=95 -n auto
+_cov-gw-work:
+    COVERAGE_FILE=.coverage.gw-work uv run --package gw-work pytest packages/gw-work/tests --cov=gw_work --cov-branch --cov-report=term-missing --cov-fail-under=95 -n auto
+_cov-gw-orchestrate:
+    COVERAGE_FILE=.coverage.gw-orchestrate uv run --package gw-orchestrate pytest packages/gw-orchestrate/tests --cov=gw_orchestrate --cov-branch --cov-report=term-missing --cov-fail-under=95 -n auto
 _cov-workflow-orca:
     COVERAGE_FILE=.coverage.workflow-orca uv run --package workflow-orca pytest packages/workflow-orca/tests --cov=workflow_orca --cov-branch --cov-report=term-missing --cov-fail-under=95 -n auto
+_cov-gw-wiki:
+    COVERAGE_FILE=.coverage.gw-wiki uv run --package gw-wiki pytest packages/gw-wiki/tests --cov=gw_wiki --cov-branch --cov-report=term-missing --cov-fail-under=95 -n auto
 _cov-graph-works-wire:
     COVERAGE_FILE=.coverage.graph-works-wire uv run --package graph-works-wire pytest packages/graph-works-wire/tests --cov=graph_works_wire --cov-branch --cov-report=term-missing --cov-fail-under=95 -n auto
 _cov-graph-works-cli:

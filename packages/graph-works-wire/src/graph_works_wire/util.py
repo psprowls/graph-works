@@ -4,9 +4,9 @@ from __future__ import annotations
 
 from typing import Any
 
-from graph_works_core.util.commands import LineEndingsReport, LogAppendResult, LogRead, TokensUpdate
-from graph_works_core.util.platform import PlatformReport
-from graph_works_core.util.read_index import ReadIndexReport
+from gw_wiki.util.commands import LineEndingsReport, LogAppendResult, LogRead, TokensUpdate
+from gw_wiki.util.platform import PlatformReport
+from gw_wiki.util.read_index import ReadIndexReport
 
 
 def log_payload(result: LogAppendResult) -> dict[str, object]:

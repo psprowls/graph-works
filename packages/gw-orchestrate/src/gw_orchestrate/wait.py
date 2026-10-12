@@ -1,0 +1,293 @@
+"""The coordinator's one wait (`gw work wait`): events and non-blocking refreshes.
+
+Decisions only. Every Orca call goes through `OrcaPort`, whose argv lives in
+`workflow_orca.port`. With a positive timeout, heartbeats never wake the caller.
+A delivery holding nothing real is acked here and the wait resumes for the remaining time. A delivery holding
+anything real is returned unacked, and the caller acks it on its next wait (`ack=`).
+The verb observes liveness only on timeout, never nudges, and never reads the clock:
+`WaitClock` is injected. Wall-minus-monotonic elapsed time is the time the host
+slept, because both macOS and Linux monotonic clocks exclude suspend.
+Zero timeout probes binding and preserves the whole delivery without ack, including
+heartbeats and duplicate completions. Failed binding proof yields unknown pending
+questions. On positive timeout it can join each liveness row to a gate wait derived from the gate run
+index (`gate_waits`, injected), so a parked worker reads as waiting.
+"""
+
+from __future__ import annotations
+
+from collections.abc import Callable, Mapping, Sequence
+from dataclasses import dataclass
+from datetime import datetime
+from functools import partial
+from typing import Any, Literal, TypeVar
+
+from subagents_io.backend import BackendError
+
+from gw_orchestrate.orca_port import (
+    OrcaDelivery,
+    OrcaMessage,
+    OrcaPendingQuestion,
+    OrcaPort,
+    OrcaTask,
+    OrcaWorker,
+)
+
+REAL_TYPES: tuple[str, ...] = ("worker_done", "escalation", "question")
+SLEEP_GAP_FLOOR_S = 60
+#: The shortest blocking wait either wait verb honours (epic D-011, D-015): about
+#: 60 s of tool time for an agent whose yield caps at 60 s, once CLI start-up is
+#: counted. The verbs cannot see the calling agent, so the lower floor is the one value.
+WAIT_FLOOR_S = 55
+_FENCED = "consumer_fenced"
+_SETTLED = frozenset({"succeeded", "failed", "stopped"})
+_REASON = "duplicate-completion"
+_T = TypeVar("_T")
+
+
+@dataclass(frozen=True, slots=True)
+class WaitClock:
+    wall: Callable[[], datetime]
+    monotonic: Callable[[], float]
+
+
+@dataclass(frozen=True, slots=True)
+class Absorbed:
+    message_id: str
+    type: str
+    dispatch_id: str
+    reason: str
+
+
+@dataclass(frozen=True, slots=True)
+class WaitResult:
+    status: Literal["event", "timeout"]
+    run_id: str
+    delivery_id: str | None
+    messages: tuple[OrcaMessage, ...]
+    absorbed: tuple[Absorbed, ...]
+    self_acked: int
+    rebound: bool
+    sleep_gap_s: int | None
+    waited_s: int
+    liveness: list[dict[str, Any]] | None = None
+    pending_questions: tuple[OrcaPendingQuestion, ...] | None = None
+    warnings: tuple[str, ...] = ()
+
+
+class WaitFailed(RuntimeError):
+    """An Orca failure the wait could not recover from; nothing unprocessed was acked."""
+
+    def __init__(self, run_id: str, code: str | None, detail: str) -> None:
+        self.run_id = run_id
+        self.code = code
+        super().__init__(detail)
+
+
+def apply_wait_floor(requested: float, *, exempt_zero: bool, option: str, default: float) -> tuple[float, str | None]:
+    """Raise *requested* to `WAIT_FLOOR_S`, returning the effective timeout and a warning.
+
+    A short poll is clamped, never refused: a refusal is one more round trip the caller
+    retries around (D-015). `exempt_zero` keeps 0 as a non-blocking read where a verb
+    defines one.
+    """
+    if requested >= WAIT_FLOOR_S or (exempt_zero and requested == 0):
+        return requested, None
+    return float(WAIT_FLOOR_S), (
+        f"{option} {requested:g} raised to the {WAIT_FLOOR_S} s wait floor; the default is {default:g}"
+    )
+
+
+class _Fence:
+    """Retry one port call once after `run-use` when Orca reports `consumer_fenced`."""
+
+    def __init__(self, port: OrcaPort, run_id: str) -> None:
+        self.port = port
+        self.run_id = run_id
+        self.rebound = False
+
+    def call(self, fn: Callable[[], _T]) -> _T:
+        try:
+            return fn()
+        except BackendError as exc:
+            if getattr(exc, "code", None) != _FENCED:
+                raise
+        self.port.run_use(self.run_id)
+        self.rebound = True
+        return fn()
+
+
+def _duplicate_completion(message: OrcaMessage, workers: Sequence[OrcaWorker], tasks: Sequence[OrcaTask]) -> str | None:
+    """Return the dispatch ID only for a released, single-attempt recorded completion.
+
+    Orca's Task result has no dispatch ID. The reporting terminal binds it to
+    the sole worker attempt; missing or malformed proof keeps the message.
+    """
+    payload = message["payload"]
+    if message["type"] != "worker_done" or payload is None:
+        return None
+    dispatch_id = payload.get("dispatchId")
+    if not isinstance(dispatch_id, str) or not dispatch_id:
+        return None
+    rows = [worker for worker in workers if worker.get("dispatch_id") == dispatch_id]
+    if len(rows) != 1:
+        return None
+    worker = rows[0]
+    task_id = worker.get("task_id")
+    terminal = worker.get("terminal")
+    if not isinstance(task_id, str) or not task_id or not isinstance(terminal, str) or not terminal:
+        return None
+    if "taskId" in payload and payload["taskId"] != task_id:
+        return None
+    state = worker.get("state")
+    if not isinstance(state, str) or state not in _SETTLED or worker.get("release_state") != "released":
+        return None
+    if sum(1 for other in workers if other.get("task_id") == task_id) != 1:
+        return None
+    matches = [task for task in tasks if task.get("id") == task_id]
+    if len(matches) != 1:
+        return None
+    task = matches[0]
+    result = task.get("result")
+    if task.get("status") != "completed" or not isinstance(result, Mapping):
+        return None
+    if result.get("provenance") != "worker_report" or result.get("completedBy") != terminal:
+        return None
+    return dispatch_id
+
+
+def _absorb(messages: Sequence[OrcaMessage], *, run_id: str, fence: _Fence) -> tuple[list[OrcaMessage], list[Absorbed]]:
+    """Split duplicate completions off a batch. A failed read keeps everything."""
+    if not any(message["type"] == "worker_done" and message["payload"] is not None for message in messages):
+        return list(messages), []
+    try:
+        workers = fence.call(lambda: fence.port.worker_list(run_id))
+        tasks = fence.call(lambda: fence.port.task_list(run_id))
+    except BackendError:
+        return list(messages), []
+    kept: list[OrcaMessage] = []
+    absorbed: list[Absorbed] = []
+    for message in messages:
+        dispatch_id = _duplicate_completion(message, workers, tasks)
+        if dispatch_id is None:
+            kept.append(message)
+        else:
+            absorbed.append(Absorbed(message["id"], message["type"], dispatch_id, _REASON))
+    return kept, absorbed
+
+
+def _pending_questions(fence: _Fence, run_id: str) -> tuple[tuple[OrcaPendingQuestion, ...] | None, tuple[str, ...]]:
+    """Re-derive questions on every return; failed reads are unknown, never empty."""
+    try:
+        read = fence.call(lambda: fence.port.pending_questions(run_id))
+    except BackendError as exc:
+        return None, (f"pending questions unavailable: {exc}",)
+    warnings = list(read["warnings"])
+    if read["truncated"]:
+        warnings.append("pending questions may be incomplete: an Orca inbox read reached its limit")
+    return tuple(read["questions"]), tuple(warnings)
+
+
+GateWaits = Callable[[datetime], Mapping[str, Mapping[str, Any]]]
+
+
+def _with_gate_waits(
+    rows: list[dict[str, Any]], gate_waits: GateWaits, now: datetime
+) -> tuple[list[dict[str, Any]], tuple[str, ...]]:
+    """Attach each row's gate wait, joined on its agent `terminal` (D-005). Facts only."""
+    try:
+        facts = gate_waits(now)
+    except (OSError, ValueError) as exc:
+        return [{**row, "gate_wait": None} for row in rows], (f"gate waits unavailable: {exc}",)
+    joined = []
+    for row in rows:
+        terminal = row.get("terminal")
+        fact = facts.get(terminal) if isinstance(terminal, str) else None
+        joined.append({**row, "gate_wait": dict(fact) if fact is not None else None})
+    return joined, ()
+
+
+def run_wait(
+    port: OrcaPort,
+    run_id: str,
+    *,
+    ack: str | None,
+    timeout_s: float,
+    clock: WaitClock,
+    gate_waits: GateWaits | None = None,
+) -> WaitResult:
+    if timeout_s < 0:
+        raise ValueError(f"timeout_s must be non-negative, got {timeout_s!r}")
+    fence = _Fence(port, run_id)
+    wall0, mono0 = clock.wall(), clock.monotonic()
+    deadline = mono0 + timeout_s
+    pending_ack = ack
+    absorbed: list[Absorbed] = []
+    self_acked = 0
+    status: Literal["event", "timeout"] = "timeout"
+    delivery_id: str | None = None
+    messages: tuple[OrcaMessage, ...] = ()
+    probe_warning: tuple[str, ...] = ()
+    if timeout_s == 0:
+        try:
+            probe_delivery = fence.call(lambda: port.check_nowait(run_id))
+            delivery_id, messages = probe_delivery["delivery_id"], tuple(probe_delivery["messages"])
+            if delivery_id is not None or messages:
+                status = "event"
+        except BackendError as exc:
+            probe_warning = (f"pending questions unavailable: non-blocking binding probe failed: {exc}",)
+    try:
+        # Zero preserves the probe's entire delivery, even when ack was supplied.
+        while timeout_s > 0:
+            sent_ack = pending_ack
+
+            def check_with_remaining_budget(ack_to_send: str | None = sent_ack) -> OrcaDelivery | None:
+                remaining_ms = int((deadline - clock.monotonic()) * 1000)
+                if remaining_ms <= 0:
+                    if ack_to_send is None:
+                        return None
+                    remaining_ms = 1
+                return port.check_wait(run_id, types=",".join(REAL_TYPES), timeout_ms=remaining_ms, ack=ack_to_send)
+
+            delivery = fence.call(check_with_remaining_budget)
+            if delivery is None:
+                break
+            pending_ack = None
+            batch = delivery["messages"]
+            if delivery["delivery_id"] is None and not batch:
+                break
+            real, dropped = _absorb([m for m in batch if m["type"] != "heartbeat"], run_id=run_id, fence=fence)
+            absorbed.extend(dropped)
+            if real:
+                status, delivery_id, messages = "event", delivery["delivery_id"], tuple(real)
+                break
+            done = delivery["delivery_id"]
+            if done is not None:
+                fence.call(partial(port.check_ack, run_id, done))
+                self_acked += 1
+    except BackendError as exc:
+        raise WaitFailed(run_id, getattr(exc, "code", None), str(exc)) from exc
+    mono_elapsed = clock.monotonic() - mono0
+    now = clock.wall()
+    gap = int((now - wall0).total_seconds() - mono_elapsed)
+    try:
+        liveness = port.liveness(run_id, now=now) if status == "timeout" and timeout_s > 0 else None
+    except BackendError as exc:
+        raise WaitFailed(run_id, getattr(exc, "code", None), str(exc)) from exc
+    gate_warnings: tuple[str, ...] = ()
+    if liveness is not None and gate_waits is not None:
+        liveness, gate_warnings = _with_gate_waits(liveness, gate_waits, now)
+    pending_questions, warnings = (None, probe_warning) if probe_warning else _pending_questions(fence, run_id)
+    return WaitResult(
+        status=status,
+        run_id=run_id,
+        delivery_id=delivery_id,
+        messages=messages,
+        absorbed=tuple(absorbed),
+        self_acked=self_acked,
+        rebound=fence.rebound,
+        sleep_gap_s=gap if gap >= SLEEP_GAP_FLOOR_S else None,
+        waited_s=int(mono_elapsed),
+        liveness=liveness,
+        pending_questions=pending_questions,
+        warnings=gate_warnings + warnings,
+    )

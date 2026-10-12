@@ -4,7 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from code_graph_io import GraphStore
+import pytest
+from code_graph_io import GraphNotInitializedError, GraphStore
 from code_graph_io import testing as gtesting
 
 
@@ -29,3 +30,36 @@ def test_raw_conn_round_trips_a_node(tmp_path: Path):
         assert conn.execute("SELECT COUNT(*) FROM nodes").fetchone()[0] == 1
     finally:
         conn.close()
+
+
+def test_raw_graph_conn_creates_schema_in_graph_directory(tmp_path: Path):
+    graph_dir = tmp_path / "nested" / "graph"
+    conn = gtesting.raw_graph_conn(graph_dir=graph_dir)
+    try:
+        assert Path(conn.execute("PRAGMA database_list").fetchone()[2]) == graph_dir / "code.db"
+        tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
+        assert {"nodes", "edges", "metadata"} <= tables
+        assert conn.execute("SELECT COUNT(*) FROM nodes").fetchone()[0] == 0
+    finally:
+        conn.close()
+
+
+def test_raw_graph_conn_reopens_same_database_without_creation(tmp_path: Path):
+    conn = gtesting.raw_conn(tmp_path / "code.db")
+    try:
+        with conn:
+            conn.execute("INSERT INTO nodes (kind, name, path) VALUES ('package','demo','pkg/demo')")
+    finally:
+        conn.close()
+    reopened = gtesting.raw_graph_conn(graph_dir=tmp_path, create=False)
+    try:
+        assert reopened.execute("SELECT kind, name, path FROM nodes").fetchall() == [("package", "demo", "pkg/demo")]
+    finally:
+        reopened.close()
+
+
+def test_raw_graph_conn_without_creation_refuses_missing_database(tmp_path: Path):
+    graph_dir = tmp_path / "missing"
+    with pytest.raises(GraphNotInitializedError):
+        gtesting.raw_graph_conn(graph_dir=graph_dir, create=False)
+    assert not graph_dir.exists()

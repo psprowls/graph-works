@@ -5,7 +5,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from graph_works_core.agent_config import (
+from graph_works_wire.agent_config import agent_config_payload
+from gw_wiki.agent_config import (
     AgentConfig,
     AgentConfigReport,
     Finding,
@@ -13,8 +14,7 @@ from graph_works_core.agent_config import (
     Layer,
     TrustStatus,
 )
-from graph_works_core.agent_config.records import ProjectAgentConfig
-from graph_works_wire.agent_config import agent_config_payload
+from gw_wiki.agent_config.records import ProjectAgentConfig
 
 GOLDEN = Path(__file__).parent / "fixtures" / "agent_config.golden.json"
 

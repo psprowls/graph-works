@@ -1,9 +1,9 @@
 # graph-works-cli
 
-`gw` is a thin Typer CLI over `graph-works-core`: it routes, parses, formats, and traces while
+`gw` is a thin Typer CLI over `gw-kernel`: it routes, parses, formats, and traces while
 domain decisions stay in the core and wiki packages.
 
-`graph-works-core` is a real, pinned dependency (see `CLAUDE.md` for the package layout and the
+`gw-kernel` is a real, pinned dependency (see `CLAUDE.md` for the package layout and the
 D-003 audit note).
 
 ## Wiki command surface
@@ -159,7 +159,7 @@ $ gw scan --apply --results-dir .works/.gw/cache/scan/results --short-head abc12
 
 `set` and `unset` refresh `.gw/cache/config.json` automatically. `sync` is the manual refresh after a
 hand edit. Hook commands update only `.claude/settings.local.json`; their merge/remove behavior lives
-in `graph_works_core.hooks`.
+in `gw_kernel.hooks`.
 
 The interactive legacy `config init` wizard is intentionally absent. Guided onboarding belongs to
 the graph-works plugin and composes the individual commands above.
@@ -171,7 +171,7 @@ per-field provenance; orchestration dispatches expose the equivalent fields.
 Human output explains agent/model/effort and resets. `gw config sync` refreshes
 all shared/local dispatch inputs. Retired-key `gw config unset [--local]` is
 removal-only and defers sync until cleanup is complete. See the
-[dispatch guide](../graph-works-core/docs/dispatch-rules.md) for YAML examples
+[dispatch guide](../gw-kernel/docs/dispatch-rules.md) for YAML examples
 and the explicit cutover procedure; no command translates old routing choices.
 
 `gw work next` (and `gw next`) also always requests guidance assembly for a

@@ -17,12 +17,12 @@ from types import MappingProxyType
 
 import pytest
 from config_io import ConfigEntry, Resolved
-from graph_works_core.hooks import HooksResult
-from graph_works_core.workspace.dispatch import DispatchRule, RuleOrigin, packaged_rules
-from graph_works_core.workspace.dispatch_config import DispatchRuleSet
-from graph_works_core.workspace.schema_read import SchemaRead
 from graph_works_wire import config
 from graph_works_wire.config import hooks_payload, projection_payload, resolved_list_payload, resolved_payload
+from gw_kernel.hooks import HooksResult
+from gw_kernel.workspace.dispatch import DispatchRule, RuleOrigin, packaged_rules
+from gw_kernel.workspace.dispatch_config import DispatchRuleSet
+from gw_kernel.workspace.schema_read import SchemaRead
 
 
 def _legacy(value: object) -> str:

@@ -24,7 +24,7 @@ def test_units_cover_every_package_dir_once() -> None:
     dirs = {p.parent.name for p in (REPO / "packages").glob("*/pyproject.toml")}
     covered = {u.name for u in UNITS} | set(ALIASES)
     assert covered == dirs
-    assert len({u.name for u in UNITS}) == len(UNITS) == 16
+    assert len({u.name for u in UNITS}) == len(UNITS) == 20
 
 
 def test_every_unit_path_exists() -> None:
@@ -42,6 +42,16 @@ def test_okf_ext_is_an_alias_and_its_paths_ride_with_okf_io() -> None:
     assert okf.lint == ("packages/okf-io", "packages/okf-ext")
     assert okf.uv_flags == ()
     assert okf.testpath == ""
+
+
+def test_kernel_unit_identity() -> None:
+    unit = resolve("gw-kernel")
+    assert unit.uv_flags == ("--package", "gw-kernel")
+    assert unit.src == ("packages/gw-kernel/src",)
+    assert unit.testpath == "packages/gw-kernel/tests"
+    assert unit.cov == ("--cov=gw_kernel",)
+    assert unit.floor == 95
+    assert sum(u.name == "gw-kernel" for u in UNITS) == 1
 
 
 def test_resolve_unknown_raises() -> None:
@@ -77,7 +87,7 @@ def test_mypy_command_shape() -> None:
 def test_mypy_jobs_lists_every_unit_on_every_arm(capsys: pytest.CaptureFixture[str]) -> None:
     assert main(["mypy-jobs"]) == 0
     lines = capsys.readouterr().out.splitlines()
-    assert len(lines) == len(UNITS) * len(ARMS) == 32
+    assert len(lines) == len(UNITS) * len(ARMS) == 40
     labels = [line.split(" ", 1)[0] for line in lines]
     assert labels == [f"{arm}/{u.name}" for arm in ARMS for u in UNITS]
     assert all(" mypy --strict --platform " in line for line in lines)
@@ -196,7 +206,7 @@ def test_gate_json_stdout_is_pure_json(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_root_conftest_addition_and_deletion_invalidate_every_manifest_unit() -> None:
-    from graph_works_core.orchestrate import gate_git, gate_units
+    from gw_orchestrate import gate_git, gate_units
 
     data = gate_manifest(REPO, cpu_count=12, jobs=3)
     manifest = gate_units.parse_manifest(json.dumps(data))
@@ -208,7 +218,33 @@ def test_root_conftest_addition_and_deletion_invalidate_every_manifest_unit() ->
     added = gate_units.unit_hashes(manifest, present, ())
     deleted = gate_units.unit_hashes(manifest, absent, ())
     assert set(before) == {unit["name"] for unit in data["units"]}
-    assert len(before) == 17
+    assert len(before) == 21
     assert all(before[name] != added[name] for name in before)
     assert all(added[name] != deleted[name] for name in before)
     assert deleted == before
+
+
+def test_orchestrate_unit_identity() -> None:
+    unit = resolve("gw-orchestrate")
+    assert unit.cov == ("--cov=gw_orchestrate",)
+    assert unit.floor == 95
+
+
+def test_pipeline_unit_identity() -> None:
+    unit = resolve("gw-pipeline")
+    assert unit.uv_flags == ("--package", "gw-pipeline")
+    assert unit.src == ("packages/gw-pipeline/src",)
+    assert unit.testpath == "packages/gw-pipeline/tests"
+    assert unit.cov == ("--cov=gw_pipeline",)
+    assert unit.floor == 95
+    assert sum(u.name == "gw-pipeline" for u in UNITS) == 1
+
+
+def test_wiki_unit_identity() -> None:
+    unit = resolve("gw-wiki")
+    assert unit.uv_flags == ("--package", "gw-wiki")
+    assert unit.src == ("packages/gw-wiki/src",)
+    assert unit.testpath == "packages/gw-wiki/tests"
+    assert unit.cov == ("--cov=gw_wiki",)
+    assert unit.floor == 95
+    assert sum(u.name == "gw-wiki" for u in UNITS) == 1

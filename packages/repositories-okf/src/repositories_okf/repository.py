@@ -2,7 +2,7 @@
 the bundle; a managed repository declares a checkout on its `track` and is not left behind it (design §5.4).
 
 The module is named for the code prefix, the catalog convention. The rules are pure over `RepositoryFacts`, which
-`gather` reads with the git runner. graph-works-core gathers once per lint and passes the facts in by closure, the
+`gather` reads with the git runner. gw-kernel gathers once per lint and passes the facts in by closure, the
 idiom of its deferred `sync` rule.
 """
 

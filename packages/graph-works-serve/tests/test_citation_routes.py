@@ -8,13 +8,13 @@ from pathlib import Path
 
 import pytest
 from conftest import PORT, TOKEN
-from graph_works_core.code_read import run_code_excerpt
-from graph_works_core.wiki_page.citations import run_wiki_citations
-from graph_works_core.workspace.layout import WorkspaceLayout
 from graph_works_serve.app import build_app
 from graph_works_serve.context import ServeContext
 from graph_works_wire import code as wire_code
 from graph_works_wire import wiki as wire_wiki
+from gw_kernel.workspace.layout import WorkspaceLayout
+from gw_wiki.code_read import run_code_excerpt
+from gw_wiki.wiki_page.citations import run_wiki_citations
 from starlette.testclient import TestClient
 
 

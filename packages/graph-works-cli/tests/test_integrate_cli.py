@@ -5,7 +5,7 @@ import subprocess
 from datetime import date
 
 from graph_works_cli.cli import app
-from graph_works_core import apply_init, plan_init
+from gw_kernel import apply_init, plan_init
 from typer.testing import CliRunner
 
 runner = CliRunner()
@@ -86,7 +86,7 @@ def test_integrate_plan_apply_replay_and_refusals(tmp_path):
 
 def test_integrate_reports_workspace_and_io_errors(tmp_path, monkeypatch):
     from graph_works_cli.work_cli import main as work_main
-    from graph_works_core.workspace.errors import WorkspaceError
+    from gw_kernel.workspace.errors import WorkspaceError
 
     layout, _repo = setup(tmp_path)
     args = ["work", "integrate", OWNER, "--repo", "code", "--workspace", str(layout.root)]
@@ -126,7 +126,7 @@ def test_accept_integration_plan_apply_and_refusal(tmp_path):
 
 def test_accept_integration_reports_workspace_and_io_errors(tmp_path, monkeypatch):
     from graph_works_cli.work_cli import main as work_main
-    from graph_works_core.workspace.errors import WorkspaceError
+    from gw_kernel.workspace.errors import WorkspaceError
 
     layout, _repo = setup(tmp_path)
     args = ["work", "accept-integration", OWNER, "--repo", "code", "--evidence", "abc", "--workspace", str(layout.root)]

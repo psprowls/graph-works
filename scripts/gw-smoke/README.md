@@ -93,7 +93,7 @@ From here on every command takes `--workspace "$TEST_WS"`.
 `librarian`/`code_reader`/`synthesizer` for `query`, `ingestor`/`proposal_reasoner`/
 `extractor` for ingest, `drift_propagator` for cross-page drift) each resolving to a
 `{model_id, backend, region, max_tokens, max_concurrency}` spec. Packaged defaults (in
-`graph_works_core/models.toml`) put every role on Bedrock. Workspace overrides live at
+`gw_wiki/models.toml`) put every role on Bedrock. Workspace overrides live at
 `roles.<role>.<field>` in `workspace.yaml`, written with `gw config set` — same
 mechanism as any other config key, no separate flag. Skip this section entirely if
 you're only testing against Bedrock with no per-role overrides — that's the packaged
@@ -102,7 +102,7 @@ default and needs nothing further.
 ### Vercel AI Gateway
 
 **The environment variable is `AI_GATEWAY_API_KEY`, not `VERCEL_AI_KEY`.**
-`graph_works_core.agent_substrate.roles` reads exactly that name
+`gw_wiki.agent_substrate.roles` reads exactly that name
 (`GATEWAY_API_KEY_ENV = "AI_GATEWAY_API_KEY"`) and hands it to `models-io`, which never
 reads the environment itself — so if `.envrc` only exports `VERCEL_AI_KEY`, every
 gateway-backed role fails with a `GatewayAccessDenied` that names `AI_GATEWAY_API_KEY`
@@ -276,9 +276,9 @@ reconcile those descriptions into the discovery catalogs, then run the executabl
 strict-validation assertions:
 
 ```bash
-uv run --package graph-works-core python scripts/gw-smoke/complete_prose.py "$TEST_WS"
+uv run --package gw-kernel python scripts/gw-smoke/complete_prose.py "$TEST_WS"
 $GW scan --no-narrate --workspace "$TEST_WS" --json
-uv run --package graph-works-core python scripts/gw-smoke/assert_contract.py "$TEST_WS"
+uv run --package gw-kernel python scripts/gw-smoke/assert_contract.py "$TEST_WS"
 ```
 
 This deterministic fixture step substitutes only for the human/model prose that `--no-narrate`

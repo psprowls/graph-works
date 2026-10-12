@@ -60,7 +60,7 @@ def test_the_other_nine_test_trees_are_still_out_of_scope():
     debt, not a correctness fix -- see the design's Scope section.
     """
     assert not in_scope("packages/code-graph-io/tests/test_store.py")
-    assert not in_scope("packages/graph-works-core/tests/test_layout.py")
+    assert not in_scope("packages/gw-kernel/tests/test_layout.py")
     assert not in_scope("plugins/gw/hooks/x.py")
     assert not in_scope("packages/okf-io/src/okf_io/py.typed")
 
@@ -149,7 +149,7 @@ def test_os_fdopen_in_text_mode_is_reported(tmp_path):
     """`os.fdopen` is a text-mode factory with both defaults.
 
     The design's own survey missed it; `config_io/projection.py:51`,
-    `workflow_local/ledger.py:76` and `workspace/transactions.py:140` are the
+    `workflow_local/ledger.py:76` and `gw_pipeline/transactions.py` are the
     real instances.
     """
     root = _repo(tmp_path)

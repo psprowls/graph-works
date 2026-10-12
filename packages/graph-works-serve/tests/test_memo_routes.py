@@ -4,11 +4,11 @@ from __future__ import annotations
 
 import pytest
 from conftest import PORT, TOKEN, write_item
-from graph_works_core.read_session import ReadSession, SnapshotSession, materialize
-from graph_works_core.workspace.layout import WorkspaceLayout
 from graph_works_serve.app import build_app
 from graph_works_serve.context import ServeContext
 from graph_works_serve.readstate import ReadState
+from gw_kernel.read_session import ReadSession, SnapshotSession, materialize
+from gw_kernel.workspace.layout import WorkspaceLayout
 from starlette.testclient import TestClient
 
 MEMO_ROUTES = (

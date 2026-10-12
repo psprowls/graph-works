@@ -14,25 +14,28 @@ from datetime import date
 from pathlib import Path
 from typing import Any, Protocol, cast
 
-from graph_works_core.archive.commands import ArchiveRun
-from graph_works_core.guidance.assembly import Guidance
-from graph_works_core.orchestrate.accept_integration import AcceptIntegrationResult
-from graph_works_core.orchestrate.asks import AskAnswerResult, AskResult
-from graph_works_core.orchestrate.commands import OrchestrateResult
-from graph_works_core.orchestrate.dispatch import DispatchFailure, DispatchResult, ObservedPlacement
-from graph_works_core.orchestrate.gate import GateCheckResult, GateRunResult, GateWaitResult, NotifyResult
-from graph_works_core.orchestrate.gate_receipts import GateEvidence, UnitEvidence
-from graph_works_core.orchestrate.integrate import IntegrateResult
-from graph_works_core.orchestrate.merge_workspace import MergeWorkspaceResult
-from graph_works_core.orchestrate.orca_port import OrcaMessage
-from graph_works_core.orchestrate.placement import BaselineRecord, PlacementRecord, ReaderRecord
-from graph_works_core.orchestrate.reroute import RerouteResult
-from graph_works_core.orchestrate.stage_advance import StageAdvance
-from graph_works_core.orchestrate.wait import WaitResult
-from graph_works_core.orchestrate.workspace_prepare import WorkspacePrepareResult
-from graph_works_core.work.affecting import WorkAffecting
-from graph_works_core.work.carried import CarriedContext
-from graph_works_core.work.commands import (
+from gw_kernel.workspace.commits import CommitOutcome
+from gw_kernel.workspace.dispatch import DispatchResolution
+from gw_orchestrate.accept_integration import AcceptIntegrationResult
+from gw_orchestrate.asks import AskAnswerResult, AskResult
+from gw_orchestrate.commands import OrchestrateResult
+from gw_orchestrate.dispatch import DispatchFailure, DispatchResult, ObservedPlacement
+from gw_orchestrate.gate import GateCheckResult, GateRunResult, GateWaitResult, NotifyResult
+from gw_orchestrate.gate_receipts import GateEvidence, UnitEvidence
+from gw_orchestrate.integrate import IntegrateResult
+from gw_orchestrate.merge_workspace import MergeWorkspaceResult
+from gw_orchestrate.orca_port import OrcaMessage
+from gw_orchestrate.placement import BaselineRecord, PlacementRecord, ReaderRecord
+from gw_orchestrate.reroute import RerouteResult
+from gw_orchestrate.stage_advance import StageAdvance
+from gw_orchestrate.wait import WaitResult
+from gw_orchestrate.workspace_prepare import WorkspacePrepareResult
+from gw_pipeline.finish import FinishTarget
+from gw_pipeline.guidance.assembly import Guidance
+from gw_work.affecting import WorkAffecting
+from gw_work.archive.commands import ArchiveRun
+from gw_work.carried import CarriedContext
+from gw_work.commands import (
     ActiveWorkTouch,
     ChildRollup,
     Decision,
@@ -51,12 +54,9 @@ from graph_works_core.work.commands import (
     Transition,
     WorkItem,
 )
-from graph_works_core.work.obligations import ObligationRecord
-from graph_works_core.work.path_report import PathReport, PathRuleRef, StageArtifactReport
-from graph_works_core.work.reconcile import ReconcileContext
-from graph_works_core.workspace.commits import CommitOutcome
-from graph_works_core.workspace.dispatch import DispatchResolution
-from graph_works_core.workspace.finish import FinishTarget
+from gw_work.obligations import ObligationRecord
+from gw_work.path_report import PathReport, PathRuleRef, StageArtifactReport
+from gw_work.reconcile import ReconcileContext
 from work_tracker_okf.workflow import RouteResult, blocker_messages
 
 from graph_works_wire._jsonable import commit_payload, jsonable

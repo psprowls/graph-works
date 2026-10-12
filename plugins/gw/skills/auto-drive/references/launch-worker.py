@@ -406,7 +406,7 @@ def owning_checkout(repo: str) -> str | None:
 
     Git lists the main working tree first. For a managed repository the plan
     names a linked working checkout, and the repository Orca knows is the
-    clone that owns it. Mirrors `_owning_checkout` in graph-works-core's
+    clone that owns it. Mirrors `_owning_checkout` in gw-kernel's
     orchestrate/dispatch.py; this helper cannot import core.
     """
     try:
@@ -540,9 +540,9 @@ def preparation_runtime() -> list[str]:
     adapter = str(helper.with_name("record-preparation.py"))
     project = helper.parents[5]
     if ((project / "pyproject.toml").is_file()
-            and (project / "packages/graph-works-core/src/graph_works_core").is_dir()
+            and (project / "packages/gw-kernel/src/gw_kernel").is_dir()
             and helper == project / "plugins/gw/skills/auto-drive/references/launch-worker.py"):
-        return ["uv", "run", "--project", str(project), "--package", "graph-works-core", "python", adapter]
+        return ["uv", "run", "--project", str(project), "--package", "gw-orchestrate", "python", adapter]
     executable = shutil.which("gw")
     if executable is None:
         fail("PREPARATION REFUSED: no installed gw runtime found")
@@ -559,8 +559,8 @@ def preparation_runtime() -> list[str]:
     if not interpreter or not interpreter[0] or "python" not in Path(interpreter[0]).name.lower():
         fail("PREPARATION REFUSED: installed gw has no discoverable Python runtime")
     probe = (
-        "import inspect; from graph_works_core.orchestrate.placement import preparation_guard, run_record_placement; "
-        "from graph_works_core.workspace.transactions import apply_mutation; "
+        "import inspect; from gw_orchestrate.placement import preparation_guard, run_record_placement; "
+        "from gw_pipeline.transactions import apply_mutation; "
         "assert 'expected_preparation' in inspect.signature(run_record_placement).parameters; "
         "assert 'start_sha' in inspect.signature(run_record_placement).parameters; "
         "assert 'validate_read_set' in inspect.signature(apply_mutation).parameters"

@@ -9,14 +9,14 @@ from pathlib import Path, PurePosixPath
 from types import MappingProxyType
 
 from config_io import ConfigEntry, Resolved
-from graph_works_core.hooks import HooksResult
-from graph_works_core.workspace.commits import CommitOutcome
-from graph_works_core.workspace.dispatch import DispatchRule, RuleOrigin, packaged_rules
-from graph_works_core.workspace.dispatch_config import DispatchRuleSet
-from graph_works_core.workspace.layout import layout_for
-from graph_works_core.workspace.schema_read import SchemaRead
-from graph_works_core.workspace.work_schemas import SchemaRefreshPlan, SchemaRefreshResult, SchemaRefusal, SchemaWrite
 from graph_works_wire import config
+from gw_kernel.hooks import HooksResult
+from gw_kernel.workspace.commits import CommitOutcome
+from gw_kernel.workspace.dispatch import DispatchRule, RuleOrigin, packaged_rules
+from gw_kernel.workspace.dispatch_config import DispatchRuleSet
+from gw_kernel.workspace.layout import layout_for
+from gw_kernel.workspace.schema_read import SchemaRead
+from gw_kernel.workspace.work_schemas import SchemaRefreshPlan, SchemaRefreshResult, SchemaRefusal, SchemaWrite
 
 
 class _Level(IntEnum):

@@ -9,12 +9,12 @@ from contextlib import asynccontextmanager
 
 import pytest
 from config_io import PROJECTION_FILENAME
-from graph_works_core.events import ChangeEvent, EventKind
-from graph_works_core.workspace.dispatch_projection import write_dispatch_projection
-from graph_works_core.workspace.layout import WorkspaceLayout
 from graph_works_serve import watch
 from graph_works_serve.hub import Changes, Hub, Resync, Subscription
 from graph_works_serve.readstate import ReadState
+from gw_kernel.events import ChangeEvent, EventKind
+from gw_kernel.workspace.dispatch_projection import write_dispatch_projection
+from gw_kernel.workspace.layout import WorkspaceLayout
 from watcher_helpers import PollingBackend
 from watcher_helpers import write as _write
 

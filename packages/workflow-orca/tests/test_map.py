@@ -117,7 +117,7 @@ def test_the_question_carries_its_own_message_id_as_the_reply_token():
     # own id and there is no second correlation scheme to get wrong.
     question = _events()[1]
     assert question.reply_token == "msg_1111111111aa"
-    assert question.options == ("main", "epic/graph-works-core")
+    assert question.options == ("main", "epic/gw-kernel")
 
 
 def test_an_unrecognised_message_type_is_dropped_not_raised():

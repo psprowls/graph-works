@@ -22,7 +22,7 @@ assert_contains() {
 RELAY="$PLUGIN_ROOT/skills/finishing-relay/SKILL.md"
 RIDER="$PLUGIN_ROOT/skills/workflow/references/brief-riders.md"
 AUTO="$PLUGIN_ROOT/skills/auto-drive/SKILL.md"
-PIPELINE="$REPO_ROOT/packages/graph-works-core/src/graph_works_core/workspace/pipeline.py"
+PIPELINE="$REPO_ROOT/packages/gw-kernel/src/gw_kernel/workspace/pipeline.py"
 
 DEFER_TAIL='"When the plan marks a step `Deferred to finish`, record it with "'
 

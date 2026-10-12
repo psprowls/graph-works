@@ -10,8 +10,8 @@ than relying on core's `dry_run=True` default.
 from __future__ import annotations
 
 import typer
-from graph_works_core.util.commands import run_tokens_update
 from graph_works_wire.util import tokens_payload
+from gw_wiki.util.commands import run_tokens_update
 
 from graph_works_cli.errors import exit_error
 from graph_works_cli.json_output import encode

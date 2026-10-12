@@ -6,12 +6,12 @@ from datetime import date
 from pathlib import Path
 from types import MappingProxyType
 
-from graph_works_core.code_read import CodeExcerpt
-from graph_works_core.util.commands import InvalidLogSection, LogEntryRead, LogRead
-from graph_works_core.wiki_page.citations import Citation, CitationCandidate, WikiCitations
-from graph_works_core.wiki_page.commands import PageLink, PageRead
-from graph_works_core.work.commands import ItemRead, ItemSource
 from graph_works_wire import code, util, wiki, work
+from gw_wiki.code_read import CodeExcerpt
+from gw_wiki.util.commands import InvalidLogSection, LogEntryRead, LogRead
+from gw_wiki.wiki_page.citations import Citation, CitationCandidate, WikiCitations
+from gw_wiki.wiki_page.commands import PageLink, PageRead
+from gw_work.commands import ItemRead, ItemSource
 
 
 def test_item_payload() -> None:

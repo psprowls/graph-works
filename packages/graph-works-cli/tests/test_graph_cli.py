@@ -20,8 +20,8 @@ from code_graph_io.testing import raw_conn
 from graph_works_cli import exit_codes
 from graph_works_cli.cli import app
 from graph_works_cli.graph_cli import main as graph_main
-from graph_works_core.graph.commands import GraphResult, GraphTarget
-from graph_works_core.workspace.errors import WorkspaceConfigError
+from gw_kernel.graph.commands import GraphResult, GraphTarget
+from gw_kernel.workspace.errors import WorkspaceConfigError
 from typer.testing import CliRunner
 
 runner = CliRunner()
@@ -264,7 +264,7 @@ def test_export_carries_a_core_failure_to_stderr(spy) -> None:
 #
 # No mock below this line: a real bootstrapped workspace with a real seeded
 # `code.db`, driven through the real `graph.commands`. Spec §5 requires this —
-# the sibling `graph-works-core` child (782e50ac) landed `fmt`, `kind=None`
+# the sibling `gw-kernel` child (782e50ac) landed `fmt`, `kind=None`
 # inference and symbol describe, so the composed behavior is exercisable here.
 
 

@@ -1,0 +1,37 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "gw-orchestrate"
+version = "0.1.0"
+description = "Work orchestration over resolved Graph Works workspaces."
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+  "gw-pipeline>=0.1,<0.2",
+  "gw-kernel>=0.7,<0.8",
+  "work-tracker-okf>=0.6.0,<0.7",
+  "okf-io>=0.2.6,<0.3",
+  "okf-ext[schemas]>=0.5.5,<0.6",
+  "subagents-io>=0.2,<0.3",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/gw_orchestrate"]
+
+[dependency-groups]
+dev = ["gw-work>=0.1,<0.2"]
+
+[tool.uv.sources]
+gw-pipeline = { workspace = true }
+gw-work = { workspace = true }
+gw-kernel = { workspace = true }
+work-tracker-okf = { workspace = true }
+okf-io = { workspace = true }
+okf-ext = { workspace = true }
+subagents-io = { workspace = true }
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"

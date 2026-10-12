@@ -19,7 +19,7 @@ from collections import defaultdict
 
 PROBES: dict[str, list[str]] = {
     "empty interpreter": ["-c", "pass"],
-    "import graph_works_core": ["-c", "import graph_works_core"],
+    "import gw_kernel": ["-c", "import gw_kernel"],
     "import subagents_io": ["-c", "import subagents_io"],
     "gw version": ["-m", "graph_works_cli.cli", "version"],
     "gw work status --help": ["-m", "graph_works_cli.cli", "work", "status", "--help"],

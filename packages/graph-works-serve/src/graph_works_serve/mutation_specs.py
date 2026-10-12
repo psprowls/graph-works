@@ -9,18 +9,18 @@ from datetime import date, datetime
 from types import MappingProxyType
 from typing import Any
 
-from graph_works_core.archive.commands import ArchiveRun, run_archive
-from graph_works_core.orchestrate.stage_advance import StageAdvance, run_stage_advance
-from graph_works_core.proposals import Decision, ProposalDecideRun, run_proposal_decide
-from graph_works_core.proposals.commands import human_actor
-from graph_works_core.scan import RepoScanRun, run_repo_scan
-from graph_works_core.wiki_page import SectionWriteRun, run_section_write
-from graph_works_core.work.commands import DecisionCommandResult, run_decision_answer
-from graph_works_core.workspace.config import load_workspace_config
-from graph_works_core.workspace.errors import WorkspaceError
-from graph_works_core.workspace.layout import WorkspaceLayout
 from graph_works_wire.wiki import proposal_decide_payload, repo_scan_payload, section_write_payload
 from graph_works_wire.work import advance_payload, archive_payload, decision_payload
+from gw_kernel.workspace.config import load_workspace_config
+from gw_kernel.workspace.errors import WorkspaceError
+from gw_kernel.workspace.layout import WorkspaceLayout
+from gw_orchestrate.stage_advance import StageAdvance, run_stage_advance
+from gw_wiki.proposals import Decision, ProposalDecideRun, run_proposal_decide
+from gw_wiki.proposals.commands import human_actor
+from gw_wiki.scan import RepoScanRun, run_repo_scan
+from gw_wiki.wiki_page import SectionWriteRun, run_section_write
+from gw_work.archive.commands import ArchiveRun, run_archive
+from gw_work.commands import DecisionCommandResult, run_decision_answer
 
 from graph_works_serve.mutations import BeforeApply, MutationSpec, Params
 from graph_works_serve.params import Param, ParamError, ParamType

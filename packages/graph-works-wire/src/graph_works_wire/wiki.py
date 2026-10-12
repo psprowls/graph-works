@@ -10,12 +10,14 @@ from collections.abc import Sequence
 from pathlib import Path
 
 from doc_wiki_okf.ingest import DocumentBrief
-from graph_works_core.guidance.claims import ClaimRow, ClaimsRefresh
-from graph_works_core.guidance.commands import ClaimsClosureRun, ClaimsShow
-from graph_works_core.ingest.commands import IngestResult
-from graph_works_core.lint_drift.lint import LintReport
-from graph_works_core.lint_drift.propagate_drift import DriftBrief, PropagateResult
-from graph_works_core.proposals import (
+from gw_kernel.guidance.claims import ClaimRow, ClaimsRefresh
+from gw_kernel.guidance.commands import ClaimsClosureRun, ClaimsShow
+from gw_kernel.wiki_stats.commands import HubEntry, WikiStats
+from gw_kernel.workspace.init import WorkspaceInit, WorkspacePlan
+from gw_wiki.ingest.commands import IngestResult
+from gw_wiki.lint_drift.lint import LintReport
+from gw_wiki.lint_drift.propagate_drift import DriftBrief, PropagateResult
+from gw_wiki.proposals import (
     ProposalChecks,
     ProposalDecideRun,
     ProposalFileRun,
@@ -23,15 +25,13 @@ from graph_works_core.proposals import (
     ProposalPreview,
     ProposalRefusal,
 )
-from graph_works_core.query.commands import QueryBrief, QueryResult
-from graph_works_core.scan.commands import ScanResult, StructuralSummary
-from graph_works_core.scan.repo_scan import RepoScanRun
-from graph_works_core.scan.scan_contract import ApplyResult
-from graph_works_core.wiki_page.citations import Citation, WikiCitations
-from graph_works_core.wiki_page.commands import PageLink, PageRead, TreeNode, WikiTree
-from graph_works_core.wiki_page.section import SectionWriteRun
-from graph_works_core.wiki_stats.commands import HubEntry, WikiStats
-from graph_works_core.workspace.init import WorkspaceInit, WorkspacePlan
+from gw_wiki.query.commands import QueryBrief, QueryResult
+from gw_wiki.scan.commands import ScanResult, StructuralSummary
+from gw_wiki.scan.repo_scan import RepoScanRun
+from gw_wiki.scan.scan_contract import ApplyResult
+from gw_wiki.wiki_page.citations import Citation, WikiCitations
+from gw_wiki.wiki_page.commands import PageLink, PageRead, TreeNode, WikiTree
+from gw_wiki.wiki_page.section import SectionWriteRun
 from okf_ext.proposals import ApplyResult as ProposalApplyResult
 from okf_ext.proposals import Proposal, Refusal, Write
 from okf_ext.tags import TagInventory

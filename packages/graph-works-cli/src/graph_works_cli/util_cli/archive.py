@@ -8,8 +8,8 @@ from __future__ import annotations
 from datetime import UTC, datetime
 
 import typer
-from graph_works_core.archive.commands import run_archive, stranded_warnings
 from graph_works_wire.work import archive_payload
+from gw_work.archive.commands import run_archive, stranded_warnings
 
 from graph_works_cli.errors import fail
 from graph_works_cli.json_output import encode

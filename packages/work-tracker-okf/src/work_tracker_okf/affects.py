@@ -86,7 +86,7 @@ def affects_drift(files: Iterable[str], code_affects: Iterable[str]) -> AffectsD
     """Files no `code_affects` entry contains, and the entries that would cover them.
 
     Widening per uncovered file: the deepest prefix it shares with any entry
-    when that is at least two segments (`packages/graph-works-core`), else the
+    when that is at least two segments (`packages/gw-kernel`), else the
     file's parent directory (a top-level file widens to itself). The result is
     collapsed by containment and sorted.
     """

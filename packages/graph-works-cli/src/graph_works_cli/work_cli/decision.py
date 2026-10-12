@@ -21,11 +21,11 @@ from pathlib import Path
 from typing import Any, cast
 
 import typer
-from graph_works_core.work import commands as work
-from graph_works_core.workspace.config import WorkspaceConfig, load_workspace_config
-from graph_works_core.workspace.errors import WorkspaceConfigError, WorkspaceError
-from graph_works_core.workspace.layout import WorkspaceLayout
 from graph_works_wire import work as wire_work
+from gw_kernel.workspace.config import WorkspaceConfig, load_workspace_config
+from gw_kernel.workspace.errors import WorkspaceConfigError, WorkspaceError
+from gw_kernel.workspace.layout import WorkspaceLayout
+from gw_work import commands as work
 
 from graph_works_cli import exit_codes
 from graph_works_cli.work_cli import rendering

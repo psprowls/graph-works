@@ -8,8 +8,8 @@ from pathlib import Path
 import pytest
 from graph_works_cli.cli import app
 from graph_works_cli.wiki_cli import section as section_module
-from graph_works_core.wiki_page import SectionWriteRun
-from graph_works_core.workspace.errors import WorkspaceError
+from gw_kernel.workspace.errors import WorkspaceError
+from gw_wiki.wiki_page import SectionWriteRun
 from typer.testing import CliRunner
 
 runner = CliRunner()

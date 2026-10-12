@@ -1,5 +1,5 @@
-"""`resolve_workspace()` (D-002) — `graph_works_core.workspace.discovery.resolve` mocked, per the
-design spec's own test strategy: `graph-works-core` is a real dependency of this package (Task 1),
+"""`resolve_workspace()` (D-002) — `gw_kernel.workspace.discovery.resolve` mocked, per the
+design spec's own test strategy: `gw-kernel` is a real dependency of this package (Task 1),
 so `monkeypatch.setattr` on the real imported name is enough — no `sys.modules` injection needed.
 """
 
@@ -10,13 +10,13 @@ from pathlib import Path
 
 import pytest
 import typer
-from graph_works_core.workspace.errors import WorkspaceNotFound
-from graph_works_core.workspace.layout import WorkspaceLayout
+from gw_kernel.workspace.errors import WorkspaceNotFound
+from gw_kernel.workspace.layout import WorkspaceLayout
 
 
 @pytest.fixture
 def fake_resolve(monkeypatch):
-    """Patch `graph_works_core.workspace.discovery.resolve` (the name `workspace_resolution.py`
+    """Patch `gw_kernel.workspace.discovery.resolve` (the name `workspace_resolution.py`
     imports) and return the call log."""
     calls: list[dict[str, object]] = []
 

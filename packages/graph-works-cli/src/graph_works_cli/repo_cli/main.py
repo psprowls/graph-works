@@ -14,13 +14,13 @@ from pathlib import Path
 from typing import Annotated
 
 import typer
-from graph_works_core.repositories.adopt import run_repo_adopt
-from graph_works_core.repositories.commands import Rescan, run_repo_add, run_repo_advance, run_repo_restore
-from graph_works_core.scan.commands import run_scan
-from graph_works_core.workspace.config import load_workspace_config
-from graph_works_core.workspace.errors import ScanError
-from graph_works_core.workspace.layout import WorkspaceLayout
 from graph_works_wire.repo import repo_add_payload, repo_adopt_payload, repo_advance_payload, repo_restore_payload
+from gw_kernel.workspace.config import load_workspace_config
+from gw_kernel.workspace.errors import ScanError
+from gw_kernel.workspace.layout import WorkspaceLayout
+from gw_wiki.repositories.adopt import run_repo_adopt
+from gw_wiki.repositories.commands import Rescan, run_repo_add, run_repo_advance, run_repo_restore
+from gw_wiki.scan.commands import run_scan
 
 from graph_works_cli import exit_codes
 from graph_works_cli.errors import fail

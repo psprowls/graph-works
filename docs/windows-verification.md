@@ -316,7 +316,7 @@ report by *printing the offending paths*, so silence is the whole signal. The
 not the guard's output.
 
 **B7 is the real payload.** It runs every package suite, including
-`packages/graph-works-core/tests/test_transactions.py` — the asset D-003's
+`packages/gw-kernel/tests/test_transactions.py` — the asset D-003's
 rationale named, and the only thing that turns "a weaker Windows tier" from a
 claim into a tier. Its Windows-anchor parametrization is gated on
 `tech-debt-anchor-abstraction` and `feature-windows-anchor-and-tier-adr`; if a
@@ -1075,7 +1075,7 @@ are sitting on. Reinstall from this checkout, then prove the copy matches:
 ```bash
 uv tool install --force --reinstall packages/graph-works-cli
 SP="$APPDATA/uv/tools/graph-works-cli/Lib/site-packages"
-for m in okf_io okf_ext work_tracker_okf graph_works_core graph_works_cli; do
+for m in okf_io okf_ext work_tracker_okf gw_kernel graph_works_cli; do
   d="packages/$(echo $m | tr _ -)/src/$m"
   [ -d "$d" ] || continue
   echo "=== $m"; diff -rq "$d" "$SP/$m" 2>&1 | grep -v __pycache__
@@ -1193,11 +1193,11 @@ is deliberately not probeable, naming this run as its evidence instead.
 git rev-parse HEAD > C:\gw-verify\f5-head.txt
 gw util platform --json > C:\gw-verify\f5-actual.json
 gw util platform --probe --workspace C:\gw-verify\ws --json > C:\gw-verify\f5-actual-probed.json
-uv run python -c "import json; from graph_works_core.util.platform import build_report; from graph_works_cli.util_cli.platform import _payload; open(r'C:\gw-verify\f5-declared.json','w',encoding='utf-8',newline='\n').write(json.dumps(_payload(build_report(platform_name='win32')), indent=2))"
+uv run python -c "import json; from gw_wiki.util.platform import build_report; from graph_works_cli.util_cli.platform import _payload; open(r'C:\gw-verify\f5-declared.json','w',encoding='utf-8',newline='\n').write(json.dumps(_payload(build_report(platform_name='win32')), indent=2))"
 ```
 
 Run all four from the **checkout root**, so `uv run` resolves this tree's
-`graph_works_core` and not an unrelated install — the comparison is only
+`gw_kernel` and not an unrelated install — the comparison is only
 meaningful if both sides come from the commit in `f5-head.txt`.
 
 Then diff, under Git Bash:
@@ -1375,7 +1375,7 @@ Which siblings had landed in `<full-sha>`:
 | C1 | **PASS** | 2026-09-04, real exFAT VHD mounted as `E:` (`fsutil` confirms `File System Name : exFAT`). At `5ad4ff22`, `gw bootstrap --workspace E:\ws` exits **rc=1** and refuses: *"the windows-revalidated tier requires hard link support: every file is installed by `CreateHardLinkW` (`transactions._commit_write`), and E:\ws is on a filesystem that does not implement it -- exFAT, FAT32 and some network shares do not. Move the workspace to an NTFS or ReFS volume, or run under WSL for the posix-strong tier."* **Nothing is left on disk** -- `E:\ws` does not exist and the volume holds only `System Volume Information`. `gw work file` is moot: bootstrap refuses first. Probe verified directly: `hard_links_supported()` is `False` on `E:` and `True` on `C:`. Prior reading at `012d5aff` was FAIL (attribution): bootstrap **succeeded** on exFAT and only `gw work file` failed, with an unattributable `[WinError 1] Incorrect function` -- and that error came from `os.link` in `transactions._commit_write`, not from `okf_ext.logs.atomic_replace` as originally recorded. | [bug-atomic-replace-exfat-unattributable](/work/epic-native-windows-support/children/bug-atomic-replace-exfat-unattributable.md) |
 | C2 | | | |
 | C3 | | | |
-| C4 | PASS (fixed) | Rollback half held; the reason half was FAIL (`unknown-path`, no member named) until [An unreadable bundle member refuses as unknown-path](/work/epic-native-windows-support/children/bug-locked-member-reported-unknown-path.md) landed `unreadable-member` in `work_tracker_okf.advance` and `graph_works_core.work.commands.run_next`. Pinned unattended by `packages/graph-works-cli/tests/test_work_cli_writes.py::test_advance_names_a_locked_member_instead_of_collapsing_into_unknown_path` and `packages/graph-works-core/tests/work/test_run_next.py::test_a_locked_member_is_named_instead_of_reported_unknown` (both Windows-only, real exclusive handle). | bug-locked-member-reported-unknown-path |
+| C4 | PASS (fixed) | Rollback half held; the reason half was FAIL (`unknown-path`, no member named) until [An unreadable bundle member refuses as unknown-path](/work/epic-native-windows-support/children/bug-locked-member-reported-unknown-path.md) landed `unreadable-member` in `work_tracker_okf.advance` and `gw_work.commands.run_next`. Pinned unattended by `packages/graph-works-cli/tests/test_work_cli_writes.py::test_advance_names_a_locked_member_instead_of_collapsing_into_unknown_path` and `packages/gw-work/tests/work/test_run_next.py::test_a_locked_member_is_named_instead_of_reported_unknown` (both Windows-only, real exclusive handle). | bug-locked-member-reported-unknown-path |
 | C5 | | | |
 | C6a | | | |
 | C6b | | | |

@@ -5,7 +5,8 @@ from __future__ import annotations
 from collections.abc import Callable
 from pathlib import Path
 
-from graph_works_core.agent_config import (
+from graph_works_wire import agent_config
+from gw_wiki.agent_config import (
     AgentConfig,
     AgentConfigReport,
     Finding,
@@ -13,8 +14,7 @@ from graph_works_core.agent_config import (
     Layer,
     TrustStatus,
 )
-from graph_works_core.agent_config.records import ProjectAgentConfig
-from graph_works_wire import agent_config
+from gw_wiki.agent_config.records import ProjectAgentConfig
 
 _PRESENT = AgentConfigReport(
     (

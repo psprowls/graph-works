@@ -43,7 +43,7 @@ in this package currently enforces that skip; treat `-m integration` /
 
 - `src/code_graph_io/` — library only, no CLI. The command layer that turns
   this into `gw graph build` / `gw graph update` lives in the sibling
-  `graph-works-core` package.
+  `gw-kernel` package.
 - `src/code_graph_io/parser/` — tree-sitter-backed source parsing (formerly
   the standalone `code-parser` package).
 - `tests/` — pytest tests (unit + integration); `tests/parser/` mirrors the
@@ -211,8 +211,8 @@ doesn't exist yet. All updates run inside one transaction
 `exit_codes.py` only declares the stable v1+ constants (`SUCCESS`,
 `GENERIC`, `STALE` — reserved, zero producers today — `NOT_INITIALIZED`,
 `SCHEMA_MISMATCH`, `NOT_IN_GIT_REPO`, `UPDATE_IN_PROGRESS`, `AMBIGUOUS`); the
-command layer that actually returns them lives in `graph-works-core`
-(`graph_works_core/graph/commands.py`, `graph_tools.py` — the user-facing
+command layer that actually returns them lives in `gw-kernel`
+(`gw_kernel/graph/commands.py`, `graph_tools.py` — the user-facing
 entry point is `gw graph build`). Don't expect a CLI in this package.
 
 ### `ignore:` handling

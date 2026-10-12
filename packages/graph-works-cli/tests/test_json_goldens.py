@@ -42,14 +42,14 @@ from graph_works_cli.wiki_cli import drift as drift_module
 from graph_works_cli.wiki_cli import ingest as ingest_module
 from graph_works_cli.wiki_cli import query as query_module
 from graph_works_cli.wiki_cli import scan as scan_module
-from graph_works_core.hooks import HooksResult
-from graph_works_core.ingest.commands import IngestResult
-from graph_works_core.lint_drift.propagate_drift import Candidate, DriftBrief, PropagateResult, Target
-from graph_works_core.proposals import commands as proposals_commands
-from graph_works_core.query.commands import QueryBrief, QueryPageBrief, QueryResult
-from graph_works_core.scan.commands import ScanResult, StructuralSummary
-from graph_works_core.scan.scan_contract import ApplyResult, ScanWorklist, worklist_payload
-from graph_works_core.util.platform import Capability, PlatformReport, ProbeResult
+from gw_kernel.hooks import HooksResult
+from gw_wiki.ingest.commands import IngestResult
+from gw_wiki.lint_drift.propagate_drift import Candidate, DriftBrief, PropagateResult, Target
+from gw_wiki.proposals import commands as proposals_commands
+from gw_wiki.query.commands import QueryBrief, QueryPageBrief, QueryResult
+from gw_wiki.scan.commands import ScanResult, StructuralSummary
+from gw_wiki.scan.scan_contract import ApplyResult, ScanWorklist, worklist_payload
+from gw_wiki.util.platform import Capability, PlatformReport, ProbeResult
 from okf_ext.proposals import Proposal
 from okf_io import load
 from ruamel.yaml import YAML

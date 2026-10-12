@@ -21,11 +21,11 @@ from pathlib import Path, PurePath
 
 import watchfiles
 from config_io import PROJECTION_FILENAME
-from graph_works_core.events import Change, ChangeEvent, EventKind, classify
-from graph_works_core.workspace.discovery import resolve
-from graph_works_core.workspace.dispatch_config import load_dispatch_config
-from graph_works_core.workspace.errors import WorkspaceError
-from graph_works_core.workspace.layout import WorkspaceLayout
+from gw_kernel.events import Change, ChangeEvent, EventKind, classify
+from gw_kernel.workspace.discovery import resolve
+from gw_kernel.workspace.dispatch_config import load_dispatch_config
+from gw_kernel.workspace.errors import WorkspaceError
+from gw_kernel.workspace.layout import WorkspaceLayout
 
 from graph_works_serve.coalesce import build_batch, net_changes
 from graph_works_serve.hub import Hub

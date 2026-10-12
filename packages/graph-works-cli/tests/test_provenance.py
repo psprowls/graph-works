@@ -11,9 +11,9 @@ from pathlib import Path
 
 import pytest
 
-ROUTING_CORE = Path("packages/graph-works-core/src/graph_works_core/__init__.py")
+ROUTING_CORE = Path("packages/gw-kernel/src/gw_kernel/__init__.py")
 ROUTING_WORK_TRACKER = Path("packages/work-tracker-okf/src/work_tracker_okf/__init__.py")
-MARKER = Path("packages/graph-works-core/pyproject.toml")
+MARKER = Path("packages/gw-kernel/pyproject.toml")
 
 
 def _git(args: list[str], cwd: Path) -> None:
@@ -31,7 +31,7 @@ def _seed_checkout(root: Path) -> None:
         (root / rel).parent.mkdir(parents=True, exist_ok=True)
         (root / rel).write_text("VALUE = 1\n", encoding="utf-8")
     (root / MARKER).parent.mkdir(parents=True, exist_ok=True)
-    (root / MARKER).write_text("[project]\nname = 'graph-works-core'\n", encoding="utf-8")
+    (root / MARKER).write_text("[project]\nname = 'gw-kernel'\n", encoding="utf-8")
 
 
 @pytest.fixture(autouse=True)
@@ -61,6 +61,15 @@ def _run_guard(monkeypatch, *, cwd: Path, source: Path | None) -> None:
     monkeypatch.setattr(provenance, "_source_checkout_root", lambda: source)
     monkeypatch.chdir(cwd)
     provenance.warn_if_stale_routing()
+
+
+def test_kernel_marker_from_nested_directory(checkouts) -> None:
+    from graph_works_cli import provenance
+
+    root, _ = checkouts
+    nested = root / "packages/gw-kernel/src/gw_kernel/workspace"
+    nested.mkdir()
+    assert provenance._checkout_root(nested) == root
 
 
 def test_warns_when_worktree_routing_differs(checkouts, monkeypatch, capsys) -> None:
@@ -181,15 +190,15 @@ def test_git_returns_none_when_subprocess_cannot_start(monkeypatch, tmp_path: Pa
 
 
 def test_source_checkout_root_resolves_from_running_core() -> None:
-    """The real resolver finds this checkout's root from the genuinely-installed `graph_works_core`."""
-    import graph_works_core
+    """The real resolver finds this checkout's root from the genuinely-installed `gw_kernel`."""
+    import gw_kernel
     from graph_works_cli import provenance
 
     root = provenance._source_checkout_root()
 
     assert root is not None
     assert (root / MARKER).is_file()
-    assert str(Path(graph_works_core.__file__).resolve()).startswith(str(root))
+    assert str(Path(gw_kernel.__file__).resolve()).startswith(str(root))
 
 
 def test_silent_when_git_cannot_produce_a_trustworthy_diff(checkouts, monkeypatch, capsys) -> None:

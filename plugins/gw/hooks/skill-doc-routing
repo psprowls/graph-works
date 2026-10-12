@@ -135,7 +135,7 @@ fi
 # creates it, because the `gw` on PATH before the cutover is still the donor
 # CLI, whose `bootstrap` builds a vault (`raw/` and `work/` siblings, an
 # out-of-repo workspace env var), not a `workspace.yaml`. graph-works-cli's own
-# `bootstrap` does write one — it wraps `graph_works_core.workspace.init` — so
+# `bootstrap` does write one — it wraps `gw_kernel.workspace.init` — so
 # the verb name `gw bootstrap` is correct on one side of the cutover and wrong
 # on the other, which is exactly why it cannot be named here. The marker file is
 # true on both. The tests assert the absence of all three candidate verbs so the

@@ -3,7 +3,7 @@
 The manifest's `workflow.dispatch_rules` names a shared YAML document. Its
 optional `.local` sibling appends rules after shared rules. Core owns resolution;
 auto-drive consumes `gw work orchestrate --json` fields and provenance directly.
-See the repository's [complete dispatch guide](../../../../../packages/graph-works-core/docs/dispatch-rules.md)
+See the repository's [complete dispatch guide](../../../../../packages/gw-kernel/docs/dispatch-rules.md)
 for attribute vocabulary, YAML examples, init/ignore behavior and manual cutover.
 The same document's `pipeline.path` and `pipeline.artifacts` blocks set which
 stages an item walks and each stage's artifact file; see the guide's Pipeline

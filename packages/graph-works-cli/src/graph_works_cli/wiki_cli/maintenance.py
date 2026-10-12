@@ -5,11 +5,11 @@ from __future__ import annotations
 from datetime import UTC, datetime
 
 import typer
-from graph_works_core.archive.commands import run_archive, stranded_warnings
-from graph_works_core.wiki_stats.commands import compute_stats
-from graph_works_core.workspace.bundle import load_workspace_bundle
 from graph_works_wire.wiki import stats_payload
 from graph_works_wire.work import archive_payload
+from gw_kernel.wiki_stats.commands import compute_stats
+from gw_kernel.workspace.bundle import load_workspace_bundle
+from gw_work.archive.commands import run_archive, stranded_warnings
 from okf_io import update_index
 
 from graph_works_cli.errors import fail

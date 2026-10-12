@@ -3,10 +3,10 @@ from __future__ import annotations
 import asyncio
 
 import watchfiles
-from graph_works_core.workspace.layout import WorkspaceLayout
 from graph_works_serve import watch
 from graph_works_serve.hub import Hub
 from graph_works_serve.readstate import ReadState
+from gw_kernel.workspace.layout import WorkspaceLayout
 from readstate_fakes import FakeOpener, state_for
 
 

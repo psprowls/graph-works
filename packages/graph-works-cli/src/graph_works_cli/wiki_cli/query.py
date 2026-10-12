@@ -5,8 +5,10 @@ from __future__ import annotations
 import asyncio
 
 import typer
-from graph_works_core.agent_substrate.roles import role_spec
-from graph_works_core.query.commands import (
+from graph_works_wire.wiki import query_brief_payload, query_payload
+from gw_kernel.workspace.errors import QueryError, WorkspaceError
+from gw_wiki.agent_substrate.roles import role_spec
+from gw_wiki.query.commands import (
     MAX_TOP_K,
     MIN_TOP_K,
     brief_embedder,
@@ -14,8 +16,6 @@ from graph_works_core.query.commands import (
     plan_query_brief,
     run_query,
 )
-from graph_works_core.workspace.errors import QueryError, WorkspaceError
-from graph_works_wire.wiki import query_brief_payload, query_payload
 from models_io import ModelsIoError
 
 from graph_works_cli.json_output import encode

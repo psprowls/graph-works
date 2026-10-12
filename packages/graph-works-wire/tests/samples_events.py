@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
-from graph_works_core.events import Change, ChangeEvent, EventKind
 from graph_works_wire import events
+from gw_kernel.events import Change, ChangeEvent, EventKind
 
 _PAGE = ChangeEvent(kind=EventKind.PAGE, path="concepts/a.md", member="concepts/a.md", change=Change.DELETED)
 _CONFIG = ChangeEvent(kind=EventKind.CONFIG, path="projection", member=None, change=Change.MODIFIED)

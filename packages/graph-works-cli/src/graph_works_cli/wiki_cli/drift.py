@@ -7,13 +7,13 @@ from datetime import UTC, datetime
 
 import typer
 from code_graph_io import GraphNotInitializedError, SchemaMismatchError, open_reader
-from graph_works_core.agent_substrate.roles import role_spec
-from graph_works_core.graph import commands as graph_commands
-from graph_works_core.lint_drift.propagate_drift import plan_drift_brief, run_propagate_drift
-from graph_works_core.workspace.config import load_workspace_config
-from graph_works_core.workspace.errors import WorkspaceError
-from graph_works_core.workspace.repos import resolve_repo
 from graph_works_wire.wiki import drift_brief_payload, drift_payload
+from gw_kernel.graph import commands as graph_commands
+from gw_kernel.workspace.config import load_workspace_config
+from gw_kernel.workspace.errors import WorkspaceError
+from gw_kernel.workspace.repos import resolve_repo
+from gw_wiki.agent_substrate.roles import role_spec
+from gw_wiki.lint_drift.propagate_drift import plan_drift_brief, run_propagate_drift
 from models_io import ModelsIoError
 
 from graph_works_cli.json_output import encode

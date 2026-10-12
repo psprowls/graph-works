@@ -18,7 +18,7 @@ type ConfigBase = Literal["system", "agent_home", "project"]
 
 @dataclass(frozen=True)
 class ConfigLayerSpec:
-    """Where one configuration layer lives. Data only: graph-works-core reads it, this package never does.
+    """Where one configuration layer lives. Data only: gw-kernel reads it, this package never does.
 
     `path` is relative to `base`; for `base="system"` it is instead a `sys.platform`-keyed
     tuple of `(platform, absolute path)` pairs, a tuple so the record stays hashable.

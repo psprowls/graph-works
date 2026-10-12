@@ -4,8 +4,8 @@ from collections.abc import Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass
 
-from graph_works_core.workspace.layout import WorkspaceLayout
 from graph_works_serve.readstate import ReadState
+from gw_kernel.workspace.layout import WorkspaceLayout
 
 
 @dataclass

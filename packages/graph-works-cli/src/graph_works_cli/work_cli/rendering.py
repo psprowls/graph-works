@@ -20,9 +20,9 @@ from contextvars import ContextVar
 from typing import Any, Never, Protocol, cast
 
 import typer
-from graph_works_core.work.commands import NextResult
-from graph_works_core.workspace.commits import NOTE_REASONS
 from graph_works_wire.errors import REASONS, error_envelope
+from gw_kernel.workspace.commits import NOTE_REASONS
+from gw_work.commands import NextResult
 
 from graph_works_cli import exit_codes
 from graph_works_cli.errors import exit_error

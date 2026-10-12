@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 from graph_works_cli.cli import app
-from graph_works_core.lint_drift import lint as lint_core
+from gw_wiki.lint_drift import lint as lint_core
 from helpers import initialized_workspace
 from typer.testing import CliRunner
 

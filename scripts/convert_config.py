@@ -2,7 +2,7 @@
 """Convert `<workspace>/.graph-wiki.yaml` v2 into `workspace.yaml` v1 plus `.gw/`.
 
 One direction only. `version: 1` is a **fresh format, not v3** -- there is no
-migration path inside `graph_works_core` (`workspace/manifest.py:18-20`), and
+migration path inside `gw_kernel` (`workspace/manifest.py:18-20`), and
 `gw bootstrap` never overwrites an existing manifest (`workspace/init.py:326`),
 so this script converts only non-dispatch settings. Retired dispatch choices
 are refused before writes; remove them explicitly and recreate desired rules
@@ -56,13 +56,13 @@ from ruamel.yaml.error import YAMLError
 
 from code_wiki_okf.config import ConfigError, load_config
 from config_io import StoreValidationError, dotted
-from graph_works_core.workspace import manifest
-from graph_works_core.workspace.dispatch_config import validate_workspace_dispatch_layers
-from graph_works_core.workspace.errors import WorkspaceError, WorkspaceNotFound
-from graph_works_core.workspace.init import GITIGNORE_FILENAME
-from graph_works_core.workspace.init import _GITIGNORE_HEADER as GITIGNORE_HEADER
-from graph_works_core.workspace.layout import WorkspaceLayout, layout_for
-from graph_works_core.workspace.pipeline import RELAY_TAIL_SEED
+from gw_kernel.workspace import manifest
+from gw_kernel.workspace.dispatch_config import validate_workspace_dispatch_layers
+from gw_kernel.workspace.errors import WorkspaceError, WorkspaceNotFound
+from gw_kernel.workspace.init import GITIGNORE_FILENAME
+from gw_kernel.workspace.init import _GITIGNORE_HEADER as GITIGNORE_HEADER
+from gw_kernel.workspace.layout import WorkspaceLayout, layout_for
+from gw_kernel.workspace.pipeline import RELAY_TAIL_SEED
 
 V2_FILENAME = ".graph-wiki.yaml"
 V2_LOCAL_FILENAME = ".graph-wiki.local.yaml"
@@ -225,7 +225,7 @@ def _workspace_relative(value: str, root: Path) -> str:
     4. **Otherwise relative** -- joined onto *root*, the directory `workspace.yaml` itself lives
        in: every reader resolves a declared repo's relative path against the directory the
        manifest was read from (`code_wiki_okf.config.load_config`, anchored on `config_path`'s
-       parent). Same computation as `graph_works_core.workspace.init._workspace_relative`,
+       parent). Same computation as `gw_kernel.workspace.init._workspace_relative`,
        restated here rather than imported because that name is private to a package this script
        only reads through its public surface.
 

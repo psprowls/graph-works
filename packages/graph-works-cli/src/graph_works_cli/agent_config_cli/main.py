@@ -13,10 +13,10 @@ from pathlib import Path
 from typing import cast
 
 import typer
-from graph_works_core.agent_config import AGENTS
-from graph_works_core.agent_config import show as show_agent_config
-from graph_works_core.agent_config.records import AgentName
-from graph_works_core.workspace.errors import WorkspaceError
+from gw_kernel.workspace.errors import WorkspaceError
+from gw_wiki.agent_config import AGENTS
+from gw_wiki.agent_config import show as show_agent_config
+from gw_wiki.agent_config.records import AgentName
 
 from graph_works_cli import exit_codes
 from graph_works_cli.agent_config_cli.rendering import render

@@ -8,13 +8,13 @@ from pathlib import Path
 
 import pytest
 from conftest import TOKEN  # S6
-from graph_works_core.events import Change, ChangeEvent, EventKind
-from graph_works_core.workspace.layout import WorkspaceLayout
 from graph_works_serve import sse
 from graph_works_serve.app import build_app
 from graph_works_serve.context import ServeContext
 from graph_works_serve.hub import Changes, Hub, Resync
 from graph_works_serve.readstate import ReadState
+from gw_kernel.events import Change, ChangeEvent, EventKind
+from gw_kernel.workspace.layout import WorkspaceLayout
 from starlette.testclient import TestClient
 
 E = ChangeEvent(kind=EventKind.WORK_ITEM, path="work/a", member="work/a.md", change=Change.MODIFIED)

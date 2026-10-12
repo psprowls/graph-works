@@ -11,7 +11,7 @@ from pathlib import Path
 
 import okf_io
 import pytest
-from graph_works_core.workspace.provenance import probe_git
+from gw_kernel.workspace.provenance import probe_git
 from okf_io import build_link_graph, load_bundle
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -108,7 +108,7 @@ def test_patches_are_restored_after_an_exception(tmp_path: Path) -> None:
     links = importlib.import_module("okf_io.links")
     search = importlib.import_module("okf_ext.search")
     index = importlib.import_module("okf_ext.search.index")
-    query = importlib.import_module("graph_works_core.query.commands")
+    query = importlib.import_module("gw_wiki.query.commands")
     before = (document.__dict__["parse"], links.LinkGraph, subprocess.Popen,
               search.term_postings, index.term_postings, query._page_hashes)
     with pytest.raises(ValueError, match="boom"), counting():
@@ -143,7 +143,7 @@ def test_counts_is_a_plain_dataclass() -> None:
 
 def test_counts_pages_hashed_and_tokenized(tmp_path: Path) -> None:
     import okf_ext.search as ext_search
-    from graph_works_core.query import commands as q
+    from gw_wiki.query import commands as q
     from okf_io import load_bundle
 
     root = tmp_path / "okf"

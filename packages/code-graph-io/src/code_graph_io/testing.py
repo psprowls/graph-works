@@ -7,7 +7,8 @@ escape hatch so conftests stop calling ``sqlite3.connect`` directly.
 
 Both take a bare db file path, unlike ``open_reader`` / ``open_writer`` which
 take the containing ``graph_dir``; schema is applied when ``create=True`` and
-the file is new.
+the file is new. ``raw_graph_conn`` accepts the containing directory so callers
+can seed a graph without constructing its owner-managed database path.
 """
 
 from __future__ import annotations
@@ -16,7 +17,7 @@ import sqlite3
 from pathlib import Path
 
 from code_graph_io import store as _store
-from code_graph_io.handle import GraphStore
+from code_graph_io.handle import GraphStore, _db_path
 
 
 def open_store(db_path: Path, *, create: bool = True) -> GraphStore:
@@ -33,3 +34,12 @@ def raw_conn(db_path: Path, *, create: bool = True) -> sqlite3.Connection:
     Applies the schema when ``create=True`` and the file does not yet exist.
     """
     return _store.connect(Path(db_path), create=create)
+
+
+def raw_graph_conn(*, graph_dir: Path, create: bool = True) -> sqlite3.Connection:
+    """Return a raw fixture-seeding connection using the owned graph DB path.
+
+    Shares directory resolution with the public graph handles and schema
+    creation/refusal behavior with ``raw_conn``.
+    """
+    return raw_conn(_db_path(graph_dir), create=create)

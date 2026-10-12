@@ -13,11 +13,11 @@ from collections.abc import Sequence
 from pathlib import Path
 
 from config_io import ConfigEntry, Resolved
-from graph_works_core.hooks import HooksResult
-from graph_works_core.workspace.dispatch import DispatchRule
-from graph_works_core.workspace.dispatch_config import DispatchRuleSet
-from graph_works_core.workspace.schema_read import SchemaRead
-from graph_works_core.workspace.work_schemas import SchemaRefreshPlan, SchemaRefreshResult
+from gw_kernel.hooks import HooksResult
+from gw_kernel.workspace.dispatch import DispatchRule
+from gw_kernel.workspace.dispatch_config import DispatchRuleSet
+from gw_kernel.workspace.schema_read import SchemaRead
+from gw_kernel.workspace.work_schemas import SchemaRefreshPlan, SchemaRefreshResult
 
 from graph_works_wire._jsonable import jsonable
 

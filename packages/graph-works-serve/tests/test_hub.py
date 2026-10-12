@@ -4,8 +4,8 @@ import asyncio
 import threading
 
 import pytest
-from graph_works_core.events import Change, ChangeEvent, EventKind
 from graph_works_serve.hub import Changes, Hub, Resync
+from gw_kernel.events import Change, ChangeEvent, EventKind
 
 E1 = ChangeEvent(kind=EventKind.LOG, path="log.md", member="log.md", change=Change.MODIFIED)
 E2 = ChangeEvent(kind=EventKind.PAGE, path="a.md", member="a.md", change=Change.ADDED)

@@ -61,7 +61,7 @@ def seeded_schema_set() -> SchemaSet:
 
     The fallback for a caller that wants the declared wiki lanes but has no
     workspace `.gw/schema/` to read -- see
-    `graph_works_core.archive.commands.run_archive`. `as_file` rather than a
+    `gw_work.archive.commands.run_archive`. `as_file` rather than a
     path join: `assets_root()` is a `Traversable`, and under a zipped install
     the directory has to be materialized before `load_schemas` can walk it.
     """

@@ -22,8 +22,8 @@ imports are absolute.
 from __future__ import annotations
 
 import typer
-from graph_works_core.util.platform import PlatformReport, build_report
 from graph_works_wire.util import platform_payload
+from gw_wiki.util.platform import PlatformReport, build_report
 
 from graph_works_cli.json_output import encode
 from graph_works_cli.workspace_resolution import resolve_workspace

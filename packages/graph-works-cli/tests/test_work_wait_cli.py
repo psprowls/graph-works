@@ -11,18 +11,16 @@ import pytest
 from graph_works_cli import exit_codes
 from graph_works_cli.cli import app
 from graph_works_cli.work_cli import main
-from graph_works_core import apply_init, plan_init
-from graph_works_core.orchestrate.wait import WaitClock, WaitFailed, run_wait
 from graph_works_wire.work import wait_payload
+from gw_kernel import apply_init, plan_init
+from gw_orchestrate.wait import WaitClock, WaitFailed, run_wait
 from subagents_io.backend import BackendError
 from typer.testing import CliRunner
 from workflow_orca._cli import OrcaResult
 from workflow_orca.port import OrcaCliPort
 
 REPO = Path(__file__).resolve().parents[3]
-FakeOrcaPort = runpy.run_path(str(REPO / "packages/graph-works-core/tests/orchestrate/fake_orca_port.py"))[
-    "FakeOrcaPort"
-]
+FakeOrcaPort = runpy.run_path(str(REPO / "packages/gw-orchestrate/tests/fake_orca_port.py"))["FakeOrcaPort"]
 runner = CliRunner()
 
 
@@ -390,7 +388,7 @@ def test_wait_floor_is_named_in_the_help():
 
 def test_timeout_rows_carry_gate_wait_from_this_workspace(env):
     layout, port = env
-    from graph_works_core.orchestrate.gate import runs_dir
+    from gw_orchestrate.gate import runs_dir
 
     runs = runs_dir(layout)
     runs.mkdir(parents=True)

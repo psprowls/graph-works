@@ -57,7 +57,7 @@ def _loaded_after_gw(argv: list[str]) -> list[str]:
 
 IMPORT_PROBES = {
     "subagents_io": "import subagents_io",
-    "graph_works_core": "import graph_works_core",
+    "gw_kernel": "import gw_kernel",
     "cli": "import graph_works_cli.cli",
 }
 
@@ -74,7 +74,7 @@ GW_PROBES = {
 }
 
 # Flipped on, task by task, as each hub goes lazy.
-READY_IMPORTS: set[str] = {"subagents_io", "graph_works_core", "cli"}
+READY_IMPORTS: set[str] = {"subagents_io", "gw_kernel", "cli"}
 READY_GW: set[str] = set(GW_PROBES)
 
 

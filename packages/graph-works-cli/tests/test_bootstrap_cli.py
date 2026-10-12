@@ -8,7 +8,7 @@ from types import SimpleNamespace
 
 import pytest
 from graph_works_cli.cli import app
-from graph_works_core import InitError
+from gw_kernel import InitError
 from typer.testing import CliRunner
 
 runner = CliRunner()
@@ -166,7 +166,7 @@ def test_bootstrap_refuses_before_any_path_when_long_paths_are_disabled(
     """The regression this item was filed for: `gw bootstrap` must refuse
     with the existing long-path message, before creating anything, rather
     than raising an unhandled `FileNotFoundError` partway through."""
-    from graph_works_core.workspace import anchors
+    from gw_kernel.workspace import anchors
 
     monkeypatch.setattr(anchors, "long_paths_enabled", lambda: False)
     root = tmp_path / "works"

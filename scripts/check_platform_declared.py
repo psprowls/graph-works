@@ -38,11 +38,11 @@ case, and a symmetric gate would delete genuinely useful information.
 Under-declaring is the failure mode this epic keeps finding; over-declaring
 is not.
 
-`graph_works_core/util/platform.py` names `fcntl`, `os.kill` and `SIGKILL`,
+`gw_wiki/util/platform.py` names `fcntl`, `os.kill` and `SIGKILL`,
 but only as string/f-string prose and as a `POSIX_ONLY_MODULES`-shaped
 frozenset of module-name *data* -- never as a real `Import`/`Attribute` AST
 node. The detector does not see it, and no exemption is needed: it is the
-reporter, not a consumer, and `graph-works-core` declares a Platform section
+reporter, not a consumer, and `gw-kernel` declares a Platform section
 anyway via its real, guarded sites in `workspace/anchors.py`.
 
 Run with:

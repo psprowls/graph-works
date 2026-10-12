@@ -40,7 +40,7 @@ matches `init`'s convention — the flag opts out of writing, and there is no
 `--config-path` names where that `workspace.yaml` lives; it defaults to
 `<bundle-root>/workspace.yaml`, but a bundle nested inside a graph-works
 workspace can point it at that workspace's own manifest instead, to read
-the same `repositories`/`ignore`/`state_gate` blocks `graph-works-core`
+the same `repositories`/`ignore`/`state_gate` blocks `gw-kernel`
 already resolved. Since `init` no longer seeds one, a bundle that was
 `init`'d but never given a `workspace.yaml` — by hand or via
 `--config-path` — surfaces `sync`/`validate` failures as an uncaught

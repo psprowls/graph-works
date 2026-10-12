@@ -1,0 +1,647 @@
+"""`gw_kernel.hooks.apply` over a temp repo_root and a temp scripts_dir
+-- one scenario per behavior the ported merge/remove primitive locks: enable,
+disable, idempotency, dedup, and the unrelated-content round trip.
+
+`transcript` is the only feature since `gates` was retired, so it is the
+subject of every scenario. The multi-wiring cases `gates` used to carry are
+gone with it -- `for_feature` still returns a tuple, and the enable/disable
+loops still iterate, but nothing exercises them at length > 1 any more."""
+
+from __future__ import annotations
+
+import json
+import os
+import re
+import subprocess
+import sys
+import zipfile
+from pathlib import Path
+
+import pytest
+from gw_kernel import hooks
+from gw_kernel.hooks import HooksError, HookWiring, apply
+
+
+def _write_script(scripts_dir: Path, name: str) -> None:
+    scripts_dir.mkdir(parents=True, exist_ok=True)
+    (scripts_dir / name).write_text("#!/bin/sh\n", encoding="utf-8")
+
+
+def _transcript_scripts_dir(tmp_path: Path) -> Path:
+    scripts = tmp_path / "scripts"
+    _write_script(scripts, "session-end-transcript-capture.py")
+    return scripts
+
+
+def _settings_file(repo_root: Path) -> Path:
+    return repo_root / ".claude" / "settings.local.json"
+
+
+def _settings(repo_root: Path) -> dict:
+    return json.loads(_settings_file(repo_root).read_text(encoding="utf-8"))
+
+
+def _seed_settings(repo_root: Path, data: object) -> None:
+    path = _settings_file(repo_root)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(data), encoding="utf-8")
+
+
+def test_hook_internal_type_and_default_script_helpers_cover_runtime_variants(tmp_path: Path) -> None:
+    assert hooks._default_scripts_dir().is_dir()
+    assert [hooks._json_type(value) for value in (True, "s", 1.5, object())] == [
+        "boolean",
+        "string",
+        "number",
+        "object",
+    ]
+    assert hooks._validate_settings(tmp_path / "settings.json", {"hooks": {"Stop": [{}]}}) == {"hooks": {"Stop": [{}]}}
+
+
+def test_enable_uses_packaged_default_script_directory(tmp_path: Path) -> None:
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    result = apply("enable", "transcript", repo_root)
+    assert result.added == ("session-end-transcript-capture.py",)
+
+
+def test_settings_read_oserror_is_wrapped(tmp_path: Path, monkeypatch) -> None:
+    repo_root = tmp_path / "repo"
+    target = _settings_file(repo_root)
+    target.parent.mkdir(parents=True)
+    target.write_text("{}", encoding="utf-8")
+    real_read = Path.read_text
+
+    def fail_read(path: Path, *args, **kwargs):
+        if path == target:
+            raise OSError("unreadable")
+        return real_read(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", fail_read)
+    with pytest.raises(HooksError, match="could not read settings"):
+        apply("disable", "transcript", repo_root)
+
+
+def test_enable_registers_the_feature_hook_under_its_event(tmp_path):
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    scripts = _transcript_scripts_dir(tmp_path)
+
+    result = apply("enable", "transcript", repo_root, scripts_dir=scripts)
+
+    assert result.changed is True
+    assert result.added == ("session-end-transcript-capture.py",)
+    assert result.removed == ()
+    assert result.skipped == ()
+
+    settings = _settings(repo_root)
+    # No feature manages `permissions` since `gates` was retired; `apply` must
+    # not invent the block on the way past.
+    assert "permissions" not in settings
+    session_end = settings["hooks"]["SessionEnd"]
+    assert len(session_end) == 1
+    assert session_end[0]["matcher"] == ""
+    assert "session-end-transcript-capture.py" in session_end[0]["hooks"][0]["command"]
+
+
+def test_double_enable_is_idempotent(tmp_path):
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    scripts = _transcript_scripts_dir(tmp_path)
+
+    first = apply("enable", "transcript", repo_root, scripts_dir=scripts)
+    second = apply("enable", "transcript", repo_root, scripts_dir=scripts)
+
+    assert first.changed is True
+    assert second.changed is False
+    assert second.added == ()
+    assert second.skipped == ("session-end-transcript-capture.py",)
+
+
+def test_disable_removes_exactly_what_enable_added(tmp_path):
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    scripts = _transcript_scripts_dir(tmp_path)
+
+    enabled = apply("enable", "transcript", repo_root, scripts_dir=scripts)
+    disabled = apply("disable", "transcript", repo_root, scripts_dir=scripts)
+
+    assert disabled.changed is True
+    assert disabled.removed == enabled.added
+    settings = _settings(repo_root)
+    assert "hooks" not in settings
+    assert "permissions" not in settings
+
+
+def test_disable_trims_a_mixed_hooks_entry_and_leaves_other_events_alone(tmp_path):
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    _seed_settings(
+        repo_root,
+        {
+            "hooks": {
+                "PreToolUse": [
+                    {"matcher": "Bash", "hooks": [{"type": "command", "command": 'bash "/other/thing.sh"'}]}
+                ],
+                "SessionEnd": [
+                    {
+                        "matcher": "",
+                        "hooks": [
+                            {"type": "command", "command": "python /x/session-end-transcript-capture.py"},
+                            {"type": "command", "command": 'bash "/x/unrelated.sh"'},
+                        ],
+                    }
+                ],
+            }
+        },
+    )
+    scripts = _transcript_scripts_dir(tmp_path)
+
+    result = apply("disable", "transcript", repo_root, scripts_dir=scripts)
+
+    assert "session-end-transcript-capture.py" in result.removed
+    settings = _settings(repo_root)
+    session_end = settings["hooks"]["SessionEnd"]
+    assert len(session_end) == 1
+    assert len(session_end[0]["hooks"]) == 1
+    assert "unrelated.sh" in session_end[0]["hooks"][0]["command"]
+    assert settings["hooks"]["PreToolUse"] == [
+        {"matcher": "Bash", "hooks": [{"type": "command", "command": 'bash "/other/thing.sh"'}]}
+    ]
+
+
+def test_disable_when_absent_is_a_noop_and_does_not_create_the_settings_file(tmp_path):
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+
+    result = apply("disable", "transcript", repo_root)
+
+    assert result.changed is False
+    assert result.removed == ()
+    assert not _settings_file(repo_root).exists()
+
+
+def test_a_user_owned_permissions_deny_survives_a_write(tmp_path):
+    """The retired `gates` feature managed `permissions.deny: ["EnterPlanMode"]`.
+
+    Nothing manages it now, so the entry is ordinary user content: a `disable`
+    that actually rewrites the file must carry it through untouched. Seeded
+    alongside a real hook so the write path runs -- a no-op `disable` would
+    prove nothing, because it never writes.
+    """
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    _seed_settings(
+        repo_root,
+        {
+            "hooks": {
+                "SessionEnd": [
+                    {
+                        "matcher": "",
+                        "hooks": [{"type": "command", "command": "python /x/session-end-transcript-capture.py"}],
+                    }
+                ]
+            },
+            "permissions": {"deny": ["EnterPlanMode"]},
+        },
+    )
+    scripts = _transcript_scripts_dir(tmp_path)
+
+    result = apply("disable", "transcript", repo_root, scripts_dir=scripts)
+
+    assert result.changed is True
+    assert result.removed == ("session-end-transcript-capture.py",)
+    settings = _settings(repo_root)
+    assert settings["permissions"]["deny"] == ["EnterPlanMode"]
+
+
+def test_enable_raises_hookserror_when_the_script_file_is_missing(tmp_path):
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    empty_scripts = tmp_path / "empty-scripts"
+    empty_scripts.mkdir()
+
+    with pytest.raises(HooksError):
+        apply("enable", "transcript", repo_root, scripts_dir=empty_scripts)
+
+    assert not _settings_file(repo_root).exists()
+
+
+def test_malformed_settings_json_raises_hookserror(tmp_path):
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    target = _settings_file(repo_root)
+    target.parent.mkdir()
+    target.write_text("{", encoding="utf-8")
+
+    with pytest.raises(HooksError, match="is not valid JSON"):
+        apply("disable", "transcript", repo_root)
+
+
+@pytest.mark.parametrize(
+    ("settings", "message"),
+    [
+        ([], "top-level JSON value must be an object, got array"),
+        ({"hooks": []}, "`hooks` must be an object, got array"),
+        ({"hooks": {"Stop": {}}}, "`hooks.Stop` must be an array, got object"),
+        ({"hooks": {"Stop": [None]}}, "`hooks.Stop[0]` must be an object, got null"),
+        (
+            {"hooks": {"Stop": [{"hooks": {}}]}},
+            "`hooks.Stop[0].hooks` must be an array, got object",
+        ),
+        (
+            {"hooks": {"Stop": [{"hooks": [None]}]}},
+            "`hooks.Stop[0].hooks[0]` must be an object, got null",
+        ),
+        (
+            {"hooks": {"Stop": [{"hooks": [{"command": 7}]}]}},
+            "`hooks.Stop[0].hooks[0].command` must be a string, got integer",
+        ),
+        ({"permissions": []}, "`permissions` must be an object, got array"),
+        ({"permissions": {"deny": {}}}, "`permissions.deny` must be an array, got object"),
+        (
+            {"permissions": {"deny": [7]}},
+            "`permissions.deny[0]` must be a string, got integer",
+        ),
+    ],
+)
+def test_malformed_settings_shapes_raise_hookserror(tmp_path, settings, message):
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    _seed_settings(repo_root, settings)
+
+    with pytest.raises(HooksError, match=re.escape(message)):
+        apply("disable", "transcript", repo_root)
+
+
+def test_settings_write_failure_raises_hookserror(tmp_path, monkeypatch):
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    scripts = _transcript_scripts_dir(tmp_path)
+    target = _settings_file(repo_root)
+    real_write_text = Path.write_text
+
+    def fail_target_write(path: Path, *args, **kwargs):
+        if path == target:
+            raise OSError("disk full")
+        return real_write_text(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "write_text", fail_target_write)
+
+    with pytest.raises(HooksError, match=r"could not write settings.*disk full"):
+        apply("enable", "transcript", repo_root, scripts_dir=scripts)
+
+
+def test_unrelated_existing_settings_content_round_trips_through_enable(tmp_path):
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    _seed_settings(
+        repo_root,
+        {
+            "hooks": {
+                "PreToolUse": [{"matcher": "Bash", "hooks": [{"type": "command", "command": 'bash "/other/thing.sh"'}]}]
+            },
+            "permissions": {"allow": ["Read"]},
+            "env": {"FOO": "bar"},
+        },
+    )
+    scripts = _transcript_scripts_dir(tmp_path)
+
+    apply("enable", "transcript", repo_root, scripts_dir=scripts)
+
+    settings = _settings(repo_root)
+    assert settings["hooks"]["PreToolUse"] == [
+        {"matcher": "Bash", "hooks": [{"type": "command", "command": 'bash "/other/thing.sh"'}]}
+    ]
+    assert settings["permissions"] == {"allow": ["Read"]}
+    assert settings["env"] == {"FOO": "bar"}
+    assert "session-end-transcript-capture.py" in settings["hooks"]["SessionEnd"][0]["hooks"][0]["command"]
+
+
+def test_disable_leaves_an_unrelated_entry_on_the_same_event_untouched(tmp_path):
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    _seed_settings(
+        repo_root,
+        {
+            "hooks": {
+                "SessionEnd": [
+                    {
+                        "matcher": "SomeOtherMatcher",
+                        "hooks": [{"type": "command", "command": 'bash "/x/unrelated-session-end-hook.sh"'}],
+                    },
+                    {
+                        "matcher": "",
+                        "hooks": [{"type": "command", "command": "python /x/session-end-transcript-capture.py"}],
+                    },
+                ]
+            },
+            "permissions": {"allow": ["Read"]},
+            "env": {"FOO": "bar"},
+        },
+    )
+    scripts = _transcript_scripts_dir(tmp_path)
+
+    result = apply("disable", "transcript", repo_root, scripts_dir=scripts)
+
+    assert "session-end-transcript-capture.py" in result.removed
+    settings = _settings(repo_root)
+    assert settings["hooks"]["SessionEnd"] == [
+        {
+            "matcher": "SomeOtherMatcher",
+            "hooks": [{"type": "command", "command": 'bash "/x/unrelated-session-end-hook.sh"'}],
+        }
+    ]
+    assert settings["permissions"] == {"allow": ["Read"]}
+    assert settings["env"] == {"FOO": "bar"}
+
+
+def test_apply_raises_hookserror_on_unknown_action(tmp_path):
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    scripts = _transcript_scripts_dir(tmp_path)
+
+    with pytest.raises(HooksError):
+        apply("bogus", "transcript", repo_root, scripts_dir=scripts)  # type: ignore[arg-type]
+
+
+def test_for_feature_raises_hookserror_on_unknown_feature():
+    with pytest.raises(HooksError):
+        HookWiring.for_feature("bogus")  # type: ignore[arg-type]
+
+
+def test_default_scripts_dir_resolves_every_wiring_script():
+    from gw_kernel.hooks import _default_scripts_dir
+
+    default_dir = _default_scripts_dir()
+    # A source checkout resolves to the plugin tree, not the packaged copy.
+    assert default_dir.as_posix().endswith("/plugins/gw/hooks/examples")
+    for wiring in HookWiring.for_feature("transcript"):
+        assert (default_dir / wiring.script).is_file()
+
+
+def test_enable_over_a_legacy_sh_registration_replaces_it(tmp_path):
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    _seed_settings(
+        repo_root,
+        {
+            "hooks": {
+                "SessionEnd": [
+                    {
+                        "matcher": "",
+                        "hooks": [
+                            {
+                                "type": "command",
+                                "command": (
+                                    'GRAPH_WORKS_PYTHON=/usr/bin/python3 bash "/x/session-end-transcript-capture.sh"'
+                                ),
+                            }
+                        ],
+                    }
+                ]
+            }
+        },
+    )
+    scripts = _transcript_scripts_dir(tmp_path)
+
+    result = apply("enable", "transcript", repo_root, scripts_dir=scripts)
+
+    assert result.changed is True
+    assert result.removed == ("session-end-transcript-capture.sh",)
+    assert result.added == ("session-end-transcript-capture.py",)
+    assert result.skipped == ()
+    settings = _settings(repo_root)
+    session_end = settings["hooks"]["SessionEnd"]
+    assert len(session_end) == 1
+    commands = [h["command"] for entry in session_end for h in entry["hooks"]]
+    assert len(commands) == 1
+    assert "session-end-transcript-capture.py" in commands[0]
+    assert "session-end-transcript-capture.sh" not in commands[0]
+
+
+def test_enable_when_current_already_present_ignores_a_stale_legacy_entry(tmp_path):
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    _seed_settings(
+        repo_root,
+        {
+            "hooks": {
+                "SessionEnd": [
+                    {
+                        "matcher": "",
+                        "hooks": [{"type": "command", "command": "bash /x/session-end-transcript-capture.sh"}],
+                    },
+                    {
+                        "matcher": "",
+                        "hooks": [{"type": "command", "command": "python /x/session-end-transcript-capture.py"}],
+                    },
+                ]
+            }
+        },
+    )
+    scripts = _transcript_scripts_dir(tmp_path)
+
+    result = apply("enable", "transcript", repo_root, scripts_dir=scripts)
+
+    assert result.changed is False
+    assert result.skipped == ("session-end-transcript-capture.py",)
+    assert result.added == ()
+    assert result.removed == ()
+
+
+def test_disable_removes_both_current_and_legacy_registrations(tmp_path):
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    _seed_settings(
+        repo_root,
+        {
+            "hooks": {
+                "SessionEnd": [
+                    {
+                        "matcher": "",
+                        "hooks": [{"type": "command", "command": "bash /x/session-end-transcript-capture.sh"}],
+                    },
+                    {
+                        "matcher": "",
+                        "hooks": [{"type": "command", "command": "python /x/session-end-transcript-capture.py"}],
+                    },
+                ]
+            }
+        },
+    )
+    scripts = _transcript_scripts_dir(tmp_path)
+
+    result = apply("disable", "transcript", repo_root, scripts_dir=scripts)
+
+    assert result.changed is True
+    assert set(result.removed) == {"session-end-transcript-capture.sh", "session-end-transcript-capture.py"}
+    settings = _settings(repo_root)
+    assert "hooks" not in settings
+
+
+@pytest.mark.parametrize(
+    ("platform_name", "expected"),
+    [
+        ("win32", '"C:\\Program Files\\Python\\python.exe" "C:\\repo\\hook script.py"'),
+        ("linux", "/usr/bin/python3 '/repo/hook script.py'"),
+        ("darwin", "/usr/bin/python3 '/repo/hook script.py'"),
+    ],
+)
+def test_quote_command_renders_per_platform(platform_name, expected):
+    if platform_name == "win32":
+        argv = ["C:\\Program Files\\Python\\python.exe", "C:\\repo\\hook script.py"]
+    else:
+        argv = ["/usr/bin/python3", "/repo/hook script.py"]
+
+    assert hooks._quote_command(argv, platform_name=platform_name) == expected
+
+
+def test_hook_command_binds_the_running_interpreter_and_quotes_for_this_platform(tmp_path):
+    script = tmp_path / "hook.py"
+
+    command = hooks._hook_command(script)
+
+    assert command == hooks._quote_command([sys.executable, str(script)])
+
+
+def _assert_wheel_enables_every_hook(wheel: Path, tmp_path: Path) -> None:
+    site_packages = tmp_path / "site-packages"
+    with zipfile.ZipFile(wheel) as archive:
+        script = "gw_kernel/_hook_scripts/session-end-transcript-capture.py"
+        assert script in archive.namelist()
+        assert b"from gw_" + b"pipeline.transcript_capture import" in archive.read(script)
+        metadata = archive.read("gw_kernel-0.7.0.dist-info/METADATA").decode("utf-8")
+        assert "Name: gw-kernel\n" in metadata
+        assert "Version: 0.7.0\n" in metadata
+        archive.extractall(site_packages)
+
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    smoke = """
+import json
+import os
+import shlex
+import subprocess
+import sys
+from datetime import date
+from pathlib import Path, PurePath
+
+import gw_kernel
+from gw_kernel import apply_init, plan_init
+from gw_kernel.hooks import apply
+
+assert Path(gw_kernel.__file__).resolve().is_relative_to(Path(sys.argv[2]).resolve())
+repo_root = Path(sys.argv[1])
+transcript = apply("enable", "transcript", repo_root)
+settings = json.loads(transcript.settings_path.read_text(encoding="utf-8"))
+commands = [
+    hook["command"]
+    for entries in settings["hooks"].values()
+    for entry in entries
+    for hook in entry["hooks"]
+]
+assert transcript.added == ("session-end-transcript-capture.py",)
+assert len(commands) == 1
+command = commands[0]
+if sys.platform == "win32":
+    tokens = [t.strip('"') for t in shlex.split(command, posix=False)]
+else:
+    tokens = shlex.split(command)
+assert tokens[0] == sys.executable
+assert PurePath(tokens[-1]).parts[-2:] == ("_hook_scripts", "session-end-transcript-capture.py")
+
+layout = apply_init(plan_init(repo_root / ".works", today=date(2026, 8, 23), topic="Hook test")).layout
+work_path = "work/feature-installed-hook"
+page = layout.bundle_dir / f"{work_path}.md"
+page.parent.mkdir(parents=True, exist_ok=True)
+page.write_text("---\\ntype: Feature\\n---\\n", encoding="utf-8")
+layout.cache_dir.mkdir(parents=True, exist_ok=True)
+(layout.cache_dir / "active-work.json").write_text(
+    json.dumps({"path": work_path, "phase": "execute"}) + "\\n",
+    encoding="utf-8",
+)
+source = repo_root / "session.jsonl"
+source.write_text('{"event":"installed"}\\n', encoding="utf-8")
+environment = os.environ.copy()
+environment["GRAPH_WORKS_DIR"] = str(layout.root)
+environment["GRAPH_WORKS_TRANSCRIPT_CAPTURE_TRACE_LOG"] = str(repo_root / "trace.log")
+completed = subprocess.run(
+    commands[0],
+    shell=True,
+    cwd=repo_root,
+    env=environment,
+    input=json.dumps({"session_id": "installed-wheel", "transcript_path": str(source)}),
+    capture_output=True,
+    text=True,
+)
+assert completed.returncode == 0, completed.stderr
+destination = layout.bundle_dir / work_path / "references" / "03-execute-transcript.jsonl"
+assert destination.read_text(encoding="utf-8") == source.read_text(encoding="utf-8")
+"""
+    environ = os.environ.copy()
+    environ["PYTHONPATH"] = str(site_packages)
+    completed = subprocess.run(
+        [sys.executable, "-c", smoke, str(repo_root), str(site_packages)],
+        cwd=tmp_path,
+        env=environ,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode == 0, completed.stderr
+
+
+def test_built_wheel_enables_every_hook_from_packaged_scripts(tmp_path):
+    """A wheel install must not depend on the monorepo's plugin checkout."""
+    workspace_root = Path(__file__).resolve().parents[3]
+    dist_dir = tmp_path / "dist"
+    subprocess.run(
+        [
+            "uv",
+            "build",
+            "--wheel",
+            "packages/gw-kernel",
+            "--out-dir",
+            str(dist_dir),
+        ],
+        cwd=workspace_root,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    wheel = next(dist_dir.glob("gw_kernel-0.7.0-*.whl"))
+
+    _assert_wheel_enables_every_hook(wheel, tmp_path)
+
+
+def test_sdist_builds_a_wheel_with_every_packaged_hook(tmp_path):
+    """The source distribution must carry everything needed for its wheel."""
+    workspace_root = Path(__file__).resolve().parents[3]
+    sdist_dir = tmp_path / "sdist"
+    subprocess.run(
+        [
+            "uv",
+            "build",
+            "--package",
+            "gw-kernel",
+            "--sdist",
+            "--out-dir",
+            str(sdist_dir),
+        ],
+        cwd=workspace_root,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    sdist = next(sdist_dir.glob("gw_kernel-0.7.0.tar.gz"))
+    wheel_dir = tmp_path / "wheel-from-sdist"
+    completed = subprocess.run(
+        ["uv", "build", str(sdist), "--wheel", "--out-dir", str(wheel_dir)],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode == 0, completed.stderr
+    wheel = next(wheel_dir.glob("gw_kernel-0.7.0-*.whl"))
+
+    _assert_wheel_enables_every_hook(wheel, tmp_path / "smoke")

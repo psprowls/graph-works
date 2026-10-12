@@ -17,9 +17,9 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import typer
-from graph_works_core.orchestrate.asks import run_ask, run_ask_answer
-from graph_works_core.workspace.errors import WorkspaceError
 from graph_works_wire import work as wire_work
+from gw_kernel.workspace.errors import WorkspaceError
+from gw_orchestrate.asks import run_ask, run_ask_answer
 
 from graph_works_cli import exit_codes
 from graph_works_cli.work_cli import rendering

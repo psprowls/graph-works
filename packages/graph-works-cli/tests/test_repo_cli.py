@@ -9,8 +9,8 @@ from pathlib import Path
 import pytest
 from code_graph_io import open_reader
 from graph_works_cli.cli import app
-from graph_works_core.graph.commands import graph_target
-from graph_works_core.workspace.discovery import resolve
+from gw_kernel.graph.commands import graph_target
+from gw_kernel.workspace.discovery import resolve
 from typer.testing import CliRunner
 
 runner = CliRunner()
@@ -124,7 +124,7 @@ def test_human_restore_dry_run_and_present(workspace: Path, url: str) -> None:
 
 def test_restore_global_refusal_envelope(workspace: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     from graph_works_cli.repo_cli import main
-    from graph_works_core.repositories.commands import RepoRefusal, RepoRestoreResult
+    from gw_wiki.repositories.commands import RepoRefusal, RepoRestoreResult
 
     monkeypatch.setattr(
         main,
@@ -138,7 +138,7 @@ def test_restore_global_refusal_envelope(workspace: Path, monkeypatch: pytest.Mo
 
 def test_advance_human_range_details() -> None:
     from graph_works_cli.repo_cli.rendering import advance_text
-    from graph_works_core.repositories.commands import RepoAdvanceResult
+    from gw_wiki.repositories.commands import RepoAdvanceResult
     from repositories_okf.flagging import FlaggedLink, FlaggedPage
     from repositories_okf.git import FileChange, RangeFacts
 
@@ -171,7 +171,7 @@ def test_advance_human_range_details() -> None:
 
 def test_add_human_warnings() -> None:
     from graph_works_cli.repo_cli.rendering import add_text
-    from graph_works_core.repositories.commands import RepoAddResult
+    from gw_wiki.repositories.commands import RepoAddResult
 
     result = RepoAddResult(
         "demo",
@@ -190,7 +190,7 @@ def test_add_human_warnings() -> None:
 
 def test_managed_human_output() -> None:
     from graph_works_cli.repo_cli.rendering import add_text, advance_text, restore_text
-    from graph_works_core.repositories.commands import (
+    from gw_wiki.repositories.commands import (
         RepoAddResult,
         RepoAdvanceResult,
         RepoRestoreResult,
@@ -372,7 +372,7 @@ def test_repo_adopt_refusal_exits_nonzero_with_code(workspace: Path, url: str) -
 
 def test_repo_adopt_human_preview_and_warnings() -> None:
     from graph_works_cli.repo_cli.rendering import adopt_text
-    from graph_works_core.repositories.adopt import RepoAdoptResult
+    from gw_wiki.repositories.adopt import RepoAdoptResult
 
     result = RepoAdoptResult(
         "demo", "../demo", "clone", "checkout", "main", "a" * 40, False, ("legacy",), (), True, warnings=("attention",)

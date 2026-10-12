@@ -726,7 +726,7 @@ def test_with_archive_shape_the_work_migrator_is_clean(tmp_path: Path) -> None:
 def _seed_schema(vault: Path) -> None:
     """Install this package's own schema/sections declarations at `.gw/`.
 
-    `apply_mutation`'s postcondition validation (`graph_works_core.workspace.
+    `apply_mutation`'s postcondition validation (`gw_kernel.workspace.
     transactions._validate_postconditions`) falls back to `<bundle_dir>/schema`
     when `<config_dir>/schema` is absent -- neither exists in a bare
     `vault_root()` fixture, and the fallback then fails outright. A real vault
@@ -807,7 +807,7 @@ def test_work_phase_write_lands_the_path_native_lane(tmp_path: Path) -> None:
 
 
 def test_work_phase_preserves_manual_commit_policy(tmp_path: Path, monkeypatch) -> None:
-    from graph_works_core.workspace import transactions
+    from gw_pipeline import transactions
     from migrate_vault import cmd_work
 
     root = vault_root(tmp_path)

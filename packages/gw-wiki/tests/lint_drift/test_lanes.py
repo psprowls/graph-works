@@ -1,0 +1,645 @@
+"""The lane composer. Rule sets are asserted as TOPIC sets, not as counts: a
+lane that silently loses a capability has to fail a test, and the count would
+still pass if one factory were swapped for another."""
+
+from __future__ import annotations
+
+import json
+from datetime import UTC, date, datetime
+
+import pytest
+import work_tracker_okf
+from code_wiki_okf.config import load_config
+from gw_kernel import apply_init, plan_init
+from gw_kernel.workspace.bundle import load_bundle_at
+from gw_wiki.lint_drift.lanes import LaneSet, compose_lanes
+from gw_wiki.lint_drift.lint import run_mechanical
+from okf_ext.bundle import SCHEMA_DIRNAME, SECTIONS_DIRNAME
+from okf_ext.tags import VOCABULARY_FILENAME
+from okf_io import Bundle, RuleContext, build_link_graph, load_bundle, validate
+
+TODAY = date(2026, 8, 13)
+AT = datetime(2026, 8, 13, tzinfo=UTC)
+
+
+@pytest.fixture
+def workspace(tmp_path):
+    repo = tmp_path / "repo"
+    (repo / ".git").mkdir(parents=True)
+    return apply_init(plan_init(repo / ".works", today=TODAY, topic="Lanes"))
+
+
+def _compose(workspace, **kwargs) -> LaneSet:
+    layout = workspace.layout
+    return compose_lanes(
+        layout,
+        load_config(
+            layout.bundle_dir,
+            config_path=layout.manifest_path,
+            graph_dir=layout.cache_dir,
+            declarations_dir=layout.config_dir,
+        ),
+        repo_root=layout.repo_root,
+        at=AT,
+        **kwargs,
+    )
+
+
+def _topics(bundle: Bundle, lane) -> set[str]:
+    """Every topic a lane's rules can emit, run against a real bundle."""
+    ctx = RuleContext(bundle=bundle, links=build_link_graph(bundle), today=TODAY)
+    emitted = {finding.code.split(".", 1)[0] for rule in lane.rules for finding in rule(ctx)}
+    return emitted
+
+
+def test_a_default_workspace_composes_the_wiki_lane_then_the_work_lane(workspace):
+    lanes = _compose(workspace)
+    assert [lane.name for lane in lanes.lanes] == ["wiki", "work"]
+    assert lanes.errors == ()
+
+
+def test_the_work_lane_reads_the_workspace_pipeline_path(workspace):
+    from gw_kernel.workspace.dispatch_config import load_dispatch_config
+    from ruamel.yaml import YAML
+
+    page = workspace.layout.bundle_dir / "work" / "feature-x.md"
+    page.parent.mkdir(parents=True, exist_ok=True)
+    page.write_text(
+        "---\ntype: Feature\ntitle: X\ndescription: d\nwork_status: open\nphase: plan\n"
+        "opened: 2026-08-13\nupdated: 2026-08-13\n---\n\n"
+        "## Plan\n\n| Action | Done when | Rationale |\n| --- | --- | --- |\n",
+        encoding="utf-8",
+        newline="\n",
+    )
+    _wiki, work = _compose(workspace).lanes
+    report = validate(load_bundle(work.root, ignore=work.ignore, prune=work.prune), today=TODAY, extra_rules=work.rules)
+    assert report.by_code("state.phase-off-path") == ()
+
+    shared = load_dispatch_config(workspace.layout).shared_path
+    yaml = YAML()
+    data = yaml.load(shared.read_text(encoding="utf-8")) if shared.exists() else {}
+    data = data or {}
+    data.setdefault("pipeline", {})["path"] = [
+        {"name": "feature-skips-plan", "match": {"type": "Feature"}, "stages": ["design", "execute", "finish"]}
+    ]
+    with shared.open("w", encoding="utf-8", newline="\n") as handle:
+        yaml.dump(data, handle)
+    _wiki, work = _compose(workspace).lanes
+    report = validate(load_bundle(work.root, ignore=work.ignore, prune=work.prune), today=TODAY, extra_rules=work.rules)
+    [finding] = report.by_code("state.phase-off-path")
+    assert finding.path == "work/feature-x.md"
+    assert "feature-skips-plan" in finding.message
+
+
+def test_a_malformed_dispatch_file_is_a_work_lane_error(workspace):
+    from gw_kernel.workspace.dispatch_config import load_dispatch_config
+
+    shared = load_dispatch_config(workspace.layout).shared_path
+    shared.write_text("pipeline:\n  path: not-a-list\n", encoding="utf-8", newline="\n")
+    lanes = _compose(workspace)
+    assert [lane.name for lane in lanes.lanes] == ["wiki"]
+    assert any(error.startswith("work lane:") for error in lanes.errors)
+
+
+def test_both_lanes_root_at_the_bundle_dir(workspace):
+    for lane in _compose(workspace).lanes:
+        assert lane.root == workspace.layout.bundle_dir
+
+
+def _seed_both_lanes(workspace):
+    """One curated page and one work item, written before composition — the
+    work lane's recipe is derived from the bundle directory as it stands."""
+    bundle_dir = workspace.layout.bundle_dir
+    (bundle_dir / "concepts").mkdir(exist_ok=True)
+    (bundle_dir / "concepts" / "byte-fidelity.md").write_text(
+        "---\ntype: Explanation\ntitle: Byte fidelity\n---\n\nBody.\n", encoding="utf-8"
+    )
+    (bundle_dir / "work").mkdir(exist_ok=True)
+    (bundle_dir / "work" / "bug-example.md").write_text(
+        "---\ntype: Bug\ntitle: Example\nstatus: accepted\n---\n\nSee [byte fidelity](/concepts/byte-fidelity.md).\n",
+        encoding="utf-8",
+    )
+    return bundle_dir
+
+
+def test_each_lane_names_its_own_members_and_no_others(workspace):
+    """D2: both lanes root at the bundle dir, so without a partition every
+    curated page is walked twice and its core-catalog findings reported twice."""
+    _seed_both_lanes(workspace)
+    wiki, work = _compose(workspace).lanes
+    members = {
+        lane.name: set(load_bundle(lane.root, ignore=lane.ignore, prune=lane.prune).concepts) for lane in (wiki, work)
+    }
+    assert members["wiki"] & members["work"] == set()
+    assert "concepts/byte-fidelity" in members["wiki"]
+    assert "work/bug-example" in members["work"]
+
+
+def test_each_lane_names_the_other_lane_rather_than_its_own_contents(workspace):
+    wiki, work = _compose(workspace).lanes
+    assert f"{work_tracker_okf.WORK_DIR}/*" in wiki.ignore
+    assert set(work_tracker_okf.IGNORE) <= set(work.ignore)
+    assert work.prune == ()
+    assert wiki.prune == ()
+
+
+def test_a_work_item_linking_a_curated_page_reports_no_broken_link(workspace):
+    """`ignore=` declares "this is not a concept", not "this is not there":
+    `has_member` counts ignored members, so the cross-lane link resolves."""
+    _seed_both_lanes(workspace)
+    _wiki, work = _compose(workspace).lanes
+    bundle = load_bundle(work.root, ignore=work.ignore, prune=work.prune)
+    report = validate(bundle, today=TODAY, extra_rules=work.rules)
+    assert not any(finding.code == "links.broken" for finding in report.findings)
+
+
+def test_a_curated_directory_added_later_needs_no_lanes_edit(workspace):
+    """The recipe is derived from the bundle directory rather than written as a
+    literal list, because `ignore=` has no negation — a list would let a new
+    curated directory silently rejoin the work lane and restore the
+    duplication with nothing to catch it."""
+    bundle_dir = workspace.layout.bundle_dir
+    (bundle_dir / "docs" / "tutorials").mkdir(parents=True)
+    (bundle_dir / "docs" / "tutorials" / "getting-started.md").write_text(
+        "---\ntype: Tutorial\ntitle: Start\n---\n\nBody.\n", encoding="utf-8"
+    )
+    _wiki, work = _compose(workspace).lanes
+    assert "docs/*" in work.ignore
+    assert "docs/tutorials/getting-started" not in load_bundle(work.root, ignore=work.ignore, prune=work.prune).concepts
+
+
+def test_the_wiki_lane_carries_every_declared_capability(workspace):
+    """The topic set, derived by running each factory's rules over a bundle
+    engineered to trip every one of them, is asserted in Task 5's mechanical
+    test. Here the weaker but still load-bearing claim: the composer built a
+    rule for each capability whose declarations are present."""
+    wiki, _work = _compose(workspace).lanes
+    assert (
+        len(wiki.rules) == 10
+    )  # health, render, schema, pool, about, drain, repos placement, section, tags, placement
+
+
+def test_the_wiki_lane_accepts_canonical_nested_code_wiki_placement(workspace):
+    bundle_dir = workspace.layout.bundle_dir
+    page = bundle_dir / "code-graph" / "demo" / "entities" / "packages" / "widgets.md"
+    page.parent.mkdir(parents=True)
+    page.write_text(
+        "---\n"
+        "type: Package\n"
+        "title: Widgets\n"
+        "resource: pkg:acme/demo/widgets\n"
+        "description: A demo package.\n"
+        "---\n\n"
+        "## Purpose\n\nA demo.\n\n"
+        "## Public API\n\nNone.\n\n"
+        "## Files\n\n_(none)_\n",
+        encoding="utf-8",
+    )
+
+    wiki, _work = _compose(workspace).lanes
+    report = validate(load_bundle(wiki.root, ignore=wiki.ignore), today=TODAY, extra_rules=wiki.rules)
+
+    assert not any(finding.code == "placement.directory-mismatch" for finding in report.findings)
+
+
+def test_the_wiki_lane_resolves_a_mirrored_file_under_references(workspace):
+    root = workspace.layout.bundle_dir
+    member = "code-graph/graph-works/file-system/plugins/gw/skills/demo/references/example.md"
+    uri = "file:graph-works:plugins/gw/skills/demo/references/example.md"
+    page = root / member
+    page.parent.mkdir(parents=True)
+    page.write_text(
+        f"---\ntype: File\ntitle: Example\ndescription: A reference file.\nresource: {uri}\n---\n\nBody.\n",
+        encoding="utf-8",
+        newline="",
+    )
+    for name, target in (("present", uri), ("missing", uri.replace("example.md", "missing.md"))):
+        curated = root / "docs" / "explanations" / f"{name}.md"
+        curated.parent.mkdir(parents=True, exist_ok=True)
+        curated.write_text(
+            f"---\ntype: Explanation\ntitle: {name}\ndescription: A reference.\n"
+            f"status: draft\nabout: [{target}]\n---\n\nBody.\n",
+            encoding="utf-8",
+            newline="",
+        )
+    wiki, _work = _compose(workspace).lanes
+    bundle = load_bundle_at(wiki.root, ignore=wiki.ignore, prune=wiki.prune)
+    report = validate(bundle, today=TODAY, extra_rules=wiki.rules)
+    assert [(f.path, f.severity) for f in report.by_code("about.unresolved")] == [
+        ("docs/explanations/missing.md", "error")
+    ]
+    assert member.removesuffix(".md") in bundle.concepts
+
+
+def test_the_wiki_lane_reports_an_unresolved_source_path(workspace):
+    """C1: `schema_rule` already rides the wiki lane, so the shipped
+    `x-okf-member` on `Source.source_path` reaches lint with no `lanes.py`
+    edit. A path into `work/` -- ignored by this lane -- still resolves."""
+    bundle_dir = workspace.layout.bundle_dir
+    (bundle_dir / "sources").mkdir(exist_ok=True)
+    (bundle_dir / "work" / "item" / "references").mkdir(parents=True, exist_ok=True)
+    (bundle_dir / "work" / "item" / "references" / "01-design.md").write_text("# D\n", encoding="utf-8", newline="")
+    for name, source_path in (
+        ("dead", "sources/references/gone.md"),
+        ("live", "work/item/references/01-design.md"),
+    ):
+        (bundle_dir / "sources" / f"2026-08-{name}.md").write_text(
+            f"---\ntype: Source\ntitle: {name}\ndescription: A source.\nsource_path: {source_path}\n---\n\n# {name}\n",
+            encoding="utf-8",
+            newline="",
+        )
+    wiki, _work = _compose(workspace).lanes
+    bundle = load_bundle(wiki.root, ignore=wiki.ignore)
+    report = validate(bundle, today=TODAY, extra_rules=wiki.rules)
+    assert [f.path for f in report.by_code("schemas.unresolved-member")] == ["sources/2026-08-dead.md"]
+
+
+def test_the_wiki_lane_rejects_the_retired_flat_package_lane(workspace):
+    bundle_dir = workspace.layout.bundle_dir
+    page = bundle_dir / "packages" / "widgets.md"
+    page.parent.mkdir(parents=True)
+    page.write_text(
+        "---\n"
+        "type: Package\n"
+        "title: Widgets\n"
+        "resource: pkg:acme/demo/widgets\n"
+        "description: A demo package.\n"
+        "---\n\n"
+        "## Purpose\n\nA demo.\n\n"
+        "## Public API\n\nNone.\n\n"
+        "## Files\n\n_(none)_\n",
+        encoding="utf-8",
+    )
+
+    wiki, _work = _compose(workspace).lanes
+    report = validate(load_bundle(wiki.root, ignore=wiki.ignore), today=TODAY, extra_rules=wiki.rules)
+
+    mismatch = [finding for finding in report.findings if finding.code == "placement.directory-mismatch"]
+    assert len(mismatch) == 1
+    assert "code-graph/demo/entities/packages/widgets" in mismatch[0].message
+
+
+def test_a_reader_adds_the_sync_rule(workspace, monkeypatch):
+    from gw_wiki.lint_drift import lanes as lanes_module
+
+    class _Reader:
+        pass
+
+    monkeypatch.setattr(lanes_module, "snapshot_bundle", lambda *a, **k: _EmptySnapshot())
+    wiki, _work = _compose(workspace, reader=_Reader()).lanes
+    assert len(wiki.rules) == 11
+
+
+class _EmptySnapshot:
+    stale: frozenset[str] = frozenset()
+    missing: frozenset[str] = frozenset()
+    orphaned: frozenset[str] = frozenset()
+
+
+def test_absent_wiki_declarations_are_a_fact_but_the_work_lane_now_requires_them(workspace, tmp_path):
+    config_dir = workspace.layout.config_dir
+    for name in (SCHEMA_DIRNAME, SECTIONS_DIRNAME):
+        for child in sorted((config_dir / name).iterdir()):
+            child.unlink()
+        (config_dir / name).rmdir()
+    (config_dir / VOCABULARY_FILENAME).unlink()
+    lanes = _compose(workspace)
+    assert [lane.name for lane in lanes.lanes] == ["wiki"]
+    assert len(lanes.lanes[0].rules) == 3  # health + render + code-wiki placement
+    assert len(lanes.errors) == 1
+    assert "work" in lanes.errors[0]
+
+
+def test_the_work_lane_now_validates_schema_and_section_conformance(workspace):
+    bundle_dir = workspace.layout.bundle_dir
+    (bundle_dir / "work").mkdir(exist_ok=True)
+    (bundle_dir / "work" / "bug-bad-type.md").write_text(
+        "---\ntype: NotAType\ntitle: Bad\nstatus: accepted\n---\n\nBody.\n", encoding="utf-8"
+    )
+    _wiki, work = _compose(workspace).lanes
+    bundle = load_bundle(work.root, ignore=work.ignore, prune=work.prune)
+    report = validate(bundle, today=TODAY, extra_rules=work.rules)
+    assert any(finding.code.startswith("schemas.") for finding in report.findings)
+
+
+def test_the_work_lane_resolves_a_root_absolute_plan_action_at_the_bundle_root(workspace):
+    """`_compose_work` passes `vault_root=layout.bundle_dir`: a plan-stage
+    item's boilerplate "Execute implementation plan: ..." row, written in the
+    root-absolute spelling every other citation in this bundle uses, must
+    resolve without help from a repo root -- and a miss must still be caught,
+    the same finding `gw work lint` and the mutation gate already report."""
+    bundle_dir = workspace.layout.bundle_dir
+    plan_dir = bundle_dir / "work" / "feature-x" / "references"
+    plan_dir.mkdir(parents=True)
+    (plan_dir / "02-plan.md").write_text("# Plan\n", encoding="utf-8")
+    (bundle_dir / "work" / "feature-x.md").write_text(
+        "---\ntype: Feature\ntitle: X\ndescription: d\nwork_status: open\n"
+        "opened: 2026-08-13\nupdated: 2026-08-13\n---\n\n"
+        "## Plan\n\n| Action | Done when | Rationale |\n| --- | --- | --- |\n"
+        "| Execute implementation plan: /work/feature-x/references/02-plan.md | Landed | Workflow |\n",
+        encoding="utf-8",
+    )
+    _wiki, work = _compose(workspace).lanes
+    bundle = load_bundle(work.root, ignore=work.ignore, prune=work.prune)
+    report = validate(bundle, today=TODAY, extra_rules=work.rules)
+    assert report.by_code("plan.action-target-missing") == ()
+
+    (plan_dir / "02-plan.md").unlink()
+    bundle = load_bundle(work.root, ignore=work.ignore, prune=work.prune)
+    report = validate(bundle, today=TODAY, extra_rules=work.rules)
+    finding = report.by_code("plan.action-target-missing")[0]
+    assert "/work/feature-x/references/02-plan.md" in finding.message
+
+
+def test_the_wiki_lane_promotes_tags_unknown_to_error(workspace):
+    """The work lane's `vocabulary_rule` composes at `severity="error"`
+    (`work_tracker_okf.compose.rule_set`), and the wiki lane's own
+    `_wiki_rules` must match -- otherwise the promotion only covers `work/`
+    and the rest of the vault, where most pages live, can still regrow the
+    tag vocabulary silently."""
+    bundle_dir = workspace.layout.bundle_dir
+    (bundle_dir / "orphan.md").write_text(
+        "---\ntitle: Orphan\ntags: [nonexistent-tag]\n---\n\nBody.\n",
+        encoding="utf-8",
+        newline="",
+    )
+    wiki, _work = _compose(workspace).lanes
+    bundle = load_bundle(wiki.root, ignore=wiki.ignore)
+    ctx = RuleContext(bundle=bundle, links=build_link_graph(bundle), today=TODAY)
+    findings = [finding for rule in wiki.rules for finding in rule(ctx) if finding.code == "tags.unknown"]
+    assert findings
+    assert all(finding.severity == "error" for finding in findings)
+
+
+def test_a_missing_config_projection_is_reported_as_a_lane_error(workspace):
+    (workspace.layout.cache_dir / "config.json").unlink()
+    lanes = _compose(workspace)
+    assert any("config projection missing" in error for error in lanes.errors)
+    assert [lane.name for lane in lanes.lanes] == ["wiki", "work"]
+
+
+def test_a_malformed_declaration_is_one_error_per_lane_that_shares_it(workspace):
+    """Both lanes read `config.declarations_dir`, so a malformed `tags.yaml`
+    is an error for each -- the wiki lane's `_wiki_rules` and the work lane's
+    `work_tracker_okf.compose.rule_set` both gate their `vocabulary_rule` on
+    the same file, and neither lane composes."""
+    (workspace.layout.config_dir / VOCABULARY_FILENAME).write_text("not: [a mapping\n", encoding="utf-8")
+    lanes = _compose(workspace)
+    assert len(lanes.errors) == 2
+    assert "wiki" in lanes.errors[0]
+    assert "work" in lanes.errors[1]
+    assert lanes.lanes == ()
+
+
+def test_a_bug_inside_a_rule_factory_propagates_rather_than_becoming_a_lane_error(workspace, monkeypatch):
+    """D9: a `ValueError` from a factory's own logic is a bug, and `lint.py`
+    already holds this line for `validate()`. Composition holds it too."""
+    from gw_wiki.lint_drift import lanes as lanes_module
+
+    def _boom(*args, **kwargs):
+        raise ValueError("a factory blew up")
+
+    monkeypatch.setattr(lanes_module, "health_rule", _boom)
+    with pytest.raises(ValueError, match="a factory blew up"):
+        _compose(workspace)
+
+
+def test_no_repo_root_still_composes_the_work_lane(workspace):
+    layout = workspace.layout
+    lanes = compose_lanes(
+        layout,
+        load_config(
+            layout.bundle_dir,
+            config_path=layout.manifest_path,
+            graph_dir=layout.cache_dir,
+            declarations_dir=layout.config_dir,
+        ),
+        repo_root=None,
+        at=AT,
+    )
+    assert [lane.name for lane in lanes.lanes] == ["wiki", "work"]
+
+
+def test_every_lane_loads_as_a_bundle(workspace):
+    for lane in _compose(workspace).lanes:
+        bundle = load_bundle(lane.root, ignore=lane.ignore, prune=lane.prune)
+        assert bundle.root == lane.root
+        assert _topics(bundle, lane) <= {
+            "health",
+            "render",
+            "schema",
+            "about",
+            "claims",
+            "sections",
+            "tags",
+            "placement",
+            "sync",
+            "state",
+            "plan",
+            "targets",
+            "graph",
+        }
+
+
+def _curated(workspace, member: str, frontmatter: str) -> None:
+    page = workspace.layout.bundle_dir / member
+    page.parent.mkdir(parents=True, exist_ok=True)
+    page.write_text(f"---\n{frontmatter}---\n\n## Context\n\nBody.\n", encoding="utf-8", newline="")
+
+
+def _wiki_report(workspace, **kwargs):
+    wiki, _work = _compose(workspace, **kwargs).lanes
+    return validate(load_bundle(wiki.root, ignore=wiki.ignore), today=TODAY, extra_rules=wiki.rules)
+
+
+def test_the_wiki_lane_composes_the_claims_contract_at_error(workspace):
+    """The backfill child flipped the contract from warn to error once every
+    curated page passed (epic decision D-010)."""
+    from gw_wiki.lint_drift.lanes import CONTRACT_SEVERITY
+
+    assert CONTRACT_SEVERITY == "error"
+    _curated(workspace, "docs/explanations/bare.md", "type: Explanation\ntitle: Bare\ndescription: d\n")
+    findings = [f for f in _wiki_report(workspace).findings if f.path == "docs/explanations/bare.md"]
+    contract = {(f.code, f.severity) for f in findings if f.code.startswith(("about.", "claims."))}
+    assert contract == {("about.missing", "error"), ("claims.missing", "error")}
+    assert not [f for f in findings if f.code.startswith("schemas.")]
+
+
+def test_the_claims_contract_rides_the_schema_gate(workspace):
+    config_dir = workspace.layout.config_dir
+    for child in sorted((config_dir / SCHEMA_DIRNAME).iterdir()):
+        child.unlink()
+    (config_dir / SCHEMA_DIRNAME).rmdir()
+    _curated(workspace, "docs/explanations/bare.md", "type: Explanation\ntitle: Bare\ndescription: d\n")
+    wiki = _compose(workspace).lanes[0]
+    report = validate(load_bundle(wiki.root, ignore=wiki.ignore), today=TODAY, extra_rules=wiki.rules)
+    assert not [f for f in report.findings if f.code.startswith(("about.", "claims."))]
+
+
+def test_repo_roots_reach_the_constrains_check(workspace, tmp_path):
+    other = tmp_path / "other"
+    (other / "src").mkdir(parents=True)
+    (other / "src" / "kept.py").write_text("", encoding="utf-8", newline="")
+    _curated(
+        workspace,
+        "adrs/2026-01-01-kept.md",
+        "type: Adr\ntitle: Kept\ndescription: d\ndecision_date: 2026-01-01\nabout: [repo:acme/demo]\n"
+        "decisions:\n  - id: D1\n    claim: Keep it.\n    constrains: [src/kept.py]\n",
+    )
+
+    def constrains(**kwargs):
+        return [f.code for f in _wiki_report(workspace, **kwargs).findings if f.code == "claims.constrains-missing"]
+
+    assert constrains() == ["claims.constrains-missing"]  # only repo_root, which lacks src/kept.py
+    assert constrains(repo_roots=(other,)) == []
+
+
+def test_the_wiki_lane_composes_the_drain_rule(workspace):
+    page = workspace.layout.bundle_dir / "sources" / "2026-09-s.md"
+    page.parent.mkdir(parents=True, exist_ok=True)
+    page.write_text(
+        "---\ntype: Source\ntitle: S\ndescription: d\nsource_path: sources/references/2026-09-s.md\n---\n\n"
+        "## Key claims\n- One.\n\n## Where it's cited in this wiki\n\n",
+        encoding="utf-8",
+        newline="",
+    )
+    findings = [f for f in _wiki_report(workspace).findings if f.path == "sources/2026-09-s.md"]
+    assert ("sources.undrained", "warn") in {(f.code, f.severity) for f in findings}
+
+
+def test_the_drain_rule_rides_the_schema_gate(workspace):
+    config_dir = workspace.layout.config_dir
+    for child in sorted((config_dir / SCHEMA_DIRNAME).iterdir()):
+        child.unlink()
+    (config_dir / SCHEMA_DIRNAME).rmdir()
+    wiki = _compose(workspace).lanes[0]
+    report = validate(load_bundle(wiki.root, ignore=wiki.ignore), today=TODAY, extra_rules=wiki.rules)
+    assert not [f for f in report.findings if f.code.startswith("sources.")]
+
+
+def _refused_type_findings(workspace):
+    layout = workspace.layout
+    report = run_mechanical(layout, _config(workspace), today=TODAY, repo_root=layout.repo_root)
+    return [f for lane in report.mechanical for f in lane.report.findings if f.code == "proposals.refused-type"]
+
+
+def test_mechanical_lint_reports_a_flagged_type_with_missing_guidance_once(workspace):
+    schema = {
+        "type": "object",
+        "properties": {"type": {"const": "Runbook"}},
+        "x-okf-directory": "runbooks/",
+        "x-okf-accept-proposals": True,
+    }
+    (workspace.layout.config_dir / SCHEMA_DIRNAME / "Runbook.schema.json").write_text(
+        json.dumps(schema), encoding="utf-8", newline=""
+    )
+    (finding,) = _refused_type_findings(workspace)
+    assert finding.severity == "warn" and finding.path is None
+    assert "Runbook" in finding.message and "missing-guidance" in finding.message
+
+
+def test_mechanical_lint_accepts_the_shipped_proposal_declarations(workspace):
+    assert _refused_type_findings(workspace) == []
+
+
+def _config(workspace):
+    layout = workspace.layout
+    return load_config(
+        layout.bundle_dir,
+        config_path=layout.manifest_path,
+        graph_dir=layout.cache_dir,
+        declarations_dir=layout.config_dir,
+    )
+
+
+def test_wiki_entry_keys_is_none_rather_than_a_raise_on_a_malformed_schema(workspace):
+    """Composition already reports a malformed schema as a `wiki lane:` line;
+    the coverage helper must not re-raise it."""
+    from gw_wiki.lint_drift.lanes import wiki_entry_keys
+
+    (workspace.layout.config_dir / SCHEMA_DIRNAME / "Source.schema.json").write_text(
+        "{not json", encoding="utf-8", newline=""
+    )
+    assert wiki_entry_keys(_config(workspace)) is None
+    assert any(error.startswith("wiki lane:") for error in _compose(workspace).errors)
+
+
+def test_wiki_entry_keys_is_none_without_a_schema_directory(workspace):
+    from gw_wiki.lint_drift.lanes import wiki_entry_keys
+
+    assert wiki_entry_keys(_config(workspace))  # the seeded schemas declare entry keys
+    schema_dir = workspace.layout.config_dir / SCHEMA_DIRNAME
+    for child in sorted(schema_dir.iterdir()):
+        child.unlink()
+    schema_dir.rmdir()
+    assert wiki_entry_keys(_config(workspace)) is None
+
+
+def _legacy_work_ignore(bundle_dir):
+    """`_work_ignore` as it stood at c96c8eb, frozen as the equivalence oracle."""
+    siblings = tuple(
+        f"{entry.name}/*" if entry.is_dir() else entry.name
+        for entry in sorted(bundle_dir.iterdir(), key=lambda path: path.name)
+        if entry.name != work_tracker_okf.WORK_DIR
+    )
+    return (*siblings, *work_tracker_okf.IGNORE)
+
+
+def test_the_work_lane_report_matches_the_legacy_recipe(workspace):
+    bundle_dir = _seed_both_lanes(workspace)
+    (bundle_dir / "work" / "bug-broken.md").write_text(
+        "---\ntype: Bug\ntitle: Broken\nstatus: accepted\n---\n\nSee [gone](/concepts/missing.md).\n",
+        encoding="utf-8",
+        newline="",
+    )
+    _wiki, work = _compose(workspace).lanes
+    scoped = validate(load_bundle(work.root, ignore=work.ignore, prune=work.prune), today=TODAY, extra_rules=work.rules)
+    legacy = validate(
+        load_bundle(work.root, ignore=_legacy_work_ignore(bundle_dir)), today=TODAY, extra_rules=work.rules
+    )
+    assert scoped.findings == legacy.findings
+    assert [f.path for f in scoped.findings if f.code == "links.broken"] == ["work/bug-broken.md"]
+
+
+def test_lane_reports_retains_ignored_members_and_prunes_only_clones(workspace):
+    from gw_wiki.lint_drift.lint import _lane_reports
+
+    _seed_both_lanes(workspace)
+    clone = workspace.layout.bundle_dir / "repositories/demo/references/git"
+    clone.mkdir(parents=True)
+    (clone / "README.md").write_text("# Upstream\n", encoding="utf-8", newline="")
+    _reports, bundles, errors = _lane_reports(_compose(workspace).lanes, today=TODAY, strict=False)
+    assert errors == ()
+    assert bundles["work"].pruned == frozenset({"repositories/demo/references/git"})
+    assert "concepts/byte-fidelity.md" in bundles["work"].ignored
+    assert bundles["work"].member_id("concepts/byte-fidelity.md") == "concepts/byte-fidelity.md"
+    assert "work/bug-example" in bundles["work"].concepts
+
+
+@pytest.mark.parametrize(
+    ("declaration", "expected"),
+    [
+        (None, None),
+        ({}, None),
+        ("malformed", None),
+        ({"properties": {"type": {"const": "Adr"}}, "x-okf-directory": "decisions/"}, "decisions/"),
+    ],
+)
+def test_adr_directory_is_read_from_the_workspace_schema_set(tmp_path, declaration, expected):
+    from code_wiki_okf.config import Config, StateGateConfig
+    from gw_wiki.lint_drift import lanes
+
+    root = tmp_path / "config"
+    if declaration is not None:
+        schemas = root / "schema"
+        schemas.mkdir(parents=True)
+        (schemas / "Adr.schema.json").write_text(
+            "[broken" if declaration == "malformed" else json.dumps(declaration), encoding="utf-8", newline="\n"
+        )
+    config = Config(
+        graph_dir=tmp_path / "cache",
+        declarations_dir=root,
+        repos=(),
+        state_gate=StateGateConfig(enabled=False, branches=("main",)),
+    )
+    assert lanes.wiki_adr_directory(config) == expected

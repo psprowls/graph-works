@@ -15,8 +15,8 @@ from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
 
-from graph_works_core import apply_init, plan_init
-from graph_works_core.workspace.layout import WorkspaceLayout
+from gw_kernel import apply_init, plan_init
+from gw_kernel.workspace.layout import WorkspaceLayout
 
 GENERATOR_VERSION = 1
 TODAY = date(2026, 10, 1)

@@ -37,10 +37,10 @@ explicit project environment (replace all placeholders):
 uv run --no-project --python 3.12 python <plugin>/skills/auto-drive/references/launch-worker.py prepare \
   --plan-file <plan.json> --owner <owner_path> --repo-name <name> \
   --workspace <workspace>
-uv run --project <source-checkout> --package graph-works-core python \
+uv run --project <source-checkout> --package gw-orchestrate python \
   <plugin>/skills/finishing-relay/references/finish-receipt.py record \
   <owner_path> --workspace <workspace> --repo <name>
-uv run --project <source-checkout> --package graph-works-core python \
+uv run --project <source-checkout> --package gw-kernel python \
   <plugin>/skills/finishing-relay/references/finish-receipt.py inspect \
   <owner_path> --workspace <workspace>
 ```

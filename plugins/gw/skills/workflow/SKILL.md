@@ -372,7 +372,7 @@ Terminal handling, run the cleanup plan with this session's cwd and execute
 it per `<plugin>/skills/finishing-relay/references/finish-cleanup.md`:
 
 ```bash
-uv run --package graph-works-core python <plugin>/skills/finishing-relay/references/finish-receipt.py cleanup <work-path> --workspace <workspace> --runner-cwd "$PWD"
+uv run --package gw-pipeline python <plugin>/skills/finishing-relay/references/finish-receipt.py cleanup <work-path> --workspace <workspace> --runner-cwd "$PWD"
 ```
 
 Name any `deferred` worktree for the user: "remove it from another directory with `git worktree remove <path>` (or `orca worktree rm`)".
@@ -463,15 +463,15 @@ phase changed, then `gw work lint`). There is no `gw work edit` verb.
 Before presenting the integration choice, state each code target's default strategy. `gw work integrate` performs every code-repository integration and records a receipt whose verification matches its strategy: `ff` proves the target now contains the source commit itself, `merge` proves a merge commit whose parents are the pre-merge target and the source, and `squash` proves a single-parent commit on the pre-merge target whose tree equals Git's merge of the source into it. An integration gw cannot verify (a rebase, a squash made elsewhere, a PR merged upstream) is never forced through. Hold, and route it to the human, who may record it with `gw work accept-integration <work-path> --repo <name> --evidence <sha> --reason "<why>" --by <human> --apply` (attested evidence, marked `accepted`). Workers never run `accept-integration` and never hand-advance.
 
 Resolve `<plugin>` to this installed plugin's absolute directory. Run the helper
-with the core environment available: the command below works from the source
+with the orchestration runtime available: the commands below work from the source
 workspace; from an external checkout add `--project <graph-works source root>`
-to `uv run`, or use the installed interpreter containing graph-works-core. Never
-assume the worker's current directory is the Graph Works source checkout.
+to `uv run`, or use an installed interpreter containing gw-orchestrate
+(or the complete gw CLI runtime). Never assume the worker's current directory is the Graph Works source checkout.
 
 ```bash
-uv run --package graph-works-core python <plugin>/skills/finishing-relay/references/finish-receipt.py inspect <work-path> --workspace <workspace>
-uv run --package graph-works-core python <plugin>/skills/finishing-relay/references/finish-receipt.py record <work-path> --workspace <workspace> --repo <name>
-uv run --package graph-works-core python <plugin>/skills/finishing-relay/references/finish-receipt.py cleanup <work-path> --workspace <workspace> --runner-cwd <cwd>
+uv run --package gw-pipeline python <plugin>/skills/finishing-relay/references/finish-receipt.py inspect <work-path> --workspace <workspace>
+uv run --package gw-orchestrate python <plugin>/skills/finishing-relay/references/finish-receipt.py record <work-path> --workspace <workspace> --repo <name>
+uv run --package gw-pipeline python <plugin>/skills/finishing-relay/references/finish-receipt.py cleanup <work-path> --workspace <workspace> --runner-cwd <cwd>
 ```
 
 Inspect before any integration. `gw work integrate` records code targets itself; record each workspace-anchor target immediately after its merge and merged-result

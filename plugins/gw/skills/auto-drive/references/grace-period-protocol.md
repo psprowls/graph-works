@@ -2,7 +2,7 @@
 
 Referenced by every dispatch mode whose worker may block on `orca orchestration
 ask` and a human might not answer in time (`GRACE_PERIOD_TAIL` in
-`graph_works_core.workspace.pipeline`, folded into `RELAY_TAIL_SEED`). One copy,
+`gw_kernel.workspace.pipeline`, folded into `RELAY_TAIL_SEED`). One copy,
 so `finishing-relay/SKILL.md` and every relay dispatch prompt agree on what
 "the worker gives up" means.
 

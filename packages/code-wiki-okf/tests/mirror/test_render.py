@@ -162,7 +162,7 @@ def test_rich_file_without_language_or_package_omits_both_keys(graph_repo) -> No
 
 
 def test_neither_rich_nor_minimal_file_stamps_tokens(graph_repo) -> None:
-    # `run_tokens_update` (graph-works-core) is `tokens`'s sole writer now --
+    # `run_tokens_update` (gw-kernel) is `tokens`'s sole writer now --
     # see 2026-08-19-tech-debt-tokens-metric-proxy-string. This lane must not
     # stamp it, rich or minimal, in either the returned frontmatter or Render.
     rich_frontmatter, rich_render = render_file(graph_repo.reader, _context("src/pkg/user.py"), at=_AT, sha=_SHA)

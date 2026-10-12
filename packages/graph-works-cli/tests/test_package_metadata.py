@@ -1,4 +1,4 @@
-"""Published dependency metadata must resolve with graph-works-core offline."""
+"""Published metadata must resolve with kernel and application slices offline."""
 
 from __future__ import annotations
 
@@ -88,12 +88,12 @@ def _manifest_requirements(relative_manifest: str) -> dict[str, Requirement]:
             frozenset({">=0.3.2", "<0.4"}),
         ),
         (
-            "packages/graph-works-core/pyproject.toml",
+            "packages/gw-kernel/pyproject.toml",
             "code-graph-io",
             frozenset({">=0.3.2", "<0.4"}),
         ),
         (
-            "packages/graph-works-core/pyproject.toml",
+            "packages/gw-kernel/pyproject.toml",
             "code-wiki-okf",
             frozenset({">=0.5.4", "<0.6"}),
         ),
@@ -148,12 +148,12 @@ def _write_stub_wheel(directory: Path, name: str, version: str, *, extras: set[s
         archive.writestr(f"{dist_info}/RECORD", "")
 
 
-def test_built_wheel_resolves_with_core_from_published_metadata_offline(tmp_path: Path) -> None:
-    """Reintroducing mutually exclusive CLI/core constraints must break resolution."""
+def test_built_wheel_resolves_with_kernel_and_orchestrate_from_published_metadata_offline(tmp_path: Path) -> None:
+    """Mutually exclusive CLI/kernel/pipeline/orchestrate/work/wiki constraints must break resolution."""
     workspace_root = _WORKSPACE_ROOT
     wheelhouse = tmp_path / "wheelhouse"
     wheelhouse.mkdir()
-    for package in ("graph-works-cli", "graph-works-core"):
+    for package in ("graph-works-cli", "gw-kernel", "gw-pipeline", "gw-orchestrate", "gw-work", "gw-wiki"):
         subprocess.run(
             [
                 "uv",
@@ -172,10 +172,22 @@ def test_built_wheel_resolves_with_core_from_published_metadata_offline(tmp_path
         )
 
     cli_wheel = next(wheelhouse.glob("graph_works_cli-*.whl"))
-    core_wheel = next(wheelhouse.glob("graph_works_core-*.whl"))
+    core_wheel = next(wheelhouse.glob("gw_kernel-*.whl"))
+    pipeline_wheel = next(wheelhouse.glob("gw_pipeline-*.whl"))
+    orchestrate_wheel = next(wheelhouse.glob("gw_orchestrate-*.whl"))
+    work_wheel = next(wheelhouse.glob("gw_work-*.whl"))
+    wiki_wheel = next(wheelhouse.glob("gw_wiki-*.whl"))
     cli_requirements = _metadata_requirements(cli_wheel)
     core_requirements = _metadata_requirements(core_wheel)
-    assert "models-io" in {canonicalize_name(requirement.name) for requirement in cli_requirements}
+    pipeline_requirements = _metadata_requirements(pipeline_wheel)
+    orchestrate_requirements = _metadata_requirements(orchestrate_wheel)
+    work_requirements = _metadata_requirements(work_wheel)
+    wiki_requirements = _metadata_requirements(wiki_wheel)
+    assert {"models-io", "gw-pipeline", "gw-work", "gw-wiki"} <= {
+        canonicalize_name(requirement.name) for requirement in cli_requirements
+    }
+    assert "gw-kernel" in {canonicalize_name(requirement.name) for requirement in pipeline_requirements}
+    assert "gw-kernel" in {canonicalize_name(requirement.name) for requirement in work_requirements}
     cli_okf_io = next(
         requirement for requirement in cli_requirements if canonicalize_name(requirement.name) == "okf-io"
     )
@@ -184,9 +196,20 @@ def test_built_wheel_resolves_with_core_from_published_metadata_offline(tmp_path
     )
     assert str(cli_okf_io.specifier) == "<0.3,>=0.2.5"
     assert str(core_okf_io.specifier) == "<0.3,>=0.2.6"
+    pipeline_okf_ext = next(
+        requirement for requirement in pipeline_requirements if canonicalize_name(requirement.name) == "okf-ext"
+    )
+    assert pipeline_okf_ext.extras == {"schemas"}
 
     extras_by_name: dict[str, set[str]] = {}
-    for requirement in (*cli_requirements, *core_requirements):
+    for requirement in (
+        *cli_requirements,
+        *core_requirements,
+        *pipeline_requirements,
+        *orchestrate_requirements,
+        *work_requirements,
+        *wiki_requirements,
+    ):
         name = canonicalize_name(requirement.name)
         extras_by_name.setdefault(name, set()).update(requirement.extras)
     for name, versions in _STUB_VERSIONS.items():

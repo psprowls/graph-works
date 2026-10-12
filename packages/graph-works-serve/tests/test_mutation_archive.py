@@ -9,8 +9,8 @@ from typing import Any
 import pytest
 from graph_works_cli.cli import app
 from graph_works_cli.work_cli import main as work_cli
-from graph_works_core.workspace.layout import WorkspaceLayout
 from graph_works_serve import mutations
+from gw_kernel.workspace.layout import WorkspaceLayout
 from httpx import Response
 from mutation_helpers import make_client, serve_workspace, snapshot, write_item, write_proposal
 from starlette.testclient import TestClient

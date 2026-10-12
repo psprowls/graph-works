@@ -9,8 +9,8 @@ import pytest
 from code_graph_io.testing import raw_conn
 from graph_works_cli.cli import app
 from graph_works_cli.wiki_cli import drift as drift_module
-from graph_works_core.lint_drift.propagate_drift import Candidate, DriftBrief, PropagateResult, Target
-from graph_works_core.workspace.errors import WorkspaceConfigError, WorkspaceError
+from gw_kernel.workspace.errors import WorkspaceConfigError, WorkspaceError
+from gw_wiki.lint_drift.propagate_drift import Candidate, DriftBrief, PropagateResult, Target
 from typer.testing import CliRunner
 
 runner = CliRunner()

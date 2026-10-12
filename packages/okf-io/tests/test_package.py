@@ -16,7 +16,7 @@ def test_version_is_static():
     orphans `_subdirectories_of` would never link. `0.2.3` adds `value_shape`
     to the surface, so a consumer naming a raw value's shape does not have to
     reach for `type(...).__name__` and leak ruamel. `0.2.4` publishes the
-    private descriptor loader required by graph-works-core's synchronized
+    private descriptor loader required by gw-kernel's synchronized
     transaction boundary. `0.2.5` adds `outline`/`outline_index` and its three
     result types, a read-only reader over the same entry cutting `update`
     uses. `0.2.6` adds `walk`, `read_member`, `resolve_member`,

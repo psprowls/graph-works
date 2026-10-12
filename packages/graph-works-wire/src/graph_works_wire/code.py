@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from graph_works_core.code_read import CodeExcerpt, CodeGraphSearch, CodeGraphTree, Neighborhood
+from gw_wiki.code_read import CodeExcerpt, CodeGraphSearch, CodeGraphTree, Neighborhood
 
 
 def excerpt_payload(result: CodeExcerpt) -> dict[str, object]:

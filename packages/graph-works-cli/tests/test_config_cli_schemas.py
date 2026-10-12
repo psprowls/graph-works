@@ -12,9 +12,9 @@ from config_io import PlainYamlStore
 from graph_works_cli import exit_codes
 from graph_works_cli.config_cli import main as config_main
 from graph_works_cli.config_cli.main import config_app
-from graph_works_core import apply_init, plan_init
-from graph_works_core.workspace import work_schemas as ws
-from graph_works_core.workspace.layout import WorkspaceLayout
+from gw_kernel import apply_init, plan_init
+from gw_kernel.workspace import work_schemas as ws
+from gw_kernel.workspace.layout import WorkspaceLayout
 from typer.testing import CliRunner
 
 runner = CliRunner()

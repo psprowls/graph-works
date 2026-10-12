@@ -30,8 +30,8 @@ components are preserved; plain `.ts` files continue to use `typescript`.
 
 Stable from v1 forward — script consumers can rely on these. code-graph-io only
 declares the constants below (`exit_codes.py`); the command layer that returns
-them lives in the sibling `graph-works-core` package
-(`graph_works_core/graph/commands.py`, `graph_tools.py`) — the live user-facing
+them lives in the sibling `gw-kernel` package
+(`gw_kernel/graph/commands.py`, `graph_tools.py`) — the live user-facing
 entry point is `gw graph build`.
 
 | Code | Name | Meaning |

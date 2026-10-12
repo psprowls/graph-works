@@ -8,7 +8,7 @@ from pathlib import Path
 
 from code_graph_io import open_writer
 from graph_works_cli.cli import app
-from graph_works_core import graph_target, resolve
+from gw_kernel import graph_target, resolve
 from typer.testing import CliRunner
 
 runner = CliRunner()

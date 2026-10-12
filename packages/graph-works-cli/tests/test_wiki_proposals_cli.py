@@ -12,7 +12,7 @@ from doc_wiki_okf.actors import producer_actor
 from graph_works_cli import exit_codes
 from graph_works_cli.cli import app
 from graph_works_cli.wiki_cli import proposals as proposals_module
-from graph_works_core.proposals import commands as proposals_commands
+from gw_wiki.proposals import commands as proposals_commands
 from okf_ext.proposals import Proposal
 from typer.testing import CliRunner
 

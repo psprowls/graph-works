@@ -10,7 +10,7 @@ from pathlib import Path
 import pytest
 from graph_works_cli import exit_codes
 from graph_works_cli.cli import app
-from graph_works_core.util.read_index import ReadIndexBusy, ReadIndexUnavailable
+from gw_wiki.util.read_index import ReadIndexBusy, ReadIndexUnavailable
 from helpers import initialized_workspace as _initialized_workspace
 from typer.testing import CliRunner
 

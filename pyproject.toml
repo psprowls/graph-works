@@ -26,7 +26,10 @@ code-wiki-okf = { workspace = true }
 work-tracker-okf = { workspace = true }
 doc-wiki-okf = { workspace = true }
 repositories-okf = { workspace = true }
-graph-works-core = { workspace = true }
+gw-kernel = { workspace = true }
+gw-wiki = { workspace = true }
+gw-pipeline = { workspace = true }
+gw-work = { workspace = true }
 graph-works-wire = { workspace = true }
 workflow-local = { workspace = true }
 workflow-orca = { workspace = true }
@@ -60,7 +63,10 @@ dev = [
     "types-jsonschema",
     "types-PyYAML",
     "doc-wiki-okf",
-    "graph-works-core",
+    "gw-kernel",
+    "gw-wiki",
+    "gw-pipeline",
+    "gw-work",
     "workflow-local",
     "workflow-orca",
 ]
@@ -85,16 +91,20 @@ select = ["E", "F", "I", "UP", "B", "SIM", "RUF", "ANN", "PTH"]
 "packages/subagents-io/tests/**" = ["ANN"]
 "packages/doc-wiki-okf/tests/**" = ["ANN"]
 "packages/repositories-okf/tests/**" = ["ANN"]
-"packages/graph-works-core/tests/**" = ["ANN"]
+"packages/gw-kernel/tests/**" = ["ANN"]
+"packages/gw-wiki/tests/**" = ["ANN"]
+"packages/gw-pipeline/tests/**" = ["ANN"]
+"packages/gw-work/tests/**" = ["ANN"]
+"packages/gw-orchestrate/tests/**" = ["ANN"]
 "packages/graph-works-wire/tests/**" = ["ANN"]
 "packages/workflow-local/tests/**" = ["ANN"]
 "packages/workflow-orca/tests/**" = ["ANN"]
 "packages/graph-works-cli/tests/**" = ["ANN"]
-"packages/graph-works-core/src/graph_works_core/prompts/_fragments/*.py" = ["E501"]
-"packages/graph-works-core/src/graph_works_core/query/prompts/code_reader.py" = ["E501"]
-"packages/graph-works-core/src/graph_works_core/query/prompts/synthesizer.py" = ["E501"]
-"packages/graph-works-core/src/graph_works_core/query/prompts/query_orchestrator.py" = ["E501"]
-"packages/graph-works-core/src/graph_works_core/query/prompts/librarian.py" = ["E501"]
+"packages/gw-wiki/src/gw_wiki/prompts/_fragments/*.py" = ["E501"]
+"packages/gw-wiki/src/gw_wiki/query/prompts/code_reader.py" = ["E501"]
+"packages/gw-wiki/src/gw_wiki/query/prompts/synthesizer.py" = ["E501"]
+"packages/gw-wiki/src/gw_wiki/query/prompts/query_orchestrator.py" = ["E501"]
+"packages/gw-wiki/src/gw_wiki/query/prompts/librarian.py" = ["E501"]
 
 [tool.mypy]
 python_version = "3.12"
@@ -115,7 +125,7 @@ platform = "linux"
 module = ["botocore.*"]
 ignore_missing_imports = true
 
-# bm25s ships no py.typed marker or stub package. graph-works-core's index
+# bm25s ships no py.typed marker or stub package. gw-wiki's index
 # build/query is a thin wrapper over its documented API.
 [[tool.mypy.overrides]]
 module = ["bm25s.*"]
@@ -163,7 +173,7 @@ precision = 2
 [tool.importlinter]
 root_packages = [
     "okf_io", "okf_ext", "code_graph_io", "config_io", "models_io", "subagents_io",
-    "code_wiki_okf", "work_tracker_okf", "doc_wiki_okf", "repositories_okf", "graph_works_core",
+    "code_wiki_okf", "work_tracker_okf", "doc_wiki_okf", "repositories_okf", "gw_kernel", "gw_pipeline", "gw_orchestrate", "gw_work", "gw_wiki",
     "workflow_local", "workflow_orca", "graph_works_cli", "graph_works_serve", "graph_works_wire", "plugin_fork_io",
 ]
 # Lets a forbidden contract name an external package (typer, click).
@@ -258,7 +268,7 @@ source_modules = [
     "okf_io", "okf_ext", "code_wiki_okf", "work_tracker_okf", "doc_wiki_okf", "repositories_okf",
     "config_io", "subagents_io", "models_io", "code_graph_io", "plugin_fork_io",
 ]
-forbidden_modules = ["graph_works_core", "graph_works_serve"]
+forbidden_modules = ["gw_kernel", "gw_pipeline", "gw_orchestrate", "gw_work", "gw_wiki", "graph_works_serve"]
 
 [[tool.importlinter.contracts]]
 name = "plugin-fork-io never imports workspace siblings"
@@ -267,7 +277,7 @@ source_modules = ["plugin_fork_io"]
 forbidden_modules = [
     "okf_io", "okf_ext", "code_graph_io", "config_io", "models_io",
     "subagents_io", "code_wiki_okf", "work_tracker_okf", "doc_wiki_okf", "repositories_okf",
-    "graph_works_core", "graph_works_cli", "graph_works_serve", "graph_works_wire", "workflow_local", "workflow_orca",
+    "gw_kernel", "gw_pipeline", "gw_wiki", "graph_works_cli", "graph_works_serve", "graph_works_wire", "workflow_local", "workflow_orca",
 ]
 
 # The seam only works in one direction. `independence` forbids every edge AMONG
@@ -296,7 +306,7 @@ name = "Backends never import each other"
 type = "independence"
 modules = ["workflow_local", "workflow_orca"]
 
-# The interface band sits above graph-works-core: `graph-works-cli` and
+# The interface band sits above gw-kernel: `graph-works-cli` and
 # `graph-works-serve`, with `graph-works-wire` as the one home of every
 # typed-result -> JSON projection they share. Two edges would undo that
 # placement, and until now no contract stated either.
@@ -326,51 +336,68 @@ source_modules = ["graph_works_serve"]
 forbidden_modules = ["typer", "click"]
 allow_indirect_imports = true
 
-# Core never imports the interface band. Nothing stopped `graph_works_core`
-# importing the CLI before this.
+# Epic D-012: the five-slice tree replaces kernel/interface and per-slice
+# sibling prohibitions. Independent siblings (|) forbid both directions;
+# the extra forbidden contract closes the consumers-to-wiki layering edge.
 [[tool.importlinter.contracts]]
-name = "Core never imports the interface band"
-type = "forbidden"
-source_modules = ["graph_works_core"]
-forbidden_modules = ["graph_works_cli", "graph_works_serve", "graph_works_wire"]
+name = "The application band is a tree of five slices beneath the interfaces"
+type = "layers"
+layers = [
+    "graph_works_cli | graph_works_serve",
+    "graph_works_wire",
+    "gw_orchestrate | gw_work",
+    "gw_pipeline | gw_wiki",
+    "gw_kernel",
+]
 
 [[tool.importlinter.contracts]]
-name = "graph_works_core verticals sit above shared substrate"
+name = "Pipeline consumers never import the wiki slice"
+type = "forbidden"
+source_modules = ["gw_orchestrate", "gw_work"]
+forbidden_modules = ["gw_wiki"]
+
+[[tool.importlinter.contracts]]
+name = "gw_kernel verticals sit above shared substrate"
 type = "layers"
-containers = ["graph_works_core"]
+containers = ["gw_kernel"]
 layers = [
-    "ingest : scan : query : lint_drift : archive : orchestrate : wiki_stats : wiki_page : tag_policy : work : util : agent_config : events : proposals : code_read : repositories",
+    "wiki_stats : tag_policy : events",
     "guidance",
-    "agent_substrate : graph : prompts : read_session",
+    "graph : read_session",
     "workspace",
 ]
 
 [[tool.importlinter.contracts]]
-name = "graph_works_core verticals never import each other"
+name = "gw_kernel verticals never import each other"
 type = "independence"
 modules = [
-    "graph_works_core.ingest",
-    "graph_works_core.scan",
-    "graph_works_core.query",
-    "graph_works_core.lint_drift",
-    "graph_works_core.archive",
-    "graph_works_core.orchestrate",
-    "graph_works_core.wiki_stats",
-    "graph_works_core.wiki_page",
-    "graph_works_core.tag_policy",
-    "graph_works_core.work",
-    "graph_works_core.util",
-    "graph_works_core.agent_config",
-    "graph_works_core.events",
-    "graph_works_core.proposals",
-    "graph_works_core.code_read",
-    "graph_works_core.repositories",
+    "gw_kernel.wiki_stats",
+    "gw_kernel.tag_policy",
+    "gw_kernel.events",
 ]
 
 # Display interfaces reach the read index through core's read-session seam.
 [[tool.importlinter.contracts]]
-name = "Only core reads the read index"
+name = "Display interfaces use the kernel read-session seam for the read index"
 type = "forbidden"
 source_modules = ["graph_works_cli", "graph_works_serve", "graph_works_wire"]
 forbidden_modules = ["okf_ext.readindex"]
 allow_indirect_imports = true
+
+[[tool.importlinter.contracts]]
+name = "gw_wiki verticals sit above shared substrate"
+type = "layers"
+containers = ["gw_wiki"]
+layers = [
+    "scan : ingest : query : lint_drift : proposals : wiki_page : code_read : repositories : agent_config : util",
+    "agent_substrate : prompts",
+]
+
+[[tool.importlinter.contracts]]
+name = "gw_wiki verticals never import each other"
+type = "independence"
+modules = [
+    "gw_wiki.scan", "gw_wiki.ingest", "gw_wiki.query", "gw_wiki.lint_drift",
+    "gw_wiki.proposals", "gw_wiki.wiki_page", "gw_wiki.code_read",
+    "gw_wiki.repositories", "gw_wiki.agent_config", "gw_wiki.util",
+]

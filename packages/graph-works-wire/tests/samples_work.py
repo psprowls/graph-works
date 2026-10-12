@@ -10,25 +10,25 @@ from pathlib import Path
 from types import MappingProxyType
 from types import SimpleNamespace as ns
 
-from graph_works_core.orchestrate.accept_integration import AcceptIntegrationResult
-from graph_works_core.orchestrate.asks import AskAnswerResult, AskResult
-from graph_works_core.orchestrate.dispatch import DispatchFailure, DispatchResult, ObservedPlacement
-from graph_works_core.orchestrate.dispatch_record import Overrides
-from graph_works_core.orchestrate.gate import GateCheckResult, GateRunResult, GateWaitResult, NotifyResult, PlannedUnit
-from graph_works_core.orchestrate.gate_receipts import GateEvidence, GateRun, UnitEvidence
-from graph_works_core.orchestrate.integrate import IntegrateResult
-from graph_works_core.orchestrate.merge_workspace import MergeWorkspaceResult
-from graph_works_core.orchestrate.placement import ReaderRecord
-from graph_works_core.orchestrate.reroute import RerouteResult
-from graph_works_core.orchestrate.wait import Absorbed, WaitResult
-from graph_works_core.orchestrate.workspace_prepare import WorkspacePrepareResult, WorkspaceStep
-from graph_works_core.work.affecting import AffectingRow, WorkAffecting
-from graph_works_core.work.carried import CarriedContext, FilledSlot, SlotFill
-from graph_works_core.work.commands import DispatchExplanation, ItemRead, ItemSource
-from graph_works_core.work.obligations import ObligationRecord
-from graph_works_core.work.reconcile import CitedDecision, CommitRef, LandedSibling, ReconcileContext
-from graph_works_core.workspace.dispatch import packaged_rules_matching, resolve_dispatch
 from graph_works_wire import work
+from gw_kernel.workspace.dispatch import packaged_rules_matching, resolve_dispatch
+from gw_orchestrate.accept_integration import AcceptIntegrationResult
+from gw_orchestrate.asks import AskAnswerResult, AskResult
+from gw_orchestrate.dispatch import DispatchFailure, DispatchResult, ObservedPlacement
+from gw_orchestrate.dispatch_record import Overrides
+from gw_orchestrate.gate import GateCheckResult, GateRunResult, GateWaitResult, NotifyResult, PlannedUnit
+from gw_orchestrate.gate_receipts import GateEvidence, GateRun, UnitEvidence
+from gw_orchestrate.integrate import IntegrateResult
+from gw_orchestrate.merge_workspace import MergeWorkspaceResult
+from gw_orchestrate.placement import ReaderRecord
+from gw_orchestrate.reroute import RerouteResult
+from gw_orchestrate.wait import Absorbed, WaitResult
+from gw_orchestrate.workspace_prepare import WorkspacePrepareResult, WorkspaceStep
+from gw_work.affecting import AffectingRow, WorkAffecting
+from gw_work.carried import CarriedContext, FilledSlot, SlotFill
+from gw_work.commands import DispatchExplanation, ItemRead, ItemSource
+from gw_work.obligations import ObligationRecord
+from gw_work.reconcile import CitedDecision, CommitRef, LandedSibling, ReconcileContext
 from work_tracker_okf.obligations import Obligation, ObligationPlan
 from work_tracker_okf.placement import ReaderObservation, ReaderReceiptPlan
 from work_tracker_okf.workflow import Blocker

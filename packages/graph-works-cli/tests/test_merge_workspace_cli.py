@@ -5,8 +5,8 @@ import subprocess
 from datetime import date
 
 from graph_works_cli.cli import app
-from graph_works_core import apply_init, plan_init
-from graph_works_core.orchestrate.workspace_prepare import run_prepare_workspace
+from gw_kernel import apply_init, plan_init
+from gw_orchestrate.workspace_prepare import run_prepare_workspace
 from typer.testing import CliRunner
 
 runner = CliRunner()

@@ -6,10 +6,10 @@ import asyncio
 from datetime import UTC, datetime
 
 import typer
-from graph_works_core.lint_drift.lint import run_lint
-from graph_works_core.workspace.config import load_workspace_config
-from graph_works_core.workspace.lint_repos import lint_repositories
 from graph_works_wire.wiki import lint_payload
+from gw_kernel.workspace.config import load_workspace_config
+from gw_kernel.workspace.lint_repos import lint_repositories
+from gw_wiki.lint_drift.lint import run_lint
 
 from graph_works_cli.json_output import encode
 from graph_works_cli.wiki_cli.errors import exit_error

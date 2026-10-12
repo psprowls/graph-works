@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from conftest import cli_json
-from graph_works_core.workspace.layout import WorkspaceLayout
+from gw_kernel.workspace.layout import WorkspaceLayout
 from pytest import MonkeyPatch
 from starlette.testclient import TestClient
 

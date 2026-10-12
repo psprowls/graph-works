@@ -3,7 +3,7 @@
 `uv tool install` records an *editable* install, materialized as `.pth` files holding the absolute
 path of the checkout it was installed from. Bare `gw` therefore means "the CLI as it exists in that
 checkout right now" — normally `main`. Run from a worktree whose branch changed
-`work-tracker-okf` / `graph-works-core` routing, the imports all succeed, from the wrong tree, and the
+`work-tracker-okf` / `gw-kernel` routing, the imports all succeed, from the wrong tree, and the
 stage routing is computed from stale logic. Not an error: a plausible wrong answer.
 
 Running bare `gw` from a worktree is *intended*, so "different checkout" alone cannot be the trigger;
@@ -32,13 +32,13 @@ import typer
 
 _KILL_SWITCH = "GRAPH_WORKS_PROVENANCE_GUARD"
 
-# Walk-up marker identifying a workspace checkout root. graph-works-core's own pyproject is used
+# Walk-up marker identifying a workspace checkout root. gw-kernel's own pyproject is used
 # because it is the package whose staleness this guard is about.
-_MARKER = Path("packages") / "graph-works-core" / "pyproject.toml"
+_MARKER = Path("packages") / "gw-kernel" / "pyproject.toml"
 
 # The only trees whose staleness changes a routing answer. Repo-relative and forward-slashed: these
 # are git pathspecs, not filesystem paths.
-_ROUTING_PATHS = ("packages/work-tracker-okf/src", "packages/graph-works-core/src")
+_ROUTING_PATHS = ("packages/work-tracker-okf/src", "packages/gw-kernel/src")
 
 _GIT_TIMEOUT_SECONDS = 5
 
@@ -57,12 +57,12 @@ def _checkout_root(start: Path) -> Path | None:
 def _source_checkout_root() -> Path | None:
     """Checkout the *running* routing code was loaded from, or None.
 
-    None means `graph_works_core` imports from somewhere with no workspace above it — a genuine
+    None means `gw_kernel` imports from somewhere with no workspace above it — a genuine
     non-editable wheel install. Nothing to compare, so nothing to say.
     """
-    import graph_works_core
+    import gw_kernel
 
-    return _checkout_root(Path(graph_works_core.__file__).resolve().parent)
+    return _checkout_root(Path(gw_kernel.__file__).resolve().parent)
 
 
 def _git(args: list[str], cwd: Path) -> subprocess.CompletedProcess[str] | None:
@@ -128,7 +128,7 @@ def _format_warning(source_root: Path, sha: str) -> str:
     """The warning text — names the fix, which under current policy is merge-and-pull."""
     return (
         f"warning: gw is running routing code from {source_root} (HEAD {sha[:7]})\n"
-        "         which differs from this checkout's packages/work-tracker-okf + graph-works-core.\n"
+        "         which differs from this checkout's packages/work-tracker-okf + gw-kernel.\n"
         "         Stage routing may be computed from stale logic.\n"
         "         Fix: merge this branch to main and pull the main checkout\n"
         "              (editable install — no reinstall needed).\n"

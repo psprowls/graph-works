@@ -6,7 +6,7 @@
 Lifted verbatim out of `work_tracker_okf.compose`, where these three functions
 already served two call sites -- the work lane's own log line and the filing
 plan's compare-and-swap. A third consumer (`gw util log`, through
-`graph_works_core.util`) would have made a third copy of the same `fcntl` +
+`gw_wiki.util`) would have made a third copy of the same `fcntl` +
 `mkstemp` dance, so it moves here: a beyond-spec write over *any* OKF bundle,
 which is what tier 2 is for.
 

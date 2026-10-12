@@ -12,10 +12,10 @@ import pytest
 from graph_works_cli import exit_codes
 from graph_works_cli.cli import app
 from graph_works_cli.work_cli import gate as gate_cli
-from graph_works_core import apply_init, plan_init
-from graph_works_core.orchestrate.gate import GateCheckResult, GateRunResult, GateWaitResult, PlannedUnit
-from graph_works_core.orchestrate.gate_receipts import UnitEvidence
-from graph_works_core.workspace.errors import WorkspaceError
+from gw_kernel import apply_init, plan_init
+from gw_kernel.workspace.errors import WorkspaceError
+from gw_orchestrate.gate import GateCheckResult, GateRunResult, GateWaitResult, PlannedUnit
+from gw_orchestrate.gate_receipts import UnitEvidence
 from typer.testing import CliRunner
 
 runner = CliRunner()

@@ -1,6 +1,6 @@
 """`gw graph` — build, describe, find and export the code graph.
 
-Four commands over `graph_works_core.graph.commands`, which already returns a
+Four commands over `gw_kernel.graph.commands`, which already returns a
 `GraphResult` carrying a stable exit code and two rendered strings. This module
 resolves `--workspace` into a `GraphTarget`, calls the matching core function,
 routes `output`/`error` to stdout/stderr, and exits `result.exit_code`. There is
@@ -15,12 +15,12 @@ from pathlib import Path
 from typing import Never
 
 import typer
-from graph_works_core.graph.commands import GraphResult, GraphTarget, graph_target
-from graph_works_core.graph.commands import build as core_build
-from graph_works_core.graph.commands import describe as core_describe
-from graph_works_core.graph.commands import export as core_export
-from graph_works_core.graph.commands import find as core_find
-from graph_works_core.workspace.errors import WorkspaceConfigError
+from gw_kernel.graph.commands import GraphResult, GraphTarget, graph_target
+from gw_kernel.graph.commands import build as core_build
+from gw_kernel.graph.commands import describe as core_describe
+from gw_kernel.graph.commands import export as core_export
+from gw_kernel.graph.commands import find as core_find
+from gw_kernel.workspace.errors import WorkspaceConfigError
 
 from graph_works_cli import exit_codes
 from graph_works_cli.errors import echo_error, exit_error

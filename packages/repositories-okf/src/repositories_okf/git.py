@@ -1,6 +1,6 @@
 """The only module in this package that runs a process: git, handed in by the caller.
 
-The caller (graph-works-core) resolves the executable (`toolchain.git`, `GW_GIT`, PATH) and the environment. This
+The caller (gw-kernel) resolves the executable (`toolchain.git`, `GW_GIT`, PATH) and the environment. This
 module reads neither. Every call has a timeout, and every failure is a `GitFailure` value, never an exception. That
 is the shape of `code_wiki_okf.git_state`, but strict rather than best-effort.
 

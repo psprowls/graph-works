@@ -13,8 +13,8 @@ import urllib.request
 from collections.abc import Iterator
 
 import pytest
-from graph_works_core.workspace.layout import WorkspaceLayout
 from graph_works_serve import discovery_file as df
+from gw_kernel.workspace.layout import WorkspaceLayout
 from watcher_helpers import write
 
 

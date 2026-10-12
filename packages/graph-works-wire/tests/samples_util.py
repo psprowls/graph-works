@@ -7,10 +7,10 @@ from datetime import date
 from pathlib import Path
 from types import SimpleNamespace as ns
 
-from graph_works_core.util.commands import LogEntryRead, LogRead
-from graph_works_core.util.platform import Capability, PlatformReport, ProbeResult
-from graph_works_core.util.read_index import ReadIndexReport
 from graph_works_wire import util
+from gw_wiki.util.commands import LogEntryRead, LogRead
+from gw_wiki.util.platform import Capability, PlatformReport, ProbeResult
+from gw_wiki.util.read_index import ReadIndexReport
 
 _REPORT = PlatformReport(
     schema_version=1,

@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 from graph_works_cli.cli import app
 from graph_works_cli.wiki_cli import query as query_module
-from graph_works_core.query.commands import QueryResult
+from gw_wiki.query.commands import QueryResult
 from models_io import BedrockAccessDenied, ModelsIoError, ProviderNotInstalled
 from typer.testing import CliRunner
 
@@ -21,7 +21,7 @@ def no_real_bedrock(monkeypatch: pytest.MonkeyPatch) -> None:
 
     A test that wants an embedder patches `make_bedrock_embeddings` (or the CLI's own seams) itself.
     """
-    from graph_works_core.query import commands as q
+    from gw_wiki.query import commands as q
 
     def unavailable(*_args: object, **_kwargs: object) -> object:
         raise ProviderNotInstalled("bedrock is stubbed out in the CLI query tests")
@@ -82,7 +82,7 @@ def test_query_defaults_to_the_claude_code_brief_and_calls_no_role_llm(
     monkeypatch: pytest.MonkeyPatch, initialized_workspace: Path
 ) -> None:
     """The system-wide claude_code default must reach the brief path, not run_query."""
-    from graph_works_core.query.commands import QueryBrief, QueryPageBrief
+    from gw_wiki.query.commands import QueryBrief, QueryPageBrief
 
     embedder = object()
     brief = QueryBrief(
@@ -154,7 +154,7 @@ def test_query_defaults_to_the_claude_code_brief_text_output(
     monkeypatch: pytest.MonkeyPatch, initialized_workspace: Path
 ) -> None:
     """The non-JSON rendering of a claude_code brief lists the query and its top pages."""
-    from graph_works_core.query.commands import QueryBrief, QueryPageBrief
+    from gw_wiki.query.commands import QueryBrief, QueryPageBrief
 
     brief = QueryBrief(
         query="why",
@@ -326,7 +326,7 @@ def test_query_reports_provider_access_denial_without_stdout_or_traceback(
 def test_query_exhausted_embedding_limit_uses_shared_error(monkeypatch, initialized_workspace, backend):
     """Real retrieval overflow must reach the CLI error route on either backend."""
     from botocore.exceptions import ClientError
-    from graph_works_core.query import commands as q
+    from gw_wiki.query import commands as q
 
     class Provider:
         def embed_query(self, text):
@@ -355,7 +355,7 @@ def test_query_exhausted_embedding_limit_uses_shared_error(monkeypatch, initiali
 
 
 def test_query_large_page_returns_normal_brief_json(monkeypatch, initialized_workspace):
-    from graph_works_core.query import commands as q
+    from gw_wiki.query import commands as q
 
     class Provider:
         def embed_query(self, text):
@@ -388,7 +388,7 @@ def test_query_real_bedrock_adapter_logs_rejections_without_uncaught_error(
     import sys
 
     from botocore.exceptions import ClientError
-    from graph_works_core.query import commands as q
+    from gw_wiki.query import commands as q
     from langchain_aws import BedrockEmbeddings
 
     calls = []
@@ -483,7 +483,7 @@ def test_query_embedding_failure_is_a_lexical_brief_with_a_warning(
     monkeypatch: pytest.MonkeyPatch, initialized_workspace: Path
 ) -> None:
     """Credentials missing at call time: the brief still answers, and says why it went lexical."""
-    from graph_works_core.query import commands as q
+    from gw_wiki.query import commands as q
 
     class NoCredentials:
         def embed_query(self, text: str) -> list[float]:

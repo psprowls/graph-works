@@ -1,7 +1,7 @@
 """`gw work` — the work-item pipeline verbs.
 
 Interface band only (ADR 2026-08-13-command-modules): parse arguments, resolve the workspace, call
-**one** `graph-works-core` command, project the typed result, choose an exit
+**one** `gw-kernel` command, project the typed result, choose an exit
 code. No business composition lives here, and nothing under
 `graph_works_cli` imports `work_tracker_okf` -- `test_work_surface.py`
 asserts it.
@@ -22,30 +22,30 @@ from pathlib import Path
 from typing import Any, Never, cast
 
 import typer
-from graph_works_core.archive.commands import run_archive, stranded_warnings
-from graph_works_core.orchestrate.accept_integration import run_accept_integration
-from graph_works_core.orchestrate.commands import run_orchestrate
-from graph_works_core.orchestrate.dispatch import run_dispatch
-from graph_works_core.orchestrate.gate import gate_wait_facts
-from graph_works_core.orchestrate.integrate import run_integrate
-from graph_works_core.orchestrate.merge_workspace import run_merge_workspace
-from graph_works_core.orchestrate.placement import (
+from graph_works_wire import work as wire_work
+from gw_kernel.workspace.config import WorkspaceConfig, load_workspace_config
+from gw_kernel.workspace.errors import WorkspaceConfigError, WorkspaceError
+from gw_kernel.workspace.layout import WorkspaceLayout
+from gw_kernel.workspace.lint_repos import lint_repositories
+from gw_orchestrate.accept_integration import run_accept_integration
+from gw_orchestrate.commands import run_orchestrate
+from gw_orchestrate.dispatch import run_dispatch
+from gw_orchestrate.gate import gate_wait_facts
+from gw_orchestrate.integrate import run_integrate
+from gw_orchestrate.merge_workspace import run_merge_workspace
+from gw_orchestrate.placement import (
     ReaderObservation,
     run_record_baseline,
     run_record_placement,
     run_record_reader,
 )
-from graph_works_core.orchestrate.reroute import run_reroute
-from graph_works_core.orchestrate.stage_advance import ExpectedPhase, run_stage_advance
-from graph_works_core.orchestrate.wait import WAIT_FLOOR_S, WaitClock, WaitFailed, apply_wait_floor, run_wait
-from graph_works_core.orchestrate.workspace_prepare import run_prepare_workspace
-from graph_works_core.work import commands as work
-from graph_works_core.workspace.config import WorkspaceConfig, load_workspace_config
-from graph_works_core.workspace.errors import WorkspaceConfigError, WorkspaceError
-from graph_works_core.workspace.finish import STRATEGIES, IntegrationStrategy
-from graph_works_core.workspace.layout import WorkspaceLayout
-from graph_works_core.workspace.lint_repos import lint_repositories
-from graph_works_wire import work as wire_work
+from gw_orchestrate.reroute import run_reroute
+from gw_orchestrate.stage_advance import ExpectedPhase, run_stage_advance
+from gw_orchestrate.wait import WAIT_FLOOR_S, WaitClock, WaitFailed, apply_wait_floor, run_wait
+from gw_orchestrate.workspace_prepare import run_prepare_workspace
+from gw_pipeline.finish import STRATEGIES, IntegrationStrategy
+from gw_work import commands as work
+from gw_work.archive.commands import run_archive, stranded_warnings
 
 from graph_works_cli import exit_codes
 from graph_works_cli.provenance import warn_if_stale_routing

@@ -84,7 +84,7 @@ def _render_matches_disk(document: Document, render: Render) -> bool:
     return `False` for every rich page on every run, in production, even
     though the underlying content is unchanged -- an idempotence check that
     always fails is not one. `_PROVENANCE_KEYS` also carries `tokens`, though
-    `render_file` no longer stamps it: `run_tokens_update` (graph-works-core)
+    `render_file` no longer stamps it: `run_tokens_update` (gw-kernel)
     is that key's sole writer now, so a *foreign* process changes it between
     runs, and comparing it here would make every page look stale on the first
     `gw util tokens` after a scan -- the same failure mode, a different cause.

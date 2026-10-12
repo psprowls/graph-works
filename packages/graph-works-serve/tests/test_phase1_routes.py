@@ -5,15 +5,15 @@ from __future__ import annotations
 from typing import Any
 
 from conftest import cli_json, write_item
-from graph_works_core.proposals import run_proposals_read
-from graph_works_core.wiki_page.commands import run_wiki_tree
-from graph_works_core.work import commands as work
-from graph_works_core.workspace.dispatch_config import run_dispatch_rules
-from graph_works_core.workspace.layout import WorkspaceLayout
-from graph_works_core.workspace.schema_read import run_schema_read
 from graph_works_wire import config as wire_config
 from graph_works_wire import wiki as wire_wiki
 from graph_works_wire import work as wire_work
+from gw_kernel.workspace.dispatch_config import run_dispatch_rules
+from gw_kernel.workspace.layout import WorkspaceLayout
+from gw_kernel.workspace.schema_read import run_schema_read
+from gw_wiki.proposals import run_proposals_read
+from gw_wiki.wiki_page.commands import run_wiki_tree
+from gw_work import commands as work
 from starlette.testclient import TestClient
 
 

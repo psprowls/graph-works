@@ -1,0 +1,27 @@
+"""Build hooks for gw-kernel distribution resources."""
+
+from __future__ import annotations
+
+from pathlib import Path
+from typing import Any
+
+from hatchling.builders.hooks.plugin.interface import BuildHookInterface
+
+
+class CustomBuildHook(BuildHookInterface):
+    """Include canonical hook scripts in direct wheel builds.
+
+    Source distributions stage the scripts inside ``src/gw_kernel``;
+    wheels built from an sdist therefore include them through the normal
+    package traversal and need no forced path.
+    """
+
+    def initialize(self, version: str, build_data: dict[str, Any]) -> None:
+        packaged = Path(self.root) / "src" / "gw_kernel" / "_hook_scripts"
+        if packaged.is_dir():
+            return
+
+        canonical = Path(self.root).parents[1] / "plugins" / "gw" / "hooks" / "examples"
+        if not canonical.is_dir():
+            raise FileNotFoundError(f"canonical hook scripts not found: {canonical}")
+        build_data["force_include"][str(canonical)] = "gw_kernel/_hook_scripts"

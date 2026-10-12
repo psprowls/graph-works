@@ -38,7 +38,7 @@ from convert_config import (
     sync_projection,
     validate_manifest,
 )
-from graph_works_core.workspace.layout import layout_for
+from gw_kernel.workspace.layout import layout_for
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures" / "config"
 
@@ -407,7 +407,7 @@ def test_control_plane_writes_the_gitignore(tmp_path: Path) -> None:
     layout = written(tmp_path, good_body())
     create_control_plane(layout)
     body = (layout.config_dir / ".gitignore").read_text(encoding="utf-8")
-    assert body.startswith("# Written by graph-works-core at workspace init.\n")
+    assert body.startswith("# Written by gw-kernel at workspace init.\n")
     assert "/cache/\n" in body
     assert "/worktrees/\n" in body
 
@@ -627,8 +627,8 @@ def test_conversion_refuses_retired_dispatch_before_writes(tmp_path: Path, key: 
 
 
 def test_new_conversion_seeds_consumable_dispatch_and_preserves_authored_file(tmp_path: Path) -> None:
-    from graph_works_core.workspace.dispatch_config import load_dispatch_config
-    from graph_works_core.workspace.dispatch_projection import write_dispatch_projection
+    from gw_kernel.workspace.dispatch_config import load_dispatch_config
+    from gw_kernel.workspace.dispatch_projection import write_dispatch_projection
 
     root = tmp_path / "clean"
     root.mkdir()

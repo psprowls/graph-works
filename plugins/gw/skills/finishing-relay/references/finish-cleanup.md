@@ -7,7 +7,7 @@ from core; the removal happens here, in prose, because core never calls Orca.
 ## Get the plan
 
 ```bash
-uv run --package graph-works-core python <plugin>/skills/finishing-relay/references/finish-receipt.py cleanup <work-path> --workspace <workspace> --runner-cwd <cwd>
+uv run --package gw-pipeline python <plugin>/skills/finishing-relay/references/finish-receipt.py cleanup <work-path> --workspace <workspace> --runner-cwd <cwd>
 ```
 
 `<cwd>` is the directory the calling session runs in. Exit 1 means `refusal`

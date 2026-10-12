@@ -10,8 +10,8 @@ from pathlib import Path
 import pytest
 from graph_works_cli.cli import app
 from graph_works_cli.wiki_cli import scan as scan_cli
-from graph_works_core.workspace.layout import WorkspaceLayout
 from graph_works_serve import mutations
+from gw_kernel.workspace.layout import WorkspaceLayout
 from mutation_helpers import frozen_datetime, make_client, serve_workspace, snapshot
 from starlette.testclient import TestClient
 from typer.testing import CliRunner

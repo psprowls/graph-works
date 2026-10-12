@@ -65,7 +65,7 @@ def load_tree_admitting_unwritable_names(root: Path, files: Mapping[str, str]) -
     from that text -- so a test keyed on that member's content keeps running on a host
     where the name itself is unwritable. This is a probe, not a predicate (D-041): the
     helper attempts the write and treats `OSError` as "this host cannot hold this
-    name," rather than encoding a second, driftable copy of `graph-works-core`'s
+    name," rather than encoding a second, driftable copy of `gw-kernel`'s
     name-shape rules -- which okf-io, a band-1 package, may not import anyway.
 
     Two refusals, both raising `ValueError`:

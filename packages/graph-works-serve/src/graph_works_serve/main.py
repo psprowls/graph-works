@@ -21,8 +21,8 @@ from typing import Any, NoReturn, cast
 from urllib.parse import urlsplit
 
 import uvicorn
-from graph_works_core.workspace import discovery
-from graph_works_core.workspace.errors import WorkspaceNotFound
+from gw_kernel.workspace import discovery
+from gw_kernel.workspace.errors import WorkspaceNotFound
 
 from graph_works_serve.app import build_app
 from graph_works_serve.catalog import render

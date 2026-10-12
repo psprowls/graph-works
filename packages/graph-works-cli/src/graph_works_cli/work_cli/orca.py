@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from graph_works_core.orchestrate.orca_port import OrcaPort
+from gw_orchestrate.orca_port import OrcaPort
 from workflow_orca.port import OrcaCliPort
 
 

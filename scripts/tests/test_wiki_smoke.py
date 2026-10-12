@@ -45,7 +45,7 @@ def test_smoke_run_creates_one_mirror_page_per_tracked_file(tmp_path: Path) -> N
     Entity pages (Package, App, TestSuite, AgentPlugin, and the Repository
     page itself) are also excluded since they're metadata pages, not file
     mirrors -- checked structurally via `is_entity_lane_page` (the same
-    predicate `sync/snapshot.py` and `graph_works_core.scan.commands` key
+    predicate `sync/snapshot.py` and `gw_wiki.scan.commands` key
     off) rather than a parent-directory-name heuristic, so a mirrored
     source file that happens to live under a directory literally named
     `packages/` etc. is never mistaken for an entity page.

@@ -13,8 +13,8 @@ import sys
 from pathlib import Path
 
 from code_wiki_okf.config import load_config
-from graph_works_core import resolve
-from graph_works_core.scan.commands import heading_key, is_unfilled, splice_sections
+from gw_kernel import resolve
+from gw_wiki.scan.commands import heading_key, is_unfilled, splice_sections
 from okf_ext.body import find_section
 from okf_ext.shape import load_sections
 from okf_io import load_bundle

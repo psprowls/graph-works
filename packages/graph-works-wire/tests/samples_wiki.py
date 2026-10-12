@@ -8,10 +8,12 @@ from pathlib import Path
 from types import MappingProxyType
 from types import SimpleNamespace as ns
 
-from graph_works_core.guidance.claims import ClaimRow, ClaimsRefresh, SkippedEntry
-from graph_works_core.guidance.closure import Closure, ClosureEntry, MatchedClaim
-from graph_works_core.guidance.commands import ClaimsClosureRun, ClaimsShow
-from graph_works_core.proposals import (
+from graph_works_wire import wiki
+from gw_kernel.guidance.claims import ClaimRow, ClaimsRefresh, SkippedEntry
+from gw_kernel.guidance.closure import Closure, ClosureEntry, MatchedClaim
+from gw_kernel.guidance.commands import ClaimsClosureRun, ClaimsShow
+from gw_kernel.workspace.commits import CommitOutcome
+from gw_wiki.proposals import (
     ProposalCheck,
     ProposalChecks,
     ProposalDecideRun,
@@ -19,13 +21,11 @@ from graph_works_core.proposals import (
     ProposalPreview,
     ProposalRefusal,
 )
-from graph_works_core.scan.commands import StructuralSummary
-from graph_works_core.scan.repo_scan import RepoScanRun
-from graph_works_core.wiki_page.citations import Citation, CitationCandidate, WikiCitations
-from graph_works_core.wiki_page.commands import PageLink, PageRead, TreeNode, TreePage, WikiTree
-from graph_works_core.wiki_page.section import SectionWriteRun
-from graph_works_core.workspace.commits import CommitOutcome
-from graph_works_wire import wiki
+from gw_wiki.scan.commands import StructuralSummary
+from gw_wiki.scan.repo_scan import RepoScanRun
+from gw_wiki.wiki_page.citations import Citation, CitationCandidate, WikiCitations
+from gw_wiki.wiki_page.commands import PageLink, PageRead, TreeNode, TreePage, WikiTree
+from gw_wiki.wiki_page.section import SectionWriteRun
 from okf_ext.proposals import ApplyResult, DecisionPlan, ProposalPlan, Write, WriteFailure
 
 LAYOUT = ns(root=Path("/ws"), bundle_dir=Path("/ws/okf"), config_dir=Path("/ws/.gw"), cache_dir=Path("/ws/.gw/cache"))

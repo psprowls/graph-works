@@ -11,11 +11,11 @@ from code_wiki_okf.entities.sync import SyncSummary
 from graph_works_cli import exit_codes
 from graph_works_cli.cli import app
 from graph_works_cli.wiki_cli import scan as scan_module
-from graph_works_core.scan.commands import ScanResult, StructuralSummary
-from graph_works_core.scan.repo_scan import RepoScanRun
-from graph_works_core.scan.scan_contract import ApplyResult, ScanWorklist, worklist_payload
-from graph_works_core.workspace.errors import ScanError, WorkspaceConfigError
 from graph_works_wire.wiki import repo_scan_payload
+from gw_kernel.workspace.errors import ScanError, WorkspaceConfigError
+from gw_wiki.scan.commands import ScanResult, StructuralSummary
+from gw_wiki.scan.repo_scan import RepoScanRun
+from gw_wiki.scan.scan_contract import ApplyResult, ScanWorklist, worklist_payload
 from typer.testing import CliRunner
 
 runner = CliRunner()

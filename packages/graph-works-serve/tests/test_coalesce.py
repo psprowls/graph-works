@@ -6,9 +6,9 @@ from functools import partial
 from pathlib import Path, PurePath
 
 import pytest
-from graph_works_core.events import Change, ChangeEvent, EventKind, classify
-from graph_works_core.workspace.layout import WorkspaceLayout, layout_for
 from graph_works_serve.coalesce import build_batch, net_changes
+from gw_kernel.events import Change, ChangeEvent, EventKind, classify
+from gw_kernel.workspace.layout import WorkspaceLayout, layout_for
 
 A = "/ws/okf/work/a.md"
 

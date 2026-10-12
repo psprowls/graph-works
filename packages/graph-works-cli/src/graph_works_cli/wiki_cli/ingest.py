@@ -9,11 +9,11 @@ from typing import cast
 
 import typer
 from doc_wiki_okf.actors import producer_actor
-from graph_works_core.agent_substrate.roles import role_spec
-from graph_works_core.ingest.commands import plan_ingest_brief, run_ingest_source, state_gate_adapter
-from graph_works_core.workspace.config import load_workspace_config
-from graph_works_core.workspace.errors import WorkspaceError
 from graph_works_wire.wiki import ingest_brief_payload, ingest_payload
+from gw_kernel.workspace.config import load_workspace_config
+from gw_kernel.workspace.errors import WorkspaceError
+from gw_wiki.agent_substrate.roles import role_spec
+from gw_wiki.ingest.commands import plan_ingest_brief, run_ingest_source, state_gate_adapter
 from models_io import ModelsIoError
 
 from graph_works_cli import exit_codes

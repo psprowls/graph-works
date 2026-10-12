@@ -6,7 +6,7 @@ import sqlite3
 
 import pytest
 from conftest import cli_json
-from graph_works_core.workspace.layout import WorkspaceLayout
+from gw_kernel.workspace.layout import WorkspaceLayout
 from models_io import ProviderNotInstalled
 from starlette.testclient import TestClient
 
@@ -18,7 +18,7 @@ def no_embedder(monkeypatch: pytest.MonkeyPatch) -> None:
     def raising_models_io_error() -> object:
         raise ProviderNotInstalled("bedrock")
 
-    monkeypatch.setattr("graph_works_core.query.commands.default_embedder", raising_models_io_error)
+    monkeypatch.setattr("gw_wiki.query.commands.default_embedder", raising_models_io_error)
 
 
 @pytest.fixture

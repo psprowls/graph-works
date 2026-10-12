@@ -4,16 +4,16 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
-from graph_works_core.repositories.adopt import RepoAdoptResult
-from graph_works_core.repositories.commands import (
+from graph_works_wire import repo
+from gw_kernel.workspace.commits import CommitOutcome
+from gw_wiki.repositories.adopt import RepoAdoptResult
+from gw_wiki.repositories.commands import (
     RepoAddResult,
     RepoAdvanceResult,
     RepoRefusal,
     RepoRestoreResult,
     RestoreOutcome,
 )
-from graph_works_core.workspace.commits import CommitOutcome
-from graph_works_wire import repo
 from repositories_okf.flagging import FlaggedLink, FlaggedPage
 from repositories_okf.git import FileChange, RangeFacts
 

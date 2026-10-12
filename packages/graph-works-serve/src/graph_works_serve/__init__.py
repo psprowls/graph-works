@@ -1,1 +1,1 @@
-"""graph-works-serve: a loopback HTTP sidecar over graph-works-core (band 4)."""
+"""graph-works-serve: a loopback HTTP sidecar over gw-kernel (band 4)."""

@@ -7,9 +7,9 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import typer
-from graph_works_core import InitError, apply_init, plan_init
-from graph_works_core.workspace.discovery import resolve_root
 from graph_works_wire.wiki import bootstrap_payload, bootstrap_plan_payload
+from gw_kernel import InitError, apply_init, plan_init
+from gw_kernel.workspace.discovery import resolve_root
 
 from graph_works_cli.json_output import encode
 from graph_works_cli.wiki_cli.errors import exit_error

@@ -9,10 +9,10 @@ from pathlib import Path
 
 import pytest
 from graph_works_cli.cli import app as cli_app
-from graph_works_core import apply_init, plan_init
-from graph_works_core.workspace.layout import WorkspaceLayout
 from graph_works_serve.app import build_app
 from graph_works_serve.context import ServeContext
+from gw_kernel import apply_init, plan_init
+from gw_kernel.workspace.layout import WorkspaceLayout
 from starlette.testclient import TestClient
 from typer.testing import CliRunner
 

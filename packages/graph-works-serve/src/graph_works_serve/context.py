@@ -6,8 +6,8 @@ import os
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from graph_works_core.workspace import discovery
-from graph_works_core.workspace.layout import WorkspaceLayout
+from gw_kernel.workspace import discovery
+from gw_kernel.workspace.layout import WorkspaceLayout
 
 from graph_works_serve.readstate import ReadState
 

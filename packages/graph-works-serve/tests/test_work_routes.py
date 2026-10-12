@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from conftest import cli_json, write_item
-from graph_works_core.workspace.layout import WorkspaceLayout
+from gw_kernel.workspace.layout import WorkspaceLayout
 from starlette.testclient import TestClient
 
 

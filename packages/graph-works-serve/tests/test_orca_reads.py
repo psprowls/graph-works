@@ -7,17 +7,17 @@ from pathlib import Path
 
 import pytest
 from conftest import write_item
-from graph_works_core.code_read import run_code_graph_neighborhood, run_code_graph_search, run_code_graph_tree
-from graph_works_core.lint_drift.lint import run_mechanical
-from graph_works_core.proposals import run_proposal_checks, run_proposal_preview
-from graph_works_core.work.affecting import run_work_affecting
-from graph_works_core.workspace.config import load_workspace_config
-from graph_works_core.workspace.layout import WorkspaceLayout
-from graph_works_core.workspace.lint_repos import lint_repositories
 from graph_works_serve import mutations
 from graph_works_wire import code as wire_code
 from graph_works_wire import wiki as wire_wiki
 from graph_works_wire import work as wire_work
+from gw_kernel.workspace.config import load_workspace_config
+from gw_kernel.workspace.layout import WorkspaceLayout
+from gw_kernel.workspace.lint_repos import lint_repositories
+from gw_wiki.code_read import run_code_graph_neighborhood, run_code_graph_search, run_code_graph_tree
+from gw_wiki.lint_drift.lint import run_mechanical
+from gw_wiki.proposals import run_proposal_checks, run_proposal_preview
+from gw_work.affecting import run_work_affecting
 from mutation_helpers import write_proposal
 from starlette.testclient import TestClient
 

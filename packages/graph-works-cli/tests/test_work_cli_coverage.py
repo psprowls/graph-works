@@ -9,9 +9,9 @@ import pytest
 import typer
 from graph_works_cli import exit_codes
 from graph_works_cli.work_cli import decision, main, reconcile, rendering
-from graph_works_core.workspace.errors import WorkspaceConfigError, WorkspaceError
-from graph_works_core.workspace.lint_repos import LintRepositories
 from graph_works_wire import work as wire_work
+from gw_kernel.workspace.errors import WorkspaceConfigError, WorkspaceError
+from gw_kernel.workspace.lint_repos import LintRepositories
 
 LAYOUT = SimpleNamespace(bundle_dir=Path("/tmp/bundle"), repo_root=Path("/tmp/repo"))
 

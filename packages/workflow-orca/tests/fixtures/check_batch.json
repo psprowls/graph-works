@@ -31,7 +31,7 @@
           "taskId": "task_338800a1fa14",
           "dispatchId": "ctx_320c498114b8",
           "question": "Which merge target?",
-          "options": ["main", "epic/graph-works-core"]
+          "options": ["main", "epic/gw-kernel"]
         }
       },
       {

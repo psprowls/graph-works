@@ -27,7 +27,7 @@ page (the only kind `plan_regenerate` ever sees, per `mirror/plan.py`'s
 whichever of `language`/`package`/`role_flags` this rich page has, so a later
 regeneration pass restamps provenance and re-verifies owned keys instead of
 only refreshing section bodies. `tokens` is also a declared `provenance` key
-but is not stamped by this lane -- `run_tokens_update` (graph-works-core) is
+but is not stamped by this lane -- `run_tokens_update` (gw-kernel) is
 its sole writer; see 2026-08-19-tech-debt-tokens-metric-proxy-string.
 """
 

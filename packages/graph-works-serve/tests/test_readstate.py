@@ -6,10 +6,10 @@ from contextlib import contextmanager
 from dataclasses import replace
 
 import pytest
-from graph_works_core.events import Change, ChangeEvent, EventKind
-from graph_works_core.read_session import ReadSession
-from graph_works_core.workspace.layout import WorkspaceLayout
 from graph_works_serve.readstate import ReadState
+from gw_kernel.events import Change, ChangeEvent, EventKind
+from gw_kernel.read_session import ReadSession
+from gw_kernel.workspace.layout import WorkspaceLayout
 from readstate_fakes import FakeOpener, FakeSession, state_for
 
 PAGE = ChangeEvent(EventKind.PAGE, "docs/p", "docs/p.md", Change.MODIFIED)
@@ -405,7 +405,7 @@ def test_replaced_index_with_same_numeric_generation_invalidates_memo(
     damage: str,
     independent_rebuild: bool,
 ) -> None:
-    from graph_works_core.read_session import database_path, open_read_session
+    from gw_kernel.read_session import database_path, open_read_session
 
     page = workspace.bundle_dir / "docs/replaced.md"
     page.parent.mkdir(parents=True, exist_ok=True)

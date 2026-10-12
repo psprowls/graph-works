@@ -3,7 +3,7 @@
 Converts a workspace's `.graph-wiki.yaml` v2 into `workspace.yaml` v1 plus the
 `.gw/` control plane, and leaves behind a `.gw/cache/config.json` projection the
 plugin's hooks read correctly. `version: 1` is a **fresh format, not v3** — there
-is no migration path inside `graph-works-core`, and `gw bootstrap` never
+is no migration path inside `gw-kernel`, and `gw bootstrap` never
 replaces an authored manifest. This script converts non-dispatch settings;
 retired dispatch choices require explicit cleanup and reauthoring.
 
@@ -24,9 +24,9 @@ uv run python scripts/convert_config.py "$WORKSPACE" --write
 
 Run it through `uv run` from the repo root, and make sure the environment is
 provisioned first (`just sync`, i.e. `uv sync --all-packages`). The script imports
-`graph_works_core`, `code_wiki_okf` and `config_io`, so a bare
+`gw_kernel`, `code_wiki_okf` and `config_io`, so a bare
 `python scripts/convert_config.py` gets
-`ModuleNotFoundError: No module named 'graph_works_core'` — the same trap
+`ModuleNotFoundError: No module named 'gw_kernel'` — the same trap
 `convert-wikilinks.md` documents. The default `--gw` is itself a
 `uv run --package …` invocation, so it inherits the script's cwd.
 
@@ -59,7 +59,7 @@ any refusal.
    `workflow.auto_drive.overrides`, and `workflow.auto_drive.permission_mode`.
    Any presence, including null/empty values, refuses conversion before writes.
    Save the desired choices, remove these keys explicitly, and recreate rules
-   using the [dispatch guide](../packages/graph-works-core/docs/dispatch-rules.md).
+   using the [dispatch guide](../packages/gw-kernel/docs/dispatch-rules.md).
 2. **Dispose** — one row per key: carry, re-express, seed or drop, each with its
    reason.
 3. **Report** the table. A dry run stops here.

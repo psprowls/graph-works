@@ -20,10 +20,10 @@ from pathlib import Path
 from typing import Any, Literal, NoReturn
 
 import typer
-from graph_works_core.orchestrate.gate import run_gate_check, run_gate_run, run_gate_wait, spawn_runner
-from graph_works_core.orchestrate.wait import WAIT_FLOOR_S, WaitClock, apply_wait_floor
-from graph_works_core.workspace.errors import WorkspaceError
 from graph_works_wire import work as wire_work
+from gw_kernel.workspace.errors import WorkspaceError
+from gw_orchestrate.gate import run_gate_check, run_gate_run, run_gate_wait, spawn_runner
+from gw_orchestrate.wait import WAIT_FLOOR_S, WaitClock, apply_wait_floor
 
 from graph_works_cli import exit_codes
 from graph_works_cli.work_cli import rendering

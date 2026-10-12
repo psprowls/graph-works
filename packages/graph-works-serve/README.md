@@ -1,7 +1,7 @@
 # graph-works-serve
 
 `graph-works-serve` provides `gw-serve`, a loopback HTTP sidecar over
-graph-works-core that emits graph-works-wire JSON projections for local agents.
+gw-kernel that emits graph-works-wire JSON projections for local agents.
 
 ```text
 gw-serve [--workspace PATH] [--port 0] [--allow-origin ORIGIN ...] [--describe]

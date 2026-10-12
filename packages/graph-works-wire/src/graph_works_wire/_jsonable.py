@@ -21,7 +21,7 @@ from __future__ import annotations
 import math
 from dataclasses import fields, is_dataclass
 
-from graph_works_core.workspace.commits import CommitOutcome
+from gw_kernel.workspace.commits import CommitOutcome
 
 
 def _mapping_key(key: object) -> str:

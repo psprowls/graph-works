@@ -2,12 +2,12 @@
 
 This harness measures the seven graph-works display reads: work status, list, item detail and queue, wiki tree, page detail and citations. Structural counts are the host-independent evidence for the [data and UI performance design](/work/epic-data-and-ui-performance/references/01-design.md), decision D-004. Latencies are evidence, never a test gate.
 
-Run under graph-works-core's environment after provisioning workspace dependencies with `uv sync --all-packages`:
+Run under gw-wiki's environment after provisioning workspace dependencies with `uv sync --all-packages`:
 
 ```bash
-uv run --package graph-works-core python scripts/bench_reads.py run --json out.json --markdown out.md
-uv run --package graph-works-core python scripts/bench_reads.py run --no-synthetic --workspace "$GRAPH_WORKS_DIR"
-uv run --package graph-works-core python scripts/bench_reads.py generate /tmp/corpus --items 1000 --wiki-pages 1000
+uv run --package gw-wiki python scripts/bench_reads.py run --json out.json --markdown out.md
+uv run --package gw-wiki python scripts/bench_reads.py run --no-synthetic --workspace "$GRAPH_WORKS_DIR"
+uv run --package gw-wiki python scripts/bench_reads.py generate /tmp/corpus --items 1000 --wiki-pages 1000
 ```
 
 `--matrix` accepts comma-separated `ITEMSxWIKI` or `ITEMSxWIKI@WARM/COLD` entries. The default matrix is `100x1000,1000x1000,10000x1000@3/2,1000x100,1000x5000`: the first three isolate work scaling at fixed wiki size; the last two isolate unrelated wiki growth at fixed work size. Defaults are five warm repeats and three cold repeats; the largest size uses three and two. Cold zero skips cold runs. `--workspace-repeats 3/2` sets the live workspace repetitions independently.

@@ -15,9 +15,9 @@ from __future__ import annotations
 from pathlib import Path
 
 import typer
-from graph_works_core.work.reconcile import run_reconcile_context
-from graph_works_core.workspace.errors import WorkspaceError
 from graph_works_wire import work as wire_work
+from gw_kernel.workspace.errors import WorkspaceError
+from gw_work.reconcile import run_reconcile_context
 
 from graph_works_cli import exit_codes
 from graph_works_cli.work_cli import rendering

@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 from click.testing import Result
 from graph_works_cli.cli import app
-from graph_works_core.guidance import assembly
+from gw_pipeline.guidance import assembly
 from typer.testing import CliRunner
 
 runner = CliRunner()

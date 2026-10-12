@@ -15,7 +15,7 @@ workspace: it extends `okf-io` and never modifies it.
 workspace: `fcntl.flock` on POSIX, `msvcrt.locking` on Windows, chosen per
 `sys.platform` and imported only inside the branch that uses it, never at
 module scope. It exists because `work_tracker_okf.decisions`,
-`graph_works_core.work.commands`, and this package's own `logs` module each
+`gw_work.commands`, and this package's own `logs` module each
 took the same five lines of `fcntl.flock` before consolidating here — every
 caller of `locked()` is portable as a result. See `gw util platform` for the
 live, per-capability answer on the running host.
@@ -281,7 +281,7 @@ graduation recipe above, run in reverse.
 `okf_ext.locking` is the fifth hoist and the first shared module that takes an
 **OS-level lock** -- a widening stated rather than smuggled, the same way
 `okf_ext.shape` stated that the layer now reads files. `work_tracker_okf`'s
-ledger lock, `graph_works_core.work.commands`'s decision lock, and
+ledger lock, `gw_work.commands`'s decision lock, and
 `okf_ext.logs`'s log lock were three byte-identical `fcntl.flock` idioms, one
 per package that could reach `okf_ext`; the independence contract forbids
 `okf_ext.logs` reaching sideways for it, so `okf_ext` -- the lowest package

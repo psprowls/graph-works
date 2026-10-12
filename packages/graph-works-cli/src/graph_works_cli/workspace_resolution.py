@@ -10,9 +10,9 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-from graph_works_core.workspace import discovery
-from graph_works_core.workspace.errors import WorkspaceNotFound
-from graph_works_core.workspace.layout import WorkspaceLayout
+from gw_kernel.workspace import discovery
+from gw_kernel.workspace.errors import WorkspaceNotFound
+from gw_kernel.workspace.layout import WorkspaceLayout
 
 from graph_works_cli import exit_codes
 from graph_works_cli.errors import exit_error, fail

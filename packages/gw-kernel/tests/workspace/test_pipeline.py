@@ -1,0 +1,309 @@
+"""The dispatch table: packaged defaults and workspace overrides by attributes."""
+
+from __future__ import annotations
+
+import re
+
+import pytest
+from gw_kernel.workspace import pipeline
+from gw_kernel.workspace.pipeline import PACKAGED_PIPELINE, RELAY_TAIL_SEED, WORKSPACE_COMMIT_TAIL
+from subagents_io.dispatch import DISPATCH_MODES
+
+
+def test_workspace_commit_tail_text() -> None:
+    assert WORKSPACE_COMMIT_TAIL == (
+        "Never `git commit` in the graph-works workspace at {workspace}; gw verbs commit their own workspace writes."
+    )
+
+
+def test_every_packaged_tail_ends_with_the_commit_tail() -> None:
+    for entry in PACKAGED_PIPELINE:
+        name = entry.name
+        if name == "finish":
+            assert entry.prompt_tail is None  # the relay tail is workspace-owned (RELAY_TAIL_SEED)
+            continue
+        assert entry.prompt_tail is not None and entry.prompt_tail.endswith(WORKSPACE_COMMIT_TAIL), name
+
+
+def test_relay_seed_ends_with_the_commit_tail() -> None:
+    assert RELAY_TAIL_SEED.startswith("Auto-drive context: ")
+    assert RELAY_TAIL_SEED.endswith(WORKSPACE_COMMIT_TAIL)
+
+
+def test_the_packaged_table_has_the_ten_rules():
+    assert [rule.name for rule in PACKAGED_PIPELINE] == [
+        "design",
+        "design-bug",
+        "design-parent",
+        "design-reconcile",
+        "plan",
+        "plan-parent",
+        "plan-reconcile",
+        "execute",
+        "execute-planned",
+        "finish",
+    ]
+
+
+def test_every_packaged_mode_is_a_dispatch_mode():
+    assert {entry.mode for entry in pipeline.PACKAGED_PIPELINE} <= DISPATCH_MODES
+
+
+def test_every_packaged_skill_is_plugin_qualified():
+    # The name shape is load-bearing: the workflow skill invokes `action.skill`
+    # verbatim, so a bare name here resolves to whichever plugin happens to
+    # claim it. This is the regression guard for a new rule, or for a row
+    # edited back to a bare name. Enforcement at dispatch time is a later
+    # child's seam; this is the value-side half of the same property.
+    for entry in pipeline.PACKAGED_PIPELINE:
+        name = entry.name
+        plugin, sep, skill = entry.skill.partition(":")
+        assert sep == ":", f"{name}: packaged skill {entry.skill!r} is not <plugin>:<skill>"
+        assert plugin, f"{name}: packaged skill {entry.skill!r} has an empty plugin"
+        assert skill, f"{name}: packaged skill {entry.skill!r} has an empty skill"
+        assert ":" not in skill, f"{name}: packaged skill {entry.skill!r} is multiply qualified"
+
+
+def test_packaged_only_resolution_needs_no_layout():
+    table = {rule.name: rule for rule in pipeline.PACKAGED_PIPELINE}
+    assert table["design"] == pipeline.PackagedRule(
+        name="design",
+        match={"stage": "design"},
+        skill="superpowers:brainstorming",
+        mode="attend",
+        prompt_tail=pipeline.ATTEND_TAIL,
+    )
+    assert table["finish"] == pipeline.PackagedRule(
+        name="finish",
+        match={"stage": "finish"},
+        skill="superpowers:finishing-a-development-branch",
+        mode="relay",
+        prompt_tail=None,
+    )
+
+
+def test_the_epic_design_entry_is_attend_with_the_neutral_tail():
+    """An epic design is a human-in-the-room stage, same as `exploration`. The
+    skill name is asserted by suffix so this test survives child 5's
+    fully-qualified rename without becoming a second place to edit."""
+    entry = next(rule for rule in PACKAGED_PIPELINE if rule.name == "design-parent")
+    assert entry.skill.endswith("epic-design")
+    assert entry.mode == "attend"
+    assert entry.prompt_tail == pipeline.ATTEND_TAIL
+
+
+def test_the_relay_seed_carries_both_halves_of_the_relay_contract():
+    # `finishing-relay` triggers on the literal prefix and reads the merge
+    # target out of the same line. A tail carrying one without the other arms
+    # half the seam, so both are asserted here rather than in prose.
+    assert pipeline.RELAY_TAIL_SEED.startswith("Auto-drive context:")
+    assert "{merge_target}" in pipeline.RELAY_TAIL_SEED
+
+
+def test_the_relay_seed_names_no_vendor():
+    # Core is the thing writing this string; a workspace replaces it with its
+    # own vendor wording through `gw config set`. The grace period tail
+    # references "orca orchestration ask" as a technical system term, not vendor wording.
+    lowered = pipeline.RELAY_TAIL_SEED.lower()
+    assert "graph-wiki" not in lowered
+
+
+def test_the_packaged_branch_entry_stays_untailed():
+    # The seed is a value the *workspace* owns. Shipping it in the packaged
+    # table would make the `relay-untailed` blocker unreachable.
+    assert next(rule for rule in PACKAGED_PIPELINE if rule.name == "finish").prompt_tail is None
+
+
+@pytest.mark.parametrize("name", ["brainstorming", "graph-works:brainstorming", "a:b"])
+def test_a_well_formed_skill_name_is_accepted(name):
+    # Bare names stay valid (D-002): user-level and repo-local skills carry no
+    # plugin prefix, so requiring qualification would make them unroutable.
+    assert pipeline.is_valid_skill_name(name)
+
+
+@pytest.mark.parametrize("name", ["", "   ", "a:", ":b", "a:b:c", "a: ", " :b"])
+def test_a_malformed_skill_name_is_rejected(name):
+    # A colon signals qualification *intent*, so a malformed qualification is
+    # still a refusable shape even though a bare name is not.
+    assert not pipeline.is_valid_skill_name(name)
+
+
+def test_check_skill_name_refuses_a_non_string(tmp_path):
+    from gw_kernel.workspace.errors import WorkspaceError
+
+    with pytest.raises(WorkspaceError, match="expects a skill name"):
+        pipeline.check_skill_name(3, key="workflow.pipeline.single.skill", source=tmp_path / "workspace.yaml")
+
+
+def test_every_packaged_skill_name_is_well_formed():
+    # `PACKAGED_PIPELINE` is a module constant, deliberately *not* checked at
+    # runtime -- a bad packaged value should fail the suite, not every command
+    # for every user. Same posture as the totality test above.
+    assert all(pipeline.is_valid_skill_name(entry.skill) for entry in pipeline.PACKAGED_PIPELINE)
+
+
+def test_both_execute_rules_carry_the_coverage_obligation():
+    table = {rule.name: rule for rule in pipeline.PACKAGED_PIPELINE}
+    assert table["execute-planned"] == pipeline.PackagedRule(
+        name="execute-planned",
+        match={"stage": "execute", "has_plan": True},
+        skill="superpowers:subagent-driven-development",
+        mode="autonomous",
+        prompt_tail=pipeline.EXECUTE_TAIL,
+    )
+    assert table["execute"] == pipeline.PackagedRule(
+        name="execute",
+        match={"stage": "execute"},
+        skill="superpowers:test-driven-development",
+        mode="autonomous",
+        prompt_tail=pipeline.EXECUTE_TAIL,
+    )
+
+
+def test_the_execute_tail_names_the_artifact_and_its_placeholders():
+    # The tail is substituted by `_prompt` with `str.replace` over a fixed
+    # placeholder set; a tail naming a placeholder outside that set would ship
+    # a literal brace to a worker.
+    assert "references/{execute_artifact}" in pipeline.EXECUTE_TAIL
+    assert "03-execute-coverage.md" not in pipeline.EXECUTE_TAIL
+    assert "{workspace}" in pipeline.EXECUTE_TAIL
+    assert "{path}" in pipeline.EXECUTE_TAIL
+    assert "## Acceptance" in pipeline.EXECUTE_TAIL
+
+
+def test_execute_tail_requires_the_current_returned_scope_report() -> None:
+    tail = pipeline.EXECUTE_TAIL
+    assert (
+        "When your brief carries a `Returned scope` block, that file's `## Returned scope <id>` section "
+        "is part of the report: read the canonical plan it names, keep its heading and row ids, "
+        "report every row `- [x]` or `- [ ]` with a one-line justification, and set its `Report state:` "
+        "line to `reported`. Write it in the coverage location the block names. "
+        "A fully checked older report is not evidence for a return.\n"
+    ) in tail
+    assert tail.index("Returned scope") < tail.index("Deferred to finish")
+
+
+def test_execute_tail_names_the_gate_verbs():
+    assert "gw work gate run {path}" in pipeline.EXECUTE_TAIL
+    assert "gw work gate wait {path}" in pipeline.EXECUTE_TAIL
+    assert "--scope scoped" in pipeline.EXECUTE_TAIL
+    assert "/private/tmp" not in pipeline.EXECUTE_TAIL
+
+
+def test_wait_line_is_vendor_neutral_and_in_the_execute_tail():
+    line = pipeline.WAIT_LINE
+    assert line in pipeline.EXECUTE_TAIL
+    assert "gw work gate wait {path}" in line
+    assert "600000 ms" in line and "at least 60 s" in line
+    for vendor in ("Codex", "Claude", "codex", "claude", "write_stdin", "yield_ms"):
+        assert vendor not in line
+    # `_prompt` substitutes a fixed placeholder set; WAIT_LINE uses only {path}.
+    assert line.replace("{path}", "").count("{") == 0
+
+
+def test_execute_tail_tells_the_worker_to_record_deferred_steps() -> None:
+    assert (
+        "When the plan marks a step `Deferred to finish`, record it with "
+        '`gw work obligation add {path} --text "<the step>" --apply` instead of doing it or leaving it in prose.'
+    ) in pipeline.EXECUTE_TAIL
+    assert pipeline.EXECUTE_TAIL.index("Deferred to finish") < pipeline.EXECUTE_TAIL.index("The gate is")
+
+
+def test_only_the_relay_tail_carries_the_grace_period_pointer() -> None:
+    # An attend worker asks in its own terminal (the attend-ask decision), so
+    # no Orca ask of its can time out; the protocol is relay-only now.
+    assert pipeline.GRACE_PERIOD_TAIL not in pipeline.ATTEND_TAIL
+    assert "grace-period" not in pipeline.ATTEND_TAIL
+    assert pipeline.GRACE_PERIOD_TAIL in pipeline.RELAY_TAIL_SEED
+    assert "grace-period-protocol.md" in pipeline.GRACE_PERIOD_TAIL
+
+
+def test_the_attend_tail_keeps_questions_in_the_terminal_and_pings_once() -> None:
+    tail = pipeline.ATTEND_TAIL
+    assert "in this terminal" in tail
+    assert "even where your Orca preamble says to use `orca orchestration ask`" in tail
+    assert "do not use `gw work ask`" in tail
+    assert "--type escalation" in tail
+    assert '--subject "Needs you at <your --from handle>"' in tail
+    assert '--body "{path} {phase}: waiting for the human in this terminal."' in tail
+    assert "exactly one notice" in tail
+
+
+def test_the_ask_line_names_the_verb_and_forbids_hand_written_options() -> None:
+    assert "ASK_LINE" in pipeline.__all__
+    line = pipeline.ASK_LINE
+    assert "gw work ask" in line
+    assert "orca.question" in line and "orca.options" in line
+    assert "never hand-write `--options`" in line
+    assert "`choice`, `effort` and `notes`" in line
+    assert "\n" not in line
+    assert not re.search(r"\{[^}]*\}", line)
+
+
+def test_the_grace_period_pointer_names_the_plugin_skill_not_a_repo_path():
+    # The protocol doc ships in the `gw` Claude Code plugin, not under the
+    # workspace and not under the repository a workspace catalogs. A bare
+    # repo-relative literal (`plugins/gw/skills/...`) only resolved because the
+    # managed repo happened to be this repo; any other codebase's workspace
+    # would hand its workers a path that does not exist there. `{workspace}`
+    # cannot stand in either -- the file is not under the workspace -- so the
+    # pointer is skill-qualified instead, and this pins that.
+    tail = pipeline.GRACE_PERIOD_TAIL
+    assert "plugins/gw/" not in tail
+    assert "{workspace}" not in tail
+    assert "auto-drive" in tail
+    assert "references/grace-period-protocol.md" in tail
+
+
+def test_no_packaged_tail_names_an_unsubstituted_placeholder():
+    # `_prompt`'s tail substitution is a literal `str.replace` over exactly
+    # this set; a tail naming anything else ships a literal brace to a worker.
+    allowed = {"{path}", "{key}", "{phase}", "{workspace}", "{merge_target}", "{execute_artifact}"}
+    for tail in (pipeline.ATTEND_TAIL, pipeline.EXECUTE_TAIL, pipeline.RELAY_TAIL_SEED):
+        assert set(re.findall(r"\{[^}]*\}", tail)) <= allowed
+
+
+def test_relay_tail_seed_still_leads_with_the_auto_drive_context_line():
+    # Load-bearing per pipeline.py's own docstring: finishing-relay's R2 scans
+    # for a line starting with this literal prefix and reads the merge target
+    # off it. The grace-period text must never replace or precede that line.
+    first_line = pipeline.RELAY_TAIL_SEED.splitlines()[0]
+    assert first_line.startswith("Auto-drive context:")
+    assert "{merge_target}" in first_line
+
+
+def test_findings_line_is_public_and_needs_no_substitution():
+    assert "FINDINGS_LINE" in pipeline.__all__
+    line = pipeline.FINDINGS_LINE
+    assert "worker_done" in line
+    assert "--body" in line
+    assert "canonical path" in line
+    assert not re.search(r"\{[^}]*\}", line)
+
+
+CONTEXT_HYGIENE = (
+    "Context hygiene: when the gate fails, `gw work gate wait` already prints the last 40 lines of its log -- "
+    "never `tail`, `cat` or `grep` a gate or test log by hand. Hand artifacts to subagents as file paths "
+    "(task briefs, review packages, reports), never pasted inline. Read each skill file once per session; "
+    "re-open only a named section when you need it again.\n"
+)
+
+
+def test_execute_tail_carries_context_hygiene_before_the_gate():
+    tail = pipeline.EXECUTE_TAIL
+    assert CONTEXT_HYGIENE in tail
+    assert tail.index("Deferred to finish") < tail.index("Context hygiene:") < tail.index("The gate is")
+
+
+def test_notify_line_precedes_the_wait_line_in_the_execute_tail() -> None:
+    tail = pipeline.EXECUTE_TAIL
+    assert pipeline.NOTIFY_LINE in tail and pipeline.WAIT_LINE in tail
+    assert tail.index(pipeline.NOTIFY_LINE) < tail.index(pipeline.WAIT_LINE)
+    assert pipeline.NOTIFY_LINE + " " + pipeline.WAIT_LINE in tail
+
+
+def test_notify_line_names_no_vendor_and_only_the_path_placeholder() -> None:
+    line = pipeline.NOTIFY_LINE
+    for word in ("Codex", "Claude", "write_stdin", "yield_ms", "Orca"):
+        assert word not in line
+    assert re.findall(r"\{(\w+)\}", line) == ["path", "path"]

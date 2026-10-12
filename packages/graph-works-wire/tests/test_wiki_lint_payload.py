@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from graph_works_core.lint_drift.lint import LaneReport, LintReport
 from graph_works_wire.wiki import wiki_lint_payload
+from gw_wiki.lint_drift.lint import LaneReport, LintReport
 from okf_io.validate import Finding, Report
 
 

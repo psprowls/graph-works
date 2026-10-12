@@ -17,8 +17,8 @@ from contextlib import AbstractContextManager, ExitStack, contextmanager
 from pathlib import Path
 from typing import Literal
 
-from graph_works_core.events import Change, ChangeEvent, EventKind
-from graph_works_core.read_session import (
+from gw_kernel.events import Change, ChangeEvent, EventKind
+from gw_kernel.read_session import (
     IndexRevision,
     ReadSession,
     SnapshotSession,
@@ -27,7 +27,7 @@ from graph_works_core.read_session import (
     materialize,
     open_read_session,
 )
-from graph_works_core.workspace.layout import WorkspaceLayout
+from gw_kernel.workspace.layout import WorkspaceLayout
 
 BumpReason = Literal["index", "config", "fallback", "reconcile-failed", "resync", "identity", "write-through"]
 Identity = tuple[Path, Path, Path, str]

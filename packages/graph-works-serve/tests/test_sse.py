@@ -4,10 +4,10 @@ import asyncio
 import json
 
 import pytest
-from graph_works_core.events import Change, ChangeEvent, EventKind
 from graph_works_serve import sse
 from graph_works_serve.hub import Changes, Hub, Resync
 from graph_works_wire.events import changes_payload
+from gw_kernel.events import Change, ChangeEvent, EventKind
 
 E = ChangeEvent(kind=EventKind.WORK_ITEM, path="work/a", member="work/a.md", change=Change.MODIFIED)
 

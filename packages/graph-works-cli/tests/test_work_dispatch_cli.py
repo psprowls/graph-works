@@ -12,14 +12,14 @@ from pathlib import Path
 import pytest
 from graph_works_cli.cli import app
 from graph_works_cli.work_cli import main
-from graph_works_core import apply_init, plan_init
-from graph_works_core.orchestrate.dispatch import encode_launch_envelope
+from gw_kernel import apply_init, plan_init
+from gw_orchestrate.dispatch import encode_launch_envelope
 from subagents_io.backend import BackendError
 from typer.testing import CliRunner
 from workflow_orca._launch import decode_launch_spec
 
 REPO = Path(__file__).resolve().parents[3]
-_fake_port = runpy.run_path(str(REPO / "packages/graph-works-core/tests/orchestrate/fake_orca_port.py"))
+_fake_port = runpy.run_path(str(REPO / "packages/gw-orchestrate/tests/fake_orca_port.py"))
 FakeOrcaPort = _fake_port["FakeOrcaPort"]
 read = _fake_port["read"]
 KEY = "gw-execute-x-1a2b"

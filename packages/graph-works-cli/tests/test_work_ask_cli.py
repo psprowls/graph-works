@@ -10,7 +10,7 @@ import pytest
 from graph_works_cli import exit_codes
 from graph_works_cli.cli import app
 from graph_works_cli.work_cli import ask as ask_module
-from graph_works_core.workspace.errors import WorkspaceError
+from gw_kernel.workspace.errors import WorkspaceError
 from typer.testing import CliRunner
 
 runner = CliRunner()

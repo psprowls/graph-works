@@ -11,8 +11,8 @@ surface (no lint-catalog rule, no `okf-io` extra rule ships alongside it).
 from __future__ import annotations
 
 import typer
-from graph_works_core.util.commands import run_line_endings
 from graph_works_wire.util import line_endings_payload
+from gw_wiki.util.commands import run_line_endings
 
 from graph_works_cli import exit_codes
 from graph_works_cli.errors import exit_error

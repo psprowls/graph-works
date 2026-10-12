@@ -166,7 +166,7 @@ def declared_repo(item: WorkItem, items_by_path: Mapping[str, WorkItem]) -> tupl
 
     Nearest wins: the item itself, then `reversed(item.ancestor_paths)`
     (which is root-first). Names only -- mapping a name to a path is
-    `graph_works_core.workspace.repos`'s job, since this band never reads
+    `gw_kernel.workspace.repos`'s job, since this band never reads
     `workspace.yaml`. A malformed `repo:` projects as `None` and is walked
     past like an absent one.
     """

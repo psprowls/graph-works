@@ -17,7 +17,7 @@ from code_graph_io.testing import raw_conn
 from graph_works_cli import exit_codes
 from graph_works_cli.cli import app
 from graph_works_cli.wiki_cli import drift as drift_module
-from graph_works_core.lint_drift.propagate_drift import DriftBrief
+from gw_wiki.lint_drift.propagate_drift import DriftBrief
 from okf_io import load
 from typer.testing import CliRunner
 

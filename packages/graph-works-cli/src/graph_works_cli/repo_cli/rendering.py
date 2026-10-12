@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from graph_works_core.repositories.adopt import RepoAdoptResult
-from graph_works_core.repositories.commands import RepoAddResult, RepoAdvanceResult, RepoRestoreResult
+from gw_wiki.repositories.adopt import RepoAdoptResult
+from gw_wiki.repositories.commands import RepoAddResult, RepoAdvanceResult, RepoRestoreResult
 
 
 def add_text(result: RepoAddResult) -> str:

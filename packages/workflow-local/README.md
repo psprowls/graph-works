@@ -103,7 +103,7 @@ settles, so no key can sit live forever. Its `delivery_id` is
 
 - **It does not provision worktrees.** `launch()` requires a concrete
   `dispatch.worktree.path` and raises `WorktreeNotProvisioned` otherwise. Git
-  belongs beside `graph_works_core.provenance`, the one module declared to run
+  belongs beside `gw_kernel.provenance`, the one module declared to run
   it. Until that function exists, a `reuse` dispatch runs end-to-end here and a
   `fork-child` one does not.
 - **It refuses `pin-detached` even with a supplied path.** This backend cannot

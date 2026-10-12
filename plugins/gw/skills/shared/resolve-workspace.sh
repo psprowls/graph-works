@@ -6,7 +6,7 @@
 # Echoes NOTHING (empty stdout, exit 0) when no workspace resolves —
 # callers decide their own fallback; this helper never invents one.
 #
-# Resolution chain (mirrors graph_works_core.discovery.resolve()):
+# Resolution chain (mirrors gw_kernel.discovery.resolve()):
 #   1. An explicit argument naming a directory that contains workspace.yaml.
 #   2. Else $GRAPH_WORKS_DIR set and non-empty -> echo it.
 #   3. Else walk up from the given start-dir argument if present, else $PWD,

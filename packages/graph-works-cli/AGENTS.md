@@ -2,7 +2,7 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-`gw` — a thin Typer CLI over `graph-works-core` (ADR 2026-08-13-command-modules: all logic stays in core, this package
+`gw` — a thin Typer CLI over `gw-kernel` (ADR 2026-08-13-command-modules: all logic stays in core, this package
 routes, parses, formats, and traces). Python >=3.12. Tests are pytest.
 
 ## Commands
@@ -77,7 +77,7 @@ loads everything (the walkers need that). The entries are:
   three guidance keys are payload data and nothing extra reaches stderr; text
   mode prints one summary line and routes each guidance warning through
   `rendering.warn`.
-- `repo_cli` — `gw repo add|restore|advance`, reference repositories in the `repositories/` lane (routes to `graph_works_core.repositories`); it injects a structural rescan into `run_repo_advance`.
+- `repo_cli` — `gw repo add|restore|advance`, reference repositories in the `repositories/` lane (routes to `gw_wiki.repositories`); it injects a structural rescan into `run_repo_advance`.
 - `config_cli` — `gw config get|list|set|unset|sync|hooks enable|disable`, the sole programmatic
   writer for `workspace.yaml` catalog keys. `set`/`unset --local` write the gitignored, per-machine
   `workspace.local.yaml` overlay instead. `set`/`unset` refresh `.gw/cache/config.json`
@@ -88,7 +88,7 @@ loads everything (the walkers need that). The entries are:
 
 Every workspace-backed sub-app command takes `--workspace PATH` and calls
 `workspace_resolution.resolve_workspace()` first (D-002): explicit path -> `GRAPH_WORKS_DIR` env -> cwd git walk-up, all via
-`graph_works_core.workspace.discovery.resolve()`. A refusal there prints `Error: ...` to stderr and
+`gw_kernel.workspace.discovery.resolve()`. A refusal there prints `Error: ...` to stderr and
 exits `exit_codes.NOT_INITIALIZED` — precedence and discovery logic live in core, never here.
 `gw agent-config show --project PATH` is the deliberate read-only exception: it bypasses workspace
 resolution and reports that one directory directly. The five new archive/proposal mutation callbacks
@@ -158,7 +158,7 @@ scope for this item.
 
 `code_graph_io.render` ships a generic `render()` dispatcher, a `describe_block()` sectioned-spine
 builder, and one `format_<kind>` per graph entity kind, built for exactly the `GraphTarget`/
-`GraphResult` shape `graph_works_core.graph.commands` returns. `gw graph`'s four verbs
+`GraphResult` shape `gw_kernel.graph.commands` returns. `gw graph`'s four verbs
 (`build`/`describe`/`find`/`export`) delegate directly to that: each command resolves a `GraphTarget`,
 calls one core function, and routes the returned `output`/`error` strings to stdout/stderr before
 exiting `result.exit_code` — no behavior beyond routing (ADR 2026-08-13-command-modules rule 5).
@@ -193,7 +193,7 @@ they silently no-op here.
 
 ### `--trace` is out of scope for this package (D-024)
 
-`graph_works_core.scan.commands` and `graph_works_core.query.commands` already write JSONL traces
+`gw_wiki.scan.commands` and `gw_wiki.query.commands` already write JSONL traces
 unconditionally to `layout.cache_dir / "traces"`. There is no write-side CLI flag anywhere — `gw
 util trace <file>` (`util_cli/trace.py`) is a read-side renderer for whatever JSONL file the caller
 points it at; it was never wired to a write-side flag and there is nothing to build here.
@@ -201,7 +201,7 @@ points it at; it was never wired to a write-side flag and there is nothing to bu
 ### The provenance guard (`provenance.py`)
 
 `warn_if_stale_routing()` warns, on stderr only, when the running `gw`'s routing code
-(`graph_works_core` / `work-tracker-okf`) was loaded from a different checkout than the one the
+(`gw_kernel` / `work-tracker-okf`) was loaded from a different checkout than the one the
 current working directory belongs to *and* that other checkout's routing sources genuinely differ
 by git content (not just "is a different worktree" — that alone would fire on nearly every
 invocation and be filtered out as noise). It only fires at call sites that are actually
@@ -212,15 +212,15 @@ to silence: a guard that guesses is worse than no guard. Kill switch:
 never exported into a session, where it leaks into gate runs. The provenance tests clear it
 themselves, so an inherited value cannot fail them.
 
-### `graph-works-core` is a real dependency — no deferred-import pattern
+### `gw-kernel` is a real dependency — no deferred-import pattern
 
-`graph-works-core` is a real, `py.typed`, `mypy --strict`-clean workspace member and a pinned
-dependency (`graph-works-core>=0.6.9,<0.7` in `pyproject.toml`, workspace-sourced via
+`gw-kernel` is a real, `py.typed`, `mypy --strict`-clean workspace member and a pinned
+dependency (`gw-kernel>=0.7,<0.8` in `pyproject.toml`, workspace-sourced via
 `[tool.uv.sources]`). `workspace_resolution.py` imports it at module level; `provenance.py` imports
 it inside `_source_checkout_root()` because only the provenance guard needs it there — that is an
 ownership choice, not a fallback for a package that might not exist. Do not reintroduce a
-missing-package fallback or `sys.modules` test-injection pattern for a `graph_works_core` import in
-this package; tests patch the real `graph_works_core.workspace.discovery.resolve` via
+missing-package fallback or `sys.modules` test-injection pattern for a `gw_kernel` import in
+this package; tests patch the real `gw_kernel.workspace.discovery.resolve` via
 `monkeypatch.setattr` on the module reference `workspace_resolution.py` holds.
 
 ### Verbose logging (`logging_config.py`)

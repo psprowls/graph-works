@@ -399,7 +399,7 @@ def run_rename(workspace: Path, ignore: Sequence[str], *, write: bool) -> int:
     return 0
 
 
-#: The lane `vocabulary_rule` is actually enforced over. `graph_works_core`
+#: The lane `vocabulary_rule` is actually enforced over. `gw_kernel`
 #: appends it to the *wiki* lane only (`lint_drift/lanes.py:139-141`), and the
 #: work lane composes `work_tracker_okf.compose.rule_set`, which does not
 #: include it (`compose.py:131-138`). So a `tags.unknown` finding under `work/`

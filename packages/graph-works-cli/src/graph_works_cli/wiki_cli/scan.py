@@ -8,7 +8,10 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import typer
-from graph_works_core.scan.commands import (
+from graph_works_wire.wiki import repo_scan_payload, scan_apply_payload, scan_emit_payload, scan_normal_payload
+from gw_kernel.workspace.config import load_workspace_config
+from gw_kernel.workspace.errors import ScanError
+from gw_wiki.scan.commands import (
     BRIEFS_DIRNAME,
     WORKLIST_FILENAME,
     apply_scan_worklist,
@@ -19,11 +22,8 @@ from graph_works_core.scan.commands import (
     scan_cache_dir,
     scan_results_dir,
 )
-from graph_works_core.scan.repo_scan import run_repo_scan
-from graph_works_core.scan.scan_contract import UnsupportedWorklistSchema
-from graph_works_core.workspace.config import load_workspace_config
-from graph_works_core.workspace.errors import ScanError
-from graph_works_wire.wiki import repo_scan_payload, scan_apply_payload, scan_emit_payload, scan_normal_payload
+from gw_wiki.scan.repo_scan import run_repo_scan
+from gw_wiki.scan.scan_contract import UnsupportedWorklistSchema
 
 from graph_works_cli import exit_codes
 from graph_works_cli.json_output import encode

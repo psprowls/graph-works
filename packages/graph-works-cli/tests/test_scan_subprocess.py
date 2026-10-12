@@ -10,7 +10,7 @@ from pathlib import Path
 import helpers
 from code_graph_io.testing import raw_conn
 from code_wiki_okf.config import load_config
-from graph_works_core.workspace.layout import CACHE_DIRNAME, DEFAULT_CONFIG_DIR, MANIFEST_FILENAME
+from gw_kernel.workspace.layout import CACHE_DIRNAME, DEFAULT_CONFIG_DIR, MANIFEST_FILENAME
 from ruamel.yaml import YAML
 
 PACKAGE_URI = "pkg:acme/demo/widgets"

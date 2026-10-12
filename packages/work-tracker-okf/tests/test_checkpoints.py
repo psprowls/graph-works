@@ -161,4 +161,4 @@ def test_checkpoints_imports_only_its_declared_dependencies() -> None:
             imported.update(alias.name for alias in node.names)
     package = {name for name in imported if name.startswith("work_tracker_okf")}
     assert package <= {"work_tracker_okf.paths", "work_tracker_okf.vocabulary"}
-    assert not {name for name in imported if name.split(".")[0] in {"graph_works_core", "subprocess"}}
+    assert not {name for name in imported if name.split(".")[0] in {"gw_kernel", "subprocess"}}

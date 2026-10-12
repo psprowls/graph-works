@@ -7,9 +7,9 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import typer
-from graph_works_core.wiki_page import run_section_write
-from graph_works_core.workspace.errors import WorkspaceError
 from graph_works_wire.wiki import section_write_payload
+from gw_kernel.workspace.errors import WorkspaceError
+from gw_wiki.wiki_page import run_section_write
 
 from graph_works_cli.errors import fail
 from graph_works_cli.json_output import encode

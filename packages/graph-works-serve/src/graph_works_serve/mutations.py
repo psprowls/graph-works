@@ -19,8 +19,8 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from graph_works_core.workspace.errors import WorkspaceError
-from graph_works_core.workspace.layout import WorkspaceLayout
+from gw_kernel.workspace.errors import WorkspaceError
+from gw_kernel.workspace.layout import WorkspaceLayout
 
 from graph_works_serve.context import Reply
 from graph_works_serve.errors import refusal

@@ -83,7 +83,7 @@ run_scan
 
 echo
 echo "== complete deterministic human-owned smoke prose =="
-uv run --package graph-works-core python "$SCRIPT_DIR/complete_prose.py" "$TEST_WS"
+uv run --package gw-kernel python "$SCRIPT_DIR/complete_prose.py" "$TEST_WS"
 
 echo
 echo "== reconcile completed prose into catalogs =="
@@ -91,7 +91,7 @@ run_scan
 
 echo
 echo "== placement tree and strict validation =="
-uv run --package graph-works-core python "$SCRIPT_DIR/assert_contract.py" "$TEST_WS"
+uv run --package gw-kernel python "$SCRIPT_DIR/assert_contract.py" "$TEST_WS"
 
 cp -R "$TEST_WS/okf" "$FIRST_OKF"
 

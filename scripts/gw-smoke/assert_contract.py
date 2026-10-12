@@ -10,7 +10,7 @@ from code_graph_io import open_reader
 from code_wiki_okf.config import load_config
 from code_wiki_okf.placement import placement_rule
 from code_wiki_okf.sync import snapshot_bundle, sync_rule
-from graph_works_core import resolve
+from gw_kernel import resolve
 from okf_ext.schemas import load_schemas, schema_rule
 from okf_ext.sections import section_rule
 from okf_ext.shape import load_sections

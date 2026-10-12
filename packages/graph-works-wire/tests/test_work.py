@@ -8,17 +8,17 @@ from pathlib import Path
 from types import SimpleNamespace
 from types import SimpleNamespace as ns
 
-from graph_works_core.orchestrate.dispatch import DispatchFailure, DispatchResult, ObservedPlacement
-from graph_works_core.orchestrate.dispatch_record import Overrides
-from graph_works_core.orchestrate.reroute import RerouteResult
-from graph_works_core.orchestrate.wait import Absorbed, WaitResult
-from graph_works_core.work.commands import DispatchExplanation, OpenDecision
-from graph_works_core.work.reconcile import CitedDecision, CommitRef, LandedSibling, ReconcileContext
-from graph_works_core.workspace.commits import CommitOutcome
-from graph_works_core.workspace.dispatch import packaged_rules_matching, resolve_dispatch
 from graph_works_wire import config as wire_config
 from graph_works_wire import work
 from graph_works_wire._jsonable import commit_payload
+from gw_kernel.workspace.commits import CommitOutcome
+from gw_kernel.workspace.dispatch import packaged_rules_matching, resolve_dispatch
+from gw_orchestrate.dispatch import DispatchFailure, DispatchResult, ObservedPlacement
+from gw_orchestrate.dispatch_record import Overrides
+from gw_orchestrate.reroute import RerouteResult
+from gw_orchestrate.wait import Absorbed, WaitResult
+from gw_work.commands import DispatchExplanation, OpenDecision
+from gw_work.reconcile import CitedDecision, CommitRef, LandedSibling, ReconcileContext
 from samples_work import (
     BUNDLE,
     advance,
@@ -811,8 +811,8 @@ def test_open_decisions_payload_reuses_the_decision_projection() -> None:
 
 
 def test_finish_target_projection_is_explicit_and_ordered() -> None:
-    from graph_works_core.workspace.finish import FinishTarget
-    from graph_works_core.workspace.repos import ItemRepo
+    from gw_kernel.workspace.repos import ItemRepo
+    from gw_pipeline.finish import FinishTarget
     from samples_work import BUNDLE, next_result
 
     result = next_result(full=True)
@@ -864,7 +864,7 @@ def test_next_payload_always_carries_repository_notes() -> None:
 
 
 def test_filing_applied_requires_successful_nonempty_writes():
-    from graph_works_core.workspace.transactions import MutationApplication
+    from gw_pipeline.transactions import MutationApplication
     from samples_work import filing
 
     for failures, rolled_back, written, expected in (
@@ -966,7 +966,7 @@ def test_pin_detached_worktree_projection():
 
 
 def test_reader_receipt_payload_freezes_attempt_and_outcome_fields() -> None:
-    from graph_works_core.orchestrate.placement import ReaderRecord
+    from gw_orchestrate.placement import ReaderRecord
     from work_tracker_okf.placement import ReaderObservation, ReaderReceiptPlan
 
     observation = ReaderObservation("task_1", "ctx_1", "key", "repo", "/reader", "a" * 40)
@@ -1002,7 +1002,7 @@ def test_reader_receipt_payload_freezes_attempt_and_outcome_fields() -> None:
 
 
 def test_wait_liveness_preserves_empty_populated_and_uncomputed():
-    from graph_works_core.orchestrate.wait import WaitResult
+    from gw_orchestrate.wait import WaitResult
 
     resume = "Gate run r for work/a finished (exit 0). Run gw work gate wait work/a --run r, then continue the stage."
     gate_wait = {"run_id": "r", "path": "work/a", "terminal": "term_a", "state": "wake_failed", "resume_line": resume}
@@ -1081,8 +1081,8 @@ def test_next_payload_always_carries_the_empty_frame() -> None:
 def test_obligation_payload_shape() -> None:
     import json
 
-    from graph_works_core.work.obligations import ObligationRecord
     from graph_works_wire.work import obligation_payload
+    from gw_work.obligations import ObligationRecord
     from work_tracker_okf.obligations import Obligation, ObligationPlan
 
     added = Obligation("Tag the release", "deferred", "2026-09-29")
@@ -1133,7 +1133,7 @@ def test_next_payload_carries_unresolved_effort_and_path_candidates() -> None:
 
 
 def test_next_payload_projects_path_and_all_stage_artifacts() -> None:
-    from graph_works_core.work.path_report import PathCandidateReport, PathReport, PathRuleRef, StageArtifactReport
+    from gw_work.path_report import PathCandidateReport, PathReport, PathRuleRef, StageArtifactReport
 
     result = next_result(full=True)
     rule = PathRuleRef("short", "/ws/dispatch.yaml", 0)
@@ -1170,7 +1170,7 @@ def test_next_payload_projects_path_and_all_stage_artifacts() -> None:
 
 
 def test_next_payload_always_has_empty_path_and_artifacts_defaults() -> None:
-    from graph_works_core.work.commands import NextResult
+    from gw_work.commands import NextResult
     from work_tracker_okf.workflow import RouteState, route
 
     state = RouteState(type="Feature", work_status="resolved", phase="done")

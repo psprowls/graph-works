@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from graph_works_core.agent_config import AgentConfig, AgentConfigReport, Layer
-from graph_works_core.agent_config.records import JsonValue
+from gw_wiki.agent_config import AgentConfig, AgentConfigReport, Layer
+from gw_wiki.agent_config.records import JsonValue
 
 
 def _layer(layer: Layer) -> dict[str, JsonValue]:

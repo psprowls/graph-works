@@ -74,11 +74,11 @@ def test_drift_containment_is_by_segment_and_one_directional() -> None:
 
 def test_drift_widening_takes_the_shared_prefix_when_two_segments_deep() -> None:
     drift = affects_drift(
-        ["packages/graph-works-core/tests/orchestrate/test_x.py"],
-        ["packages/graph-works-core/src/graph_works_core/orchestrate"],
+        ["packages/gw-kernel/tests/orchestrate/test_x.py"],
+        ["packages/gw-kernel/src/gw_kernel/orchestrate"],
     )
-    assert drift.uncovered == ("packages/graph-works-core/tests/orchestrate/test_x.py",)
-    assert drift.widening == ("packages/graph-works-core",)
+    assert drift.uncovered == ("packages/gw-kernel/tests/orchestrate/test_x.py",)
+    assert drift.widening == ("packages/gw-kernel",)
 
 
 def test_drift_widening_falls_back_to_the_parent_directory_and_collapses() -> None:

@@ -5,15 +5,15 @@ from __future__ import annotations
 from datetime import date
 from pathlib import Path
 
-from graph_works_core.util.commands import (
+from graph_works_wire.util import line_endings_payload, log_payload, platform_payload, tokens_payload
+from gw_wiki.util.commands import (
     LineEndingFinding,
     LineEndingsReport,
     LogAppendResult,
     TokenStamp,
     TokensUpdate,
 )
-from graph_works_core.util.platform import Capability, PlatformReport, ProbeResult
-from graph_works_wire.util import line_endings_payload, log_payload, platform_payload, tokens_payload
+from gw_wiki.util.platform import Capability, PlatformReport, ProbeResult
 
 
 def test_log_payload_isoformats_the_day() -> None:

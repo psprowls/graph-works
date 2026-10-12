@@ -12,7 +12,7 @@ from __future__ import annotations
 from collections.abc import Callable, Iterable
 from pathlib import PurePath
 
-from graph_works_core.events import Change, ChangeEvent
+from gw_kernel.events import Change, ChangeEvent
 
 RawChange = tuple[str, str]
 ClassifyFn = Callable[[PurePath, Change], ChangeEvent | None]

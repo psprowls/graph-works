@@ -1,4 +1,4 @@
-"""The `OrcaPort` graph-works-core declares, satisfied structurally — this module never imports core.
+"""The `OrcaPort` gw-kernel declares, satisfied structurally — this module never imports core.
 
 Most methods project one Orca call; timeout liveness reuses session observation.
 """

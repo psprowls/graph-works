@@ -5,7 +5,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## What this repo is
 
 A `uv` workspace (`members = ["packages/*"]`) for OKF tooling. The root is a
-workspace root only — not distributable, `package = false`. It holds seventeen
+workspace root only — not distributable, `package = false`. It holds twenty-one
 packages today, plus one plugin tree (not a workspace member, not Python):
 `plugins/gw`, the first-party Claude Code plugin this repo publishes and the
 one Claude Code loads (name `gw`).
@@ -23,9 +23,9 @@ couple to:
 | -------------------- | -------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `-io`                | 1, foundation  | stdlib and declared third party only — never a sibling package, never a workspace path; `os` only where a package's own boundary test names a narrow, tested exemption |
 | `-okf`               | 2, OKF-aware   | band 1 plus the OKF document model                                                                                                                                     |
-| `-core`              | 3, application | everything below it; exactly one package (`graph-works-core`) knows what a workspace is                                                                                |
+| `gw-<slice>` | 3, application | a tree over `gw-kernel`: pipeline and wiki depend on kernel; orchestrate and work depend on pipeline and kernel; only kernel resolves a workspace root |
 | `workflow-<backend>` | beside band 1  | vendor/system coupling lives here — one package per dispatch backend                                                                                                   |
-| `graph-works-<interface>` (including `graph-works-serve`) | 4, interface | everything below it; interfaces never import each other — what they share (the JSON projections) lives in graph-works-wire, which imports no interface               |
+| `graph-works-<interface>` (including `graph-works-serve`) | 4, interface | every application slice; interfaces never import each other — what they share (the JSON projections) lives in graph-works-wire, which imports no interface               |
 
 
 Each package carries its own `AGENTS.md` (via a `CLAUDE.md` that just
@@ -48,19 +48,30 @@ spans packages.
 | `doc-wiki-okf`     | 2        | The documentation-wiki lane: source reading, ingest briefs, proposals.                                                                                         |
 | `repositories-okf` | 2        | The repositories lane: ManagedRepository/ReferenceRepository declarations, the lane installer, the clone ignore glob, and the reference-repository git runner and page builders (pin, snapshot, changelog, flagging). |
 | `work-tracker-okf` | 2        | Work-item tracking as an OKF v0.2 lane.                                                                                                                        |
-| `graph-works-core` | 3        | What a workspace is: discovery, the layout object, the manifest, init.                                                                                         |
+| `gw-kernel` | 3        | What a workspace is: discovery, the layout object, the manifest, init.                                                                                         |
+| `gw-pipeline` | 3, application slice | Journaled transactions, finish evidence, placement, gate configuration, guidance and transcript capture over resolved kernel primitives. |
+| `gw-orchestrate` | 3, application slice | Work planning, dispatch, placement, gates, advancement and integration over resolved kernel workspace primitives. |
+| `gw-work` | 3, application slice | Work-item commands and archive operations over kernel and pipeline services. |
+| `gw-wiki` | 3, application slice | Wiki scan, ingest, query, lint, proposals, display reads, repository operations and agent support over resolved kernel primitives. |
 | `graph-works-wire` | 4        | Every typed result projected to plain JSON data — the one copy the CLI and graph-works-serve emit. Pure: no interface framework, no I/O, no encoding. |
-| `graph-works-cli`  | 4        | `gw`: a thin Typer interface over `graph-works-core` (ADR-0013 — logic stays in core, this package routes/parses/formats/traces).                              |
-| `graph-works-serve` | 4      | `gw-serve`: loopback HTTP sidecar over core — read and plan/apply mutation routes, guard, `serve.json`, route catalog. |
+| `graph-works-cli`  | 4        | `gw`: a thin Typer interface over the five application slices (ADR-0013 — logic stays in the slices, this package routes/parses/formats/traces).                              |
+| `graph-works-serve` | 4      | `gw-serve`: loopback HTTP sidecar over the application slices — read and plan/apply mutation routes, guard, `serve.json`, route catalog. |
 
 
-Dependencies only point down the table (never up, never sideways within a
-band except through the band-1 `DispatchBackend` seam). `graph-works-core` is
+Dependencies point down the bands and down the application tree: `gw-pipeline`
+and `gw-wiki` depend on `gw-kernel`; `gw-orchestrate` and `gw-work` depend on
+pipeline and kernel. Sibling imports are forbidden; the band-1 `DispatchBackend`
+seam permits its declared backend dependencies. The root import-linter contracts
+"The application band is a tree of five slices beneath the interfaces" and
+"Pipeline consumers never import the wiki slice" enforce the application tree. `gw-kernel` is
 deliberately the only package that resolves a workspace root or reads
-`workspace.yaml` — every package beneath it receives resolved paths as
-arguments. Above core sits the interface band: `graph-works-cli`,
+`workspace.yaml` — application slices receive resolved kernel primitives; only
+`gw_pipeline.transcript_capture` may delegate to kernel discovery. Kernel never
+imports slices; pipeline never imports work/orchestrate/wiki or interfaces.
+Every package beneath kernel receives resolved paths as
+arguments. Above the application slices sits the interface band: `graph-works-cli`,
 `graph-works-wire`, and `graph-works-serve`. import-linter states both
-edges — the wire never imports an interface, and core never imports the
+edges — the wire never imports an interface, and no application slice imports the
 interface band.
 
 ## Commands
@@ -79,7 +90,7 @@ exists yet — enforcement is local, by design (ADR-0010).
 | `just line-endings`      | A tracked file that would check out CRLF under Git for Windows' default `core.autocrlf=true`                                                                                                                                                                                                                                                                                                                                                              |
 | `just platform-declared` | A package that imports a POSIX-only module, or reaches a POSIX-only process primitive, with no `## Platform` section declaring it — ADR-0021 rule 3a as a check                                                                                                                                                                                                                                                                                           |
 | `just lint`              | `uv run ruff check . && uv run ruff format --check .`                                                                                                                                                                                                                                                                                                                                                                                                     |
-| `just types`             | `uv run mypy --strict`, **twice per package** — once per `--platform` arm (`linux`, `win32`), 32 invocations total, run concurrently (`GW_TYPES_JOBS`) with per-arm-per-unit `--cache-dir .mypy_cache/<arm>/<unit>` — via `uv run --package <name> mypy --strict --platform <arm> packages/<name>/src` (okf-io and okf-ext share a bare `uv run` since they share the root `testpaths`); a POSIX host cannot otherwise see a Windows-only `mypy --strict` failure, or vice versa                                                                      |
+| `just types`             | `uv run mypy --strict`, **twice per package** — once per `--platform` arm (`linux`, `win32`), 40 unit/arm invocations total, run concurrently (`GW_TYPES_JOBS`) with per-arm-per-unit `--cache-dir .mypy_cache/<arm>/<unit>` — via `uv run --package <name> mypy --strict --platform <arm> packages/<name>/src` (okf-io and okf-ext share a bare `uv run` since they share the root `testpaths`); a POSIX host cannot otherwise see a Windows-only `mypy --strict` failure, or vice versa                                                                      |
 | `just contracts`         | `uv run lint-imports` — the workspace's band/suffix boundaries plus okf-ext's internal capability boundaries                                                                                                                                                                                                                                                                                                                                              |
 | `just test`              | `uv run pytest`, plus one `uv run --package <name> pytest packages/<name>/tests` per non-okf-io/okf-ext package                                                                                                                                                                                                                                                                                                                                           |
 | `just cov`               | Branch coverage, gated per package (95% for most, 90% for `code-graph-io`) — see the justfile for exact invocations; a failure reports only a global percentage, so start with the lowest-covered module and read `term-missing`                                                                                                                                                                                                                          |
@@ -93,7 +104,7 @@ boundary the gate is `gw work gate run <work-path>` then `gw work gate wait
 <work-path>`: gw runs this repository's `gate.full` (`just check`) once per
 clean tree and records a receipt that advance and finish trust. Do not re-run
 the full gate by hand.**
-Re-running the full 17-package gate on every fix attempt is the single biggest
+Re-running the full workspace gate on every fix attempt is the single biggest
 source of wasted time in this repo — mypy strict runs twice per package per
 platform arm, cov runs the full suite per package, and `test-plugin` alone chains
 ~15 suites including a `node --test` run. A transcript survey of
@@ -336,7 +347,7 @@ throughout the code are `$GRAPH_WORKS_DIR/okf/adrs/`. Read them before
 revisiting a settled decision — most surprising choices in this codebase are
 documented there with their rejected alternatives.
 
-(`GRAPH_WIKI_WORKSPACE` is an **old** layout's env var name — `graph-works-core`
+(`GRAPH_WIKI_WORKSPACE` is an **old** layout's env var name — `gw-kernel`
 explicitly does not honor it, and a workspace under that shape resolves as
 "not a workspace" rather than falling back. If you see it referenced anywhere
 outside a test asserting the old name is rejected, that reference is stale.)

@@ -7,9 +7,9 @@ from collections.abc import Iterator
 import httpx
 import pytest
 from conftest import PORT, TOKEN
-from graph_works_core.workspace.layout import WorkspaceLayout
 from graph_works_serve.app import build_app
 from graph_works_serve.context import ServeContext
+from gw_kernel.workspace.layout import WorkspaceLayout
 from starlette.testclient import TestClient
 from test_events_route import scripted
 

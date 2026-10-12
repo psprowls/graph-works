@@ -158,7 +158,7 @@ matches or resolves rules. Treat model IDs and effort strings as opaque.
      start, in step 4.
    - `main` is the repository's own checkout —
      `_resolve_worktree` in
-     `packages/graph-works-core/src/graph_works_core/orchestrate/commands.py`
+     `packages/gw-orchestrate/src/gw_orchestrate/commands.py`
      chooses `main` over `reuse` whenever the resolved worktree equals the
      code repo's own checkout. No worker states or infers its own placement in
      either case; step 4 records what Orca actually placed.

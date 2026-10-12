@@ -13,16 +13,16 @@ from config_io import (
     StoreValidationError,
     resolve_key,
 )
-from graph_works_core.hooks import Action, HooksSettingsError
-from graph_works_core.hooks import apply as apply_hooks
-from graph_works_core.workspace import manifest
-from graph_works_core.workspace.discovery import find_repo_root
-from graph_works_core.workspace.dispatch_config import is_retired_config_key, remove_retired_config_key
-from graph_works_core.workspace.dispatch_projection import mutate_workspace_config, write_dispatch_projection
-from graph_works_core.workspace.errors import WorkspaceError
-from graph_works_core.workspace.layout import WorkspaceLayout
-from graph_works_core.workspace.manifest import workspace_store
-from graph_works_core.workspace.work_schemas import SchemaRefreshStale, apply_schema_refresh, plan_schema_refresh
+from gw_kernel.hooks import Action, HooksSettingsError
+from gw_kernel.hooks import apply as apply_hooks
+from gw_kernel.workspace import manifest
+from gw_kernel.workspace.discovery import find_repo_root
+from gw_kernel.workspace.dispatch_config import is_retired_config_key, remove_retired_config_key
+from gw_kernel.workspace.dispatch_projection import mutate_workspace_config, write_dispatch_projection
+from gw_kernel.workspace.errors import WorkspaceError
+from gw_kernel.workspace.layout import WorkspaceLayout
+from gw_kernel.workspace.manifest import workspace_store
+from gw_kernel.workspace.work_schemas import SchemaRefreshStale, apply_schema_refresh, plan_schema_refresh
 
 from graph_works_cli import exit_codes
 from graph_works_cli.config_cli.rendering import (

@@ -14,9 +14,13 @@ members = [
     "doc-wiki-okf",
     "graph-works",
     "graph-works-cli",
-    "graph-works-core",
     "graph-works-serve",
     "graph-works-wire",
+    "gw-kernel",
+    "gw-orchestrate",
+    "gw-pipeline",
+    "gw-wiki",
+    "gw-work",
     "models-io",
     "okf-ext",
     "okf-io",
@@ -391,7 +395,10 @@ source = { virtual = "." }
 [package.dev-dependencies]
 dev = [
     { name = "doc-wiki-okf" },
-    { name = "graph-works-core" },
+    { name = "gw-kernel" },
+    { name = "gw-pipeline" },
+    { name = "gw-wiki" },
+    { name = "gw-work" },
     { name = "import-linter" },
     { name = "models-io" },
     { name = "mypy" },
@@ -414,7 +421,10 @@ dev = [
 [package.metadata.requires-dev]
 dev = [
     { name = "doc-wiki-okf", editable = "packages/doc-wiki-okf" },
-    { name = "graph-works-core", editable = "packages/graph-works-core" },
+    { name = "gw-kernel", editable = "packages/gw-kernel" },
+    { name = "gw-pipeline", editable = "packages/gw-pipeline" },
+    { name = "gw-wiki", editable = "packages/gw-wiki" },
+    { name = "gw-work", editable = "packages/gw-work" },
     { name = "import-linter", specifier = ">=2.0" },
     { name = "models-io", editable = "packages/models-io" },
     { name = "mypy", specifier = ">=1.11" },
@@ -442,8 +452,12 @@ dependencies = [
     { name = "code-wiki-okf" },
     { name = "config-io" },
     { name = "doc-wiki-okf" },
-    { name = "graph-works-core" },
     { name = "graph-works-wire" },
+    { name = "gw-kernel" },
+    { name = "gw-orchestrate" },
+    { name = "gw-pipeline" },
+    { name = "gw-wiki" },
+    { name = "gw-work" },
     { name = "models-io" },
     { name = "okf-ext", extra = ["schemas"] },
     { name = "okf-io" },
@@ -459,8 +473,12 @@ requires-dist = [
     { name = "code-wiki-okf", editable = "packages/code-wiki-okf" },
     { name = "config-io", editable = "packages/config-io" },
     { name = "doc-wiki-okf", editable = "packages/doc-wiki-okf" },
-    { name = "graph-works-core", editable = "packages/graph-works-core" },
     { name = "graph-works-wire", editable = "packages/graph-works-wire" },
+    { name = "gw-kernel", editable = "packages/gw-kernel" },
+    { name = "gw-orchestrate", editable = "packages/gw-orchestrate" },
+    { name = "gw-pipeline", editable = "packages/gw-pipeline" },
+    { name = "gw-wiki", editable = "packages/gw-wiki" },
+    { name = "gw-work", editable = "packages/gw-work" },
     { name = "models-io", editable = "packages/models-io" },
     { name = "okf-ext", extras = ["schemas"], editable = "packages/okf-ext" },
     { name = "okf-io", editable = "packages/okf-io" },
@@ -470,59 +488,16 @@ requires-dist = [
 ]
 
 [[package]]
-name = "graph-works-core"
-version = "0.6.11"
-source = { editable = "packages/graph-works-core" }
-dependencies = [
-    { name = "code-graph-io" },
-    { name = "code-wiki-okf" },
-    { name = "config-io" },
-    { name = "doc-wiki-okf" },
-    { name = "langchain-core" },
-    { name = "markdown-it-py" },
-    { name = "models-io", extra = ["bedrock"] },
-    { name = "okf-ext", extra = ["schemas"] },
-    { name = "okf-io" },
-    { name = "plugin-fork-io" },
-    { name = "repositories-okf" },
-    { name = "ruamel-yaml" },
-    { name = "subagents-io" },
-    { name = "work-tracker-okf" },
-]
-
-[package.optional-dependencies]
-vercel = [
-    { name = "models-io", extra = ["vercel"] },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "code-graph-io", editable = "packages/code-graph-io" },
-    { name = "code-wiki-okf", editable = "packages/code-wiki-okf" },
-    { name = "config-io", editable = "packages/config-io" },
-    { name = "doc-wiki-okf", editable = "packages/doc-wiki-okf" },
-    { name = "langchain-core", specifier = ">=1.4" },
-    { name = "markdown-it-py", specifier = ">=3.0" },
-    { name = "models-io", extras = ["bedrock"], editable = "packages/models-io" },
-    { name = "models-io", extras = ["vercel"], marker = "extra == 'vercel'", editable = "packages/models-io" },
-    { name = "okf-ext", extras = ["schemas"], editable = "packages/okf-ext" },
-    { name = "okf-io", editable = "packages/okf-io" },
-    { name = "plugin-fork-io", editable = "packages/plugin-fork-io" },
-    { name = "repositories-okf", editable = "packages/repositories-okf" },
-    { name = "ruamel-yaml", specifier = ">=0.18" },
-    { name = "subagents-io", editable = "packages/subagents-io" },
-    { name = "work-tracker-okf", editable = "packages/work-tracker-okf" },
-]
-provides-extras = ["vercel"]
-
-[[package]]
 name = "graph-works-serve"
 version = "0.3.12"
 source = { editable = "packages/graph-works-serve" }
 dependencies = [
     { name = "config-io" },
-    { name = "graph-works-core" },
     { name = "graph-works-wire" },
+    { name = "gw-kernel" },
+    { name = "gw-orchestrate" },
+    { name = "gw-wiki" },
+    { name = "gw-work" },
     { name = "starlette" },
     { name = "uvicorn" },
     { name = "watchfiles" },
@@ -536,8 +511,11 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "config-io", editable = "packages/config-io" },
-    { name = "graph-works-core", editable = "packages/graph-works-core" },
     { name = "graph-works-wire", editable = "packages/graph-works-wire" },
+    { name = "gw-kernel", editable = "packages/gw-kernel" },
+    { name = "gw-orchestrate", editable = "packages/gw-orchestrate" },
+    { name = "gw-wiki", editable = "packages/gw-wiki" },
+    { name = "gw-work", editable = "packages/gw-work" },
     { name = "starlette", specifier = ">=0.40" },
     { name = "uvicorn", specifier = ">=0.30" },
     { name = "watchfiles", specifier = ">=1.0,<2" },
@@ -553,7 +531,11 @@ source = { editable = "packages/graph-works-wire" }
 dependencies = [
     { name = "config-io" },
     { name = "doc-wiki-okf" },
-    { name = "graph-works-core" },
+    { name = "gw-kernel" },
+    { name = "gw-orchestrate" },
+    { name = "gw-pipeline" },
+    { name = "gw-wiki" },
+    { name = "gw-work" },
     { name = "okf-ext" },
 ]
 
@@ -561,7 +543,11 @@ dependencies = [
 requires-dist = [
     { name = "config-io", editable = "packages/config-io" },
     { name = "doc-wiki-okf", editable = "packages/doc-wiki-okf" },
-    { name = "graph-works-core", editable = "packages/graph-works-core" },
+    { name = "gw-kernel", editable = "packages/gw-kernel" },
+    { name = "gw-orchestrate", editable = "packages/gw-orchestrate" },
+    { name = "gw-pipeline", editable = "packages/gw-pipeline" },
+    { name = "gw-wiki", editable = "packages/gw-wiki" },
+    { name = "gw-work", editable = "packages/gw-work" },
     { name = "okf-ext", editable = "packages/okf-ext" },
 ]
 
@@ -627,6 +613,174 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/00/ac/05d859a62ed9282f43a0f0962da230c46a2eb3d3ecb5b39117b3b4888405/grimp-3.15-cp315-cp315-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:fcc2e5065d35047729e41a55c9c3eb99810cf322fe3b3e89fa126f306ce6b3b5", size = 2273647, upload-time = "2026-07-03T12:08:36.139Z" },
     { url = "https://files.pythonhosted.org/packages/6d/dd/f726316f54e29da4f24d545d6299e1ea0accfbbf52729077fd4a619de055/grimp-3.15-cp315-cp315t-manylinux_2_17_i686.manylinux2014_i686.whl", hash = "sha256:b38327673df49203cff0ebcbbf078999a80f0b11bb654760059f6f00f56f64d6", size = 2344080, upload-time = "2026-07-03T12:08:25.044Z" },
     { url = "https://files.pythonhosted.org/packages/c1/56/523a8f969f0a0b0a8ce43fbe8bc7a04e90f52724efc85f3305f1e07ae626/grimp-3.15-cp315-cp315t-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:965b37dad2f73164a103381c9fd1255bb3b2f6021ca2f38ffe70dd00fdc0fc55", size = 2275041, upload-time = "2026-07-03T12:08:37.582Z" },
+]
+
+[[package]]
+name = "gw-kernel"
+version = "0.7.0"
+source = { editable = "packages/gw-kernel" }
+dependencies = [
+    { name = "code-graph-io" },
+    { name = "code-wiki-okf" },
+    { name = "config-io" },
+    { name = "doc-wiki-okf" },
+    { name = "markdown-it-py" },
+    { name = "okf-ext", extra = ["schemas"] },
+    { name = "okf-io" },
+    { name = "repositories-okf" },
+    { name = "ruamel-yaml" },
+    { name = "subagents-io" },
+    { name = "work-tracker-okf" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "code-graph-io", editable = "packages/code-graph-io" },
+    { name = "code-wiki-okf", editable = "packages/code-wiki-okf" },
+    { name = "config-io", editable = "packages/config-io" },
+    { name = "doc-wiki-okf", editable = "packages/doc-wiki-okf" },
+    { name = "markdown-it-py", specifier = ">=3.0" },
+    { name = "okf-ext", extras = ["schemas"], editable = "packages/okf-ext" },
+    { name = "okf-io", editable = "packages/okf-io" },
+    { name = "repositories-okf", editable = "packages/repositories-okf" },
+    { name = "ruamel-yaml", specifier = ">=0.18" },
+    { name = "subagents-io", editable = "packages/subagents-io" },
+    { name = "work-tracker-okf", editable = "packages/work-tracker-okf" },
+]
+
+[[package]]
+name = "gw-orchestrate"
+version = "0.1.0"
+source = { editable = "packages/gw-orchestrate" }
+dependencies = [
+    { name = "gw-kernel" },
+    { name = "gw-pipeline" },
+    { name = "okf-ext", extra = ["schemas"] },
+    { name = "okf-io" },
+    { name = "subagents-io" },
+    { name = "work-tracker-okf" },
+]
+
+[package.dev-dependencies]
+dev = [
+    { name = "gw-work" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "gw-kernel", editable = "packages/gw-kernel" },
+    { name = "gw-pipeline", editable = "packages/gw-pipeline" },
+    { name = "okf-ext", extras = ["schemas"], editable = "packages/okf-ext" },
+    { name = "okf-io", editable = "packages/okf-io" },
+    { name = "subagents-io", editable = "packages/subagents-io" },
+    { name = "work-tracker-okf", editable = "packages/work-tracker-okf" },
+]
+
+[package.metadata.requires-dev]
+dev = [{ name = "gw-work", editable = "packages/gw-work" }]
+
+[[package]]
+name = "gw-pipeline"
+version = "0.1.0"
+source = { editable = "packages/gw-pipeline" }
+dependencies = [
+    { name = "code-graph-io" },
+    { name = "config-io" },
+    { name = "gw-kernel" },
+    { name = "okf-ext", extra = ["schemas"] },
+    { name = "okf-io" },
+    { name = "work-tracker-okf" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "code-graph-io", editable = "packages/code-graph-io" },
+    { name = "config-io", editable = "packages/config-io" },
+    { name = "gw-kernel", editable = "packages/gw-kernel" },
+    { name = "okf-ext", extras = ["schemas"], editable = "packages/okf-ext" },
+    { name = "okf-io", editable = "packages/okf-io" },
+    { name = "work-tracker-okf", editable = "packages/work-tracker-okf" },
+]
+
+[[package]]
+name = "gw-wiki"
+version = "0.1.0"
+source = { editable = "packages/gw-wiki" }
+dependencies = [
+    { name = "code-graph-io" },
+    { name = "code-wiki-okf" },
+    { name = "config-io" },
+    { name = "doc-wiki-okf" },
+    { name = "gw-kernel" },
+    { name = "langchain-core" },
+    { name = "models-io", extra = ["bedrock"] },
+    { name = "okf-ext", extra = ["schemas"] },
+    { name = "okf-io" },
+    { name = "plugin-fork-io" },
+    { name = "repositories-okf" },
+    { name = "subagents-io" },
+    { name = "work-tracker-okf" },
+]
+
+[package.optional-dependencies]
+vercel = [
+    { name = "models-io", extra = ["vercel"] },
+]
+
+[package.dev-dependencies]
+dev = [
+    { name = "gw-work" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "code-graph-io", editable = "packages/code-graph-io" },
+    { name = "code-wiki-okf", editable = "packages/code-wiki-okf" },
+    { name = "config-io", editable = "packages/config-io" },
+    { name = "doc-wiki-okf", editable = "packages/doc-wiki-okf" },
+    { name = "gw-kernel", editable = "packages/gw-kernel" },
+    { name = "langchain-core", specifier = ">=1.4" },
+    { name = "models-io", extras = ["bedrock"], editable = "packages/models-io" },
+    { name = "models-io", extras = ["vercel"], marker = "extra == 'vercel'", editable = "packages/models-io" },
+    { name = "okf-ext", extras = ["schemas"], editable = "packages/okf-ext" },
+    { name = "okf-io", editable = "packages/okf-io" },
+    { name = "plugin-fork-io", editable = "packages/plugin-fork-io" },
+    { name = "repositories-okf", editable = "packages/repositories-okf" },
+    { name = "subagents-io", editable = "packages/subagents-io" },
+    { name = "work-tracker-okf", editable = "packages/work-tracker-okf" },
+]
+provides-extras = ["vercel"]
+
+[package.metadata.requires-dev]
+dev = [{ name = "gw-work", editable = "packages/gw-work" }]
+
+[[package]]
+name = "gw-work"
+version = "0.1.0"
+source = { editable = "packages/gw-work" }
+dependencies = [
+    { name = "code-graph-io" },
+    { name = "code-wiki-okf" },
+    { name = "doc-wiki-okf" },
+    { name = "gw-kernel" },
+    { name = "gw-pipeline" },
+    { name = "okf-ext", extra = ["schemas"] },
+    { name = "okf-io" },
+    { name = "repositories-okf" },
+    { name = "work-tracker-okf" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "code-graph-io", editable = "packages/code-graph-io" },
+    { name = "code-wiki-okf", editable = "packages/code-wiki-okf" },
+    { name = "doc-wiki-okf", editable = "packages/doc-wiki-okf" },
+    { name = "gw-kernel", editable = "packages/gw-kernel" },
+    { name = "gw-pipeline", editable = "packages/gw-pipeline" },
+    { name = "okf-ext", extras = ["schemas"], editable = "packages/okf-ext" },
+    { name = "okf-io", editable = "packages/okf-io" },
+    { name = "repositories-okf", editable = "packages/repositories-okf" },
+    { name = "work-tracker-okf", editable = "packages/work-tracker-okf" },
 ]
 
 [[package]]

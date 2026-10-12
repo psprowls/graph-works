@@ -21,7 +21,7 @@ uv run scripts/migrate_vault.py frontmatter "$GRAPH_WIKI_WORKSPACE/wiki" --write
 
 Run it through `uv run` from the repo root. **`uv run` is mandatory.** This
 script imports `okf_io`, `okf_ext`, `doc_wiki_okf`, `code_wiki_okf` and
-`graph_works_core` from the workspace; a `./migrate_vault.py` shebang
+`gw_kernel` from the workspace; a `./migrate_vault.py` shebang
 invocation cannot resolve any of them — the same trap
 `scripts/convert-wikilinks.md` documents.
 

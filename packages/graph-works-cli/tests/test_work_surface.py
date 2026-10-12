@@ -133,18 +133,22 @@ def _imported_roots(path: Path) -> set[str]:
     return roots
 
 
-def test_work_cli_imports_domain_behavior_only_through_graph_works_core() -> None:
+def test_work_cli_imports_domain_behavior_only_through_application_packages() -> None:
     """ADR-0013's boundary, asserted rather than reviewed.
 
     The work CLI may depend on its own interface package, Typer, and the Python
     standard library. Every domain/config/schema dependency must arrive through
-    ``graph_works_core`` rather than a lower-level sibling package.
+    ``gw_kernel``, ``gw_pipeline``, ``gw_work`` or ``gw_orchestrate`` rather than
+    a lower-level sibling package.
     """
     # D-002: only work_cli/orca.py builds the Orca adapter needed by core's port.
     allowed = {
         *sys.stdlib_module_names,
         "graph_works_cli",
-        "graph_works_core",
+        "gw_kernel",
+        "gw_pipeline",
+        "gw_orchestrate",
+        "gw_work",
         "graph_works_wire",
         "typer",
         "workflow_orca",

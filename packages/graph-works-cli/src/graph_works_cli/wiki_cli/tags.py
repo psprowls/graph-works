@@ -2,7 +2,7 @@
 
 ADR 2026-08-13-command-modules: this module routes, parses, formats, and traces. Every decision --
 what the retention rule is, what a disposition file may say, which phase runs
-first -- belongs to `graph_works_core.tag_policy` and is not restated here.
+first -- belongs to `gw_kernel.tag_policy` and is not restated here.
 """
 
 from __future__ import annotations
@@ -11,16 +11,16 @@ from datetime import date
 from pathlib import Path
 
 import typer
-from graph_works_core.tag_policy.commands import (
+from graph_works_wire.wiki import tag_inventory_payload, tags_undeclared_payload
+from gw_kernel.tag_policy.commands import (
     Phase,
     apply_phase,
     draft_disposition,
     plan_phase,
     undeclared,
 )
-from graph_works_core.tag_policy.disposition import load, render
-from graph_works_core.workspace.bundle import load_workspace_bundle
-from graph_works_wire.wiki import tag_inventory_payload, tags_undeclared_payload
+from gw_kernel.tag_policy.disposition import load, render
+from gw_kernel.workspace.bundle import load_workspace_bundle
 from okf_ext.tags import VOCABULARY_FILENAME
 from okf_ext.tags import inventory as tag_inventory
 

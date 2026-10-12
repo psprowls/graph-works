@@ -348,7 +348,7 @@ def test_apply_serializes_through_one_lock(store: Store, monkeypatch: pytest.Mon
 
 
 def test_exception_envelopes_preserve_reason_exit_codes(store: Store) -> None:
-    from graph_works_core.workspace.errors import WorkspaceError
+    from gw_kernel.workspace.errors import WorkspaceError
 
     for exc, reason, code in ((ValueError("missing"), "unresolved", 7), (WorkspaceError("workspace"), "workspace", 4)):
         store.raise_ = exc

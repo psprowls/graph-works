@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from dataclasses import fields
 
-from graph_works_core.events import Change, ChangeEvent, EventKind
 from graph_works_wire.events import SCHEMA_VERSION, change_event_payload, changes_payload
+from gw_kernel.events import Change, ChangeEvent, EventKind
 
 ITEM = ChangeEvent(
     kind=EventKind.WORK_ITEM,

@@ -20,12 +20,12 @@ from dataclasses import replace
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from graph_works_core.query import commands as q
-from graph_works_core.workspace.layout import WorkspaceLayout
+from gw_wiki.query import commands as q
+from gw_kernel.workspace.layout import WorkspaceLayout
 from read_bench_counters import counting
 
 try:
-    from graph_works_core.query import lexical_store
+    from gw_wiki.query import lexical_store
 except ImportError:  # The pre-read-model revision has no persisted lexical store.
     lexical_store = None
 

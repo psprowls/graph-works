@@ -10,8 +10,8 @@ from __future__ import annotations
 from datetime import UTC, datetime
 
 import typer
-from graph_works_core.util.commands import run_log
 from graph_works_wire.util import log_payload
+from gw_wiki.util.commands import run_log
 
 from graph_works_cli.errors import exit_error
 from graph_works_cli.json_output import encode

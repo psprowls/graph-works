@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from graph_works_core.agent_config import AgentConfigReport
 from graph_works_wire.agent_config import agent_config_payload
+from gw_wiki.agent_config import AgentConfigReport
 
 from graph_works_cli.json_output import encode
 

@@ -251,7 +251,7 @@ def test_transaction_yields_the_same_store(seeded_workspace: Path):
 # Cross-thread access
 #
 # The reader's sqlite3.Connection is opened on whichever thread calls
-# open_reader(). Consumers such as graph_works_core's LangChain tool wrappers
+# open_reader(). Consumers such as gw_kernel's LangChain tool wrappers
 # fall back to BaseTool.ainvoke() -> run_in_executor(None, self._run, ...),
 # which runs the sync query on a threadpool worker thread that is NOT the
 # thread that opened the connection. sqlite3's default check_same_thread=True

@@ -1,4 +1,4 @@
-"""CLI routing for graph_works_core.hooks; merge semantics stay in core tests."""
+"""CLI routing for gw_kernel.hooks; merge semantics stay in core tests."""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ from pathlib import Path, PurePath
 import typer
 from graph_works_cli import exit_codes
 from graph_works_cli.config_cli.main import config_app
-from graph_works_core.hooks import HooksError, HooksResult
+from gw_kernel.hooks import HooksError, HooksResult
 from typer.testing import CliRunner
 
 runner = CliRunner()

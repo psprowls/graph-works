@@ -31,7 +31,7 @@ Or `just check-affected` (or `just check-pkg repositories-okf`) for lint, types 
 
 - OKF v0.2 conformance (SPEC §11 item 1) is claimed for the committed bundle only.
 - A materialized clone under `repositories/<name>/references/git/` usually holds `.md` files without frontmatter, so a working tree with a clone present is not strictly conformant.
-- The lane ignore (`CLONE_GLOB`) and directory pruning (`PRUNE_GLOB`) is a graph-works consumer convention, not a spec feature; every graph-works bundle load appends it through `graph_works_core.workspace.bundle`.
+- The lane ignore (`CLONE_GLOB`) and directory pruning (`PRUNE_GLOB`) is a graph-works consumer convention, not a spec feature; every graph-works bundle load appends it through `gw_kernel.workspace.bundle`.
 - No bundle export or copy tooling exists at the baseline; any future exporter must exclude `repositories/*/references/git/`.
 
 ## Obsidian

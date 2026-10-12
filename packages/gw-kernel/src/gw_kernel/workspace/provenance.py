@@ -1,0 +1,660 @@
+"""Git provenance: what a completed stage leaves behind.
+
+The only module in this package that runs git. Two contracts live here.
+Provenance capture (`run_git`, `results_facts`, `worktree_state`, ...) is
+best-effort and degrades to `None`: an advance must not fail because a stub
+could not be gathered. Gate inputs (`gate_git` and the `strict_*` probes) are
+the opposite: they return a typed `GitFailure` that the gate turns into a
+refusal, never a silent pass.
+
+The exceptions are `write_active_work`'s canonical-path and dispatch-phase
+guards, which raise. Those are caller bugs, not git failures: a coordination
+pointer must identify exactly one path-native work item and an active phase.
+
+No clock. `write_active_work` takes `updated=` as an already-formatted string,
+matching `work-tracker-okf`'s `today=` convention: the caller that knows what
+"now" means is the one that supplies it.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import shutil
+import subprocess
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Literal
+
+from work_tracker_okf.paths import parse_item_path
+from work_tracker_okf.pipeline import dispatch_phases
+from work_tracker_okf.results import ResultsFacts
+
+from gw_kernel.workspace.errors import WorkspaceError
+from gw_kernel.workspace.layout import WorkspaceLayout
+from gw_kernel.workspace.manifest import resolve_checked_key
+
+#: The pointer a transcript-capture hook reads to attribute a session to an
+#: item. It lands in `layout.cache_dir` -- gitignored machine state, which is
+#: what the cache directory is for -- not in the committed config directory.
+ACTIVE_WORK_FILENAME = "active-work.json"
+ACTIVE_WORK_PHASES: frozenset[str] = dispatch_phases()
+
+#: Every git call is capped. A hung `git` on the advance path is the failure
+#: this exists to make impossible.
+_GIT_TIMEOUT_SECONDS = 5
+
+#: git's own field separator for `--format`. Safe inside a subject line, where
+#: a colon or a tab is not.
+_UNIT_SEP = "\x1f"
+
+
+@dataclass(frozen=True, slots=True)
+class GitOutcome:
+    """One git invocation's result; `returncode` is `None` when git did not run."""
+
+    returncode: int | None
+    stdout: str
+    cause: Literal["ok", "missing", "timeout", "error"]
+    stderr: str = ""
+
+
+def probe_git(
+    cwd: Path,
+    *args: str,
+    executable: str = "git",
+    timeout: float = _GIT_TIMEOUT_SECONDS,
+    input_text: str | None = None,
+    preserve_output: bool = False,
+) -> GitOutcome:
+    """Run `git <args>` in *cwd*, retaining its exit status for state probes.
+
+    *timeout* defaults to the advance-path cap; `workspace.commits` passes a
+    longer one because a commit runs the user's own git hooks.
+    *preserve_output* decodes strict UTF-8 bytes without newline translation;
+    use it for NUL-delimited paths whose CR/LF characters must remain exact.
+    """
+    try:
+        if preserve_output:
+            raw = subprocess.run(
+                [executable, *args],
+                cwd=cwd,
+                capture_output=True,
+                input=input_text.encode("utf-8") if input_text is not None else None,
+                check=False,
+                timeout=timeout,
+            )
+            return GitOutcome(raw.returncode, raw.stdout.decode("utf-8"), "ok", raw.stderr.decode("utf-8"))
+        completed = subprocess.run(
+            [executable, *args],
+            cwd=cwd,
+            capture_output=True,
+            input=input_text,
+            text=True,
+            check=False,
+            timeout=timeout,
+        )
+    except FileNotFoundError:
+        return GitOutcome(None, "", "missing")
+    except subprocess.TimeoutExpired:
+        return GitOutcome(None, "", "timeout")
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return GitOutcome(None, "", "error")
+    return GitOutcome(completed.returncode, completed.stdout, "ok", completed.stderr)
+
+
+def run_git(cwd: Path, *args: str) -> str | None:
+    """Best-effort `git <args>` in *cwd*; stdout, or `None` on any failure.
+
+    Public because callers outside this module run git through it (or through
+    `probe_git`): this is the only module in the package that does, and a
+    second subprocess helper elsewhere would be a second timeout policy and a
+    second degrade contract to keep in step.
+    """
+    outcome = probe_git(cwd, *args)
+    return outcome.stdout if outcome.returncode == 0 else None
+
+
+GIT_ENV = "GW_GIT"
+GitFailureCause = Literal["unresolved", "missing", "timeout", "error", "nonzero"]
+
+
+@dataclass(frozen=True, slots=True)
+class GitFailure:
+    """Why a gate input could not be read. Never a pass."""
+
+    cause: GitFailureCause
+    detail: str
+
+
+@dataclass(frozen=True, slots=True)
+class GitExecutable:
+    """The one git the gate runs, where it came from, and its `--version`."""
+
+    path: str
+    source: Literal["config", "env", "path"]
+    version: str
+
+
+def resolve_git(configured: str | None, *, environ: Mapping[str, str]) -> GitExecutable | GitFailure:
+    """Pick the gate's git: *configured* (`toolchain.git`), then `GW_GIT`, then PATH.
+
+    The first choice present is the choice. A broken one is a `GitFailure`,
+    never a silent fall-through to a lower one: which git a gate ran must be
+    predictable from configuration alone.
+    """
+    source: Literal["config", "env", "path"]
+    if configured:
+        candidate, source = configured, "config"
+    elif environ.get(GIT_ENV):
+        candidate, source = environ[GIT_ENV], "env"
+    else:
+        found = shutil.which("git", path=environ.get("PATH", ""))
+        if found is None:
+            return GitFailure("missing", "no `git` on PATH; set toolchain.git in workspace.local.yaml, or GW_GIT")
+        candidate, source = found, "path"
+    if not Path(candidate).is_absolute():
+        found = shutil.which(candidate, path=environ.get("PATH", ""))
+        if found is None:
+            return GitFailure("missing", f"{source} git {candidate!r} is not on PATH")
+        candidate = found
+    return _validated(candidate, source)
+
+
+_VALIDATED: dict[tuple[str, str], GitExecutable] = {}
+
+
+def _validated(executable: str, source: Literal["config", "env", "path"]) -> GitExecutable | GitFailure:
+    """`git --version` once per process per executable. Only a success is
+    remembered: a failure is re-probed on the next call."""
+    key = (executable, source)
+    cached = _VALIDATED.get(key)
+    if cached is not None:
+        return cached
+    probed = _probe_version(executable, source)
+    if isinstance(probed, GitExecutable):
+        _VALIDATED[key] = probed
+    return probed
+
+
+def _probe_version(executable: str, source: Literal["config", "env", "path"]) -> GitExecutable | GitFailure:
+    if not Path(executable).is_file():
+        return GitFailure("missing", f"{source} git {executable!r} does not exist")
+    outcome = probe_git(Path(executable).parent, "--version", executable=executable, timeout=_GIT_TIMEOUT_SECONDS)
+    if outcome.cause == "timeout":
+        return GitFailure("timeout", f"`{executable} --version` did not answer in {_GIT_TIMEOUT_SECONDS}s")
+    if outcome.cause != "ok":
+        return GitFailure(
+            "missing" if outcome.cause == "missing" else "error", f"`{executable} --version` could not run"
+        )
+    version = outcome.stdout.strip()
+    if outcome.returncode != 0 or not version.startswith("git version"):
+        return GitFailure(
+            "nonzero",
+            f"`{executable} --version` exited {outcome.returncode}: {(outcome.stderr or version).strip()[:300]}",
+        )
+    return GitExecutable(executable, source, version)
+
+
+def gate_git(layout: WorkspaceLayout, *, environ: Mapping[str, str] | None = None) -> GitExecutable | GitFailure:
+    """`resolve_git` with `toolchain.git` read from the layered manifest."""
+    env: Mapping[str, str] = os.environ if environ is None else environ
+    try:
+        value = resolve_checked_key(layout, "toolchain.git", environ={}).value
+    except WorkspaceError as exc:
+        return GitFailure("unresolved", str(exc))
+    configured = value.strip() if isinstance(value, str) and value.strip() else None
+    return resolve_git(configured, environ=env)
+
+
+def strict_git(cwd: Path, *args: str, git: GitExecutable, preserve_output: bool = False) -> str | GitFailure:
+    outcome = (
+        probe_git(cwd, *args, executable=git.path, preserve_output=True)
+        if preserve_output
+        else probe_git(cwd, *args, executable=git.path)
+    )
+    label = f"`git {' '.join(args[:2])}` in {cwd}"
+    if outcome.cause == "timeout":
+        return GitFailure("timeout", f"{label} timed out")
+    if outcome.cause != "ok":
+        return GitFailure("missing" if outcome.cause == "missing" else "error", f"{label} could not run")
+    if outcome.returncode != 0:
+        return GitFailure("nonzero", f"{label} exited {outcome.returncode}: {outcome.stderr.strip()[:300]}")
+    return outcome.stdout
+
+
+def strict_commit(repo: Path, ref: str, *, git: GitExecutable) -> str | GitFailure:
+    out = strict_git(repo, "rev-parse", "--verify", "--end-of-options", f"{ref}^{{commit}}", git=git)
+    return out if isinstance(out, GitFailure) else out.strip()
+
+
+def strict_is_ancestor(repo: Path, ancestor: str, descendant: str, *, git: GitExecutable) -> bool | GitFailure:
+    outcome = probe_git(repo, "merge-base", "--is-ancestor", ancestor, descendant, executable=git.path)
+    if outcome.cause != "ok" or outcome.returncode not in (0, 1):
+        return GitFailure("nonzero", f"`git merge-base --is-ancestor` in {repo} failed: {outcome.stderr.strip()[:300]}")
+    return outcome.returncode == 0
+
+
+def strict_toplevel(cwd: Path, *, git: GitExecutable) -> Path | GitFailure:
+    """The canonical root of the checkout containing *cwd*.
+
+    A subdirectory and a symlinked path name the same checkout as its root;
+    another worktree of the same repository does not.
+    """
+    out = strict_git(cwd, "rev-parse", "--show-toplevel", git=git)
+    if isinstance(out, GitFailure):
+        return out
+    raw = out.strip()
+    if not raw:
+        return GitFailure("error", f"`git rev-parse --show-toplevel` in {cwd} answered nothing")
+    try:
+        return Path(raw).resolve(strict=True)
+    except OSError as exc:
+        return GitFailure("error", f"cannot resolve checkout root {raw!r}: {exc}")
+
+
+def strict_merge_base(repo: Path, a: str, b: str, *, git: GitExecutable) -> str | GitFailure:
+    """The best common ancestor of *a* and *b*; unrelated histories are a failure, not an answer."""
+    out = strict_git(repo, "merge-base", a, b, git=git)
+    if isinstance(out, GitFailure):
+        return out
+    sha = out.strip()
+    return sha or GitFailure("error", f"`git merge-base` in {repo} answered nothing")
+
+
+def strict_same_repository(cwd: Path, repo: Path, *, git: GitExecutable) -> bool | GitFailure:
+    """Whether *cwd* is a checkout of *repo*: their `--git-common-dir`s agree."""
+    commons: list[Path] = []
+    for where in (cwd, repo):
+        out = strict_git(where, "rev-parse", "--git-common-dir", git=git)
+        if isinstance(out, GitFailure):
+            return out
+        common = _absolute(out, where)
+        if common is None:
+            return GitFailure("error", f"cannot resolve the git common dir of {where}")
+        commons.append(common)
+    return commons[0] == commons[1]
+
+
+def _porcelain_z(out: str) -> tuple[str, ...]:
+    fields = out.split("\0")
+    dirty: list[str] = []
+    index = 0
+    while index < len(fields):
+        entry = fields[index]
+        index += 1
+        if len(entry) < 4:
+            continue
+        status, name = entry[:2], entry[3:]
+        if status[0] in {"R", "C"}:
+            # A rename or copy carries its source in the very next field.
+            index += 1
+        dirty.append(name)
+    return tuple(dirty)
+
+
+def strict_dirty_paths(repo: Path, paths: Sequence[Path | str], *, git: GitExecutable) -> tuple[str, ...] | GitFailure:
+    """`dirty_paths` for the gate: a failed `git status` is a `GitFailure`, not `None`."""
+    out = strict_git(repo, "status", "--porcelain", "-z", "--", *(str(path) for path in paths), git=git)
+    return out if isinstance(out, GitFailure) else _porcelain_z(out)
+
+
+@dataclass(frozen=True, slots=True)
+class GateRange:
+    start_sha: str
+    end_sha: str
+    commits: tuple[str, ...]
+    files: tuple[str, ...]
+    scope: tuple[str, ...]
+
+
+def strict_range(
+    repo: Path, *, start_sha: str, paths: Sequence[Path | str], git: GitExecutable
+) -> GateRange | GitFailure:
+    end = strict_commit(repo, "HEAD", git=git)
+    if isinstance(end, GitFailure):
+        return end
+    scope = tuple(str(path) for path in paths)
+    diff = strict_git(repo, "diff", "--name-status", f"{start_sha}..{end}", "--", *scope, git=git)
+    if isinstance(diff, GitFailure):
+        return diff
+    log = strict_git(repo, "log", "--oneline", f"{start_sha}..{end}", "--", *scope, git=git)
+    if isinstance(log, GitFailure):
+        return log
+    return GateRange(
+        start_sha,
+        end,
+        tuple(line for line in log.splitlines() if line.strip()),
+        tuple(line.split("\t")[-1] for line in diff.splitlines() if line.strip()),
+        scope,
+    )
+
+
+def _absolute(raw: str, cwd: Path) -> Path | None:
+    """A `git rev-parse --git-dir` answer, which may be relative to *cwd*."""
+    if not raw.strip():
+        return None
+    candidate = Path(raw.strip())
+    try:
+        return (candidate if candidate.is_absolute() else cwd / candidate).resolve()
+    except OSError:
+        return None
+
+
+def worktree_state(cwd: Path, repo: Path, *, git: GitExecutable | GitFailure | None = None) -> tuple[str, str] | None:
+    """`(toplevel, branch)` when *cwd* is a linked worktree of *repo*, else `None`.
+
+    `--git-dir` differs from `--git-common-dir` in a linked worktree -- but also
+    inside a submodule, so `--show-superproject-working-tree` rules that out.
+
+    "Of *repo*" is decided by comparing *repo*'s own `--git-common-dir` with
+    *cwd*'s: **two paths are the same repository exactly when their common dirs
+    agree.** That is the property this docstring always claimed, stated
+    directly instead of inferred from a directory layout. The previous check --
+    the common dir's *parent* must be *repo* -- was only true when *repo* is
+    the main checkout, so it answered `None` for a *repo* that is itself a
+    linked worktree, and for either side using `--separate-git-dir`. A
+    coordinator standing in a worktree is the ordinary case, not the exotic
+    one.
+
+    A detached HEAD returns `None`; there is no branch worth recording, and the
+    finish stage creates one anyway.
+    """
+    resolved = git if git is not None else resolve_git(None, environ=os.environ)
+    if isinstance(resolved, GitFailure):
+        return None
+    executable = resolved
+
+    def _read(where: Path, *args: str) -> str | None:
+        outcome = probe_git(where, *args, executable=executable.path)
+        return outcome.stdout if outcome.returncode == 0 else None
+
+    git_dir_raw = _read(cwd, "rev-parse", "--git-dir")
+    common_raw = _read(cwd, "rev-parse", "--git-common-dir")
+    if git_dir_raw is None or common_raw is None:
+        return None
+    git_dir = _absolute(git_dir_raw, cwd)
+    common = _absolute(common_raw, cwd)
+    if git_dir is None or common is None or git_dir == common:
+        return None
+    if (_read(cwd, "rev-parse", "--show-superproject-working-tree") or "").strip():
+        return None
+    repo_common_raw = _read(Path(repo), "rev-parse", "--git-common-dir")
+    if repo_common_raw is None:
+        return None
+    repo_common = _absolute(repo_common_raw, Path(repo))
+    if repo_common is None or repo_common != common:
+        return None
+    top = _read(cwd, "rev-parse", "--show-toplevel")
+    branch = _read(cwd, "branch", "--show-current")
+    if top is None or branch is None or not branch.strip():
+        return None
+    return top.strip(), branch.strip()
+
+
+def repository_of(cwd: Path, repos: Sequence[Path]) -> Path | None:
+    """The first of *repos* that *cwd* belongs to, or `None`.
+
+    "Belongs to" is `worktree_state`'s own identity test: the two paths'
+    `--git-common-dir`s agree. So *cwd* anywhere inside a repo's main checkout
+    or any linked worktree of it names that repo, and a repo that is itself a
+    linked worktree is matched too. `None` when *cwd* is in no repository or in
+    none of *repos*.
+    """
+    common_raw = run_git(cwd, "rev-parse", "--git-common-dir")
+    common = _absolute(common_raw, cwd) if common_raw is not None else None
+    if common is None:
+        return None
+    for repo in repos:
+        repo_raw = run_git(Path(repo), "rev-parse", "--git-common-dir")
+        if repo_raw is not None and _absolute(repo_raw, Path(repo)) == common:
+            return repo
+    return None
+
+
+def head_sha(repo: Path) -> str | None:
+    """*repo*'s `HEAD`, or `None` when it is not a repo or has no commits."""
+    out = run_git(repo, "rev-parse", "HEAD")
+    sha = out.strip() if out is not None else ""
+    return sha or None
+
+
+#: What `default_base` answers when git cannot. The repo's own default branch
+#: is the right answer and this is the fallback, not a preference.
+FALLBACK_BASE = "main"
+
+
+def default_base(repo: Path | None) -> str:
+    """*repo*'s default branch, best-effort; `FALLBACK_BASE` on any failure.
+
+    Lives here rather than in `orchestrate` because it runs git and this is the
+    only module in the package that does — and because `workspace.anchor`,
+    which sits below `orchestrate`, needs it to compute a merge base.
+    """
+    if repo is None:
+        return FALLBACK_BASE
+    out = run_git(repo, "symbolic-ref", "refs/remotes/origin/HEAD")
+    if out is None or not out.strip():
+        return FALLBACK_BASE
+    return out.strip().rsplit("/", 1)[-1]
+
+
+def merge_base(repo: Path, a: str, b: str) -> str | None:
+    """The best common ancestor of *a* and *b* in *repo*, or `None`.
+
+    Degrades like every other function here: an unknown ref, an unrelated
+    history, or a directory that is not a repository all answer `None` rather
+    than raising. `merge_base(default_base, HEAD)` on the base branch itself
+    answers `HEAD` — an empty range, which `results.render()` already flags.
+    """
+    out = run_git(repo, "merge-base", a, b)
+    sha = (out or "").strip()
+    return sha or None
+
+
+def spec_anchor_commit(repo: Path, spec_path: Path) -> str | None:
+    """The most recent commit in *repo* touching *spec_path*.
+
+    `None` when the file is untracked, new, or outside *repo*. Git's own
+    history of the file IS the anchor when it has one, which is why no
+    frontmatter field stamps it: it stays correct even if reconcile runs twice.
+    """
+    out = run_git(repo, "log", "-1", "--format=%H", "--", str(spec_path))
+    sha = (out or "").strip()
+    return sha or None
+
+
+def commit_exists(repo: Path, sha: str) -> bool:
+    """Whether *sha* names a commit present in *repo*'s object store (not
+    necessarily reachable from any ref). Never raises.
+
+    The guard on a blank *sha* is not defensive noise: `cat-file -e ^{commit}`
+    on an empty string is a git usage error, and this answers a question the
+    caller asks about an unverified fallback.
+    """
+    if not sha:
+        return False
+    return run_git(repo, "cat-file", "-e", f"{sha}^{{commit}}") is not None
+
+
+def commits_touching(repo: Path, commit_range: str, paths: Sequence[Path | str]) -> tuple[tuple[str, str], ...]:
+    """`((sha, subject), ...)` for commits in *commit_range* touching *paths*,
+    newest first.
+
+    An empty *paths* returns `()` rather than the whole log — an unscoped range
+    is never what the caller means, and silently widening it would flood the
+    consumer with unrelated commits.
+    """
+    if not paths:
+        return ()
+    out = run_git(repo, "log", f"--format=%H{_UNIT_SEP}%s", commit_range, "--", *(str(path) for path in paths))
+    rows: list[tuple[str, str]] = []
+    for line in (out or "").splitlines():
+        if _UNIT_SEP not in line:
+            continue
+        sha, subject = line.split(_UNIT_SEP, 1)
+        rows.append((sha, subject))
+    return tuple(rows)
+
+
+def dirty_paths(repo: Path, paths: Sequence[Path | str]) -> tuple[str, ...] | None:
+    """Paths under *paths* with uncommitted changes in *repo*, or `None`.
+
+    `()` means "evaluated, and the tree is clean under this scope"; `None`
+    means "could not be evaluated" -- an empty *paths*, a directory that is
+    not a repository, or a `git status` that failed. The caller must
+    distinguish them: the gate that reads this fails **open** on `None` and
+    refuses on a non-empty tuple, so collapsing the two would either silence
+    the gate or fire it on every non-repo workspace.
+
+    Empty *paths* declines rather than widening to the whole tree, matching
+    `commits_touching` and `results_facts` just above: an unscoped answer is
+    never what the caller means, and here it would refuse an advance over dirt
+    the item never claimed.
+
+    `-z` rather than the default quoting: porcelain v1 escapes a path with a
+    space or a non-ASCII byte into a C-quoted string, and a refusal that names
+    `"spaced name.txt"` with the quotes attached is a path the reader cannot
+    paste back into `git add`.
+    """
+    if not paths:
+        return None
+    out = run_git(repo, "status", "--porcelain", "-z", "--", *(str(path) for path in paths))
+    if out is None:
+        return None
+    return _porcelain_z(out)
+
+
+def results_facts(
+    repo: Path,
+    *,
+    phase: str,
+    start_sha: str,
+    paths: Sequence[Path | str],
+    opened: str,
+) -> ResultsFacts | None:
+    """The facts a results stub renders from, gathered over `start_sha..HEAD`,
+    scoped to *paths*.
+
+    An empty *paths* returns `None` -- no stub -- matching `commits_touching`'s
+    own contract just above: we cannot attribute an item with no declared
+    surface, and an unscoped page is worse than an absent one.
+
+    Rendering and writing stay in `work_tracker_okf.results` -- that module
+    declines git by name (`ResultsFacts` takes its facts, it never gathers
+    them), and this is the gatherer it declined.
+    """
+    if not paths:
+        return None
+    end_sha = head_sha(repo)
+    if end_sha is None:
+        return None
+    scope = tuple(str(path) for path in paths)
+    diff = run_git(repo, "diff", "--name-status", f"{start_sha}..{end_sha}", "--", *scope)
+    log = run_git(repo, "log", "--oneline", f"{start_sha}..{end_sha}", "--", *scope)
+    if diff is None or log is None:
+        return None
+    files = tuple(line.split("\t")[-1] for line in diff.splitlines() if line.strip())
+    commits = tuple(line for line in log.splitlines() if line.strip())
+    return ResultsFacts(
+        phase=phase,
+        start_sha=start_sha,
+        end_sha=end_sha,
+        files=files,
+        commits=commits,
+        scope=scope,
+        start_predates_item=_start_predates_opened(repo, start_sha, opened),
+    )
+
+
+def _start_predates_opened(repo: Path, start_sha: str, opened: str) -> bool:
+    """Whether *start_sha*'s committer date is earlier than *opened*.
+
+    Best-effort like every other call in this module: a failed `git show`
+    degrades to `False` rather than making the range look wrong when we
+    simply couldn't check. String comparison, not a datetime parse: both
+    sides are ISO 8601 date-prefixed, which sorts correctly as text, and it
+    keeps this a value comparison rather than a clock read.
+    """
+    out = run_git(repo, "show", "-s", "--format=%cI", start_sha)
+    committer_date = (out or "").strip()
+    if not committer_date:
+        return False
+    return committer_date[:10] < opened
+
+
+def write_active_work(layout: WorkspaceLayout, path: str, phase: str, *, updated: str) -> Path | None:
+    """Stamp the active-work pointer; the path written, or `None` on `OSError`.
+
+    Raises:
+        ValueError: for a noncanonical path or inactive phase -- `done` most of all.
+    """
+    if parse_item_path(path) is None:
+        raise ValueError(f"expected a canonical work-item path, got {path!r}")
+    if phase not in ACTIVE_WORK_PHASES:
+        raise ValueError(
+            f"phase {phase!r} produces no artifact, so it is not an active-work phase; "
+            f"expected one of {sorted(ACTIVE_WORK_PHASES)}"
+        )
+    pointer = {"path": path, "phase": phase, "updated": updated}
+    target = layout.cache_dir / ACTIVE_WORK_FILENAME
+    try:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(json.dumps(pointer, indent=2) + "\n", encoding="utf-8", newline="\n")
+    except OSError:
+        return None
+    return target
+
+
+def clear_active_work(layout: WorkspaceLayout, paths: set[str]) -> bool:
+    """Delete the pointer when it names one of *paths*; whether it was deleted.
+
+    Otherwise a later capture hook resurrects a working directory for an item
+    that has moved to the archive. Fail-open on a missing, unreadable,
+    malformed or non-mapping pointer -- the same degrade contract as the write.
+    """
+    target = layout.cache_dir / ACTIVE_WORK_FILENAME
+    try:
+        pointer = json.loads(target.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return False
+    if not isinstance(pointer, dict):
+        return False
+    # Coordination cache is disposable. Pre-path-native records are invalid,
+    # not aliases, and are removed instead of being interpreted as identity.
+    path = pointer.get("path")
+    if not isinstance(path, str) or parse_item_path(path) is None:
+        try:
+            target.unlink()
+        except OSError:
+            return False
+        return True
+    if path not in paths:
+        return False
+    try:
+        target.unlink()
+    except OSError:
+        return False
+    return True
+
+
+__all__ = [
+    "ACTIVE_WORK_FILENAME",
+    "FALLBACK_BASE",
+    "GitOutcome",
+    "clear_active_work",
+    "commit_exists",
+    "commits_touching",
+    "default_base",
+    "dirty_paths",
+    "head_sha",
+    "merge_base",
+    "probe_git",
+    "repository_of",
+    "results_facts",
+    "run_git",
+    "spec_anchor_commit",
+    "worktree_state",
+    "write_active_work",
+]

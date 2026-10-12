@@ -1,0 +1,38 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "gw-work"
+version = "0.1.0"
+description = "Work tracking and archival over resolved Graph Works workspaces."
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+  "gw-pipeline>=0.1,<0.2",
+  "gw-kernel>=0.7,<0.8",
+  "work-tracker-okf>=0.6.0,<0.7",
+  "okf-io>=0.2.6,<0.3",
+  "okf-ext[schemas]>=0.5.5,<0.6",
+  "doc-wiki-okf>=0.3.2,<0.4",
+  "code-wiki-okf>=0.5.4,<0.6",
+  "code-graph-io>=0.3.2,<0.4",
+  "repositories-okf>=0.1.3,<0.2",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/gw_work"]
+
+[tool.uv.sources]
+gw-pipeline = { workspace = true }
+gw-kernel = { workspace = true }
+work-tracker-okf = { workspace = true }
+okf-io = { workspace = true }
+okf-ext = { workspace = true }
+doc-wiki-okf = { workspace = true }
+code-wiki-okf = { workspace = true }
+code-graph-io = { workspace = true }
+repositories-okf = { workspace = true }
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

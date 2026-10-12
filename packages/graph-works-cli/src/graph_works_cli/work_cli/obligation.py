@@ -6,9 +6,9 @@ from datetime import UTC, date, datetime
 from typing import Any, cast
 
 import typer
-from graph_works_core.work.obligations import run_obligation_add
-from graph_works_core.workspace.errors import WorkspaceError
 from graph_works_wire import work as wire_work
+from gw_kernel.workspace.errors import WorkspaceError
+from gw_work.obligations import run_obligation_add
 
 from graph_works_cli import exit_codes
 from graph_works_cli.work_cli import rendering

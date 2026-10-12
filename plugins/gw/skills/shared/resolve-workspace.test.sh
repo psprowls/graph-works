@@ -95,7 +95,7 @@ rc=$?
 assert_eq "no git repo anywhere: empty stdout" "" "$out"
 assert_eq "no git repo anywhere: exit 0" "0" "$rc"
 
-# --- (e) parity with graph_works_core.workspace.discovery.resolve_root ----
+# --- (e) parity with gw_kernel.workspace.discovery.resolve_root ----
 #
 # This script is a second implementation of a discovery chain that also exists
 # in Python, and two implementations of one rule drift. The matrix below is the
@@ -149,7 +149,7 @@ python_answers=$(
 import sys
 from pathlib import Path
 
-from graph_works_core.workspace.discovery import resolve_root
+from gw_kernel.workspace.discovery import resolve_root
 
 for line in sys.stdin.read().splitlines():
     workspace, cwd, env = line.split("\t")
@@ -164,7 +164,7 @@ for line in sys.stdin.read().splitlines():
 
 if [[ -z "$python_answers" ]]; then
   fail=$((fail + 1))
-  echo "FAIL - parity: could not run graph_works_core.workspace.discovery.resolve_root"
+  echo "FAIL - parity: could not run gw_kernel.workspace.discovery.resolve_root"
   echo "        uv run --project $REPO_ROOT failed; the parity matrix covered nothing"
 else
   # No mapfile: this suite must run under macOS's bash 3.2.

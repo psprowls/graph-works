@@ -7,8 +7,8 @@ import sys
 from pathlib import Path
 
 import pytest
-from graph_works_core.work import commands as work
-from graph_works_core.workspace.bundle import load_workspace_bundle
+from gw_work import commands as work
+from gw_kernel.workspace.bundle import load_workspace_bundle
 from okf_io import build_link_graph
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))

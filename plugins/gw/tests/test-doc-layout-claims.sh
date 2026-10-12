@@ -202,7 +202,7 @@ for reader in "skills/lint/SKILL.md" "skills/graph-works/references/lint-workflo
 done
 
 # --- pointer-presence assertions -----------------------------------------
-# The packaged pipeline table (graph_works_core.workspace.pipeline) dispatches
+# The packaged pipeline table (gw_kernel.workspace.pipeline) dispatches
 # the `epic-design` variant to a skill of this name. A table entry pointing at
 # a directory that does not exist fails only at dispatch time, in a worker
 # session, with no earlier signal — so assert the cheap half here.

@@ -43,7 +43,7 @@ def test_graph_keys_are_units_and_okf_ext_folds() -> None:
 def test_okf_io_closure_is_every_declared_dependent() -> None:
     assert reverse_closure(GRAPH, {"okf-io"}) == {
         "okf-io", "code-wiki-okf", "doc-wiki-okf", "work-tracker-okf", "repositories-okf",
-        "graph-works-core", "graph-works-wire", "graph-works-cli", "graph-works-serve",
+        "gw-kernel", "gw-wiki", "gw-pipeline", "gw-work", "gw-orchestrate", "graph-works-wire", "graph-works-cli", "graph-works-serve",
     }
 
 
@@ -60,7 +60,15 @@ def test_stdout_has_no_carriage_returns() -> None:
 def test_subagents_io_closure() -> None:
     assert reverse_closure(GRAPH, {"subagents-io"}) == {
         "subagents-io", "workflow-local", "workflow-orca",
-        "graph-works-core", "graph-works-wire", "graph-works-cli", "graph-works-serve",
+        "gw-kernel", "gw-wiki", "gw-pipeline", "gw-work", "gw-orchestrate", "graph-works-wire", "graph-works-cli", "graph-works-serve",
+    }
+
+
+def test_kernel_path_selects_interface_dependents() -> None:
+    selection = _sel("packages/gw-kernel/src/gw_kernel/hooks.py")
+    assert selection.mode == "packages"
+    assert set(selection.units) == {
+        "gw-kernel", "gw-wiki", "gw-pipeline", "gw-work", "gw-orchestrate", "graph-works-wire", "graph-works-cli", "graph-works-serve",
     }
 
 
@@ -157,3 +165,40 @@ def test_missing_main_is_a_clear_error(repo: Path, capsys: pytest.CaptureFixture
     monkeypatch.chdir(repo)
     assert main([]) == 2
     assert "--base" in capsys.readouterr().err
+
+
+def test_orchestrate_path_selects_only_slice_and_interfaces() -> None:
+    selection = _sel("packages/gw-orchestrate/src/gw_orchestrate/commands.py")
+    assert set(selection.units) == {"gw-orchestrate", "graph-works-cli", "graph-works-serve", "graph-works-wire"}
+    assert "gw-kernel" not in selection.units
+
+
+def test_work_path_selects_slice_and_consumers_without_kernel() -> None:
+    selection = _sel("packages/gw-work/src/gw_work/commands.py")
+    assert selection.mode == "packages"
+    assert selection.plugin is False
+    assert set(selection.units) == {"gw-work", "gw-wiki", "gw-orchestrate", "graph-works-cli", "graph-works-serve", "graph-works-wire"}
+    assert "gw-kernel" not in selection.units
+
+
+def test_pipeline_path_selects_consumers_without_kernel() -> None:
+    selection = _sel("packages/gw-pipeline/src/gw_pipeline/transactions.py")
+    assert selection.mode == "packages"
+    assert selection.plugin is False
+    assert set(selection.units) == {
+        "gw-pipeline", "gw-orchestrate", "gw-work", "gw-wiki",
+        "graph-works-cli", "graph-works-serve", "graph-works-wire",
+    }
+    assert "gw-kernel" not in selection.units
+    assert "gw-wiki" in selection.units
+
+
+def test_wiki_path_selects_interfaces_but_not_kernel():
+    selection = _sel("packages/gw-wiki/src/gw_wiki/scan/commands.py")
+    assert selection.mode == "packages"
+    assert set(selection.units) == {
+        "gw-wiki", "graph-works-cli", "graph-works-serve", "graph-works-wire",
+    }
+    assert "gw-wiki" in GRAPH["graph-works-cli"]
+    assert "gw-work" in GRAPH["gw-wiki"]  # dev-only is intentionally counted
+    assert "gw-wiki" not in GRAPH["gw-kernel"]

@@ -1,8 +1,8 @@
 # AGENTS.md — graph-works-wire
 
 The interface band's shared projection layer. Band: interface (above
-`graph-works-core`, beside `graph-works-cli` and
-`graph-works-serve`). Depends on `graph-works-core`, `config-io`,
+`gw-kernel`, beside `graph-works-cli` and
+`graph-works-serve`). Depends on `gw-kernel`, `config-io`,
 `doc-wiki-okf` and `okf-ext` for their result types only.
 
 ## Modules

@@ -13,7 +13,7 @@ from typing import Any, cast
 
 from graph_works_cli.cli import app
 from graph_works_cli.util_cli import platform as platform_module
-from graph_works_core.util.platform import Capability, PlatformReport, ProbeResult
+from gw_wiki.util.platform import Capability, PlatformReport, ProbeResult
 from typer.testing import CliRunner
 
 runner = CliRunner()

@@ -6,8 +6,6 @@ from collections.abc import Sequence
 from pathlib import Path
 
 from config_io import Resolved
-from graph_works_core.hooks import HooksResult
-from graph_works_core.workspace.work_schemas import SchemaRefreshPlan, SchemaRefreshResult
 from graph_works_wire.config import (
     hooks_payload,
     projection_payload,
@@ -15,6 +13,8 @@ from graph_works_wire.config import (
     resolved_payload,
     schema_refresh_payload,
 )
+from gw_kernel.hooks import HooksResult
+from gw_kernel.workspace.work_schemas import SchemaRefreshPlan, SchemaRefreshResult
 
 from graph_works_cli.json_output import encode
 

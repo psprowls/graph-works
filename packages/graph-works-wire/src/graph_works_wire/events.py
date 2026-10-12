@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 
-from graph_works_core.events import ChangeEvent
+from gw_kernel.events import ChangeEvent
 
 SCHEMA_VERSION = 1
 

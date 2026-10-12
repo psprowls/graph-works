@@ -13,38 +13,38 @@ from types import MappingProxyType
 from typing import Literal, cast
 
 from config_io import RegistryError, StoreValidationError
-from graph_works_core.agent_config import AGENTS
-from graph_works_core.agent_config import show as show_agent_config
-from graph_works_core.agent_config.records import AgentName
-from graph_works_core.code_read import (
-    run_code_excerpt,
-    run_code_graph_neighborhood,
-    run_code_graph_search,
-    run_code_graph_tree,
-)
-from graph_works_core.lint_drift.lint import run_mechanical
-from graph_works_core.orchestrate.commands import run_orchestrate
-from graph_works_core.proposals import PAGE_STATUSES, run_proposal_checks, run_proposal_preview, run_proposals_read
-from graph_works_core.query.commands import MAX_TOP_K, MIN_TOP_K, brief_embedder, plan_query_brief
-from graph_works_core.read_session import ReadSession
-from graph_works_core.util.commands import run_log_read
-from graph_works_core.wiki_page.citations import run_wiki_citations
-from graph_works_core.wiki_page.commands import run_page_read, run_wiki_tree
-from graph_works_core.work import commands as work
-from graph_works_core.work.affecting import run_work_affecting
-from graph_works_core.workspace import manifest
-from graph_works_core.workspace.config import load_workspace_config
-from graph_works_core.workspace.dispatch_config import run_dispatch_rules
-from graph_works_core.workspace.errors import QueryError, WorkspaceError
-from graph_works_core.workspace.layout import WorkspaceLayout
-from graph_works_core.workspace.lint_repos import lint_repositories
-from graph_works_core.workspace.schema_read import run_schema_read
 from graph_works_wire import agent_config as wire_agent_config
 from graph_works_wire import code as wire_code
 from graph_works_wire import config as wire_config
 from graph_works_wire import util as wire_util
 from graph_works_wire import wiki as wire_wiki
 from graph_works_wire import work as wire_work
+from gw_kernel.read_session import ReadSession
+from gw_kernel.workspace import manifest
+from gw_kernel.workspace.config import load_workspace_config
+from gw_kernel.workspace.dispatch_config import run_dispatch_rules
+from gw_kernel.workspace.errors import QueryError, WorkspaceError
+from gw_kernel.workspace.layout import WorkspaceLayout
+from gw_kernel.workspace.lint_repos import lint_repositories
+from gw_kernel.workspace.schema_read import run_schema_read
+from gw_orchestrate.commands import run_orchestrate
+from gw_wiki.agent_config import AGENTS
+from gw_wiki.agent_config import show as show_agent_config
+from gw_wiki.agent_config.records import AgentName
+from gw_wiki.code_read import (
+    run_code_excerpt,
+    run_code_graph_neighborhood,
+    run_code_graph_search,
+    run_code_graph_tree,
+)
+from gw_wiki.lint_drift.lint import run_mechanical
+from gw_wiki.proposals import PAGE_STATUSES, run_proposal_checks, run_proposal_preview, run_proposals_read
+from gw_wiki.query.commands import MAX_TOP_K, MIN_TOP_K, brief_embedder, plan_query_brief
+from gw_wiki.util.commands import run_log_read
+from gw_wiki.wiki_page.citations import run_wiki_citations
+from gw_wiki.wiki_page.commands import run_page_read, run_wiki_tree
+from gw_work import commands as work
+from gw_work.affecting import run_work_affecting
 
 from graph_works_serve import mutations, sse
 from graph_works_serve.context import Reply, ServeContext

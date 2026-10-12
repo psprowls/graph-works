@@ -449,7 +449,7 @@ def _open_relative_directory(root_fd: int, relative: str) -> int:
     `O_DIRECTORY`" into a per-member "could not be read" for the whole
     bundle -- a wrong answer that looks like a plausible one. Nothing in
     production reaches this on Windows: the only caller of `_load_at` is
-    `graph_works_core.workspace.transactions._load_bundle_through`, whose
+    `gw_pipeline.transactions._load_bundle_through`, whose
     Windows tier takes the ordinary path walk instead.
     """
     if sys.platform == "win32":

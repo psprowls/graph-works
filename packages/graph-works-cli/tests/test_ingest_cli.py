@@ -11,8 +11,8 @@ from doc_wiki_okf.actors import producer_actor
 from graph_works_cli import exit_codes
 from graph_works_cli.cli import app
 from graph_works_cli.wiki_cli import ingest as ingest_module
-from graph_works_core.ingest.commands import IngestResult
-from graph_works_core.workspace.errors import WorkspaceConfigError
+from gw_kernel.workspace.errors import WorkspaceConfigError
+from gw_wiki.ingest.commands import IngestResult
 from models_io import BedrockAccessDenied, ProviderNotInstalled
 from ruamel.yaml import YAML
 from typer.testing import CliRunner

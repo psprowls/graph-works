@@ -6,8 +6,8 @@ import sqlite3
 from datetime import UTC, datetime, timedelta
 
 import typer
-from graph_works_core.util.read_index import ReadIndexReport, run_read_index
 from graph_works_wire.util import read_index_payload
+from gw_wiki.util.read_index import ReadIndexReport, run_read_index
 
 from graph_works_cli import exit_codes
 from graph_works_cli.errors import exit_error

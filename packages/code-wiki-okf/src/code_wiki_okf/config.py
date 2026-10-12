@@ -5,9 +5,9 @@ Config raises; content never does. okf-io's never-raise rule is for
 concept content, and the workspace manifest is configuration — following the
 `VocabularyError` / `SchemaError` / `SectionError` precedent in okf-ext.
 
-This reads the same file `graph_works_core.workspace.manifest` reads, but
-independently: this package cannot depend on `graph_works_core` (ADR 2026-08-02-workspace-layering —
-`code-wiki-okf` is tier 3, `graph_works_core` sits above it), so it has its
+This reads the same file `gw_kernel.workspace.manifest` reads, but
+independently: this package cannot depend on `gw_kernel` (ADR 2026-08-02-workspace-layering —
+`code-wiki-okf` is tier 3, `gw_kernel` sits above it), so it has its
 own permissive top-level parse rather than importing `Manifest`/`CATALOG`.
 Every key this module does not name (`version`, `roles`, `layout`, ...) is
 ignored rather than rejected -- the manifest catalog owns top-level
@@ -152,7 +152,7 @@ def load_config(
     `<bundle_root>/workspace.yaml`.
 
     Every top-level key other than `repositories`, `ignore`, `state_gate` is
-    ignored -- the manifest catalog (`graph_works_core.workspace.manifest`)
+    ignored -- the manifest catalog (`gw_kernel.workspace.manifest`)
     owns top-level validation; this reader only owns the three blocks it
     consumes.
 
@@ -187,7 +187,7 @@ def config_from_mapping(
     `state_gate` blocks.
 
     The sibling of `load_config` (D-005), for a caller that has already read
-    the document — `graph_works_core.workspace.config`, which reads it through
+    the document — `gw_kernel.workspace.config`, which reads it through
     `config-io`'s store so the workspace has one YAML parser rather than two. A
     `content=` keyword on `load_config` would have been mutually exclusive
     with `config_path=` and needed a runtime refusal for the both-given case;
@@ -237,7 +237,7 @@ def config_from_mapping(
         allowed_repo_keys = {"path", "ignore", "gate", "finish", "checkout"}
         _reject_unknown_keys(entry, allowed=allowed_repo_keys, name=name, where=f"`repositories.{repo_name}`")
         if "gate" in entry:
-            # The gate block is graph-works-core's (`workspace/gate_config.py`); this
+            # The gate block is gw-pipeline's (`gw_pipeline/gate_config.py`); this
             # reader only refuses a shape no gate could have.
             _require_mapping(entry["gate"], name=name, where=f"`repositories.{repo_name}.gate`")
         if "checkout" in entry:

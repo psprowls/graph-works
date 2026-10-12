@@ -283,7 +283,7 @@ On success, the result contains:
   `relay-untailed`, `worktree-pending`, `workspace-pending`, `worktree-unsupported`,
   `worktree-unprovable`, `worktree-ambiguous`, `cross-repo-child`, `invalid`),
   `reason`. The closed vocabulary is `BLOCKED_KINDS` in
-  `graph_works_core.orchestrate.commands` — if a `kind` arrives that isn't in
+  `gw_orchestrate.commands` — if a `kind` arrives that isn't in
   this list, treat it as this skill being out of date, print it, and act on
   nothing.
 - `warnings[]` — plain strings (e.g. a malformed decisions-ledger entry).
@@ -356,7 +356,7 @@ repair. Creation errors trigger observation, never another suffixed create.
 
 The helper uses `record-preparation.py snapshot|record` as a thin adapter to
 core. In the source plugin it selects an absolute source project with
-`uv run --project <source-root> --package graph-works-core python`; installed
+`uv run --project <source-root> --package gw-orchestrate python`; installed
 plugins discover the `gw` Python interpreter and probe guarded preparation
 capability. An incompatible or undiscoverable runtime refuses explicitly.
 Neither path resolves the runtime from the coordinator's working directory. The record call carries `--root <owner_path> --phase <owner_phase>
@@ -612,7 +612,7 @@ reference this cycle's `holds[]` (§2.2) against §2.1's live-key map.
 
 **Resolving a live key back to a work path — use the Task's `display_name`.**
 A key (`gw-<phase>-<stem>`) is a one-way hash-bearing name: nothing recovers a
-path by parsing one, and `graph_works_core.orchestrate.commands` says so
+path by parsing one, and `gw_orchestrate.commands` says so
 outright (`session_index` is the only reverse, and it is a planner-internal
 map this session never holds). The durable route is the one §3 already
 creates: every Task is created with
@@ -2200,7 +2200,7 @@ reconcile §2.5.3 before exiting, and report any unresolved or live-and-muted wo
 - Any dispatch-decision logic — readiness, worktree choice, model, prompt
   assembly, parallelism caps, `affects` serialization — all owned by
   `gw work orchestrate`, whose engine is
-  `graph_works_core.orchestrate.commands` (`plan()` and the `_resolve_worktree`
+  `gw_orchestrate.commands` (`plan()` and the `_resolve_worktree`
   ladder it calls). A wrong-looking plan (bad worktree action, a missing
   blocker kind, a bad prompt) gets fixed there or filed as a work item;
   never patched around in this skill's prose.

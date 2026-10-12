@@ -1,0 +1,376 @@
+"""`_gate_scope` -- the member set the postcondition gate's validate() call is
+narrowed to.
+
+Reuses `gw_kernel.testing.transactions.workspace`/`plan`, the same plan-construction
+helpers `test_transactions.py` itself builds every fixture plan from, rather
+than reinventing bundle/plan setup here.
+"""
+
+from __future__ import annotations
+
+import hashlib
+from pathlib import Path
+
+import pytest
+from gw_kernel.testing.transactions import plan as _plan
+from gw_kernel.testing.transactions import workspace as _workspace
+from gw_kernel.workspace.layout import WorkspaceLayout
+from gw_pipeline.transactions import (
+    EMPTY_TRANSACTION_ID,
+    _affected_index_members,
+    _baseline_scope,
+    _condition_scope,
+    _gate_scope,
+    _map_member,
+    apply_mutation,
+)
+from okf_io import load_bundle
+from work_tracker_okf.indexes import plan_indexes
+from work_tracker_okf.items import IGNORE, load_items
+from work_tracker_okf.mutation import DirectoryPrecondition, PlannedWrite, WorkMutationPlan
+from work_tracker_okf.reparent import plan_reparent
+
+
+def _digest(content: bytes) -> str:
+    return hashlib.sha256(content).hexdigest()
+
+
+@pytest.fixture
+def a_workspace(tmp_path: Path) -> WorkspaceLayout:
+    return _workspace(tmp_path)
+
+
+@pytest.fixture
+def a_write_plan(a_workspace: WorkspaceLayout) -> WorkMutationPlan:
+    """A real, applicable mutation: a conformant `work/feature` page already on
+    disk, plus the lane-index update it requires -- built the same way
+    `run_regen_indexes` builds one, so `apply_mutation` actually succeeds
+    rather than merely exercising the scope-computation functions."""
+    _write_item(a_workspace.bundle_dir, "work/feature", type="Feature")
+    bundle = load_bundle(a_workspace.bundle_dir, ignore=IGNORE)
+    items = load_items(bundle)
+    (index_plan,) = plan_indexes(bundle.root, items, lanes=("work",))
+    return _plan(
+        a_workspace,
+        writes=(
+            PlannedWrite(
+                "work/index.md",
+                _digest(index_plan.before.encode("utf-8")) if index_plan.before is not None else None,
+                index_plan.after.encode("utf-8"),
+            ),
+        ),
+        validate_paths=("work/feature",),
+    )
+
+
+@pytest.fixture
+def an_empty_plan(a_workspace: WorkspaceLayout) -> WorkMutationPlan:
+    return _plan(a_workspace)
+
+
+@pytest.fixture
+def an_empty_plan_with_directory_preconditions(a_workspace: WorkspaceLayout) -> WorkMutationPlan:
+    """`run_regen_indexes` attaches `directory_preconditions` for lanes absent
+    when the planner read them, even when it writes nothing itself."""
+    return _plan(
+        a_workspace,
+        directory_preconditions=(DirectoryPrecondition("work/new", None),),
+    )
+
+
+def test_gate_scope_is_the_targeted_member_set(a_write_plan: WorkMutationPlan) -> None:
+    """Same set the post-filter already compares against: every validate path as
+    a `.md` member, plus every lane index the plan writes or moves into."""
+    plan = a_write_plan
+    expected = {f"{path}.md" for path in plan.validate_paths}
+    expected.update(_affected_index_members(plan))
+    assert _gate_scope(plan) == frozenset(expected)
+
+
+def test_gate_scope_of_an_empty_plan_is_empty(an_empty_plan: WorkMutationPlan) -> None:
+    assert _gate_scope(an_empty_plan) == frozenset()
+
+
+def _write_item(
+    root: Path,
+    path: str,
+    *,
+    type: str,
+    status: str = "stable",
+) -> None:
+    """Same shape as `test_transactions.py`'s own `_write_item`, duplicated here
+    rather than imported -- that module is read-only for this task, and this
+    fixture style is the one Task 5 established: build directly from the
+    shared `gw_kernel.testing.transactions` primitives rather than reaching into a
+    sibling test module's private helpers."""
+    page = root / f"{path}.md"
+    page.parent.mkdir(parents=True, exist_ok=True)
+    page.write_text(
+        "---\n"
+        f"type: {type}\n"
+        f"title: {path.rsplit('/', 1)[-1]}\n"
+        "description: D\n"
+        f"status: {status}\n"
+        "work_status: open\n"
+        "phase: design\n"
+        "effort: small\n"
+        "affects: []\n"
+        "opened: 2026-08-22\n"
+        "updated: 2026-08-22\n"
+        "---\n\n"
+        "## Plan\n\n"
+        "| Action | Done when | Rationale |\n"
+        "| --- | --- | --- |\n",
+        encoding="utf-8",
+        newline="",
+    )
+
+
+@pytest.fixture
+def a_move_plan(tmp_path: Path) -> WorkMutationPlan:
+    """A single reparent-shaped move: `work/x` -> `work/p/children/x`."""
+    layout = _workspace(tmp_path)
+    return _plan(
+        layout,
+        path_mapping={"work/x": "work/p/children/x"},
+        validate_paths=("work/p/children/x",),
+    )
+
+
+@pytest.fixture
+def workspace_with_a_broken_child(tmp_path: Path) -> tuple[WorkspaceLayout, WorkMutationPlan]:
+    """A real reparent plan over a bundle where the child being moved already
+    carries a pre-existing validation error (an unknown `status:` value)."""
+    layout = _workspace(tmp_path)
+    release = "work/release-cutover"
+    source = "work/bug-source"
+    _write_item(layout.bundle_dir, release, type="Release")
+    _write_item(layout.bundle_dir, source, type="Bug", status="not-a-real-status")
+    (layout.bundle_dir / release / "children").mkdir(parents=True)
+    bundle = load_bundle(layout.bundle_dir, ignore=IGNORE)
+    plan = plan_reparent(bundle, load_items(bundle), source, release)
+    assert plan.ok is True
+    return layout, plan
+
+
+def test_baseline_scope_of_a_plan_with_no_moves_equals_the_gate_scope(a_write_plan: WorkMutationPlan) -> None:
+    assert _baseline_scope(a_write_plan) == _gate_scope(a_write_plan)
+
+
+def test_baseline_scope_is_the_pre_image_of_the_gate_scope_under_a_move(a_move_plan: WorkMutationPlan) -> None:
+    """Every member in the baseline scope maps into the gate scope, and every
+    member of the gate scope is the image of something in the baseline scope."""
+    gate = _gate_scope(a_move_plan)
+    baseline = _baseline_scope(a_move_plan)
+    assert {_map_member(a_move_plan.path_mapping, member) for member in baseline} == gate
+
+
+def test_the_baseline_scope_names_the_source_not_the_destination(a_move_plan: WorkMutationPlan) -> None:
+    """A reparent moves `work/x.md` to `work/p/children/x.md`. The gate scope
+    names the destination; the baseline, captured pre-move, must name the
+    source -- otherwise the pre-existing failure on `work/x.md` is never
+    counted and the mutation is blamed for it."""
+    source = "work/x.md"
+    dest = "work/p/children/x.md"
+    assert source in _baseline_scope(a_move_plan)
+    assert dest in _gate_scope(a_move_plan)
+    assert source not in _gate_scope(a_move_plan)
+
+
+def test_condition_scope_without_moves_is_the_validate_paths(a_workspace: WorkspaceLayout) -> None:
+    plan = _plan(a_workspace, validate_paths=("work/a", "work/b"))
+    assert _condition_scope(plan) == frozenset({"work/a", "work/b"})
+
+
+def test_condition_scope_keeps_both_pre_images_of_a_moved_validate_path(a_move_plan: WorkMutationPlan) -> None:
+    assert _condition_scope(a_move_plan) == frozenset({"work/x", "work/p/children/x"})
+
+
+def test_condition_scope_drops_a_validate_path_that_is_itself_moved_away(a_workspace: WorkspaceLayout) -> None:
+    """`work/a` moves to `work/b`: nothing maps *to* `work/a`, so it has no pre-image."""
+    plan = _plan(a_workspace, path_mapping={"work/a": "work/b"}, validate_paths=("work/a",))
+    assert _condition_scope(plan) == frozenset()
+
+
+def test_condition_scope_keeps_exact_key_semantics_for_descendants(a_workspace: WorkspaceLayout) -> None:
+    """Condition keys are mapped with `path_mapping.get` (exact key), not
+    `_map_member`'s prefix match -- the spec keeps that unchanged. A validated
+    descendant of a moved item is therefore its own pre-image."""
+    plan = _plan(
+        a_workspace,
+        path_mapping={"work/x": "work/p/children/x"},
+        validate_paths=("work/p/children/x/children/y",),
+    )
+    assert _condition_scope(plan) == frozenset({"work/p/children/x/children/y"})
+
+
+def test_a_pre_existing_error_on_a_moved_document_is_excused_not_reported(
+    workspace_with_a_broken_child: tuple[WorkspaceLayout, WorkMutationPlan],
+) -> None:
+    """Design Verification 3. The child page carries a validation error before
+    the mutation; reparenting it must excuse that error, not roll back."""
+    layout, plan = workspace_with_a_broken_child
+    application = apply_mutation(layout, plan, commit=None)
+    assert application.ok, application.failures
+    assert not application.rolled_back
+    assert any("pre-existing, not caused by this operation" in note for note in application.warnings)
+
+
+def test_a_supplied_baseline_bundle_saves_the_baseline_load(monkeypatch, a_workspace, a_write_plan):
+    """A supplied bundle feeds findings by identity and saves the baseline load."""
+    from gw_pipeline import transactions
+
+    loads: list[str] = []
+    real_load = transactions._load_bundle_through
+
+    def counted(root, path, *, ignore):  # type: ignore[no-untyped-def]
+        loads.append(path.as_posix())
+        return real_load(root, path, ignore=ignore)
+
+    seen_bundles: list[object] = []
+    real_validate = transactions.validate
+
+    def recording_validate(bundle, **kwargs):  # type: ignore[no-untyped-def]
+        seen_bundles.append(bundle)
+        return real_validate(bundle, **kwargs)
+
+    monkeypatch.setattr(transactions, "_load_bundle_through", counted)
+    monkeypatch.setattr(transactions, "validate", recording_validate)
+    reused = load_bundle(a_workspace.bundle_dir, ignore=IGNORE)
+    result = transactions.apply_mutation(a_workspace, a_write_plan, baseline_bundle=reused, commit=None)
+
+    assert result.ok, result.failures
+    assert len(loads) == 1
+    assert len(seen_bundles) == 2
+    assert seen_bundles[0] is reused
+    assert seen_bundles[1] is not reused
+
+
+def test_without_a_supplied_bundle_both_passes_still_load(monkeypatch, a_workspace, a_write_plan):
+    from gw_pipeline import transactions
+
+    loads: list[str] = []
+    real = transactions._load_bundle_through
+
+    def counted(root, path, *, ignore):
+        loads.append(path.as_posix())
+        return real(root, path, ignore=ignore)
+
+    monkeypatch.setattr(transactions, "_load_bundle_through", counted)
+    transactions.apply_mutation(a_workspace, a_write_plan, commit=None)
+    assert len(loads) == 2
+
+
+@pytest.mark.parametrize("supplied, expected_loads", [(True, 0), (False, 1)])
+def test_capture_load_count_is_independent_of_the_conditions_half(
+    monkeypatch, a_workspace, a_write_plan, supplied: bool, expected_loads: int
+) -> None:
+    from gw_pipeline import transactions
+
+    reused = load_bundle(a_workspace.bundle_dir, ignore=IGNORE) if supplied else None
+    loads: list[str] = []
+    real_load = transactions._load_bundle_through
+
+    def counted(root, path, *, ignore):  # type: ignore[no-untyped-def]
+        loads.append(path.as_posix())
+        return real_load(root, path, ignore=ignore)
+
+    monkeypatch.setattr(transactions, "_load_bundle_through", counted)
+    root = transactions._open_root(a_workspace.bundle_dir)
+    try:
+        transactions._capture_validation_state(a_workspace, a_write_plan, root, repo_root=None, bundle=reused)
+    finally:
+        root.close()
+
+    assert len(loads) == expected_loads
+
+
+def test_a_reused_bundle_produces_the_same_gate_outcome(a_workspace, a_write_plan):
+    reused = load_bundle(a_workspace.bundle_dir, ignore=IGNORE)
+    with_reuse = apply_mutation(a_workspace, a_write_plan, baseline_bundle=reused, commit=None)
+    assert with_reuse.ok, with_reuse.failures
+
+
+def test_the_conditions_half_reads_the_validate_paths_fresh_under_the_lock(monkeypatch, tmp_path: Path) -> None:
+    """A stale supplied bundle cannot hide a missing parent of a validated child."""
+    from gw_pipeline import transactions
+
+    layout = _workspace(tmp_path)
+    _write_item(layout.bundle_dir, "work/parent", type="Release")
+    _write_item(layout.bundle_dir, "work/parent/children/child", type="Feature")
+    _write_item(layout.bundle_dir, "work/unrelated/children/orphan", type="Feature")
+    stale_bundle = load_bundle(layout.bundle_dir, ignore=IGNORE)
+    (layout.bundle_dir / "work/parent.md").unlink()
+
+    def forbidden(*_args, **_kwargs):  # type: ignore[no-untyped-def]
+        raise AssertionError("the baseline must not load items or a bundle when one was supplied")
+
+    monkeypatch.setattr(transactions, "load_items", forbidden)
+    monkeypatch.setattr(transactions, "_load_bundle_through", forbidden)
+    plan = _plan(layout, validate_paths=("work/parent/children/child",))
+    root = transactions._open_root(layout.bundle_dir)
+    try:
+        state = transactions._capture_validation_state(layout, plan, root, repo_root=None, bundle=stale_bundle)
+    finally:
+        root.close()
+
+    assert state.conditions == {("work/parent/children/child", "parent-missing"): 1}
+
+
+def test_a_wholly_empty_plan_opens_the_lock_but_no_transaction_directory(
+    a_workspace: WorkspaceLayout, an_empty_plan: WorkMutationPlan
+) -> None:
+    """The narrowed short-circuit still opens `work-mutations/` (the cache
+    directory) and takes the executor lock through it -- two existing tests in
+    `test_transactions.py` depend on that for an all-default, wholly-empty
+    plan, and this run itself leaves an `executor.lock` file behind. What it
+    skips is the per-mutation transaction *subdirectory* -- the only kind of
+    entry `_new_transaction_directory` ever creates there -- so this checks
+    for the absence of a new directory, not for `work-mutations/` being
+    untouched altogether."""
+    transaction_root = a_workspace.cache_dir / "work-mutations"
+
+    def transaction_directories() -> set[Path]:
+        if not transaction_root.exists():
+            return set()
+        return {entry for entry in transaction_root.glob("*") if entry.is_dir()}
+
+    before = transaction_directories()
+    application = apply_mutation(a_workspace, an_empty_plan, commit=None)
+    after = transaction_directories()
+    assert after == before
+    assert application.ok
+    assert application.transaction_id == EMPTY_TRANSACTION_ID
+    assert application.written == () and application.moved == () and application.created_directories == ()
+
+
+def test_a_wholly_empty_plan_runs_no_validation(
+    monkeypatch: pytest.MonkeyPatch, a_workspace: WorkspaceLayout, an_empty_plan: WorkMutationPlan
+) -> None:
+    from gw_pipeline import transactions
+
+    monkeypatch.setattr(
+        transactions,
+        "validate",
+        lambda *a, **k: pytest.fail("empty plan must not validate"),
+    )
+    assert apply_mutation(a_workspace, an_empty_plan, commit=None).ok
+
+
+def test_a_plan_with_only_directory_preconditions_is_not_short_circuited(
+    a_workspace: WorkspaceLayout, an_empty_plan_with_directory_preconditions: WorkMutationPlan
+) -> None:
+    """`run_regen_indexes` builds `directory_preconditions` for lanes absent
+    before the planner read them. Those are a claim on the filesystem and must
+    still be enforced, so such a plan is not `wholly` empty.
+
+    Asserting on `transaction_id` directly (rather than diffing
+    `work-mutations/` contents, as the sibling short-circuit tests do) is
+    deliberate here: `_executor_lock` unconditionally creates
+    `work-mutations/executor.lock` regardless of whether the plan is
+    short-circuited, so an unfiltered before/after diff of that directory
+    would pass even if `directory_preconditions` were dropped from
+    `_is_wholly_empty` entirely -- it wouldn't actually guard the property
+    this test claims to."""
+    application = apply_mutation(a_workspace, an_empty_plan_with_directory_preconditions, commit=None)
+    assert application.transaction_id != EMPTY_TRANSACTION_ID, "a plan carrying preconditions must open a transaction"

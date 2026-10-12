@@ -7,11 +7,11 @@ from typing import cast
 
 import pytest
 import watchfiles
-from graph_works_core.events import Change, ChangeEvent, EventKind
-from graph_works_core.workspace.layout import WorkspaceLayout
 from graph_works_serve import watch
 from graph_works_serve.hub import Changes, Hub, Resync
 from graph_works_serve.readstate import ReadState
+from gw_kernel.events import Change, ChangeEvent, EventKind
+from gw_kernel.workspace.layout import WorkspaceLayout
 from readstate_fakes import FakeOpener, state_for
 
 # `workspace` is C5's initialized-workspace fixture (S6).
@@ -205,7 +205,7 @@ async def test_manifest_change_that_moves_dispatch_rules_rewatches(
 async def test_unloadable_manifest_keeps_the_old_sets(
     workspace: WorkspaceLayout, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    from graph_works_core.workspace.errors import WorkspaceError
+    from gw_kernel.workspace.errors import WorkspaceError
 
     initial = (workspace, watch.watch_sets(workspace, None))
     calls = iter([initial])
@@ -253,7 +253,7 @@ async def test_missing_config_dir_is_skipped_with_one_line(
 async def test_invalid_dispatch_reference_keeps_previous_watch_sets(
     workspace: WorkspaceLayout, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from graph_works_core.workspace.errors import WorkspaceError
+    from gw_kernel.workspace.errors import WorkspaceError
 
     original = watch.load_dispatch_config
     calls = 0
@@ -327,7 +327,7 @@ async def test_error_backoff_caps_and_resets_after_clean_batch(workspace: Worksp
 async def test_initial_bad_dispatch_still_watches_bundle_and_manifest(
     workspace: WorkspaceLayout, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from graph_works_core.workspace.errors import WorkspaceError
+    from gw_kernel.workspace.errors import WorkspaceError
 
     def bad(layout: WorkspaceLayout) -> object:
         raise WorkspaceError("broken dispatch")

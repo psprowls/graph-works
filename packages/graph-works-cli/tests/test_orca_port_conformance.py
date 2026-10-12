@@ -5,8 +5,8 @@ from __future__ import annotations
 import typing
 
 from graph_works_cli.work_cli.orca import orca_port
-from graph_works_core.orchestrate import dispatch as core_dispatch
-from graph_works_core.orchestrate import orca_port as core
+from gw_orchestrate import dispatch as core_dispatch
+from gw_orchestrate import orca_port as core
 from subagents_io.dispatch import PlannedDispatch, WorktreeAction
 from workflow_orca import port as vendor
 from workflow_orca._launch import encode_launch_spec

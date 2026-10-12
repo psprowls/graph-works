@@ -1,6 +1,6 @@
 # AGENTS.md — graph-works-serve
 
-The loopback HTTP sidecar. Band: interface (above `graph-works-core`, beside
+The loopback HTTP sidecar. Band: interface (above `gw-kernel`, beside
 `graph-works-cli` and `graph-works-wire`).
 
 ## Modules

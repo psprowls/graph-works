@@ -65,18 +65,18 @@ never-raise rule for concept *content* — the workspace manifest's
 `repositories`/`ignore`/`state_gate` blocks are configuration, and a caller
 getting them wrong should hear about it immediately, not get a silently
 degraded `Bundle`. `config.py` reads the same `workspace.yaml` that
-`graph_works_core.workspace.manifest` reads, but independently and only for
-those three blocks — this package cannot depend on `graph_works_core`
+`gw_kernel.workspace.manifest` reads, but independently and only for
+those three blocks — this package cannot depend on `gw_kernel`
 (ADR 2026-08-02-workspace-layering puts it above tier 3), so every other top-level key is ignored
 rather than validated.
 
 **Two entry points, one validator.** `load_config(bundle_root, config_path=…)`
 reads the file and validates it. `config_from_mapping(content, anchor=…,
 bundle_root=…, …)` validates an already-parsed mapping, for a caller that has
-its own reader — `graph_works_core.workspace.config`, which reads through
+its own reader — `gw_kernel.workspace.config`, which reads through
 `config-io`'s store so the workspace has one YAML parser rather than two. The
 band rule is untouched: this package is handed a mapping and two directories,
-and still imports nothing from `graph_works_core`.
+and still imports nothing from `gw_kernel`.
 
 `anchor` is the directory a relative `repositories.*.path` resolves against
 (ADR 2026-08-26-a-relative-path) and `bundle_root` is what a relative `graph_dir` /

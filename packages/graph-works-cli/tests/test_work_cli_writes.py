@@ -13,7 +13,7 @@ from graph_works_cli import exit_codes
 from graph_works_cli.cli import app
 from graph_works_cli.work_cli import main as work_main
 from graph_works_cli.workspace_resolution import resolve_workspace
-from graph_works_core.orchestrate.gate_receipts import GateRun, render_receipt
+from gw_orchestrate.gate_receipts import GateRun, render_receipt
 from okf_io import load
 from typer.testing import CliRunner
 
@@ -1022,7 +1022,7 @@ def test_record_placement_stale_preimage_is_incomplete_apply(
     monkeypatch: pytest.MonkeyPatch,
     json_output: bool,
 ) -> None:
-    from graph_works_core.orchestrate import placement
+    from gw_orchestrate import placement
 
     path = file_item(workspace, "Stale preimage")
     assert runner.invoke(app, ["work", "advance", path, "--workspace", str(workspace)]).exit_code == 0
@@ -1064,8 +1064,8 @@ def test_record_placement_projects_application_warnings_and_rollback(
 ) -> None:
     from dataclasses import replace
 
-    from graph_works_core.orchestrate.placement import run_record_placement
-    from graph_works_core.workspace.transactions import MutationApplication
+    from gw_orchestrate.placement import run_record_placement
+    from gw_pipeline.transactions import MutationApplication
 
     path = file_item(workspace, "Application projection")
     assert runner.invoke(app, ["work", "advance", path, "--workspace", str(workspace)]).exit_code == 0
@@ -1192,7 +1192,7 @@ def test_touch_active_work_refuses_an_unphased_item(workspace: Path) -> None:
 def test_touch_active_work_degraded_write_warns_and_exits_zero(
     workspace: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from graph_works_core.workspace import provenance
+    from gw_kernel.workspace import provenance
 
     path = file_item(workspace, "Done", kind="Bug")
     assert runner.invoke(app, ["work", "advance", path, "--workspace", str(workspace)]).exit_code == 0
@@ -1218,7 +1218,7 @@ def test_touch_active_work_human_mode_reports_the_phase_on_success(workspace: Pa
 def test_touch_active_work_human_mode_degraded_write_omits_the_phase_line(
     workspace: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from graph_works_core.workspace import provenance
+    from gw_kernel.workspace import provenance
 
     path = file_item(workspace, "Done", kind="Bug")
     assert runner.invoke(app, ["work", "advance", path, "--workspace", str(workspace)]).exit_code == 0
@@ -1448,7 +1448,7 @@ def test_prepare_workspace_errors_use_json_envelope(workspace, monkeypatch, erro
 
 @pytest.mark.parametrize("applied", [False, True])
 def test_prepare_workspace_human_steps(workspace, monkeypatch, applied):
-    from graph_works_core.orchestrate.workspace_prepare import WorkspacePrepareResult, WorkspaceStep
+    from gw_orchestrate.workspace_prepare import WorkspacePrepareResult, WorkspaceStep
 
     result = WorkspacePrepareResult(
         "work/a",
@@ -1466,7 +1466,7 @@ def test_prepare_workspace_human_steps(workspace, monkeypatch, applied):
 
 
 def test_prepare_workspace_partial_failure_retains_effects_in_envelope(workspace, monkeypatch):
-    from graph_works_core.orchestrate.workspace_prepare import WorkspacePrepareResult, WorkspaceStep
+    from gw_orchestrate.workspace_prepare import WorkspacePrepareResult, WorkspaceStep
 
     result = WorkspacePrepareResult(
         "work/a/children/b",

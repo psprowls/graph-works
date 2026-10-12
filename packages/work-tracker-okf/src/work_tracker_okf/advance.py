@@ -80,7 +80,7 @@ RefusalReason = Literal[
 Trigger = Literal["dispatch", "complete", "return", "repair"]
 
 #: The execute -> finish commit gate's codes, raised one band up by
-#: `graph_works_core.orchestrate.stage_advance`, which cannot own the
+#: `gw_orchestrate.stage_advance`, which cannot own the
 #: vocabulary: `RefusalReason` is the CLI's rendering contract and a closed
 #: string vocabulary is band-legal here where a git observation is not. Every
 #: one of them fails closed, and every one is bypassable only by

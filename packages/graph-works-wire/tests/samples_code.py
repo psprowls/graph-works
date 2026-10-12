@@ -4,7 +4,8 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
-from graph_works_core.code_read import (
+from graph_works_wire import code
+from gw_wiki.code_read import (
     CodeExcerpt,
     CodeGraphSearch,
     CodeGraphTree,
@@ -14,7 +15,6 @@ from graph_works_core.code_read import (
     Neighborhood,
     SearchHit,
 )
-from graph_works_wire import code
 
 CODE: dict[str, tuple[Callable[[], object], ...]] = {
     "code.excerpt_payload": (

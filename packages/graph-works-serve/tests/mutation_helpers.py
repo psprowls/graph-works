@@ -7,11 +7,11 @@ from collections.abc import Sequence
 from datetime import date, datetime, tzinfo
 from pathlib import Path
 
-from graph_works_core import apply_init, plan_init
-from graph_works_core.workspace.layout import WorkspaceLayout
 from graph_works_serve.app import build_app
 from graph_works_serve.context import ServeContext
 from graph_works_serve.routes import ROUTES, RouteSpec
+from gw_kernel import apply_init, plan_init
+from gw_kernel.workspace.layout import WorkspaceLayout
 from starlette.testclient import TestClient
 
 TODAY = date(2026, 9, 18)

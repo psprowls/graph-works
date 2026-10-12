@@ -22,7 +22,7 @@ _EXPECTED_OWNED = {
     "File": ("language", "package", "role_flags"),
 }
 
-#: `prose_refreshed_commit` is the prose anchor graph-works-core's scan vertical
+#: `prose_refreshed_commit` is the prose anchor gw-kernel's scan vertical
 #: stamps (its design spec §4). Declared for the five repo-owned entity types only:
 #: a Dependency is owned by no repository, so `sync` passes `sha=None` for it and
 #: there is nothing to anchor against; mirror `File` pages are out of that

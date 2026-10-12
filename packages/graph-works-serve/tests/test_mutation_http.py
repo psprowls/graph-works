@@ -9,12 +9,12 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
-from graph_works_core.workspace.layout import WorkspaceLayout
 from graph_works_serve import mutations, routes
 from graph_works_serve.catalog import describe
 from graph_works_serve.context import ServeContext
 from graph_works_serve.mutations import BeforeApply, MutationSpec, Params
 from graph_works_serve.params import Param
+from gw_kernel.workspace.layout import WorkspaceLayout
 from mutation_helpers import TOKEN, make_client, serve_workspace, snapshot
 from starlette.testclient import TestClient
 

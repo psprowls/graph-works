@@ -13,9 +13,9 @@ from typing import cast
 
 import code_graph_io.exit_codes as codes
 import pytest
-from graph_works_core.workspace.layout import WorkspaceLayout
 from graph_works_serve import discovery_file as df
 from graph_works_serve import main as serve_main
+from gw_kernel.workspace.layout import WorkspaceLayout
 
 
 def _launch_without_http_until_released(workspace: str, started: object, release: object, result: object) -> None:

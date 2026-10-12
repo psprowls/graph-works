@@ -1,7 +1,7 @@
 """One portable exclusive file lock for every process-serializing site.
 
 **Shared layer, not a capability.** `work_tracker_okf.decisions`,
-`graph_works_core.work.commands`, and `okf_ext.logs` each took the same five
+`gw_work.commands`, and `okf_ext.logs` each took the same five
 lines of `fcntl.flock` around a dedicated lock file, and the independence
 contract forbids one of those sites reaching into another for it — the same
 reasoning `okf_ext.writing` documents for the write engine. `okf_ext` is the

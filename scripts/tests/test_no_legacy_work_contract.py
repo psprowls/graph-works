@@ -131,7 +131,7 @@ def test_active_plugin_scan_covers_every_maintained_surface() -> None:
 
 def test_transcript_capture_resolves_the_active_canonical_path() -> None:
     """Transcript capture must derive owned references from the active path."""
-    module = ROOT / "packages" / "graph-works-core" / "src" / "graph_works_core" / "transcript_capture.py"
+    module = ROOT / "packages" / "gw-pipeline" / "src" / "gw_pipeline" / "transcript_capture.py"
     text = module.read_text(encoding="utf-8")
 
     assert 'work_path = pointer["path"]' in text
@@ -153,13 +153,13 @@ def test_public_managed_artifact_payloads_do_not_use_legacy_doc_keys() -> None:
 def test_private_descriptor_loader_is_versioned_as_a_synchronized_dependency() -> None:
     manifests = {
         name: ROOT / "packages" / name / "pyproject.toml"
-        for name in ("okf-io", "work-tracker-okf", "graph-works-core", "graph-works-cli")
+        for name in ("okf-io", "work-tracker-okf", "gw-kernel", "graph-works-cli")
     }
     with manifests["okf-io"].open("rb") as handle:
         assert tomllib.load(handle)["project"]["version"] == "0.2.6"
 
-    for name in ("work-tracker-okf", "graph-works-core", "graph-works-cli"):
+    for name in ("work-tracker-okf", "gw-kernel", "graph-works-cli"):
         with manifests[name].open("rb") as handle:
             dependencies = tomllib.load(handle)["project"]["dependencies"]
-        floor = "0.2.6" if name == "graph-works-core" else "0.2.5"
+        floor = "0.2.6" if name == "gw-kernel" else "0.2.5"
         assert f"okf-io>={floor},<0.3" in dependencies, name

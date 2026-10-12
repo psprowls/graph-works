@@ -2,7 +2,7 @@
 """Thin core adapter: snapshot before provisioning, guarded stamp afterwards, carrying the anchor's verified base tip as its
 `start_sha` baseline.
 
-Run under ``uv run --package graph-works-core python``. No Orca call runs
+Run under ``uv run --package gw-orchestrate python``. No Orca call runs
 inside this process or while core holds its decision-owner lock.
 """
 from __future__ import annotations
@@ -12,9 +12,9 @@ from datetime import date
 import json
 from pathlib import Path
 
-from graph_works_core.orchestrate.placement import preparation_guard, run_record_placement
-from graph_works_core.workspace.discovery import resolve
-from graph_works_core.workspace.provenance import GitFailure, gate_git, strict_commit
+from gw_orchestrate.placement import preparation_guard, run_record_placement
+from gw_kernel.workspace.discovery import resolve
+from gw_kernel.workspace.provenance import GitFailure, gate_git, strict_commit
 
 
 def main() -> None:

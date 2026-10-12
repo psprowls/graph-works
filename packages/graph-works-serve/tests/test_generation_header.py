@@ -5,13 +5,13 @@ from datetime import UTC, datetime
 
 import pytest
 from conftest import PORT, TOKEN
-from graph_works_core.read_session import ReadSession, SnapshotSession, materialize
-from graph_works_core.workspace.layout import WorkspaceLayout
 from graph_works_serve import mutations
 from graph_works_serve.app import build_app
 from graph_works_serve.context import Reply, ServeContext
 from graph_works_serve.readstate import ReadState
 from graph_works_serve.routes import ROUTES, RouteSpec
+from gw_kernel.read_session import ReadSession, SnapshotSession, materialize
+from gw_kernel.workspace.layout import WorkspaceLayout
 from starlette.testclient import TestClient
 from test_mutation_section import PAGE, TEXT
 

@@ -11,7 +11,7 @@ import pytest
 from graph_works_cli import exit_codes
 from graph_works_cli.cli import app
 from graph_works_cli.wiki_cli import maintenance
-from graph_works_core.wiki_stats.commands import HubEntry, WikiStats
+from gw_kernel.wiki_stats.commands import HubEntry, WikiStats
 from helpers import initialized_workspace as _initialized_workspace
 from typer.testing import CliRunner
 

@@ -25,7 +25,7 @@ assert_absent() {
 
 AUTO="$PLUGIN_ROOT/skills/auto-drive/SKILL.md"
 WORKFLOW="$PLUGIN_ROOT/skills/workflow/SKILL.md"
-PIPELINE="$REPO_ROOT/packages/graph-works-core/src/graph_works_core/workspace/pipeline.py"
+PIPELINE="$REPO_ROOT/packages/gw-kernel/src/gw_kernel/workspace/pipeline.py"
 
 echo "--- execute return"
 assert_contains "$AUTO" '--return-scope' "send-back can name new plan tasks and review findings"

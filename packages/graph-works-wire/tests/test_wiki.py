@@ -12,18 +12,6 @@ import pytest
 from code_wiki_okf.entities.sync import SyncSummary
 from code_wiki_okf.mirror.model import MirrorResult
 from code_wiki_okf.sync import MirrorSummary
-from graph_works_core.guidance.claims import ClaimRow, ClaimsRefresh, SkippedEntry
-from graph_works_core.guidance.closure import Closure, ClosureEntry, MatchedClaim
-from graph_works_core.guidance.commands import ClaimsClosureRun, ClaimsShow
-from graph_works_core.ingest.commands import IngestResult
-from graph_works_core.lint_drift.lint import LaneReport, LintReport, ProposalBacklog, SemanticFinding
-from graph_works_core.proposals import ProposalDecideRun, ProposalFileRun, ProposalRefusal
-from graph_works_core.scan.commands import ScanResult, StructuralSummary
-from graph_works_core.scan.scan_contract import ApplyResult, ScanWorklist
-from graph_works_core.wiki_page.commands import TreeNode, TreePage, WikiTree
-from graph_works_core.wiki_stats.commands import HubEntry, WikiStats
-from graph_works_core.workspace.init import WorkspaceInit, plan_init
-from graph_works_core.workspace.layout import layout_for
 from graph_works_wire import wiki
 from graph_works_wire.wiki import (
     bootstrap_payload,
@@ -43,6 +31,18 @@ from graph_works_wire.wiki import (
     tag_inventory_payload,
     tags_undeclared_payload,
 )
+from gw_kernel.guidance.claims import ClaimRow, ClaimsRefresh, SkippedEntry
+from gw_kernel.guidance.closure import Closure, ClosureEntry, MatchedClaim
+from gw_kernel.guidance.commands import ClaimsClosureRun, ClaimsShow
+from gw_kernel.wiki_stats.commands import HubEntry, WikiStats
+from gw_kernel.workspace.init import WorkspaceInit, plan_init
+from gw_kernel.workspace.layout import layout_for
+from gw_wiki.ingest.commands import IngestResult
+from gw_wiki.lint_drift.lint import LaneReport, LintReport, ProposalBacklog, SemanticFinding
+from gw_wiki.proposals import ProposalDecideRun, ProposalFileRun, ProposalRefusal
+from gw_wiki.scan.commands import ScanResult, StructuralSummary
+from gw_wiki.scan.scan_contract import ApplyResult, ScanWorklist
+from gw_wiki.wiki_page.commands import TreeNode, TreePage, WikiTree
 from okf_ext.bundle import ApplyResult as BundleApplyResult
 from okf_ext.proposals import ApplyResult as ProposalApplyResult
 from okf_ext.proposals import DecisionPlan, Proposal, ProposalPlan, Write, WriteFailure
@@ -422,7 +422,7 @@ def test_lint_payload_has_exact_keys_and_explicit_nested_rows() -> None:
 
 
 def test_lint_payload_carries_source_drain_only_when_present() -> None:
-    from graph_works_core.lint_drift.lint import SourceDrainCoverage
+    from gw_wiki.lint_drift.lint import SourceDrainCoverage
 
     assert "source_drain" not in lint_payload(LintReport())
     payload = lint_payload(LintReport(source_drain=SourceDrainCoverage(158, 12, 1159, 71, 25, 1063)))
@@ -702,7 +702,7 @@ def test_ingest_payload_warns_when_no_proposal_types_are_eligible(refused: list[
 
 
 def test_listing_payload_retains_raw_type_and_projects_resolution_refusal() -> None:
-    from graph_works_core.proposals import ProposalListing
+    from gw_wiki.proposals import ProposalListing
     from okf_ext.proposals import Refusal
 
     proposal = Proposal(

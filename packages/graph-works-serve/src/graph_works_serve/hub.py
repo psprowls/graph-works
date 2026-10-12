@@ -14,7 +14,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
-from graph_works_core.events import ChangeEvent
+from gw_kernel.events import ChangeEvent
 
 from graph_works_serve.readstate import ReadState
 

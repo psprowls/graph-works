@@ -8,7 +8,7 @@ same policy rather than each spelling the lane out.
 Provenance keys `generated` and `last_updated_commit` are added by `sync.py`,
 not here: a renderer knows a `PackageDescription`, not a commit SHA. `tokens`
 is also a declared provenance key but neither this module nor `sync.py` adds
-it -- `run_tokens_update` (graph-works-core) is its sole writer.
+it -- `run_tokens_update` (gw-kernel) is its sole writer.
 
 Frontmatter arrays are plain graph names, verbatim from the describe record —
 not resolved to bundle links. `depends_on` is `internal_dependencies`

@@ -35,7 +35,7 @@ links, headings and diagnostics, without page bodies. It uses only okf-io's
 public reader entry points and stdlib; no `TOPIC`. `MemberRow.fm_exact=False`
 marks a frontmatter JSON fallback (for example custom YAML values or recursive
 aliases); callers needing lossless frontmatter must use a full read for those
-rows. `readindex.member_row` is the public projection shared with graph-works-core.
+rows. `readindex.member_row` is the public projection shared with gw-kernel.
 Standard columns remain exact. Surrogate-containing reader strings use
 reversible BLOB bindings, decoded by the index connection, including filters.
 

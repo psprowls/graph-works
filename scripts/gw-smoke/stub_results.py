@@ -6,7 +6,7 @@ brief. For testing the *contract* (does apply correctly consume results), not fo
 testing prose quality — the sections it writes are placeholders.
 
 Matching is by the `uri` field inside each result file's JSON content, not the
-filename (see `load_results_dir` in `graph_works_core.scan.commands`) — so the
+filename (see `load_results_dir` in `gw_wiki.scan.commands`) — so the
 output filename here just needs to be unique, not derived from anything.
 
 Usage: python3 stub_results.py <workspace-path>
@@ -24,7 +24,7 @@ _SLUG_UNSAFE = re.compile(r"[^A-Za-z0-9._-]+")
 
 
 def _brief_slug(uri: str) -> str:
-    """Mirrors `graph_works_core.scan.commands.brief_slug`."""
+    """Mirrors `gw_wiki.scan.commands.brief_slug`."""
     return _SLUG_UNSAFE.sub("-", uri).strip("-") or "entity"
 
 

@@ -148,7 +148,7 @@ def _scalar(value: str) -> str:
     Plain when it safely can be -- this file is read by humans, and a
     vocabulary of quoted strings is worse to edit than one without them --
     and `json.dumps` otherwise. That call is the one
-    `graph_works_core.workspace.manifest.render_initial` already makes for
+    `gw_kernel.workspace.manifest.render_initial` already makes for
     `workspace.yaml`'s `repositories`/`ignore` blocks, and for the reason
     documented there: an unquoted plain scalar breaks on an ordinary string
     containing `" #"` (read back truncated at the comment) or `": "`

@@ -10,9 +10,9 @@ import pytest
 from graph_works_cli import exit_codes
 from graph_works_cli.cli import app
 from graph_works_cli.wiki_cli import lint as lint_module
-from graph_works_core.lint_drift.lint import LaneReport, LintReport, ProposalBacklog, SemanticFinding
-from graph_works_core.workspace.errors import WorkspaceConfigError
-from graph_works_core.workspace.lint_repos import LintRepositories
+from gw_kernel.workspace.errors import WorkspaceConfigError
+from gw_kernel.workspace.lint_repos import LintRepositories
+from gw_wiki.lint_drift.lint import LaneReport, LintReport, ProposalBacklog, SemanticFinding
 from okf_io import Finding, Report
 from typer.testing import CliRunner
 

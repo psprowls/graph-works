@@ -10,8 +10,8 @@ from typing import Any
 import pytest
 from graph_works_cli.cli import app
 from graph_works_cli.wiki_cli import proposals as proposal_cli
-from graph_works_core.workspace.layout import WorkspaceLayout
 from graph_works_serve import mutations
+from gw_kernel.workspace.layout import WorkspaceLayout
 from httpx import Response
 from mutation_helpers import frozen_datetime, make_client, serve_workspace, snapshot, write_proposal
 from okf_io import load
@@ -42,7 +42,7 @@ def _apply(client: TestClient, headers: dict[str, str], params: dict[str, Any], 
 def test_round_trip_matches_cli_and_stamps_the_echoed_plan_instant(
     env: Env, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, decision: str, status: str
 ) -> None:
-    monkeypatch.setattr("graph_works_core.proposals.commands.human_actor", lambda cwd=None: "human:tester")
+    monkeypatch.setattr("gw_wiki.proposals.commands.human_actor", lambda cwd=None: "human:tester")
     layout, member, client, headers = env
     params = {"target": TARGET, "decision": decision}
     before = snapshot(layout)
@@ -147,7 +147,7 @@ def _page(layout: WorkspaceLayout, member: str) -> None:
 
 
 def test_supersede_round_trip_matches_cli(env: Env, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("graph_works_core.proposals.commands.human_actor", lambda cwd=None: "human:tester")
+    monkeypatch.setattr("gw_wiki.proposals.commands.human_actor", lambda cwd=None: "human:tester")
     layout, member, client, headers = env
     _page(layout, "concepts/old.md")
     params = {"target": TARGET, "decision": "supersede", "superseded_by": "concepts/old", "note": "dup"}

@@ -4,7 +4,7 @@
     uv run scripts/migrate_vault.py frontmatter <vault> --write  # apply
 
 **`uv run` is mandatory.** This imports `okf_io`, `okf_ext`, `doc_wiki_okf`,
-`code_wiki_okf` and `graph_works_core` from the workspace; a `./migrate_vault.py`
+`code_wiki_okf` and `gw_kernel` from the workspace; a `./migrate_vault.py`
 shebang invocation cannot resolve any of them. Same trap
 `scripts/convert-wikilinks.md` documents.
 
@@ -144,7 +144,7 @@ def _layout(vault: Path):  # -> WorkspaceLayout
     Imported lazily so `--help` does not pay for the core package, and so a
     phase that never touches the transaction executor never loads it.
     """
-    from graph_works_core.workspace.layout import layout_for
+    from gw_kernel.workspace.layout import layout_for
 
     workspace = vault.parent
     return layout_for(workspace, bundle_dir=vault.name)
@@ -790,7 +790,7 @@ def cmd_work(args: argparse.Namespace) -> PhaseReport:
     and reloads it (`migration.py:627-695`) -- every member, not just the work
     lane. Correct, and slow. Reported as a note so an attended run expects it.
     """
-    from graph_works_core.workspace.transactions import apply_mutation
+    from gw_pipeline.transactions import apply_mutation
     from migrate_vault_work import LEGACY_IGNORE, plan_migration
 
     vault: Path = args.vault

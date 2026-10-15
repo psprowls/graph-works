@@ -12,10 +12,10 @@ from test_orchestrate_shell import _workspace, _write
 def _setup(tmp_path, monkeypatch, *, nested=False, foreign=False):
     layout = _workspace(
         tmp_path,
-        "version: 1\nrepositories:\n  core: {path: /core}\n  ui: {path: /ui}\n"
-        "workflow:\n  auto_drive: {max_parallel: 4}\n",
+        "version: 1\nrepositories:\n  core: {path: /core}\n  ui: {path: /ui}\n",
+        workflow="workflow:\n  auto_drive: {max_parallel: 4}\n",
     )
-    (layout.root / "dispatch.yaml").write_text(
+    (layout.root / "workflow.yaml").write_text(
         "pipeline:\n  rules:\n    - match: {stage: finish}\n"
         '      prompt_tail: "Auto-drive context: merge target {merge_target}"\n',
         encoding="utf-8",
@@ -144,7 +144,7 @@ def test_real_git_shell_keeps_live_root_target_when_source_is_dirty(tmp_path):
     for name, source in sources.items():
         git(repo, "worktree", "add", "-b", f"feature/{name}", str(source))
     layout = _workspace(tmp_path / "workspace", f"version: 1\nrepositories:\n  code: {{path: {repo}}}\n")
-    (layout.root / "dispatch.yaml").write_text(
+    (layout.root / "workflow.yaml").write_text(
         "pipeline:\n  rules:\n    - match: {stage: finish}\n"
         '      prompt_tail: "Auto-drive context: merge target {merge_target}"\n',
         encoding="utf-8",

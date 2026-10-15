@@ -9,8 +9,7 @@ from work_tracker_okf.items import load_items
 def setup(tmp_path, monkeypatch, *, scalar=True, nested=False, base_checkout=False):
     layout = layout_for(tmp_path)
     layout.manifest_path.write_text(
-        "version: 1\nworkflow: {dispatch_rules: dispatch.yaml}\n"
-        "repositories:\n  core: {path: /core}\n  ui: {path: /ui}\n",
+        "version: 1\nworkflow_config: dispatch.yaml\nrepositories:\n  core: {path: /core}\n  ui: {path: /ui}\n",
         encoding="utf-8",
     )
     (layout.root / "dispatch.yaml").write_text(

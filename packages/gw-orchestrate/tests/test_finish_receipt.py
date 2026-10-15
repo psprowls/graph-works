@@ -68,7 +68,7 @@ def setup(tmp_path, seed):
     # apply_init's disposable config projection names the seed root; nothing here reads it.
     (layout.cache_dir / "config.json").unlink(missing_ok=True)
     layout.manifest_path.write_text(
-        "version: 1\nworkflow: {dispatch_rules: dispatch.yaml}\nrepositories:\n"
+        "version: 1\nworkflow_config: workflow.yaml\nrepositories:\n"
         + "".join(f"  {n}: {{path: {r}}}\n" for n, (r, _) in repos.items()),
         encoding="utf-8",
     )
@@ -411,7 +411,9 @@ def test_invalid_commit_config_rejects_valid_finish_before_lock_and_preserves_pr
     layout, repos = setup(tmp_path, receipt_seed)
     git(repos["code"][0], "merge", "feature")
     git(repos["ui"][0], "merge", "feature")
-    layout.local_manifest_path.write_text("workflow:\n  workspace_commits: invalid\n", encoding="utf-8", newline="\n")
+    (layout.root / "workflow.local.yaml").write_text(
+        "workflow:\n  workspace_commits: invalid\n", encoding="utf-8", newline="\n"
+    )
     before = {p.relative_to(layout.root): p.read_bytes() for p in layout.root.rglob("*") if p.is_file()}
     with pytest.raises(WorkspaceError, match="workspace_commits"):
         record(layout, "code")

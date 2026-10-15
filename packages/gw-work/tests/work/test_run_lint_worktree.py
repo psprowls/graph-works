@@ -77,7 +77,7 @@ def _primary_with_linked(tmp_path):
     _git(primary_root, "init", "-q", "-b", "main")
     primary = apply_init(plan_init(primary_root, today=TODAY, topic="Work")).layout
     primary.manifest_path.write_text(
-        "version: 1\nworkflow:\n  dispatch_rules: dispatch.yaml\n"
+        "version: 1\nworkflow_config: workflow.yaml\n"
         "repositories:\n  gw:\n    path: okf/repositories/gw/references/git\n"
         "    checkout: .gw/worktrees/gw/main\n",
         encoding="utf-8",
@@ -105,7 +105,7 @@ def _two(tmp_path):
     (two / "packages/b").mkdir(parents=True)
     layout = apply_init(plan_init(tmp_path / "ws", today=TODAY, topic="Work")).layout
     layout.manifest_path.write_text(
-        "version: 1\nworkflow:\n  dispatch_rules: dispatch.yaml\n"
+        "version: 1\nworkflow_config: workflow.yaml\n"
         f"repositories:\n  one:\n    path: {one}\n  two:\n    path: {two}\n",
         encoding="utf-8",
         newline="\n",

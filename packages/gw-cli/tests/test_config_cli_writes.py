@@ -18,57 +18,68 @@ runner = CliRunner()
 def _workspace(tmp_path: Path) -> Path:
     root = tmp_path / "workspace"
     root.mkdir()
-    (root / "workspace.yaml").write_text("version: 1\nworkflow: {dispatch_rules: dispatch.yaml}\n", encoding="utf-8")
+    (root / "workspace.yaml").write_text("version: 1\nworkflow_config: dispatch.yaml\n", encoding="utf-8")
     (root / "dispatch.yaml").write_text("pipeline: {rules: []}\n", encoding="utf-8")
     return root
 
 
-def test_set_coerces_persists_and_refreshes_projection(tmp_path: Path) -> None:
+def _load(path: Path) -> dict:
+    return PlainYamlStore(path).read_explicit()
+
+
+def test_set_writes_a_workflow_key_into_the_workflow_file(tmp_path: Path) -> None:
     root = _workspace(tmp_path)
-
     result = runner.invoke(
-        config_app,
-        ["set", "workflow.auto_drive.max_parallel", "3", "--workspace", str(root), "--json"],
+        config_app, ["set", "workflow.auto_drive.max_parallel", "3", "--workspace", str(root), "--json"]
     )
-
-    assert result.exit_code == 0
-    payload = json.loads(result.stdout)
-    assert payload["key"] == "workflow.auto_drive.max_parallel"
-    assert payload["value"] == 3
-    assert payload["origin"] == "manifest"
-    stored = PlainYamlStore(root / "workspace.yaml").read_explicit()
-    assert stored["workflow"] == {"dispatch_rules": "dispatch.yaml", "auto_drive": {"max_parallel": 3}}
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.output)
+    assert (payload["key"], payload["value"], payload["origin"]) == ("workflow.auto_drive.max_parallel", 3, "workflow")
+    assert _load(root / "dispatch.yaml")["workflow"] == {"auto_drive": {"max_parallel": 3}}
+    assert _load(root / "workspace.yaml") == {"version": 1, "workflow_config": "dispatch.yaml"}
     projection = json.loads((root / ".gw" / "cache" / "config.json").read_text(encoding="utf-8"))
-    assert projection["workflow"]["auto_drive"]["max_parallel"] == 3
-    assert set(projection["_meta"]) == {
-        "source_mtime",
-        "source_sha256",
-        "overlay_mtime",
-        "overlay_sha256",
-        "dispatch_inputs",
-    }
+    assert projection["workflow"] == {"auto_drive": {"max_parallel": 3}}
 
 
 def test_unset_removes_explicit_value_refreshes_projection_and_reports_default(tmp_path: Path) -> None:
     root = _workspace(tmp_path)
-    runner.invoke(
-        config_app,
-        ["set", "workflow.auto_drive.max_parallel", "3", "--workspace", str(root)],
-    )
+    runner.invoke(config_app, ["set", "workflow.auto_drive.max_parallel", "3", "--workspace", str(root)])
 
     result = runner.invoke(
-        config_app,
-        ["unset", "workflow.auto_drive.max_parallel", "--workspace", str(root), "--json"],
+        config_app, ["unset", "workflow.auto_drive.max_parallel", "--workspace", str(root), "--json"]
     )
 
-    assert result.exit_code == 0
+    assert result.exit_code == 0, result.output
     payload = json.loads(result.stdout)
     assert payload["value"] == 2
     assert payload["origin"] == "default"
-    stored = PlainYamlStore(root / "workspace.yaml").read_explicit()
-    assert stored["workflow"] == {"dispatch_rules": "dispatch.yaml"}
+    assert "auto_drive" not in (_load(root / "dispatch.yaml").get("workflow") or {})
+    assert _load(root / "workspace.yaml") == {"version": 1, "workflow_config": "dispatch.yaml"}
     projection = json.loads((root / ".gw" / "cache" / "config.json").read_text(encoding="utf-8"))
-    assert projection["workflow"] == {"dispatch_rules": "dispatch.yaml"}
+    assert "max_parallel" not in projection.get("workflow", {}).get("auto_drive", {})
+
+
+def test_set_local_writes_the_local_sibling_and_reports_shadowing(tmp_path: Path) -> None:
+    root = _workspace(tmp_path)
+    runner.invoke(config_app, ["set", "workflow.auto_drive.max_parallel", "4", "--workspace", str(root)])
+    result = runner.invoke(
+        config_app, ["set", "--local", "workflow.auto_drive.max_parallel", "2", "--workspace", str(root)]
+    )
+    assert result.exit_code == 0, result.output
+    assert result.output.splitlines() == [
+        "workflow.auto_drive.max_parallel = 2  (origin: workflow-local)",
+        "  note: workflow file value 4 is shadowed by its .local sibling",
+    ]
+    assert _load(root / "dispatch.local.yaml") == {"workflow": {"auto_drive": {"max_parallel": 2}}}
+
+
+def test_list_marks_workflow_origins(tmp_path: Path) -> None:
+    root = _workspace(tmp_path)
+    runner.invoke(config_app, ["set", "workflow.auto_drive.max_parallel", "4", "--workspace", str(root)])
+    runner.invoke(config_app, ["set", "--local", "workflow.gate.max_concurrent", "1", "--workspace", str(root)])
+    lines = runner.invoke(config_app, ["list", "--workspace", str(root)]).output.splitlines()
+    assert "+ workflow.auto_drive.max_parallel = 4  [workflow; default 2]" in lines
+    assert "~ workflow.gate.max_concurrent = 1  [workflow-local; default None]" in lines
 
 
 def test_set_rejects_invalid_values_without_writing(tmp_path: Path) -> None:
@@ -81,10 +92,7 @@ def test_set_rejects_invalid_values_without_writing(tmp_path: Path) -> None:
 
     assert result.exit_code == exit_codes.GENERIC
     assert "expects an integer" in result.stderr
-    assert PlainYamlStore(root / "workspace.yaml").read_explicit() == {
-        "version": 1,
-        "workflow": {"dispatch_rules": "dispatch.yaml"},
-    }
+    assert _load(root / "workspace.yaml") == {"version": 1, "workflow_config": "dispatch.yaml"}
     assert not (root / ".gw" / "cache" / "config.json").exists()
 
 
@@ -148,7 +156,7 @@ def test_write_verbs_preserve_not_initialized_for_a_missing_workspace(tmp_path: 
 def test_sync_regenerates_projection_after_a_hand_edit(tmp_path: Path) -> None:
     root = _workspace(tmp_path)
     PlainYamlStore(root / "workspace.yaml").write(
-        {"version": 1, "topic": "Hand edited", "workflow": {"dispatch_rules": "dispatch.yaml"}}
+        {"version": 1, "topic": "Hand edited", "workflow_config": "dispatch.yaml"}
     )
 
     result = runner.invoke(config_app, ["sync", "--workspace", str(root)])
@@ -175,7 +183,7 @@ def test_set_does_not_reorder_the_manifest(tmp_path: Path) -> None:
     root = _workspace(tmp_path)
     manifest = root / "workspace.yaml"
     PlainYamlStore(manifest).write(
-        {"version": 1, "topic": "t", "ignore": ["tmp/**"], "workflow": {"dispatch_rules": "dispatch.yaml"}}
+        {"version": 1, "topic": "t", "ignore": ["tmp/**"], "workflow_config": "dispatch.yaml"}
     )
     before = [
         line.split(":", 1)[0]
@@ -216,23 +224,23 @@ def test_sync_maps_a_registry_fault_to_the_generic_exit(tmp_path: Path, monkeypa
 
 def test_set_local_writes_only_the_local_file_and_projects_the_merged_view(tmp_path: Path) -> None:
     root = _workspace(tmp_path)
-    committed_before = (root / "workspace.yaml").read_bytes()
+    shared_before = (root / "dispatch.yaml").read_bytes()
+    manifest_before = (root / "workspace.yaml").read_bytes()
 
     result = runner.invoke(
         config_app,
         ["set", "--local", "workflow.auto_drive.max_parallel", "2", "--workspace", str(root), "--json"],
     )
 
-    assert result.exit_code == 0
+    assert result.exit_code == 0, result.output
     payload = json.loads(result.stdout)
     assert payload["value"] == 2
-    assert payload["origin"] == "local"
-    assert (root / "workspace.yaml").read_bytes() == committed_before
-    local = PlainYamlStore(root / "workspace.local.yaml").read_explicit()
-    assert local == {"workflow": {"auto_drive": {"max_parallel": 2}}}
+    assert payload["origin"] == "workflow-local"
+    assert (root / "dispatch.yaml").read_bytes() == shared_before
+    assert (root / "workspace.yaml").read_bytes() == manifest_before
+    assert _load(root / "dispatch.local.yaml") == {"workflow": {"auto_drive": {"max_parallel": 2}}}
     projection = json.loads((root / ".gw" / "cache" / "config.json").read_text(encoding="utf-8"))
     assert projection["workflow"]["auto_drive"]["max_parallel"] == 2
-    assert projection["_meta"]["overlay_sha256"] is not None
 
 
 def test_set_local_shadows_a_committed_value_without_touching_it(tmp_path: Path) -> None:
@@ -244,11 +252,10 @@ def test_set_local_shadows_a_committed_value_without_touching_it(tmp_path: Path)
         ["set", "--local", "workflow.auto_drive.max_parallel", "2", "--workspace", str(root), "--json"],
     )
 
-    assert result.exit_code == 0
+    assert result.exit_code == 0, result.output
     payload = json.loads(result.stdout)
-    assert (payload["value"], payload["origin"], payload["shadowed"]) == (2, "local", 4)
-    committed = PlainYamlStore(root / "workspace.yaml").read_explicit()
-    assert committed["workflow"] == {"dispatch_rules": "dispatch.yaml", "auto_drive": {"max_parallel": 4}}
+    assert (payload["value"], payload["origin"], payload["shadowed"]) == (2, "workflow-local", 4)
+    assert _load(root / "dispatch.yaml")["workflow"] == {"auto_drive": {"max_parallel": 4}}
 
 
 def test_set_without_local_still_writes_only_the_committed_file(tmp_path: Path) -> None:
@@ -288,10 +295,10 @@ def test_unset_local_removes_the_override_and_falls_back_to_the_base(tmp_path: P
         ["unset", "--local", "workflow.auto_drive.max_parallel", "--workspace", str(root), "--json"],
     )
 
-    assert result.exit_code == 0
+    assert result.exit_code == 0, result.output
     payload = json.loads(result.stdout)
-    assert (payload["value"], payload["origin"]) == (4, "manifest")
-    assert PlainYamlStore(root / "workspace.local.yaml").read_explicit() == {}
+    assert (payload["value"], payload["origin"]) == (4, "workflow")
+    assert not (_load(root / "dispatch.local.yaml").get("workflow") or {}).get("auto_drive")
     projection = json.loads((root / ".gw" / "cache" / "config.json").read_text(encoding="utf-8"))
     assert projection["workflow"]["auto_drive"]["max_parallel"] == 4
 
@@ -308,6 +315,7 @@ def test_a_failed_first_local_write_leaves_no_local_file_behind(tmp_path: Path) 
     )
     assert result.exit_code != 0
     assert not (root / "workspace.local.yaml").exists()
+    assert not (root / "dispatch.local.yaml").exists()
 
 
 @pytest.mark.parametrize("local", [False, True])
@@ -320,7 +328,7 @@ def test_reference_write_validates_selected_pair_before_mutation(tmp_path, local
         (root / "other.yaml").write_text(document, encoding="utf-8", newline="")
     result = runner.invoke(
         config_app,
-        ["set", "workflow.dispatch_rules", "other.yaml", "--workspace", str(root), *(["--local"] if local else [])],
+        ["set", "workflow_config", "other.yaml", "--workspace", str(root), *(["--local"] if local else [])],
     )
     assert result.exit_code == exit_codes.SCHEMA_MISMATCH
     assert (target.read_bytes() if target.exists() else None) == before
@@ -333,7 +341,7 @@ def test_reference_write_validates_new_local_sibling_and_projects_provenance(tmp
     shared.write_text("# shared\npipeline: {rules: []}\n", encoding="utf-8", newline="")
     sibling = root / "other.local.yml"
     sibling.write_text("pipeline: null\n", encoding="utf-8", newline="")
-    args = ["set", "--local", "workflow.dispatch_rules", "other.yml", "--workspace", str(root)]
+    args = ["set", "--local", "workflow_config", "other.yml", "--workspace", str(root)]
     result = runner.invoke(config_app, args)
     assert result.exit_code == exit_codes.SCHEMA_MISMATCH
     assert not (root / "workspace.local.yaml").exists()
@@ -344,10 +352,10 @@ def test_reference_write_validates_new_local_sibling_and_projects_provenance(tmp
     for verb in ["get", "list"]:
         result = runner.invoke(
             config_app,
-            [verb, *(["workflow.dispatch_rules"] if verb == "get" else []), "--workspace", str(root), "--json"],
+            [verb, *(["workflow_config"] if verb == "get" else []), "--workspace", str(root), "--json"],
         )
         value = json.loads(result.stdout)
-        row = value if verb == "get" else next(row for row in value if row["key"] == "workflow.dispatch_rules")
+        row = value if verb == "get" else next(row for row in value if row["key"] == "workflow_config")
         assert (row["origin"], row["value"], row["shadowed"]) == ("local", "other.yml", "dispatch.yaml")
     payload = json.loads((root / ".gw/cache/config.json").read_bytes())
     assert payload["dispatch"]["shared_path"] == str(shared)

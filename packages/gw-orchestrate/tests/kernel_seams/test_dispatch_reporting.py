@@ -102,16 +102,15 @@ def test_next_and_orchestrate_share_resolution(tmp_path: Path, kind, phase, spec
             document.set("sources", [{"id": "plan", "resource": f"/{path}/references/02-plan.md"}])
             page.write_text(document.serialize(), encoding="utf-8")
             (layout.bundle_dir / f"{path}/references/02-plan.md").write_text("# Plan\n", encoding="utf-8")
-    shared = layout.root / "dispatch.yaml"
+    shared = layout.root / "workflow.yaml"
     shared.write_text(
-        "version: 1\npipeline:\n  attributes: [stage, type, effort, blast_radius, has_spec, has_plan]\n"
+        "pipeline:\n  attributes: [stage, type, effort, blast_radius, has_spec, has_plan]\n"
         "  rules:\n  - match: {}\n    model: inherited\n    reasoning_effort: high\n"
         '  - match: {stage: finish}\n    prompt_tail: "merge {merge_target}"\n',
         encoding="utf-8",
     )
-    (layout.root / "dispatch.local.yaml").write_text(
-        "version: 1\npipeline:\n  rules:\n  - name: local-agent\n    match: {blast_radius: package}\n"
-        "    agent: codex\n",
+    (layout.root / "workflow.local.yaml").write_text(
+        "pipeline:\n  rules:\n  - name: local-agent\n    match: {blast_radius: package}\n    agent: codex\n",
         encoding="utf-8",
     )
     next_result = run_next(layout, path, dry_run=False)
@@ -156,7 +155,7 @@ def test_descended_next_resolves_leaf_attributes_and_keeps_transitions(tmp_path)
     document.set("worktree", str(worktree))
     document.set("branch", "epic/a")
     page.write_text(document.serialize(), encoding="utf-8")
-    (layout.root / "dispatch.local.yaml").write_text(
+    (layout.root / "workflow.local.yaml").write_text(
         "pipeline:\n  rules:\n  - match: {type: Feature}\n    agent: codex\n", encoding="utf-8"
     )
     next_result = run_next(layout, parent, descend=True)

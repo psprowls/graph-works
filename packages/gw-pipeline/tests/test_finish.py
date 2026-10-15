@@ -29,7 +29,7 @@ def _git_workspace_with_code(tmp_path):
         _git(repo, "add", "-A")
         _git(repo, "commit", "--allow-empty", "-m", "base")
     layout.manifest_path.write_text(
-        f"version: 1\nworkflow: {{dispatch_rules: dispatch.yaml}}\nrepositories:\n  code: {{path: {code}}}\n",
+        f"version: 1\nworkflow_config: workflow.yaml\nrepositories:\n  code: {{path: {code}}}\n",
         encoding="utf-8",
     )
     _git(layout.root, "add", "-A")
@@ -119,11 +119,10 @@ def test_workspace_stamp_with_placement_disabled_blocks(tmp_path, monkeypatch):
 def setup(tmp_path, monkeypatch, *, scalar=True, nested=False, base_checkout=False):
     layout = layout_for(tmp_path)
     layout.manifest_path.write_text(
-        "version: 1\nworkflow: {dispatch_rules: dispatch.yaml}\n"
-        "repositories:\n  core: {path: /core}\n  ui: {path: /ui}\n",
+        "version: 1\nworkflow_config: workflow.yaml\nrepositories:\n  core: {path: /core}\n  ui: {path: /ui}\n",
         encoding="utf-8",
     )
-    (layout.root / "dispatch.yaml").write_text(
+    (layout.root / "workflow.yaml").write_text(
         "pipeline:\n  rules:\n    - match: {stage: finish}\n"
         '      prompt_tail: "Auto-drive context: merge target {merge_target}"\n',
         encoding="utf-8",
@@ -277,7 +276,7 @@ def test_unstamped_descendant_receipt_verifies_against_anchor_tip(tmp_path):
     git(repo, "config", "user.email", "test@example.test")
     git(repo, "commit", "--allow-empty", "-m", "base")
     layout.manifest_path.write_text(
-        f"version: 1\nworkflow: {{dispatch_rules: dispatch.yaml}}\nrepositories:\n  code: {{path: {repo}}}\n",
+        f"version: 1\nworkflow_config: workflow.yaml\nrepositories:\n  code: {{path: {repo}}}\n",
         encoding="utf-8",
     )
     anchor = tmp_path / "anchor"
@@ -326,7 +325,7 @@ def test_real_git_foreign_only_owner_targets_nearest_anchor(tmp_path, nested):
         git(repo, "commit", "--allow-empty", "-m", "base")
         repos[name] = repo
     layout.manifest_path.write_text(
-        "version: 1\nworkflow: {dispatch_rules: dispatch.yaml}\nrepositories:\n"
+        "version: 1\nworkflow_config: workflow.yaml\nrepositories:\n"
         + "".join(f"  {n}: {{path: {p}}}\n" for n, p in repos.items()),
         encoding="utf-8",
     )

@@ -36,14 +36,16 @@ from work_tracker_okf.pipeline import (
 from gw_kernel.workspace.dispatch import ATTRIBUTES, DispatchRule, RuleOrigin, packaged_rules, parse_rules
 from gw_kernel.workspace.errors import WorkspaceError
 from gw_kernel.workspace.layout import WorkspaceLayout
-from gw_kernel.workspace.manifest import dispatch_store, workspace_store
-
-_RETIRED = (
-    "workflow.pipeline",
-    "workflow.auto_drive.models",
-    "workflow.auto_drive.overrides",
-    "workflow.auto_drive.permission_mode",
+from gw_kernel.workspace.manifest import WORKFLOW_KEYS, dispatch_store, workspace_store
+from gw_kernel.workspace.workflow_file import (
+    RETIRED_KEYS,
+    check_legacy_workflow_keys,
+    missing_workflow_file,
+    validate_workflow_document,
+    workflow_file_path,
 )
+
+_RETIRED = RETIRED_KEYS
 _READER = YAML(typ="safe")
 _ABSENT = object()
 
@@ -154,7 +156,7 @@ def validate_workspace_dispatch_layers(
     base: Mapping[str, object],
     overlay: Mapping[str, object],
 ) -> Path:
-    """Validate explicit manifest layers and resolve their dispatch reference.
+    """Validate explicit manifest layers and resolve their workflow file.
 
     This accepts prospective mappings so manifest mutation callers can validate
     removals and reference changes before writing either layer.
@@ -165,15 +167,13 @@ def validate_workspace_dispatch_layers(
             raise WorkspaceError(
                 f"{path}: retired key {retired}; remove it, then initialize or recreate dispatch rules"
             )
-    combined = dotted.merge(base, overlay)
-    reference = dotted.get(combined, "workflow.dispatch_rules")
-    if not isinstance(reference, str) or not reference.strip():
-        raise WorkspaceError(
-            f"{layout.manifest_path}: workflow.dispatch_rules must be a non-empty path; "
-            "remove retired keys, then initialize or recreate dispatch rules"
-        )
-    expanded = Path(reference).expanduser()
-    return expanded if expanded.is_absolute() else layout.root / expanded
+    check_legacy_workflow_keys(
+        manifest_path=layout.manifest_path,
+        base=base,
+        local_manifest_path=layout.local_manifest_path,
+        overlay=overlay,
+    )
+    return workflow_file_path(manifest_path=layout.manifest_path, base=base, overlay=overlay)
 
 
 def _rules(document: Mapping[str, object], *, source: Path, attributes: frozenset[str]) -> tuple[DispatchRule, ...]:
@@ -318,6 +318,8 @@ def _compose(
     fingerprints: Mapping[Path, Fingerprint | None],
 ) -> DispatchConfig:
     for source, document in ((shared_path, shared), (local_path, local)):
+        validate_workflow_document(source, document, keys=WORKFLOW_KEYS)
+    for source, document in ((shared_path, shared), (local_path, local)):
         if "pipeline" not in document:
             continue
         pipeline = document["pipeline"]
@@ -401,6 +403,8 @@ def load_prospective_dispatch_config(
         path: source_fingerprint(path)
         for path in (layout.manifest_path, layout.local_manifest_path, store.base.path, store.overlay.path)
     }
+    if fingerprints[store.base.path] is None and seed is None:
+        raise missing_workflow_file(store.base.path)
     shared = seed if seed is not None and fingerprints[store.base.path] is None else _strict_read(store.base.path)
     local = _strict_read(store.overlay.path, optional=True)
     result = _compose(store.base.path, store.overlay.path, shared, local, fingerprints)

@@ -166,7 +166,7 @@ def test_basic_refusals(lone, case, refusal):
     elif case == "phase":
         page.write_bytes(page.read_bytes().replace(b"phase: finish", b"phase: execute"))
     elif case == "off":
-        lone.layout.local_manifest_path.write_text(
+        (lone.layout.root / "workflow.local.yaml").write_text(
             "workflow:\n  workspace_commits: off\n", encoding="utf-8", newline="\n"
         )
     else:

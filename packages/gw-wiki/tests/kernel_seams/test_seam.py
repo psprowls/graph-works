@@ -42,10 +42,7 @@ state_gate:
 roles:
   librarian:
     model_id: some-model
-workflow:
-  dispatch_rules: dispatch.yaml
-  auto_drive:
-    max_parallel: 3
+workflow_config: dispatch.yaml
 quirk: yes
 """
 
@@ -58,7 +55,9 @@ def _workspace(tmp_path: Path):
     (layout.bundle_dir / "work").mkdir(parents=True, exist_ok=True)
     layout.cache_dir.mkdir(parents=True, exist_ok=True)
     (root / "dispatch.yaml").write_text(
-        "pipeline:\n  rules:\n  - match: {stage: design, type: Bug}\n    skill: gw:custom-diagnosis\n", encoding="utf-8"
+        "workflow:\n  auto_drive:\n    max_parallel: 3\n"
+        "pipeline:\n  rules:\n  - match: {stage: design, type: Bug}\n    skill: gw:custom-diagnosis\n",
+        encoding="utf-8",
     )
     return layout
 

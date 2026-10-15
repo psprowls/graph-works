@@ -1,7 +1,7 @@
 {
   "key": "workflow.auto_drive.max_parallel",
   "value": 3,
-  "origin": "manifest",
+  "origin": "workflow",
   "entry": {
     "key": "workflow.auto_drive.max_parallel",
     "type": "int",

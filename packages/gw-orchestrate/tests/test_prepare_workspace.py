@@ -363,7 +363,7 @@ def test_dangling_destination_symlink_refuses(ws):
 
 
 def test_workspace_commit_off_is_no_effect_note(ws):
-    overlay = ws.manifest_path.with_name("workspace.local.yaml")
+    overlay = ws.manifest_path.with_name("workflow.local.yaml")
     overlay.write_text('workflow:\n  workspace_commits: "off"\n', encoding="utf-8", newline="")
     result = run_prepare_workspace(ws, CHILD, today=TODAY, apply=True)
     assert result.note and result.refusal is None and not result.applied and not result.steps

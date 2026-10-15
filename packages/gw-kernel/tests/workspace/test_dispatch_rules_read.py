@@ -22,9 +22,9 @@ def _layout(tmp_path: Path):
 
 
 def _rules(layout, shared: str, local: str | None = None) -> None:
-    (layout.root / "dispatch.yaml").write_text(f"version: 1\npipeline:\n  rules:\n{shared}", encoding="utf-8")
+    (layout.root / "workflow.yaml").write_text(f"pipeline:\n  rules:\n{shared}", encoding="utf-8")
     if local is not None:
-        (layout.root / "dispatch.local.yaml").write_text(f"version: 1\npipeline:\n  rules:\n{local}", encoding="utf-8")
+        (layout.root / "workflow.local.yaml").write_text(f"pipeline:\n  rules:\n{local}", encoding="utf-8")
 
 
 def test_packaged_rows_follow_the_packaged_pipeline() -> None:
@@ -51,8 +51,8 @@ def test_rules_are_in_fold_order_shared_then_local(tmp_path: Path) -> None:
     assert ruleset.attributes == ("blast_radius", "effort", "has_plan", "has_spec", "spec_stale", "stage", "type")
     assert ruleset.packaged == packaged_rules()
     assert [(Path(r.origin.source).name, r.origin.index, r.origin.name) for r in ruleset.rules] == [
-        ("dispatch.yaml", 0, None),
-        ("dispatch.local.yaml", 0, "mine"),
+        ("workflow.yaml", 0, None),
+        ("workflow.local.yaml", 0, "mine"),
     ]
     assert ruleset.rules[0].match["stage"] == ("plan", "execute")
 
@@ -61,7 +61,7 @@ def test_a_malformed_rule_names_its_file_and_index(tmp_path: Path) -> None:
     layout = _layout(tmp_path)
     _rules(layout, "  - match: {}\n    model: opus\n", "  - match: {}\n    colour: red\n")
 
-    with pytest.raises(WorkspaceError, match=r"dispatch\.local\.yaml: rule 0: unknown rule keys"):
+    with pytest.raises(WorkspaceError, match=r"workflow\.local\.yaml: rule 0: unknown rule keys"):
         run_dispatch_rules(layout)
 
 

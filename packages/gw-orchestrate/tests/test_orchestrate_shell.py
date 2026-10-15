@@ -43,13 +43,10 @@ def test_run_orchestrate_reads_checkpoints_for_execute_items_only(
     assert captured == {executing: orchestrate.HumanCheckpoints("no-plan")}
 
 
-def _workspace(tmp_path: Path, manifest: str = "version: 1\n"):
+def _workspace(tmp_path: Path, manifest: str = "version: 1\n", workflow: str = ""):
     tmp_path.mkdir(parents=True, exist_ok=True)
-    if "workflow:" in manifest:
-        manifest = manifest.replace("workflow:\n", "workflow:\n  dispatch_rules: dispatch.yaml\n")
-    else:
-        manifest += "workflow:\n  dispatch_rules: dispatch.yaml\n"
-    (tmp_path / "dispatch.yaml").write_text("pipeline:\n  rules: []\n", encoding="utf-8")
+    manifest += "workflow_config: workflow.yaml\n"
+    (tmp_path / "workflow.yaml").write_text(f"{workflow}pipeline:\n  rules: []\n", encoding="utf-8")
     (tmp_path / "workspace.yaml").write_text(manifest, encoding="utf-8")
     layout = layout_for(tmp_path)
     (layout.bundle_dir / "work").mkdir(parents=True, exist_ok=True)
@@ -177,11 +174,9 @@ def test_embedded_workspace_notes_and_plans_as_before(tmp_path: Path) -> None:
 
 def test_workspace_commits_off_notes_and_plans_as_before(tmp_path: Path) -> None:
     layout = _workspace_with_git(tmp_path)
-    layout.manifest_path.write_text(
-        layout.manifest_path.read_text(encoding="utf-8").replace(
-            "workflow:\n", "workflow:\n  workspace_commits: off\n", 1
-        ),
-        encoding="utf-8",
+    workflow_file = layout.root / "workflow.yaml"
+    workflow_file.write_text(
+        "workflow:\n  workspace_commits: off\n" + workflow_file.read_text(encoding="utf-8"), encoding="utf-8"
     )
     _write(layout, "work/feature-lone", phase="execute", work_status="accepted", affects=("packages/a/x.py",))
     _commit_workspace(layout.root)
@@ -249,7 +244,7 @@ def test_open_decision_blocks_exact_canonical_path(tmp_path: Path) -> None:
 
 
 def test_bad_manifest_scalar_refuses(tmp_path: Path) -> None:
-    layout = _workspace(tmp_path, 'version: 1\nworkflow:\n  auto_drive:\n    max_parallel: "4"\n')
+    layout = _workspace(tmp_path, workflow='workflow:\n  auto_drive:\n    max_parallel: "4"\n')
     _write(layout, "work/feature-a")
     with pytest.raises(WorkspaceError, match="expects an integer"):
         orchestrate.run_orchestrate(layout, "work/feature-a")
@@ -1445,7 +1440,7 @@ def test_run_orchestrate_reads_supervise_merges_from_the_manifest(tmp_path: Path
 
     supervised = _workspace(
         tmp_path / "supervised",
-        manifest="version: 1\nworkflow:\n  auto_drive:\n    supervise_merges: true\n",
+        workflow="workflow:\n  auto_drive:\n    supervise_merges: true\n",
     )
     _write(supervised, "work/feature-a", phase="design")
     assert orchestrate.run_orchestrate(supervised, "work/feature-a").supervise_merges is True

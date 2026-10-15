@@ -154,16 +154,22 @@ path — a foreign version raises `WorkspaceError`), `initialized_at`,
 `config_dir`" when absent), the bundle declarations `code_wiki_okf.config.load_config`
 reads (`repositories.*.path`, `repositories.*.ignore`, `ignore`, `state_gate.*`),
 five `roles.*.<field>` wildcard entries (model/backend/region/max_tokens/max_concurrency
-overrides consumed by `gw_wiki.agent_substrate.roles`), `workflow.dispatch_rules` (the
-shared dispatch document reference), and operational `workflow.auto_drive`
-`max_parallel`/`supervise_merges`. `graph_dir` and
+overrides consumed by `gw_wiki.agent_substrate.roles`), `workflow_config` (the top-level
+pointer naming the workflow file), and the six `workflow.*` keys
+(`auto_drive.max_parallel`/`max_attend`/`supervise_merges`,
+`gate.unit_jobs`/`gate.max_concurrent`, `workspace_commits`), which the catalog
+declares but whose values are homed in the workflow file (`workflow:` block), not
+the manifest; a `workflow.*` key in either manifest layer is refused. A
+manifest with no `workflow_config` refuses with "run `gw bootstrap`"; a
+workspace with no `workspace.yaml` at all reads those keys as catalog defaults. `graph_dir` and
 `declarations_dir` are **not** stored in the manifest — they're resolved from
 the layout and supplied by the caller at read time. `Manifest` itself never
 holds a `Path`, only strings; turning overrides into resolved paths is
 `layout_for`'s job alone. `checked()`/`resolve_checked_key`/`resolve_checked_all`
 exist because a hand-edited manifest bypasses config-io's set-time
 validation — only `STORED_ORIGINS` values (`"manifest"`, the committed file,
-and `"local"`, the per-machine overlay) get re-checked against the catalog's
+`"local"`, the per-machine overlay, and `"workflow"` / `"workflow-local"`, the
+workflow file pair) get re-checked against the catalog's
 declared type/`allowed`; env and default origins are trusted.
 
 **One read seam, two write sites.** `manifest_store(path)` and
@@ -177,11 +183,13 @@ because `discovery.resolve` calls `read(path)` before a layout exists.
 `PlainYamlStore` construction inside the seam itself: only `manifest_store`
 and `set_value` construct it, and `tests/test_workspace_store_boundary.py`
 pins the permitted construction sites at exactly those two.
-`gw_cli.config_cli.main._store` calls `workspace_store` like any
-other reader, then writes by naming a layer already on the `LayeredYamlStore`
-it got back — `.base` or `.overlay` — rather than constructing its own
-`PlainYamlStore`. That is what let the seam's return type change (the layered
-read-only store) without any caller moving.
+`gw config set`/`unset` re-resolve the key through
+`manifest.resolve_checked_key`, then write through
+`dispatch_projection.mutate_workspace_config`, which names a layer already on
+the `LayeredYamlStore` it got back — `.base` or `.overlay`, of the manifest or
+of the workflow file pair — rather than constructing its own `PlainYamlStore`.
+That is what let the seam's return type change (the layered read-only store)
+without any caller moving.
 
 `dispatch.parse_rules` validates every supplied rule before matching, including
 skill names and unsupported permission/backend fields. `dispatch_config` checks
@@ -190,8 +198,8 @@ cannot hide legacy shared settings. `dispatch.resolve_dispatch` is the single
 profile cascade and records all six field origins. The planner and next-stage
 reader derive attributes from work-tracker state via `dispatch_attributes`.
 
-`dispatch_projection` fingerprints both manifests and both dispatch documents,
-including absent local files, checks snapshots before publication, and never
+`dispatch_projection` fingerprints both manifests and both workflow-file layers,
+including absent local files, adds a top-level `workflow` block to the projection, checks snapshots before publication, and never
 writes merged rules back. See [Dispatch rules](docs/dispatch-rules.md) and the
 focused `test_dispatch*.py` suites before changing this seam.
 
@@ -201,12 +209,13 @@ the dry run, matching six other shipped writers across the workspace). In
 order, `apply_init` performs: (1) create directories (`root`, `.gw/`,
 `.gw/cache/`, `okf/`, `.gw/worktrees/`); (2) write `<config_dir>/.gitignore`
 (only the gitignored members — cache and worktrees dirs) and `<root>/.gitignore`
-(`workspace.local.yaml` and `/dispatch.local.yaml`, the per-machine overlays); the
+(`workspace.local.yaml` and the pointer's `.local` sibling, `/workflow.local.yaml` for a new workspace, the per-machine overlays); the
 repo's own root `.gitignore` is never edited — in the `.works` shape
 `layout.root` is `<repo>/.works`, so the workspace's root gitignore is inside
-the workspace; (3) create a missing manifest, or insert only a missing dispatch
-reference into authored YAML; create a missing shared dispatch file with the
-relay-tail seed, preserving authored files; (4) write `<root>/AGENTS.md` via `render_context_file` — the gw region above
+the workspace; (3) create a missing manifest carrying `workflow_config: workflow.yaml`, or insert
+only a missing `workflow_config` line into authored YAML (an existing pointer,
+even to `dispatch.yaml`, is never rewritten); create a missing workflow file with
+the relay-tail seed, preserving authored files; (4) write `<root>/AGENTS.md` via `render_context_file` — the gw region above
 `## Local Conventions` regenerated whole from `assets/AGENTS.md.template`,
 the tail beneath that heading carried verbatim — and `<root>/CLAUDE.md` as
 the one-line `@AGENTS.md` pointer, both at `layout.root` and never a repo

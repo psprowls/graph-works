@@ -21,7 +21,7 @@ PACKAGED_NAMES = [rule.name for rule in PACKAGED_DEFINITION.path_rules]
 
 def _workspace(tmp_path: Path, shared: str = "{}\n", local: str | None = None):
     (tmp_path / "workspace.yaml").write_text(
-        "version: 1\nworkflow:\n  dispatch_rules: dispatch.yaml\n", encoding="utf-8", newline=""
+        "version: 1\nworkflow_config: dispatch.yaml\n", encoding="utf-8", newline=""
     )
     (tmp_path / "dispatch.yaml").write_text(shared, encoding="utf-8", newline="")
     if local is not None:

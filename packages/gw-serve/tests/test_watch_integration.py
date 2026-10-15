@@ -142,11 +142,11 @@ async def test_moving_dispatch_rules_rewatches_and_the_new_file_classifies(
     workspace: WorkspaceLayout, running: tuple[Hub, Subscription], polling_backend: PollingBackend
 ) -> None:
     _, sub = running
-    old = workspace.root / "dispatch.yaml"
-    new = workspace.root / "rules" / "dispatch.yaml"
+    old = workspace.root / "workflow.yaml"
+    new = workspace.root / "rules" / "workflow.yaml"
     _write(new, old.read_text(encoding="utf-8"))
     manifest = workspace.manifest_path.read_text(encoding="utf-8").replace(
-        "dispatch_rules: dispatch.yaml", "dispatch_rules: rules/dispatch.yaml"
+        "workflow_config: workflow.yaml", "workflow_config: rules/workflow.yaml"
     )
     _write(workspace.manifest_path, manifest)
 
@@ -166,8 +166,8 @@ async def test_moving_dispatch_rules_rewatches_and_the_new_file_classifies(
     ("filename", "token"),
     [
         ("workspace.local.yaml", "manifest-local"),
-        ("dispatch.yaml", "dispatch"),
-        ("dispatch.local.yaml", "dispatch-local"),
+        ("workflow.yaml", "dispatch"),
+        ("workflow.local.yaml", "dispatch-local"),
     ],
 )
 async def test_local_manifest_and_dispatch_edits_emit_config(

@@ -3,8 +3,9 @@
 Four layout overrides, five role-override wildcards, the bundle declarations
 (`repositories`, `ignore`, `state_gate`), a version, a provenance stamp, a
 topic, and one `env-only` entry documenting the discovery override.
-The plugin backends belong to `models-io`; the guidance and workflow blocks
-are deferred until their consumers exist.
+The plugin backends belong to `models-io`; the guidance block is deferred until
+its consumer exists. The `workflow.*` keys are declared here but homed in the
+workflow file `workflow_config` names, not in `workspace.yaml`.
 
 `roles` is the one line C2 amends. The role *concept* does belong to
 `subagents-io` and `models-io` — `resolve_role_spec` takes both mappings as
@@ -27,8 +28,9 @@ come for free, and roughly 250 lines of bespoke checking does not get written.
 from __future__ import annotations
 
 import json
+import os
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date
 from pathlib import Path
 
@@ -39,6 +41,8 @@ from config_io import (
     Resolved,
     StoreValidationError,
     dotted,
+    expand_wildcards,
+    find_entry,
     resolve_all,
     resolve_key,
     set_key,
@@ -51,6 +55,14 @@ from gw_kernel.workspace.layout import (
     LOCAL_MANIFEST_FILENAME,
     MANIFEST_FILENAME,
     WorkspaceLayout,
+)
+from gw_kernel.workspace.workflow_file import (
+    DEFAULT_WORKFLOW_FILE,
+    WORKFLOW_CONFIG_KEY,
+    check_legacy_workflow_keys,
+    missing_workflow_file,
+    validate_workflow_document,
+    workflow_file_path,
 )
 
 #: The one format this package reads.
@@ -71,7 +83,10 @@ WORKSPACE_DIR_ENV = "GRAPH_WORKS_DIR"
 #: config-io's set-time checks — a hand-edited overlay is no more validated
 #: than a hand-edited base — so `checked` covers both. `"env"` stays
 #: fail-open (config-io's documented rule) and `"default"` is catalog-authored.
-STORED_ORIGINS: frozenset[str] = frozenset({"manifest", "local"})
+STORED_ORIGINS: frozenset[str] = frozenset({"manifest", "local", "workflow", "workflow-local"})
+
+#: config-io's two layer origins, renamed for a key read from the workflow file pair.
+_WORKFLOW_ORIGINS: Mapping[str, str] = {"manifest": "workflow", "local": "workflow-local"}
 
 CATALOG: tuple[ConfigEntry, ...] = (
     ConfigEntry(
@@ -260,12 +275,16 @@ CATALOG: tuple[ConfigEntry, ...] = (
         description="Fan-out width for one role, read by the subagent pool's semaphore.",
     ),
     ConfigEntry(
-        key="workflow.dispatch_rules",
+        key=WORKFLOW_CONFIG_KEY,
         type="str",
         default=None,
-        description="Shared dispatch-rules document, resolved relative to the workspace root.",
+        description=(
+            "The workflow file (its workflow: and pipeline: sections), resolved relative to the workspace root. "
+            "Its machine-local overlay is the <stem>.local<suffix> sibling."
+        ),
     ),
-    # Operational controls are independent of dispatch profiles.
+    # Homed in the workflow file workflow_config names, not in workspace.yaml (D-004):
+    # same keys, routed by resolve_checked_key.
     ConfigEntry(
         key="workflow.auto_drive.max_parallel",
         type="int",
@@ -304,7 +323,7 @@ CATALOG: tuple[ConfigEntry, ...] = (
         default=None,
         description=(
             "How many `gw work gate` runs may execute at once on this machine; unset is unlimited. "
-            "Set per machine in workspace.local.yaml."
+            "Set per machine in the workflow file's .local sibling."
         ),
     ),
     ConfigEntry(
@@ -335,6 +354,15 @@ CATALOG: tuple[ConfigEntry, ...] = (
         env_var=WORKSPACE_DIR_ENV,
     ),
 )
+
+
+def is_workflow_key(key: str) -> bool:
+    """Whether *key* is homed in the workflow file rather than `workspace.yaml` (D-004)."""
+    return key.startswith("workflow.")
+
+
+#: Every concrete key the workflow file's `workflow:` block may hold.
+WORKFLOW_KEYS: frozenset[str] = frozenset(entry.key for entry in CATALOG if is_workflow_key(entry.key))
 
 
 @dataclass(frozen=True, slots=True)
@@ -468,7 +496,14 @@ def read(path: str | Path, *, environ: Mapping[str, str] | None = None) -> Manif
             "Initialize one with `gw_kernel.plan_init` / `apply_init`."
         )
     try:
-        resolved = resolve_all(CATALOG, store=manifest_store(path), environ={} if environ is None else environ)
+        store = manifest_store(path)
+        resolved = resolve_all(CATALOG, store=store, environ={} if environ is None else environ)
+        check_legacy_workflow_keys(
+            manifest_path=path,
+            base=store.read_base_explicit(),
+            local_manifest_path=store.overlay.path,
+            overlay=store.read_overlay_explicit(),
+        )
     except StoreValidationError as exc:
         raise WorkspaceError(f"{path}: {exc}") from exc
     values: dict[str, object] = {item.key: item.value for item in resolved}
@@ -525,7 +560,9 @@ def checked(resolved: Resolved, *, source: Path) -> object:
     return value
 
 
-def _check_resolved(resolved: Resolved, *, explicit: Mapping[str, object], layout: WorkspaceLayout) -> Resolved:
+def _check_resolved(
+    resolved: Resolved, *, explicit: Mapping[str, object], base_path: Path, local_path: Path
+) -> Resolved:
     """Refuse a malformed stored value while preserving its resolution metadata."""
     # `resolve_key` treats a stored null as unset and returns the catalog
     # default, so the raw mapping is the only place a deliberate null remains
@@ -535,7 +572,7 @@ def _check_resolved(resolved: Resolved, *, explicit: Mapping[str, object], layou
     # A stored explicit null always resolves with origin "default" (see
     # `resolve_key`), so which layer actually holds the null cannot be
     # recovered from the already-merged `explicit` mapping alone — this
-    # refusal names the base manifest regardless of which file the null is
+    # refusal names the base layer regardless of which file the null is
     # actually in.
     if (
         resolved.entry.default is not None
@@ -543,33 +580,117 @@ def _check_resolved(resolved: Resolved, *, explicit: Mapping[str, object], layou
         and dotted.get(explicit, resolved.key) is None
     ):
         raise WorkspaceError(
-            f"{layout.manifest_path}: {resolved.key}: is explicitly null. This key has a real default, so a "
+            f"{base_path}: {resolved.key}: is explicitly null. This key has a real default, so a "
             "null here inherits it while reading as a deliberate setting — remove the line, or set a value."
         )
     # Unlike the null check above, a *malformed* (wrong-type) value's origin
-    # is exactly which layer produced it — "local" only when the overlay
-    # itself carries the winning value (see `resolve_key`) — so the refusal
-    # can and does name the actual offending file.
-    source = layout.local_manifest_path if resolved.origin == "local" else layout.manifest_path
+    # is exactly which layer produced it — "local" / "workflow-local" only when
+    # the overlay itself carries the winning value (see `resolve_key`) — so the
+    # refusal can and does name the actual offending file.
+    source = local_path if resolved.origin in ("local", "workflow-local") else base_path
     checked(resolved, source=source)
     return resolved
 
 
-def resolve_checked_key(layout: WorkspaceLayout, key: str, *, environ: Mapping[str, str]) -> Resolved:
-    """Resolve one manifest key and reject malformed hand-edited values."""
+def _manifest_layers(layout: WorkspaceLayout) -> tuple[LayeredYamlStore, dict[str, object], dict[str, object]]:
+    """Both manifest layers, read once and refused when they still carry a moved `workflow.*` key."""
     store = workspace_store(layout)
+    try:
+        base, overlay = store.read_base_explicit(), store.read_overlay_explicit()
+    except StoreValidationError as exc:
+        raise WorkspaceError(str(exc)) from exc
+    check_legacy_workflow_keys(
+        manifest_path=layout.manifest_path,
+        base=base,
+        local_manifest_path=layout.local_manifest_path,
+        overlay=overlay,
+    )
+    return store, base, overlay
+
+
+def workflow_store(layout: WorkspaceLayout) -> LayeredYamlStore:
+    """The workflow file pair `workflow_config` names, its top level and `workflow:` block validated.
+
+    `pipeline:` is neither parsed nor checked here, so a broken dispatch rule
+    fails dispatch, not every reader of `workflow.workspace_commits`.
+    """
+    _, base, overlay = _manifest_layers(layout)
+    shared = workflow_file_path(manifest_path=layout.manifest_path, base=base, overlay=overlay)
+    if not shared.is_file():
+        raise missing_workflow_file(shared)
+    store = dispatch_store(shared)
+    for layer in (store.base, store.overlay):
+        try:
+            document = layer.read_explicit()
+        except StoreValidationError as exc:
+            raise WorkspaceError(str(exc)) from exc
+        validate_workflow_document(layer.path, document, keys=WORKFLOW_KEYS)
+    return store
+
+
+def _workflow_read_store(layout: WorkspaceLayout) -> LayeredYamlStore:
+    """`workflow_store`, except a pre-manifest workspace (no `workspace.yaml`) reads against an empty pair.
+
+    The placeholder names files beneath a directory that does not exist, so no stray
+    `workflow.yaml` in the root is read and every `workflow.*` read resolves to its catalog
+    default; a manifest that exists without `workflow_config` still refuses (D-006).
+    """
+    if os.path.lexists(layout.manifest_path):
+        return workflow_store(layout)
+    return dispatch_store(layout.root / ".gw-no-workflow-config" / "workflow.yaml")
+
+
+def _resolve_workflow(store: LayeredYamlStore, key: str, *, environ: Mapping[str, str]) -> Resolved:
     resolved = resolve_key(CATALOG, key, store=store, environ=environ)
-    return _check_resolved(resolved, explicit=store.read_explicit(), layout=layout)
+    resolved = replace(resolved, origin=_WORKFLOW_ORIGINS.get(resolved.origin, resolved.origin))
+    return _check_resolved(
+        resolved, explicit=store.read_explicit(), base_path=store.base.path, local_path=store.overlay.path
+    )
+
+
+def resolve_checked_key(layout: WorkspaceLayout, key: str, *, environ: Mapping[str, str]) -> Resolved:
+    """Resolve one key from its home and reject malformed hand-edited values.
+
+    A `workflow.*` catalog key resolves from the workflow file pair; every
+    other key, and an unknown key (so config-io names it), from the manifest.
+    """
+    store, _, _ = _manifest_layers(layout)
+    if is_workflow_key(key) and find_entry(CATALOG, key) is not None:
+        return _resolve_workflow(_workflow_read_store(layout), key, environ=environ)
+    resolved = resolve_key(CATALOG, key, store=store, environ=environ)
+    return _check_resolved(
+        resolved,
+        explicit=store.read_explicit(),
+        base_path=layout.manifest_path,
+        local_path=layout.local_manifest_path,
+    )
 
 
 def resolve_checked_all(layout: WorkspaceLayout, *, environ: Mapping[str, str]) -> list[Resolved]:
-    """Resolve every manifest key and reject malformed hand-edited values."""
-    store = workspace_store(layout)
+    """Every catalog key from its home, in `resolve_all`'s order, malformed values refused."""
+    store, _, _ = _manifest_layers(layout)
     explicit = store.read_explicit()
+    workflow = _workflow_read_store(layout)
+    keys = [entry.key for entry in CATALOG if "*" not in entry.key] + expand_wildcards(CATALOG, store=store)
     return [
-        _check_resolved(resolved, explicit=explicit, layout=layout)
-        for resolved in resolve_all(CATALOG, store=store, environ=environ)
+        _resolve_workflow(workflow, key, environ=environ)
+        if is_workflow_key(key)
+        else _check_resolved(
+            resolve_key(CATALOG, key, store=store, environ=environ),
+            explicit=explicit,
+            base_path=layout.manifest_path,
+            local_path=layout.local_manifest_path,
+        )
+        for key in keys
     ]
+
+
+def value_source(layout: WorkspaceLayout, resolved: Resolved) -> Path:
+    """The file a resolved value came from, for a refusal that names it."""
+    if is_workflow_key(resolved.key):
+        store = _workflow_read_store(layout)
+        return store.overlay.path if resolved.origin == "workflow-local" else store.base.path
+    return layout.local_manifest_path if resolved.origin == "local" else layout.manifest_path
 
 
 def _checked_value(layout: WorkspaceLayout, key: str) -> object:
@@ -617,6 +738,10 @@ def set_value(path: str | Path, key: str, raw_value: str) -> Resolved:
     binding it here is what keeps every caller from having to import it —
     refusals, coercion and the persistence check are all `config-io`'s.
     """
+    if is_workflow_key(key):
+        raise WorkspaceError(
+            f"{key}: lives in the workflow file workflow_config names, not {Path(path).name}; use `gw config set`"
+        )
     return set_key(CATALOG, key, raw_value, store=PlainYamlStore(Path(path)))
 
 
@@ -642,12 +767,12 @@ def render_initial(
     default, so they are always rendered — an empty `repositories: {}` when
     there is no repo root, same as `_repositories_text` used to write.
 
-    The shared dispatch document is referenced explicitly; init owns its seed.
+    The workflow file is referenced explicitly through workflow_config; init owns its seed.
     """
     lines = [f"version: {MANIFEST_VERSION}", f"initialized_at: {json.dumps(today.isoformat())}"]
     if topic is not None and topic.strip():
         lines.append(f"topic: {json.dumps(topic)}")
-    lines.extend(["workflow:", "  dispatch_rules: dispatch.yaml"])
+    lines.append(f"{WORKFLOW_CONFIG_KEY}: {DEFAULT_WORKFLOW_FILE}")
     if repositories:
         lines.append("repositories:")
         for name, path in repositories.items():
@@ -668,6 +793,7 @@ __all__ = [
     "CATALOG",
     "MANIFEST_VERSION",
     "STORED_ORIGINS",
+    "WORKFLOW_KEYS",
     "WORKSPACE_DIR_ENV",
     "Manifest",
     "check_version",
@@ -677,9 +803,12 @@ __all__ = [
     "checked_str",
     "defaults",
     "dispatch_store",
+    "is_workflow_key",
     "read",
     "render_initial",
     "resolve_checked_all",
     "resolve_checked_key",
     "set_value",
+    "value_source",
+    "workflow_store",
 ]

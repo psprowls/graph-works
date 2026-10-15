@@ -12,8 +12,9 @@ import doc_wiki_okf.init
 import pytest
 import repositories_okf.init
 import work_tracker_okf.init
-from gw_kernel.workspace.errors import InitError
-from gw_kernel.workspace.init import INSTALLERS, apply_init, plan_init
+from gw_kernel.workspace.errors import InitError, WorkspaceError
+from gw_kernel.workspace.init import INSTALLERS, SEED_DISPATCH_TEXT, apply_init, plan_init
+from ruamel.yaml import YAML
 
 TODAY = date(2026, 8, 13)
 
@@ -227,7 +228,7 @@ def test_a_hand_written_root_gitignore_gains_only_the_missing_line(tmp_path):
     assert text.splitlines() == [
         "*.tmp",
         "workspace.local.yaml",
-        "/dispatch.local.yaml",
+        "/workflow.local.yaml",
         "/okf/repositories/*/references/git/",
     ]
 
@@ -266,7 +267,7 @@ def test_a_fresh_bootstrap_produces_exactly_the_gw_tree(tmp_path):
 
     assert {path.name for path in root.iterdir()} == {
         "workspace.yaml",
-        "dispatch.yaml",
+        "workflow.yaml",
         ".gitignore",
         ".gw",
         "okf",
@@ -691,7 +692,7 @@ def test_bootstrap_writes_the_seed_text_verbatim(tmp_path):
     from gw_kernel.workspace.init import SEED_DISPATCH_TEXT
 
     result = _init(tmp_path / "works")
-    written = (result.layout.root / "dispatch.yaml").read_text(encoding="utf-8")
+    written = (result.layout.root / "workflow.yaml").read_text(encoding="utf-8")
     assert written == SEED_DISPATCH_TEXT
 
 
@@ -708,7 +709,7 @@ def test_seed_example_uncomments_to_a_valid_config(tmp_path):
     uncommented, changed = _uncomment_example(SEED_DISPATCH_TEXT)
     assert changed == 6
     result = _init(tmp_path / "works")
-    shared = result.layout.root / "dispatch.yaml"
+    shared = result.layout.root / "workflow.yaml"
     shared.write_text(uncommented, encoding="utf-8", newline="")
     config = load_dispatch_config(result.layout)
     assert config.path_rules[-1].rule.name == "features-skip-plan"
@@ -788,18 +789,18 @@ def test_a_refused_plan_renders_the_refusal(tmp_path):
 def test_init_adds_only_missing_reference_preserving_authored_bytes(tmp_path):
     root = tmp_path / "works"
     root.mkdir()
-    authored = "# heading\r\nversion: 1\r\nworkflow:\r\n  auto_drive: {max_parallel: 3} # keep\r\n# end\r\n"
+    authored = "# heading\r\nversion: 1\r\ntopic: t # keep\r\n# end\r\n"
     (root / "workspace.yaml").write_bytes(authored.encode())
-    shared = root / "dispatch.yaml"
+    shared = root / "workflow.yaml"
     shared.write_bytes(b"# custom\npipeline: {rules: []}\n")
     before = shared.read_bytes()
     plan = plan_init(root, today=TODAY)
     apply_init(plan)
     updated = (root / "workspace.yaml").read_bytes().decode()
-    assert updated.replace("  dispatch_rules: dispatch.yaml\r\n", "") == authored
+    assert updated.replace("workflow_config: workflow.yaml\r\n", "") == authored
     assert shared.read_bytes() == before
-    assert "/dispatch.local.yaml" in (root / ".gitignore").read_text()
-    assert not (root / "dispatch.local.yaml").exists()
+    assert "/workflow.local.yaml" in (root / ".gitignore").read_text()
+    assert not (root / "workflow.local.yaml").exists()
     assert plan_init(root, today=TODAY).is_empty
 
 
@@ -823,7 +824,7 @@ def test_init_refuses_stale_plan_before_any_write(tmp_path):
     root = tmp_path / "works"
     plan = plan_init(root, today=TODAY)
     root.mkdir()
-    (root / "dispatch.local.yaml").write_text("pipeline: {rules: []}\n", encoding="utf-8")
+    (root / "workflow.local.yaml").write_text("pipeline: {rules: []}\n", encoding="utf-8")
     with pytest.raises(WorkspaceError, match="changed"):
         apply_init(plan)
     assert not (root / "workspace.yaml").exists()
@@ -832,12 +833,12 @@ def test_init_refuses_stale_plan_before_any_write(tmp_path):
 @pytest.mark.parametrize(
     "authored,inserted",
     [
-        ("{version: 1, workflow: {auto_drive: {max_parallel: 3}}}\n", ", dispatch_rules: dispatch.yaml"),
-        ("version: 1\n...\n", "workflow: {dispatch_rules: dispatch.yaml}\n"),
-        ("version: 1", "\nworkflow: {dispatch_rules: dispatch.yaml}\n"),
+        ("{version: 1, topic: t}\n", ", workflow_config: workflow.yaml"),
+        ("version: 1\n...\n", "workflow_config: workflow.yaml\n"),
+        ("version: 1", "\nworkflow_config: workflow.yaml\n"),
     ],
 )
-def test_init_narrow_reference_insert_handles_authored_yaml_styles(tmp_path, authored, inserted):
+def test_init_narrow_pointer_insert_handles_authored_yaml_styles(tmp_path, authored, inserted):
     root = tmp_path / "works"
     root.mkdir()
     manifest = root / "workspace.yaml"
@@ -855,7 +856,7 @@ def test_init_reports_alternate_local_ignore_without_editing_external_repo(tmp_p
     ignore.write_text("# user\n", encoding="utf-8")
     shared = alternate / "rules.yml"
     shared.write_text("pipeline: {rules: []}\n", encoding="utf-8")
-    (root / "workspace.yaml").write_text(f"version: 1\nworkflow: {{dispatch_rules: {shared}}}\n", encoding="utf-8")
+    (root / "workspace.yaml").write_text(f"version: 1\nworkflow_config: {shared}\n", encoding="utf-8")
     plan = plan_init(root, today=TODAY)
     assert str(alternate / "rules.local.yml") in plan.diff()
     assert "/rules.local.yml" in plan.diff()
@@ -886,13 +887,13 @@ def test_init_refuses_manifest_changed_while_planning(tmp_path, monkeypatch):
     assert "# concurrent author" in manifest.read_text()
 
 
-def test_applied_init_reports_alternate_ignore_advice(tmp_path):
+def test_applied_init_ignores_the_local_sibling_of_a_custom_workflow_file(tmp_path):
     root = tmp_path / "works"
     root.mkdir()
-    (root / "workspace.yaml").write_text("version: 1\nworkflow: {dispatch_rules: custom.yml}\n", encoding="utf-8")
-    result = apply_init(plan_init(root, today=TODAY))
-    assert str(root / "custom.local.yml") in result.diff()
-    assert "/custom.local.yml" in result.diff()
+    (root / "workspace.yaml").write_text("version: 1\nworkflow_config: custom.yml\n", encoding="utf-8")
+    apply_init(plan_init(root, today=TODAY))
+    assert "/custom.local.yml" in (root / ".gitignore").read_text(encoding="utf-8").splitlines()
+    assert (root / "custom.yml").is_file()
 
 
 @pytest.mark.parametrize(
@@ -902,14 +903,14 @@ def test_applied_init_reports_alternate_ignore_advice(tmp_path):
         "version: 1\ndefaults: &settings {workflow: {auto_drive: {max_parallel: 3}}}\n<<: *settings\n",
     ],
 )
-def test_init_refuses_reference_insertion_that_changes_aliased_settings(tmp_path, text):
+def test_init_refuses_aliased_legacy_workflow_keys_without_mutation(tmp_path, text):
     from gw_kernel.workspace.errors import WorkspaceError
 
     root = tmp_path / "works"
     root.mkdir()
     manifest = root / "workspace.yaml"
     manifest.write_bytes(text.encode())
-    with pytest.raises(WorkspaceError, match="without changing authored"):
+    with pytest.raises(WorkspaceError, match=r"no longer live in workspace\.yaml"):
         plan_init(root, today=TODAY)
     assert manifest.read_bytes() == text.encode()
 
@@ -917,8 +918,8 @@ def test_init_refuses_reference_insertion_that_changes_aliased_settings(tmp_path
 @pytest.mark.parametrize(
     "authored,inserted",
     [
-        ("{version: 1,}\n", " workflow: {dispatch_rules: dispatch.yaml}"),
-        ("version: 1\nworkflow: {auto_drive: {max_parallel: 3},}\n", " dispatch_rules: dispatch.yaml"),
+        ("{version: 1,}\n", " workflow_config: workflow.yaml"),
+        ("{version: 1, topic: t,}\n", " workflow_config: workflow.yaml"),
     ],
 )
 def test_init_preserves_trailing_commas_in_authored_flow_maps(tmp_path, authored, inserted):
@@ -933,15 +934,13 @@ def test_init_preserves_trailing_commas_in_authored_flow_maps(tmp_path, authored
 
 @pytest.mark.parametrize("separator", ["", ",", ", # trailing separator\n"])
 def test_init_preserves_flow_mapping_with_aliased_last_value(tmp_path, separator):
-    authored = (
-        "{version: 1, settings: &settings {max_parallel: 3}, workflow: {auto_drive: *settings" + separator + "}}\n"
-    )
+    authored = "{version: 1, settings: &settings {max_parallel: 3}, extra: *settings" + separator + "}\n"
     root = tmp_path / "works"
     root.mkdir()
     manifest = root / "workspace.yaml"
     manifest.write_bytes(authored.encode())
     apply_init(plan_init(root, today=TODAY))
-    insertion = (" " if separator else ", ") + "dispatch_rules: dispatch.yaml"
+    insertion = (" " if separator else ", ") + "workflow_config: workflow.yaml"
     assert manifest.read_bytes().decode().replace(insertion, "") == authored
     assert plan_init(root, today=TODAY).is_empty
 
@@ -966,7 +965,7 @@ def test_the_lane_line_is_added_once_across_reinits(tmp_path):
 def test_a_pre_lane_root_gitignore_gains_only_the_lane_line(tmp_path):
     root = tmp_path / "works"
     root.mkdir()
-    (root / ".gitignore").write_text("workspace.local.yaml\n/dispatch.local.yaml\n", encoding="utf-8", newline="")
+    (root / ".gitignore").write_text("workspace.local.yaml\n/workflow.local.yaml\n", encoding="utf-8", newline="")
     plan = plan_init(root, today=TODAY)
     write = next(w for w in plan.writes if w.label == ".gitignore")
     assert write.mode == "append"
@@ -1124,3 +1123,104 @@ def test_init_records_work_schema_provenance(tmp_path: Path) -> None:
     assert any(label.endswith(ws.PROVENANCE_RELATIVE) for label in result.written)
     again = apply_init(plan_init(tmp_path / "w", today=date(2026, 10, 5), topic="P"))
     assert not any(label.endswith(ws.PROVENANCE_RELATIVE) for label in again.written)
+
+
+# --- workflow_config pointer (D-004) ---
+
+
+def test_a_new_workspace_points_at_a_seeded_workflow_yaml(tmp_path: Path) -> None:
+    root = tmp_path / "ws"
+    apply_init(plan_init(root, today=TODAY))
+    manifest = YAML(typ="safe").load((root / "workspace.yaml").read_text(encoding="utf-8"))
+    assert manifest["workflow_config"] == "workflow.yaml"
+    assert "workflow" not in manifest
+    assert (root / "workflow.yaml").read_text(encoding="utf-8") == SEED_DISPATCH_TEXT
+    assert not (root / "dispatch.yaml").exists()
+    assert "/workflow.local.yaml" in (root / ".gitignore").read_text(encoding="utf-8").splitlines()
+    assert "/dispatch.local.yaml" not in (root / ".gitignore").read_text(encoding="utf-8").splitlines()
+
+
+def test_an_existing_dispatch_yaml_pointer_and_file_are_left_alone(tmp_path: Path) -> None:
+    root = tmp_path / "ws"
+    root.mkdir()
+    (root / "workspace.yaml").write_text("version: 1\nworkflow_config: dispatch.yaml\n", encoding="utf-8", newline="")
+    (root / "dispatch.yaml").write_text("pipeline: {}\n", encoding="utf-8", newline="")
+    before = {name: (root / name).read_bytes() for name in ("workspace.yaml", "dispatch.yaml")}
+    apply_init(plan_init(root, today=TODAY))
+    assert {name: (root / name).read_bytes() for name in before} == before
+    assert not (root / "workflow.yaml").exists()
+    assert "/dispatch.local.yaml" in (root / ".gitignore").read_text(encoding="utf-8").splitlines()
+
+
+def test_a_workspace_with_neither_key_gets_the_pointer_and_keeps_an_existing_workflow_yaml(tmp_path: Path) -> None:
+    root = tmp_path / "ws"
+    root.mkdir()
+    (root / "workspace.yaml").write_text("version: 1\n# keep me\ntopic: t\n", encoding="utf-8", newline="")
+    (root / "workflow.yaml").write_text("workflow:\n  auto_drive:\n    max_parallel: 3\n", encoding="utf-8", newline="")
+    authored = (root / "workflow.yaml").read_bytes()
+    apply_init(plan_init(root, today=TODAY))
+    assert (root / "workspace.yaml").read_text(
+        encoding="utf-8"
+    ) == "version: 1\n# keep me\ntopic: t\nworkflow_config: workflow.yaml\n"
+    assert (root / "workflow.yaml").read_bytes() == authored
+
+
+@pytest.mark.parametrize(
+    ("manifest", "local", "pattern"),
+    [
+        ("version: 1\nworkflow:\n  dispatch_rules: dispatch.yaml\n", None, r"workflow\.dispatch_rules is replaced"),
+        (
+            "version: 1\nworkflow_config: workflow.yaml\nworkflow:\n  auto_drive:\n    max_parallel: 4\n",
+            None,
+            r"no longer live in workspace\.yaml",
+        ),
+        (
+            "version: 1\nworkflow_config: workflow.yaml\n",
+            "workflow:\n  gate:\n    max_concurrent: 2\n",
+            r"no longer live in workspace\.local\.yaml",
+        ),
+    ],
+)
+def test_bootstrap_refuses_a_workspace_carrying_legacy_keys(
+    tmp_path: Path, manifest: str, local: str | None, pattern: str
+) -> None:
+    root = tmp_path / "ws"
+    root.mkdir()
+    (root / "workspace.yaml").write_text(manifest, encoding="utf-8", newline="")
+    if local is not None:
+        (root / "workspace.local.yaml").write_text(local, encoding="utf-8", newline="")
+    before = (root / "workspace.yaml").read_bytes()
+    with pytest.raises(WorkspaceError, match=pattern):
+        plan_init(root, today=TODAY)
+    assert (root / "workspace.yaml").read_bytes() == before
+
+
+def test_a_local_sibling_outside_the_root_is_a_notice_not_a_gitignore_line(tmp_path: Path) -> None:
+    root = tmp_path / "ws"
+    root.mkdir()
+    outside = tmp_path / "shared" / "wf.yaml"
+    outside.parent.mkdir()
+    outside.write_text("pipeline: {}\n", encoding="utf-8", newline="")
+    (root / "workspace.yaml").write_text(f"version: 1\nworkflow_config: {outside}\n", encoding="utf-8", newline="")
+    plan = plan_init(root, today=TODAY)
+    assert any(
+        notice.startswith(f"! Local dispatch path: {outside.with_name('wf.local.yaml')}") for notice in plan.notices
+    )
+
+
+def test_an_empty_manifest_is_refused_not_given_a_pointer(tmp_path: Path) -> None:
+    root = tmp_path / "ws"
+    root.mkdir()
+    (root / "workspace.yaml").write_text("", encoding="utf-8", newline="")
+    with pytest.raises(WorkspaceError, match="must hold a mapping"):
+        plan_init(root, today=TODAY)
+
+
+def test_an_insertion_that_would_change_authored_settings_is_refused(tmp_path: Path) -> None:
+    root = tmp_path / "ws"
+    root.mkdir()
+    authored = "version: 1\ntopic: |\n  a\n  b"
+    (root / "workspace.yaml").write_text(authored, encoding="utf-8", newline="")
+    with pytest.raises(WorkspaceError, match="cannot insert workflow_config without changing authored settings"):
+        plan_init(root, today=TODAY)
+    assert (root / "workspace.yaml").read_text(encoding="utf-8") == authored

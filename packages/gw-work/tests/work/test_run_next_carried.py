@@ -158,7 +158,7 @@ def test_an_epic_waiting_on_children_carries_the_empty_frame(tmp_path: Path, mon
 def test_a_dispatch_preflight_carries_the_empty_frame(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     layout = _layout(tmp_path)
     _write(layout, "work/feature-a")
-    (layout.root / "dispatch.yaml").write_text(
+    (layout.root / "workflow.yaml").write_text(
         "version: 1\npipeline:\n  rules:\n  - match: {}\n    colour: red\n", encoding="utf-8", newline="\n"
     )
     _fake(monkeypatch, _echo)

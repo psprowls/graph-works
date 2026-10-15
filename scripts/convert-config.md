@@ -69,13 +69,17 @@ any refusal.
 5. **Validate through four independent readers** — `manifest.read`,
    `manifest.resolve_checked_all` (the path `gw config list` takes),
    `code_wiki_okf.config.load_config`, and
-   `validate_workspace_dispatch_layers` for the new reference and retired-key refusal.
-   A failure unlinks a manifest this run created and exits 1.
+   `validate_workspace_dispatch_layers` for the `workflow_config` pointer and retired-key refusal.
+   A failure unlinks a manifest this run created and exits 1. Because readers 2
+   and 4 read the workflow file the pointer names, step 6 runs before this one.
 6. **Create the control plane** — the four layout directories and
    `.gw/.gitignore`, a missing `dispatch.yaml` with the default branch relay
-   rule, and root ignore entries for local manifests/dispatch rules. Authored
-   dispatch files remain untouched. The manifest points at the shared file;
-   `max_parallel` and `supervise_merges` remain operational settings.
+   rule, and root ignore entries for local manifests/dispatch rules. The
+   manifest carries `workflow_config: dispatch.yaml` and no `workflow:` block;
+   the carried `max_parallel` and `supervise_merges` values are written under
+   the seeded `dispatch.yaml`'s `workflow: auto_drive:` block. An authored
+   `dispatch.yaml` stays untouched, and the conversion refuses when it lacks
+   the carried values: add them under its `workflow:` block by hand.
 7. **Sync** — `gw config sync --workspace <root>`, then three post-conditions:
    the projection exists, its `_meta.source_sha256` matches the manifest's, and
    it carries `layout.bundle_dir`. This is deliberately the **last** write, so

@@ -21,7 +21,7 @@ from work_tracker_okf.items import IGNORE, load_items
 
 def _set_pipeline(layout, **blocks: object) -> None:
     yaml = YAML()
-    target = layout.root / "dispatch.yaml"
+    target = layout.root / "workflow.yaml"
     document = yaml.load(target.read_text(encoding="utf-8")) or {}
     document.setdefault("pipeline", {}).update(blocks)
     with target.open("w", encoding="utf-8", newline="\n") as handle:
@@ -33,11 +33,8 @@ TODAY = date(2026, 8, 23)
 
 def _workspace(tmp_path: Path, manifest: str = "version: 1\n"):
     apply_init(plan_init(tmp_path, today=TODAY, topic="Artifacts"))
-    if "workflow:" in manifest:
-        manifest = manifest.replace("workflow:\n", "workflow:\n  dispatch_rules: dispatch.yaml\n")
-    else:
-        manifest += "workflow:\n  dispatch_rules: dispatch.yaml\n"
-    (tmp_path / "dispatch.yaml").write_text("pipeline:\n  rules: []\n", encoding="utf-8")
+    manifest += "workflow_config: workflow.yaml\n"
+    (tmp_path / "workflow.yaml").write_text("pipeline:\n  rules: []\n", encoding="utf-8")
     (tmp_path / "workspace.yaml").write_text(manifest, encoding="utf-8")
     layout = layout_for(tmp_path)
     (layout.bundle_dir / "work").mkdir(parents=True, exist_ok=True)

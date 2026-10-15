@@ -82,7 +82,9 @@ def test_invalid_commit_config_precedes_decision_owner_lock(tmp_path: Path, verb
         for path in layout.bundle_dir.rglob("*")
         if path.is_file()
     }
-    layout.local_manifest_path.write_text("workflow:\n  workspace_commits: invalid\n", encoding="utf-8", newline="\n")
+    (layout.root / "workflow.local.yaml").write_text(
+        "workflow:\n  workspace_commits: invalid\n", encoding="utf-8", newline="\n"
+    )
 
     def call(*, dry_run: bool):
         if verb == "add":
@@ -737,8 +739,7 @@ def _split_layout(tmp_path: Path):
     (code / "packages/a").mkdir(parents=True)
     layout = apply_init(plan_init(vault / ".works", today=TODAY, topic="Split")).layout
     layout.manifest_path.write_text(
-        "version: 1\nworkflow: {dispatch_rules: dispatch.yaml}\nrepositories:\n"
-        f'  "code":\n    path: {json.dumps(str(code))}\n',
+        f'version: 1\nworkflow_config: workflow.yaml\nrepositories:\n  "code":\n    path: {json.dumps(str(code))}\n',
         encoding="utf-8",
     )
     (layout.bundle_dir / "work").mkdir(parents=True, exist_ok=True)

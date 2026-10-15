@@ -124,7 +124,7 @@ def test_a_malformed_dispatch_file_blocks_offered_transitions_only(tmp_path: Pat
 
     by_path = {entry.item.path: entry.result for entry in entries}
     assert by_path[READY].dispatch_preflight is not None
-    assert "dispatch.yaml: rule 0" in by_path[READY].dispatch_preflight
+    assert "workflow.yaml: rule 0" in by_path[READY].dispatch_preflight
     assert by_path[READY].dispatch_preflight == work.run_next(layout, READY, dry_run=True).dispatch_preflight
     assert by_path[EPIC].route.on_complete is None
     assert by_path[EPIC].dispatch_preflight is None

@@ -103,8 +103,9 @@ def test_commit_failure_keeps_mutation_and_warns(tmp_path, monkeypatch) -> None:
 
 def test_invalid_mode_raises_before_any_effect(tmp_path) -> None:
     layout, member, target = _seed(tmp_path)
-    layout.local_manifest_path.parent.mkdir(parents=True, exist_ok=True)
-    layout.local_manifest_path.write_text("workflow:\n  workspace_commits: nope\n", encoding="utf-8", newline="\n")
+    (layout.root / "dispatch.local.yaml").write_text(
+        "workflow:\n  workspace_commits: nope\n", encoding="utf-8", newline="\n"
+    )
     before = target.read_bytes()
     with pytest.raises(Exception, match="workspace_commits"):
         apply_mutation(layout, _rewrite(layout, member, target), commit=WorkspaceCommit("workspace: t"))

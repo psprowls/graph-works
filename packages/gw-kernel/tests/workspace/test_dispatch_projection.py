@@ -4,18 +4,22 @@ import json
 from pathlib import Path
 
 import pytest
+from config_io.errors import UnknownKeyError
 from gw_kernel.workspace.dispatch_projection import (
     _check_projection_inputs,
     build_dispatch_projection,
+    mutate_workspace_config,
     write_dispatch_projection,
 )
 from gw_kernel.workspace.errors import WorkspaceError
 from gw_kernel.workspace.layout import layout_for
+from gw_kernel.workspace.manifest import resolve_checked_key
+from ruamel.yaml import YAML
 
 
 def workspace(tmp_path: Path):
     (tmp_path / "workspace.yaml").write_text(
-        "version: 1\nworkflow: {dispatch_rules: dispatch.yaml}\n", encoding="utf-8", newline=""
+        "version: 1\nworkflow_config: dispatch.yaml\n", encoding="utf-8", newline=""
     )
     (tmp_path / "dispatch.yaml").write_text(
         "pipeline:\n  rules:\n    - name: shared\n      match: {}\n      model: example\n", encoding="utf-8", newline=""
@@ -120,7 +124,7 @@ def test_manifest_write_refuses_a_change_during_validation_without_clobbering_it
     def changing(layout, **kwargs):
         config = real(layout, **kwargs)
         layout.manifest_path.write_text(
-            "version: 1\n# concurrent author\nworkflow: {dispatch_rules: dispatch.yaml}\n", encoding="utf-8", newline=""
+            "version: 1\n# concurrent author\nworkflow_config: dispatch.yaml\n", encoding="utf-8", newline=""
         )
         return config
 
@@ -169,7 +173,7 @@ def test_failed_projection_preserves_edit_after_completed_manifest_write(tmp_pat
 
     layout = workspace(tmp_path)
     target = layout.local_manifest_path if local else layout.manifest_path
-    concurrent = b"version: 1\n# concurrent author\ntopic: concurrent\nworkflow: {dispatch_rules: dispatch.yaml}\n"
+    concurrent = b"version: 1\n# concurrent author\ntopic: concurrent\nworkflow_config: dispatch.yaml\n"
 
     def change_then_refuse(layout):
         assert b"topic: new" in target.read_bytes()
@@ -202,3 +206,81 @@ def test_config_io_rollback_preserves_edit_during_post_write_validation(tmp_path
     with pytest.raises(WorkspaceError, match=r"rollback refused.*concurrent"):
         module.mutate_workspace_config(layout, "topic", "new", local=local)
     assert target.read_bytes() == concurrent
+
+
+def _ws(tmp_path: Path):
+    (tmp_path / "workspace.yaml").write_text(
+        "version: 1\nworkflow_config: workflow.yaml\n", encoding="utf-8", newline=""
+    )
+    (tmp_path / "workflow.yaml").write_text("pipeline: {}\n", encoding="utf-8", newline="")
+    return layout_for(tmp_path)
+
+
+def _yaml(path: Path) -> dict[str, object]:
+    return YAML(typ="safe").load(path.read_text(encoding="utf-8")) or {}
+
+
+def test_set_writes_a_workflow_key_into_the_shared_workflow_file(tmp_path: Path) -> None:
+    layout = _ws(tmp_path)
+    manifest_before = layout.manifest_path.read_bytes()
+    mutate_workspace_config(layout, "workflow.auto_drive.max_parallel", "3", local=False)
+    assert _yaml(tmp_path / "workflow.yaml") == {"pipeline": {}, "workflow": {"auto_drive": {"max_parallel": 3}}}
+    assert layout.manifest_path.read_bytes() == manifest_before
+    projection = json.loads((layout.cache_dir / "config.json").read_text(encoding="utf-8"))
+    assert projection["workflow"] == {"auto_drive": {"max_parallel": 3}}
+    assert projection["dispatch"]["reference"] == "workflow.yaml"
+
+
+def test_set_local_creates_the_local_sibling_and_leaves_shared_bytes_alone(tmp_path: Path) -> None:
+    layout = _ws(tmp_path)
+    shared_before = (tmp_path / "workflow.yaml").read_bytes()
+    mutate_workspace_config(layout, "workflow.gate.max_concurrent", "2", local=True)
+    assert _yaml(tmp_path / "workflow.local.yaml") == {"workflow": {"gate": {"max_concurrent": 2}}}
+    assert (tmp_path / "workflow.yaml").read_bytes() == shared_before
+    assert resolve_checked_key(layout, "workflow.gate.max_concurrent", environ={}).origin == "workflow-local"
+
+
+def test_unset_local_removes_the_key(tmp_path: Path) -> None:
+    layout = _ws(tmp_path)
+    mutate_workspace_config(layout, "workflow.gate.max_concurrent", "2", local=True)
+    mutate_workspace_config(layout, "workflow.gate.max_concurrent", None, local=True)
+    assert "workflow" not in _yaml(tmp_path / "workflow.local.yaml")
+    assert resolve_checked_key(layout, "workflow.gate.max_concurrent", environ={}).origin == "default"
+
+
+def test_a_workflow_write_over_a_broken_rule_is_refused_and_changes_nothing(tmp_path: Path) -> None:
+    layout = _ws(tmp_path)
+    (tmp_path / "workflow.yaml").write_text("pipeline:\n  rules: 5\n", encoding="utf-8", newline="")
+    before = (tmp_path / "workflow.yaml").read_bytes()
+    with pytest.raises(WorkspaceError):
+        mutate_workspace_config(layout, "workflow.auto_drive.max_parallel", "3", local=False)
+    assert (tmp_path / "workflow.yaml").read_bytes() == before
+
+
+def test_an_unknown_workflow_key_without_a_pointer_is_refused_as_unknown(tmp_path: Path) -> None:
+    (tmp_path / "workspace.yaml").write_text("version: 1\n", encoding="utf-8", newline="")
+    layout = layout_for(tmp_path)
+    before = layout.manifest_path.read_bytes()
+    with pytest.raises(UnknownKeyError) as caught:
+        mutate_workspace_config(layout, "workflow.typo", "1", local=False)
+    assert "gw bootstrap" not in str(caught.value)
+    assert "workflow.typo" in str(caught.value)
+    assert layout.manifest_path.read_bytes() == before
+
+
+def test_setting_workflow_config_to_a_missing_file_is_refused(tmp_path: Path) -> None:
+    layout = _ws(tmp_path)
+    before = layout.manifest_path.read_bytes()
+    with pytest.raises(WorkspaceError, match=r"does not exist; run `gw bootstrap`"):
+        mutate_workspace_config(layout, "workflow_config", "nope.yaml", local=False)
+    assert layout.manifest_path.read_bytes() == before
+
+
+def test_a_workflow_block_edit_invalidates_the_projection(tmp_path: Path) -> None:
+    layout = _ws(tmp_path)
+    payload = build_dispatch_projection(layout)
+    (tmp_path / "workflow.yaml").write_text(
+        "pipeline: {}\nworkflow:\n  workspace_commits: 'on'\n", encoding="utf-8", newline=""
+    )
+    with pytest.raises(WorkspaceError, match="configuration changed before projection publication"):
+        _check_projection_inputs(payload)

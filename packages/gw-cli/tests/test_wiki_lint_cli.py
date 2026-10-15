@@ -195,8 +195,7 @@ def test_lint_resolves_repo_root_from_workspace_yaml_in_split_topology(tmp_path:
     (code / "packages/foo").mkdir(parents=True)
     layout = lint_module.resolve_workspace(str(root))
     layout.manifest_path.write_text(
-        "version: 1\nworkflow: {dispatch_rules: dispatch.yaml}\nrepositories:\n"
-        f'  "code":\n    path: {json.dumps(str(code))}\n',
+        f'version: 1\nworkflow_config: workflow.yaml\nrepositories:\n  "code":\n    path: {json.dumps(str(code))}\n',
         encoding="utf-8",
     )
 

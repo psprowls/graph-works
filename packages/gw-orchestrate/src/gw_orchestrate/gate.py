@@ -23,7 +23,7 @@ from gw_kernel.workspace.bundle import load_work_bundle
 from gw_kernel.workspace.commits import item_stem
 from gw_kernel.workspace.errors import WorkspaceError
 from gw_kernel.workspace.layout import WorkspaceLayout
-from gw_kernel.workspace.manifest import resolve_checked_key
+from gw_kernel.workspace.manifest import resolve_checked_key, value_source
 from gw_kernel.workspace.repos import resolve_item_repo
 from gw_pipeline.gate_config import ScopedGate, repo_gate, unit_jobs
 from okf_ext.locking import locked
@@ -212,11 +212,14 @@ MAX_CONCURRENT_KEY = "workflow.gate.max_concurrent"
 
 def gate_max_concurrent(layout: WorkspaceLayout) -> int | None:
     """The per-machine gate concurrency cap; None is unlimited (D-002)."""
-    value = resolve_checked_key(layout, MAX_CONCURRENT_KEY, environ={}).value
+    resolved = resolve_checked_key(layout, MAX_CONCURRENT_KEY, environ={})
+    value = resolved.value
     if value is None:
         return None
     if isinstance(value, bool) or not isinstance(value, int) or value < 1:
-        raise WorkspaceError(f"{layout.manifest_path}: {MAX_CONCURRENT_KEY}: expects a positive integer, got {value!r}")
+        raise WorkspaceError(
+            f"{value_source(layout, resolved)}: {MAX_CONCURRENT_KEY}: expects a positive integer, got {value!r}"
+        )
     return value
 
 

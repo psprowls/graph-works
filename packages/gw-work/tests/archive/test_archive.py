@@ -288,14 +288,10 @@ def test_mixed_archive_rejects_invalid_commit_config_before_either_apply(tmp_pat
     wiki.parent.mkdir(parents=True)
     wiki.write_text("---\ntitle: Example\ndescription: d\nstatus: stable\n---\n", encoding="utf-8")
     before = _snapshot(layout.bundle_dir)
-    manifest = layout.manifest_path
-    original = manifest.read_text(encoding="utf-8")
-    assert "  dispatch_rules: dispatch.yaml\n" in original
-    manifest.write_text(
-        original.replace(
-            "  dispatch_rules: dispatch.yaml\n",
-            "  dispatch_rules: dispatch.yaml\n  workspace_commits: invalid\n",
-        ),
+    dispatch = layout.root / "workflow.yaml"
+    assert "workflow_config: workflow.yaml\n" in layout.manifest_path.read_text(encoding="utf-8")
+    dispatch.write_text(
+        "workflow:\n  workspace_commits: invalid\n" + dispatch.read_text(encoding="utf-8"),
         encoding="utf-8",
         newline="\n",
     )
@@ -365,8 +361,7 @@ def _split_layout(tmp_path: Path):
     (code / "packages/a").mkdir(parents=True)
     layout = apply_init(plan_init(vault / ".works", today=TODAY, topic="Split")).layout
     layout.manifest_path.write_text(
-        "version: 1\nworkflow: {dispatch_rules: dispatch.yaml}\nrepositories:\n"
-        f'  "code":\n    path: {json.dumps(str(code))}\n',
+        f'version: 1\nworkflow_config: workflow.yaml\nrepositories:\n  "code":\n    path: {json.dumps(str(code))}\n',
         encoding="utf-8",
     )
     (layout.bundle_dir / "work").mkdir(parents=True, exist_ok=True)
@@ -426,7 +421,7 @@ def test_two_declared_repos_archive_validates_against_every_declared_repo(tmp_pa
     other.mkdir()
     code = tmp_path / "code"
     layout.manifest_path.write_text(
-        "version: 1\nworkflow: {dispatch_rules: dispatch.yaml}\nrepositories:\n"
+        "version: 1\nworkflow_config: workflow.yaml\nrepositories:\n"
         f'  "other":\n    path: {json.dumps(str(other))}\n'
         f'  "code":\n    path: {json.dumps(str(code))}\n',
         encoding="utf-8",

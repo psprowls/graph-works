@@ -22,7 +22,7 @@
     ".gitignore",
     "okf/.obsidian/app.json",
     "workspace.yaml",
-    "dispatch.yaml",
+    "workflow.yaml",
     "AGENTS.md",
     "CLAUDE.md",
     "cache/config.json",

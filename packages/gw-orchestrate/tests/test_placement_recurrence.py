@@ -60,7 +60,7 @@ def world(tmp_path: Path) -> tuple[WorkspaceLayout, Path, Path]:
 
     # Keep the vault outside the checkout so stage writes cannot dirty the repo.
     layout = apply_init(plan_init(tmp_path / "works", today=TODAY, topic="Recurrence")).layout
-    (layout.root / "dispatch.yaml").write_text(
+    (layout.root / "workflow.yaml").write_text(
         "pipeline:\n  rules:\n    - match: {stage: finish}\n"
         '      prompt_tail: "Auto-drive context: merge target is `{merge_target}`."\n',
         encoding="utf-8",

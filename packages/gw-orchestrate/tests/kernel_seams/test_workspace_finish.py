@@ -28,7 +28,7 @@ def _git_workspace_with_code(tmp_path):
         _git(repo, "add", "-A")
         _git(repo, "commit", "--allow-empty", "-m", "base")
     layout.manifest_path.write_text(
-        f"version: 1\nworkflow: {{dispatch_rules: dispatch.yaml}}\nrepositories:\n  code: {{path: {code}}}\n",
+        f"version: 1\nworkflow_config: workflow.yaml\nrepositories:\n  code: {{path: {code}}}\n",
         encoding="utf-8",
     )
     _git(layout.root, "add", "-A")
@@ -88,11 +88,10 @@ def test_inspect_is_incomplete_until_the_workspace_target_merges(tmp_path):
 def setup(tmp_path, monkeypatch, *, scalar=True, nested=False, base_checkout=False):
     layout = layout_for(tmp_path)
     layout.manifest_path.write_text(
-        "version: 1\nworkflow: {dispatch_rules: dispatch.yaml}\n"
-        "repositories:\n  core: {path: /core}\n  ui: {path: /ui}\n",
+        "version: 1\nworkflow_config: workflow.yaml\nrepositories:\n  core: {path: /core}\n  ui: {path: /ui}\n",
         encoding="utf-8",
     )
-    (layout.root / "dispatch.yaml").write_text(
+    (layout.root / "workflow.yaml").write_text(
         "pipeline:\n  rules:\n    - match: {stage: finish}\n"
         '      prompt_tail: "Auto-drive context: merge target {merge_target}"\n',
         encoding="utf-8",
@@ -148,7 +147,7 @@ def test_next_and_orchestrate_have_identical_finish_targets(tmp_path, monkeypatc
     monkeypatch.setattr(commands, "observe_repository", finish.observe_repository)
     monkeypatch.setattr(commands, "repository_identity", lambda p: str(p))
     # Relay dispatch requires an explicit tail, as in initialized workspaces.
-    (layout.root / "dispatch.yaml").write_text(
+    (layout.root / "workflow.yaml").write_text(
         "pipeline:\n  rules:\n    - match: {stage: finish}\n"
         '      prompt_tail: "Auto-drive context: merge target {merge_target}"\n',
         encoding="utf-8",

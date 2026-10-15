@@ -7,12 +7,7 @@ from enum import StrEnum
 from pathlib import Path
 
 import typer
-from config_io import (
-    LayeredYamlStore,
-    RegistryError,
-    StoreValidationError,
-    resolve_key,
-)
+from config_io import RegistryError, StoreValidationError
 from gw_kernel.hooks import Action, HooksSettingsError
 from gw_kernel.hooks import apply as apply_hooks
 from gw_kernel.workspace import manifest
@@ -21,7 +16,6 @@ from gw_kernel.workspace.dispatch_config import is_retired_config_key, remove_re
 from gw_kernel.workspace.dispatch_projection import mutate_workspace_config, write_dispatch_projection
 from gw_kernel.workspace.errors import WorkspaceError
 from gw_kernel.workspace.layout import WorkspaceLayout
-from gw_kernel.workspace.manifest import workspace_store
 from gw_kernel.workspace.work_schemas import SchemaRefreshStale, apply_schema_refresh, plan_schema_refresh
 
 from gw_cli import exit_codes
@@ -63,7 +57,10 @@ _HOOK_FEATURE_ARGUMENT = typer.Argument(..., help="transcript")
 _LOCAL_OPTION = typer.Option(
     False,
     "--local",
-    help="Write workspace.local.yaml instead of workspace.yaml.",
+    help=(
+        "Write the machine-local layer: workspace.local.yaml, "
+        "or the workflow file's .local sibling for workflow.* keys."
+    ),
 )
 
 
@@ -83,16 +80,6 @@ config_app.add_typer(hooks_app, name="hooks")
 
 def _layout(workspace: str) -> WorkspaceLayout:
     return resolve_workspace(workspace)
-
-
-def _store(workspace: str) -> tuple[WorkspaceLayout, LayeredYamlStore]:
-    """Resolve a workspace and bind both config layers through core's seam.
-
-    Writes and sync use core's validated dispatch projection assembly. The
-    layered store remains the effective-value read seam after a mutation.
-    """
-    layout = _layout(workspace)
-    return layout, workspace_store(layout)
 
 
 def _repo_root(repo: str) -> Path:
@@ -144,7 +131,7 @@ def get_cmd(
     workspace: str = _WORKSPACE_OPTION,
     json_output: bool = _JSON_OPTION,
 ) -> None:
-    """Show a key's effective value and origin (env / local / manifest / default)."""
+    """Show a key's effective value and origin (env / local / manifest / workflow-local / workflow / default)."""
     try:
         result = manifest.resolve_checked_key(_layout(workspace), key, environ=os.environ)
     except RegistryError as exc:
@@ -179,9 +166,9 @@ def set_cmd(
 ) -> None:
     """Set a catalog key and refresh `.gw/cache/config.json`."""
     try:
-        layout, store = _store(workspace)
+        layout = _layout(workspace)
         mutate_workspace_config(layout, key, value, local=local)
-        result = resolve_key(manifest.CATALOG, key, store=store, environ=os.environ)
+        result = manifest.resolve_checked_key(layout, key, environ=os.environ)
     except RegistryError as exc:
         exit_error(str(exc), code=exit_codes.GENERIC, cause=exc)
     except (StoreValidationError, WorkspaceError) as exc:
@@ -198,12 +185,12 @@ def unset_cmd(
 ) -> None:
     """Remove an explicit key, refresh the projection, and show its fallback."""
     try:
-        layout, store = _store(workspace)
+        layout = _layout(workspace)
         if is_retired_config_key(key):
             result = remove_retired_config_key(layout, key, local=local)
         else:
             mutate_workspace_config(layout, key, None, local=local)
-            result = resolve_key(manifest.CATALOG, key, store=store, environ=os.environ)
+            result = manifest.resolve_checked_key(layout, key, environ=os.environ)
     except RegistryError as exc:
         exit_error(str(exc), code=exit_codes.GENERIC, cause=exc)
     except (StoreValidationError, WorkspaceError) as exc:

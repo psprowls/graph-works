@@ -12,9 +12,9 @@ from test_run_next import CHILD, EPIC, _layout, _spec, _write
 
 
 def _dispatch(layout, *, shared: str, local: str = "") -> None:
-    (layout.root / "dispatch.yaml").write_text(f"version: 1\npipeline:\n  rules:\n{shared}", encoding="utf-8")
+    (layout.root / "workflow.yaml").write_text(f"pipeline:\n  rules:\n{shared}", encoding="utf-8")
     if local:
-        (layout.root / "dispatch.local.yaml").write_text(f"version: 1\npipeline:\n  rules:\n{local}", encoding="utf-8")
+        (layout.root / "workflow.local.yaml").write_text(f"pipeline:\n  rules:\n{local}", encoding="utf-8")
 
 
 def test_a_plan_stage_item_explains_the_same_resolution_next_computes(tmp_path: Path) -> None:
@@ -98,7 +98,7 @@ def test_a_malformed_dispatch_file_fails_the_read(tmp_path: Path) -> None:
     _write(layout, "work/feature-a", phase="plan")
     _dispatch(layout, shared="  - match: {}\n    model: opus\n", local="  - match: {}\n    colour: red\n")
 
-    with pytest.raises(WorkspaceError, match=r"dispatch\.local\.yaml: rule 0"):
+    with pytest.raises(WorkspaceError, match=r"workflow\.local\.yaml: rule 0"):
         work.run_dispatch_explain(layout, "work/feature-a")
 
 

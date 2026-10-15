@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import shlex
 
-from _gate_helpers import NOW, mint_unit_receipt
+from _gate_helpers import NOW, mint_unit_receipt, set_workflow_gate
 from conftest import GateEnv, git
 from gw_orchestrate import gate as gate_mod
 from gw_orchestrate import gate_units as gu
@@ -227,15 +227,7 @@ def test_changed_hash_plan_does_not_join_even_with_same_manifest(env: GateEnv) -
 def test_changed_job_cap_does_not_join_old_plan(env: GateEnv) -> None:
     _units_env(env)
     first = gate_mod.run_gate_run(env.layout, env.path, now=NOW, token="0a1b2c3d", spawn=env.spawn)
-    manifest = env.layout.manifest_path
-    manifest.write_text(
-        manifest.read_text(encoding="utf-8").replace(
-            "workflow: {dispatch_rules: dispatch.yaml}",
-            "workflow: {dispatch_rules: dispatch.yaml, gate: {unit_jobs: 1}}",
-        ),
-        encoding="utf-8",
-        newline="\n",
-    )
+    set_workflow_gate(env, "unit_jobs", 1)
     second = gate_mod.run_gate_run(env.layout, env.path, now=NOW, token="1a1b2c3d", spawn=env.spawn)
     assert second.status == "started" and second.run_id != first.run_id
     assert json.loads(env.spawned[-1].read_text(encoding="utf-8"))["jobs"] == 1

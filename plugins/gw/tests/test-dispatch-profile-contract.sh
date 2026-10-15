@@ -159,7 +159,7 @@ for document in "$AUTO_DRIVE" "$ONBOARD"; do
   if grep -Eq 'workflow\.pipeline|workflow\.auto_drive\.permission_mode' "$document"; then
     fail "$document must not recommend retired dispatch settings"
   fi
-  grep -F 'dispatch.local.yaml' "$document" >/dev/null || fail "$document explains local dispatch rules"
+  grep -F 'workflow.local.yaml' "$document" >/dev/null || fail "$document explains local dispatch rules"
   grep -F 'gw config sync' "$document" >/dev/null || fail "$document syncs dispatch changes"
 done
 grep -F "Permissions remain the selected agent's existing settings" "$ONBOARD" >/dev/null || fail "onboarding preserves agent-owned permissions"

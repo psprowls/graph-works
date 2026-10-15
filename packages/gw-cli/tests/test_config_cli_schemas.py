@@ -143,9 +143,8 @@ def test_apply_maps_workspace_error_to_schema_mismatch(tmp_path: Path) -> None:
     root = _root(tmp_path)
     target = root / ".gw/schema/Bug.schema.json"
     target.unlink()
-    PlainYamlStore(root / "workspace.yaml").write(
-        {"version": 1, "topic": "C", "workflow": {"dispatch_rules": "dispatch.yaml", "workspace_commits": "invalid"}}
-    )
+    PlainYamlStore(root / "workspace.yaml").write({"version": 1, "topic": "C", "workflow_config": "dispatch.yaml"})
+    PlainYamlStore(root / "dispatch.yaml").write({"workflow": {"workspace_commits": "invalid"}, "pipeline": {}})
     result = runner.invoke(config_app, ["sync", "--schemas", "--apply", "--workspace", str(root)])
     assert result.exit_code == exit_codes.SCHEMA_MISMATCH
     assert "workspace_commits" in result.stderr and result.stdout == ""

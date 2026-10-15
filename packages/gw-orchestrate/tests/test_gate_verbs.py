@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import json
 from datetime import timedelta
+from pathlib import Path
 
 import pytest
 from _gate_helpers import NOW, mint_receipt, raise_, set_max_concurrent, snapshot_dirs
 from conftest import git, make_repo
 from gw_kernel.workspace.errors import WorkspaceError
+from gw_kernel.workspace.layout import layout_for
 from gw_orchestrate import gate
 from gw_orchestrate.gate import gate_max_concurrent, run_gate_check, run_gate_run, runs_dir
 
@@ -188,7 +190,7 @@ def test_max_concurrent_reads_a_positive_integer(env):
 
 
 def test_max_concurrent_reads_the_local_overlay(env):
-    env.layout.local_manifest_path.write_text(
+    (env.root / "workflow.local.yaml").write_text(
         "workflow:\n  gate:\n    max_concurrent: 1\n", encoding="utf-8", newline="\n"
     )
     assert gate_max_concurrent(env.layout) == 1
@@ -200,3 +202,16 @@ def test_a_bad_max_concurrent_refuses_gate_run(env, value):
     with pytest.raises(WorkspaceError, match="max_concurrent"):
         run_gate_run(env.layout, env.path, now=NOW, token="aaaaaaaa", spawn=env.spawn)
     assert env.spawned == []
+
+
+def test_max_concurrent_refusal_names_the_workflow_file(tmp_path: Path) -> None:
+    (tmp_path / "workspace.yaml").write_text(
+        "version: 1\nworkflow_config: workflow.yaml\n", encoding="utf-8", newline="\n"
+    )
+    (tmp_path / "workflow.yaml").write_text(
+        "workflow:\n  gate:\n    max_concurrent: 0\n", encoding="utf-8", newline="\n"
+    )
+    with pytest.raises(
+        WorkspaceError, match=r"workflow\.yaml: workflow\.gate\.max_concurrent: expects a positive integer, got 0"
+    ):
+        gate_max_concurrent(layout_for(tmp_path))

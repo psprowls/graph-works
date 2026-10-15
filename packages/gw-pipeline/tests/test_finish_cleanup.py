@@ -30,7 +30,9 @@ def setup(tmp_path: Path, *, resolved: bool = True, receipt: bool = True):
     root.mkdir()
     layout = apply_init(plan_init(root, today=date(2026, 9, 26), topic="Cleanup")).layout
     init_repo(root)
-    layout.manifest_path.write_text(f"version: 1\nrepositories:\n  code: {{path: {code}}}\n", encoding="utf-8")
+    layout.manifest_path.write_text(
+        f"version: 1\nworkflow_config: workflow.yaml\nrepositories:\n  code: {{path: {code}}}\n", encoding="utf-8"
+    )
     git(root, "add", ".")
     git(root, "commit", "-m", "workspace base")
     repos = {"code": code, "_workspace": root}

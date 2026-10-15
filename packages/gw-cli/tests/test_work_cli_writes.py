@@ -682,8 +682,7 @@ def test_split_topology_files_and_lints_clean(tmp_path: Path) -> None:
     (code / "packages/foo").mkdir(parents=True)
     layout = resolve_workspace(str(root))
     layout.manifest_path.write_text(
-        "version: 1\nworkflow: {dispatch_rules: dispatch.yaml}\nrepositories:\n"
-        f'  "code":\n    path: {json.dumps(str(code))}\n',
+        f'version: 1\nworkflow_config: workflow.yaml\nrepositories:\n  "code":\n    path: {json.dumps(str(code))}\n',
         encoding="utf-8",
     )
 
@@ -1262,7 +1261,7 @@ def reader_item(workspace: Path) -> str:
     path = file_item(workspace, "Reader")
     manifest = workspace / "workspace.yaml"
     manifest.write_text(
-        "version: 1\nworkflow:\n  dispatch_rules: dispatch.yaml\n"
+        "version: 1\nworkflow_config: workflow.yaml\n"
         f"repositories:\n  code:\n    path: {json.dumps(str(workspace.parent / 'code'))}\n",
         encoding="utf-8",
         newline="\n",
@@ -1501,7 +1500,7 @@ def _execute_item_without_baseline(workspace: Path) -> str:
         subprocess.run(["git", *args], cwd=code, check=True, capture_output=True)
     layout = resolve_workspace(str(workspace))
     layout.manifest_path.write_text(
-        "version: 1\nworkflow:\n  dispatch_rules: dispatch.yaml\n"
+        "version: 1\nworkflow_config: workflow.yaml\n"
         f"repositories:\n  code:\n    path: {json.dumps(str(code))}\n    gate:\n      full: 'true'\n",
         encoding="utf-8",
         newline="\n",

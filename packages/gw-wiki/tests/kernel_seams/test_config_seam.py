@@ -25,10 +25,7 @@ repositories:
 roles:
   planner:
     max_tokens: 4096
-workflow:
-  auto_drive:
-    max_parallel: 2
-  dispatch_rules: dispatch.yaml
+workflow_config: dispatch.yaml
 """
 
 
@@ -37,7 +34,9 @@ def _workspace(tmp_path):
     (root / "okf").mkdir(parents=True)
     (root / "workspace.yaml").write_text(BASE, encoding="utf-8")
     (root / "workspace.local.yaml").write_text(LOCAL, encoding="utf-8")
-    (root / "dispatch.yaml").write_text("pipeline:\n  rules: []\n", encoding="utf-8")
+    (root / "dispatch.yaml").write_text(
+        "workflow:\n  auto_drive:\n    max_parallel: 2\npipeline:\n  rules: []\n", encoding="utf-8"
+    )
     (root / "dispatch.local.yaml").write_text(
         "pipeline:\n  rules:\n  - match: {stage: design}\n    skill: local:designer\n", encoding="utf-8"
     )

@@ -267,9 +267,45 @@ def test_ignore_is_seeded_empty_never_the_whole_scan(tmp_path: Path) -> None:
 
 def test_new_dispatch_reference_replaces_retired_manifest_tail(tmp_path: Path) -> None:
     conversion = convert_agent_workspace(tmp_path)
-    d = by_target(conversion, "workflow.dispatch_rules")
+    d = by_target(conversion, "workflow_config")
     assert (d.action, d.value) == ("seed", "dispatch.yaml")
     assert "pipeline:" not in conversion.manifest_text
+
+
+def test_a_converted_manifest_carries_the_pointer_and_no_workflow_block(tmp_path: Path) -> None:
+    from ruamel.yaml import YAML
+
+    conversion = convert_agent_workspace(tmp_path)
+    manifest = YAML(typ="safe").load(conversion.manifest_text)
+    assert manifest["workflow_config"] == "dispatch.yaml"
+    assert "workflow" not in manifest
+
+
+def test_carried_auto_drive_values_land_in_the_seeded_dispatch_yaml(tmp_path: Path) -> None:
+    from ruamel.yaml import YAML
+
+    root = tmp_path / "clean"
+    root.mkdir()
+    (root / "wiki").mkdir()
+    (root / ".graph-wiki.yaml").write_text(
+        "version: 2\nrepo-directory: .\nworkflow:\n  auto_drive: {max_parallel: 4}\n", encoding="utf-8", newline=""
+    )
+    assert main([str(root), "--write", "--no-sync"]) == 0
+    dispatch = YAML(typ="safe").load((root / "dispatch.yaml").read_text(encoding="utf-8"))
+    assert dispatch["workflow"] == {"auto_drive": {"max_parallel": 4}}
+    assert dispatch["pipeline"]["rules"][0]["match"] == {"stage": "finish"}
+
+
+def test_an_authored_dispatch_yaml_missing_the_carried_values_is_refused(tmp_path: Path) -> None:
+    root = tmp_path / "clean"
+    root.mkdir()
+    (root / "wiki").mkdir()
+    (root / ".graph-wiki.yaml").write_text(
+        "version: 2\nrepo-directory: .\nworkflow:\n  auto_drive: {max_parallel: 4}\n", encoding="utf-8", newline=""
+    )
+    (root / "dispatch.yaml").write_text("pipeline: {rules: []}\n", encoding="utf-8", newline="")
+    assert main([str(root), "--write", "--no-sync"]) == 1
+    assert not (root / "workspace.yaml").exists()
 
 
 def test_no_layout_keys_beyond_bundle_dir_are_written(tmp_path: Path) -> None:
@@ -339,7 +375,10 @@ def test_bundle_dir_override_changes_both_the_seed_and_the_repo_path(tmp_path: P
     assert '  bundle_dir: "okf"' in conversion.manifest_text
 
 
-def written(tmp_path: Path, body: str, *, repo: bool = True) -> object:
+GOOD_DISPATCH = "workflow:\n  auto_drive:\n    max_parallel: 4\n"
+
+
+def written(tmp_path: Path, body: str, *, repo: bool = True, dispatch: str = GOOD_DISPATCH) -> object:
     """A workspace root carrying *body* as its `workspace.yaml`, plus the layout."""
     root = tmp_path / "workspaces" / "graph-works"
     root.mkdir(parents=True, exist_ok=True)
@@ -347,6 +386,7 @@ def written(tmp_path: Path, body: str, *, repo: bool = True) -> object:
     if repo:
         (tmp_path / "graph-works").mkdir(exist_ok=True)
     (root / "workspace.yaml").write_text(body, encoding="utf-8", newline="")
+    (root / "dispatch.yaml").write_text(dispatch, encoding="utf-8", newline="")
     return layout_for(root, bundle_dir="wiki")
 
 
@@ -357,10 +397,7 @@ def good_body() -> str:
         'topic: "graph-works"\n'
         "layout:\n"
         '  bundle_dir: "wiki"\n'
-        "workflow:\n"
-        "  dispatch_rules: dispatch.yaml\n"
-        "  auto_drive:\n"
-        "    max_parallel: 4\n"
+        "workflow_config: dispatch.yaml\n"
         "repositories:\n"
         '  "graph-works":\n'
         '    path: "../../graph-works"\n'
@@ -379,13 +416,13 @@ def test_validate_rejects_a_foreign_version(tmp_path: Path) -> None:
 
 
 def test_validate_rejects_a_mistyped_catalog_scalar(tmp_path: Path) -> None:
-    body = good_body().replace("max_parallel: 4", 'max_parallel: "four"')
+    dispatch = GOOD_DISPATCH.replace("max_parallel: 4", 'max_parallel: "four"')
     with pytest.raises(ConversionRefused, match="max_parallel"):
-        validate_manifest(written(tmp_path, body))
+        validate_manifest(written(tmp_path, good_body(), dispatch=dispatch))
 
 
 def test_validate_rejects_retired_models_even_when_empty(tmp_path: Path) -> None:
-    body = good_body().replace("  auto_drive:", "  auto_drive:\n    models: {}")
+    body = good_body() + "workflow:\n  auto_drive:\n    models: {}\n"
     with pytest.raises(ConversionRefused, match="retired key"):
         validate_manifest(written(tmp_path, body))
 
@@ -646,7 +683,7 @@ def test_new_conversion_seeds_consumable_dispatch_and_preserves_authored_file(tm
     assert "/dispatch.local.yaml" in (root / ".gitignore").read_text(encoding="utf-8")
     projection = json.loads(write_dispatch_projection(layout).read_text(encoding="utf-8"))
     assert projection["workflow"]["auto_drive"] == {"max_parallel": 4, "supervise_merges": False}
-    authored = b"# authored\npipeline: {rules: []}\n"
+    authored = b"# authored\nworkflow: {auto_drive: {max_parallel: 4, supervise_merges: false}}\npipeline: {rules: []}\n"
     (root / "dispatch.yaml").write_bytes(authored)
     assert main([str(root), "--write", "--no-sync"]) == 0
     assert (root / "dispatch.yaml").read_bytes() == authored

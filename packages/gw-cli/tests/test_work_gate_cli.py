@@ -20,7 +20,10 @@ from typer.testing import CliRunner
 
 runner = CliRunner()
 ITEM = "work/feature-a"
-MANIFEST = "version: 1\nrepositories:\n  code:\n    path: ../code\n    gate:\n      full: 'true'\n"
+MANIFEST = (
+    "version: 1\nworkflow_config: workflow.yaml\nrepositories:\n  code:\n    path: ../code\n"
+    "    gate:\n      full: 'true'\n"
+)
 
 
 def _git(cwd: Path, *args: str) -> None:
@@ -280,9 +283,9 @@ def test_gate_check_text_lists_stale_units(env, monkeypatch):
 
 
 def test_gate_run_with_a_bad_max_concurrent_exits_schema_mismatch(env):
-    manifest = env.root / "workspace.yaml"
-    manifest.write_text(
-        manifest.read_text(encoding="utf-8") + "workflow:\n  gate:\n    max_concurrent: 0\n",
+    workflow_file = env.root / "workflow.yaml"
+    workflow_file.write_text(
+        "workflow:\n  gate:\n    max_concurrent: 0\n" + workflow_file.read_text(encoding="utf-8"),
         encoding="utf-8",
         newline="\n",
     )

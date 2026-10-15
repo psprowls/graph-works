@@ -16,7 +16,7 @@ from gw_kernel.workspace.layout import layout_for
 
 def _workspace(tmp_path: Path, reference: str = "dispatch.yaml"):
     (tmp_path / "workspace.yaml").write_text(
-        f"version: 1\nworkflow:\n  dispatch_rules: {reference}\n",
+        f"version: 1\nworkflow_config: {reference}\n",
         encoding="utf-8",
         newline="",
     )
@@ -110,7 +110,7 @@ def test_local_manifest_can_override_reference_with_an_absolute_yml_path(tmp_pat
     layout = _workspace(tmp_path)
     external = tmp_path.parent / f"{tmp_path.name}-rules.yml"
     external.write_text("{}\n", encoding="utf-8", newline="")
-    layout.local_manifest_path.write_text(f"workflow:\n  dispatch_rules: {external}\n", encoding="utf-8", newline="")
+    layout.local_manifest_path.write_text(f"workflow_config: {external}\n", encoding="utf-8", newline="")
 
     config = load_dispatch_config(layout)
 
@@ -207,16 +207,16 @@ def test_retired_manifest_keys_are_rejected_by_layer_membership(tmp_path: Path, 
 def test_unrelated_manifest_configuration_survives_dispatch_loading(tmp_path: Path) -> None:
     layout = _workspace(tmp_path)
     layout.manifest_path.write_text(
-        "version: 1\nroles:\n  planner:\n    model_id: x\nworkflow:\n  dispatch_rules: dispatch.yaml\n"
-        "  auto_drive:\n    max_parallel: 7\n    supervise_merges: true\n",
+        "version: 1\nroles:\n  planner:\n    model_id: x\nworkflow_config: dispatch.yaml\n",
         encoding="utf-8",
         newline="",
     )
-    (tmp_path / "dispatch.yaml").write_text("{}\n", encoding="utf-8", newline="")
+    workflow = "workflow:\n  auto_drive:\n    max_parallel: 7\n    supervise_merges: true\n"
+    (tmp_path / "dispatch.yaml").write_text(workflow, encoding="utf-8", newline="")
 
     load_dispatch_config(layout)
 
-    assert "max_parallel: 7" in layout.manifest_path.read_text(encoding="utf-8")
+    assert "max_parallel: 7" in (tmp_path / "dispatch.yaml").read_text(encoding="utf-8")
     assert "model_id: x" in layout.manifest_path.read_text(encoding="utf-8")
 
 
@@ -375,7 +375,7 @@ def test_apply_refuses_inputs_changed_during_reload(tmp_path, monkeypatch, layer
     load = module.load_dispatch_config
     changed_path = layout.manifest_path if change == "reference" else plan.path
     concurrent = (
-        b"version: 1\nworkflow: {dispatch_rules: alternate.yaml}\n"
+        b"version: 1\nworkflow_config: alternate.yaml\n"
         if change == "reference"
         else b"# concurrent author\npipeline: {rules: []}\n"
     )

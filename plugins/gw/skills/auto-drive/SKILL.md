@@ -322,8 +322,8 @@ On success, the result contains:
   `blocked[]` has none of them.
 
 Peak workers are `max_parallel + max_attend` (the pools are separate, epic
-decision 005). Tune either down in `workspace.local.yaml`
-(`workflow.auto_drive.max_parallel` / `workflow.auto_drive.max_attend`). The
+decision 005). Tune either down in the workflow file's `.local` sibling
+(`workflow.auto_drive.max_parallel` / `workflow.auto_drive.max_attend`, in its `workflow:` block). The
 coordinator still passes only `--live` keys; the planner classifies them.
 For each live key, it tries every variant of that key's stage and both values
 of `has_spec` and `has_plan` with the item's current non-artifact attributes.
@@ -474,8 +474,8 @@ you know is out of date).
   report it and move on.
   `relay-untailed` means a relay-mode variant has no `prompt_tail`, so a
   dispatched worker would drop into an interactive menu unattended — the fix
-  is a matching rule with `prompt_tail` in the shared dispatch document named
-  by `workflow.dispatch_rules`, or its local sibling (`dispatch.local.yaml`
+  is a matching rule with `prompt_tail` in the workflow file named
+  by `workflow_config`, or its local sibling (`workflow.local.yaml`
   for the default path), followed by `gw config sync`. The reason string names
   the variant. `worktree-unsupported` means the plan
   needs a worktree provisioned and the target backend can't; `gw work
@@ -1822,7 +1822,7 @@ what the options *mean*; that is the worker's job.
    **This is not the coordinator guessing an answer** (cf. §2.5.1, which
    forbids exactly that). Nothing is inferred per question. The decision was
    made once, by a human, at design time; it is recorded in this skill's
-   prose and in `workflow.auto_drive.supervise_merges`, which that human can
+   prose and in `workflow.auto_drive.supervise_merges` (in the workflow file), which that human can
    flip to take every merge question back. §2.5.1 bars inventing an answer
    nobody gave — a standing, published policy applied to a structurally
    verified class of question is the opposite of that.

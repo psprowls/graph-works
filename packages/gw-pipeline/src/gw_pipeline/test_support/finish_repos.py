@@ -87,8 +87,7 @@ def workspace(
     layout = apply_init(plan_init(root, today=TODAY, topic="Integrate")).layout
     write(
         layout.manifest_path,
-        "version: 1\nworkflow: {dispatch_rules: dispatch.yaml}\nrepositories:\n"
-        f"  code:\n    path: {repo}\n{finish_config}",
+        f"version: 1\nworkflow_config: workflow.yaml\nrepositories:\n  code:\n    path: {repo}\n{finish_config}",
     )
     page = layout.bundle_dir / (OWNER + ".md")
     page.parent.mkdir(parents=True, exist_ok=True)

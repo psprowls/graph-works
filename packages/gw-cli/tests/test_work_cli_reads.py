@@ -168,7 +168,7 @@ def test_reconcile_context_rejects_a_named_non_repo(workspace: Path, tmp_path: P
 
 def override_skill(workspace: Path, value: str) -> None:
     """Hand-edit the shared dispatch document, bypassing write-time validation."""
-    path = workspace / "dispatch.yaml"
+    path = workspace / "workflow.yaml"
     path.write_text(
         f"pipeline:\n  rules:\n  - match: {{stage: design}}\n    skill: {json.dumps(value)}\n",
         encoding="utf-8",
@@ -184,7 +184,7 @@ def test_next_reports_a_malformed_stage_skill_as_a_blocker(workspace: Path) -> N
     assert payload["action"] is None
     assert payload["on_dispatch"] is None
     assert any("rule 0.skill" in blocker for blocker in payload["blockers"])
-    assert any("dispatch.yaml" in blocker for blocker in payload["blockers"])
+    assert any("workflow.yaml" in blocker for blocker in payload["blockers"])
 
 
 def test_next_reports_an_empty_stage_skill_as_a_blocker(workspace: Path) -> None:
@@ -275,10 +275,10 @@ def test_next_and_orchestrate_json_share_profile_and_provenance(workspace: Path)
     document = load(page)
     document.set("affects", ["packages/a"])
     page.write_text(document.serialize(), encoding="utf-8")
-    (workspace / "dispatch.yaml").write_text(
+    (workspace / "workflow.yaml").write_text(
         "pipeline:\n  rules:\n  - match: {}\n    model: original\n    reasoning_effort: high\n", encoding="utf-8"
     )
-    (workspace / "dispatch.local.yaml").write_text(
+    (workspace / "workflow.local.yaml").write_text(
         "pipeline:\n  rules:\n  - name: local-agent\n    match: {}\n    agent: codex\n", encoding="utf-8"
     )
     code = workspace.parent / "code"

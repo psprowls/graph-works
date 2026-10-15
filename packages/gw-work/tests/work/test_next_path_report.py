@@ -41,9 +41,7 @@ def _write(layout, path, *, type="Feature", phase="design", effort="medium", wor
 
 
 def _set_pipeline(layout, **pipeline):
-    (layout.root / "dispatch.yaml").write_text(
-        json.dumps({"version": 1, "pipeline": pipeline}), encoding="utf-8", newline="\n"
-    )
+    (layout.root / "workflow.yaml").write_text(json.dumps({"pipeline": pipeline}), encoding="utf-8", newline="\n")
 
 
 def _payload(layout, path: str) -> dict:
@@ -144,7 +142,7 @@ def test_workspace_path_rule_reports_its_source(tmp_path: Path) -> None:
     payload = _payload(layout, "work/feature-x")
     rule = payload["path"]["rule"]
     assert rule["name"] == "features-skip-plan"
-    assert rule["source"] == str(layout.root / "dispatch.yaml")
+    assert rule["source"] == str(layout.root / "workflow.yaml")
     assert rule["index"] == 0
     assert payload["artifacts"]["plan"]["on_path"] is False
 
@@ -172,7 +170,7 @@ def test_existing_artifact_is_reported_as_existing(tmp_path: Path) -> None:
 @pytest.mark.parametrize("dry_run", [True, False])
 def test_malformed_dispatch_file_reports_no_path_or_artifacts(tmp_path: Path, dry_run: bool) -> None:
     layout = _layout(tmp_path)
-    (layout.root / "dispatch.yaml").write_text("pipeline: {path: nope}\n", encoding="utf-8")
+    (layout.root / "workflow.yaml").write_text("pipeline: {path: nope}\n", encoding="utf-8")
     _write(layout, "work/feature-x", phase="design")
     payload = next_payload(work.run_next(layout, "work/feature-x", dry_run=dry_run), bundle_root=layout.bundle_dir)
     assert (payload["path"], payload["artifacts"]) == (None, {})

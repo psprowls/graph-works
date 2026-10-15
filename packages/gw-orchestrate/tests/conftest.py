@@ -75,8 +75,7 @@ class GateEnv:
 
     def set_manifest(self, *, gate: str) -> None:
         (self.root / "workspace.yaml").write_text(
-            "version: 1\nworkflow: {dispatch_rules: dispatch.yaml}\n"
-            f"repositories:\n  code:\n    path: ../code\n{gate}",
+            f"version: 1\nworkflow_config: workflow.yaml\nrepositories:\n  code:\n    path: ../code\n{gate}",
             encoding="utf-8",
             newline="\n",
         )

@@ -151,7 +151,7 @@ def test_canonical_bundle_uses_one_transaction(ws, mode):
         doc.delete("repo_stamps")
         doc.save()
     else:
-        write(layout.local_manifest_path, "workflow:\n  workspace_commits: off\n")
+        write((layout.root / "workflow.local.yaml"), "workflow:\n  workspace_commits: off\n")
     old = git(content, "rev-parse", "HEAD")
     result = advance(layout)
     assert result.application.ok, result
@@ -171,7 +171,7 @@ def test_optional_and_configured_artifacts(ws, change):
         (content / "okf" / COVERAGE).unlink()
         commit(content)
         if change == "custom-coverage":
-            dispatch = layout.root / "dispatch.yaml"
+            dispatch = layout.root / "workflow.yaml"
             write(
                 dispatch,
                 dispatch.read_text(encoding="utf-8").replace(
@@ -416,7 +416,7 @@ def test_unreadable_or_uncommittable_destination_refuses(ws, tmp_path, damage):
         target.symlink_to(external)
         commit(content)
     else:
-        write(content / "workspace.local.yaml", "workflow:\n  workspace_commits: off\n")
+        write(content / "workflow.local.yaml", "workflow:\n  workspace_commits: off\n")
     result = advance(layout)
     assert result.outcome.plan.refusal == "return-destination-unverified"
     assert document(layout).fm_data()["phase"] == "finish"
@@ -1124,7 +1124,7 @@ def test_reported_completion_supports_optional_plan_and_canonical_destination(ws
         doc.delete("repo_stamps")
         doc.save()
     else:
-        write(layout.local_manifest_path, "workflow:\n  workspace_commits: off\n")
+        write((layout.root / "workflow.local.yaml"), "workflow:\n  workspace_commits: off\n")
     if destination != "disabled":
         commit(layout.root)
     assert advance(layout).application.ok
@@ -1327,7 +1327,7 @@ def test_local_return_publication_preserves_noncommitting_modes(ws, kind, mode):
         doc.delete("repo_stamps")
         doc.save()
     if mode == "off":
-        write(layout.local_manifest_path, "workflow:\n  workspace_commits: off\n")
+        write((layout.root / "workflow.local.yaml"), "workflow:\n  workspace_commits: off\n")
     else:
         shutil.rmtree(layout.root / ".git")
     result = invoke()

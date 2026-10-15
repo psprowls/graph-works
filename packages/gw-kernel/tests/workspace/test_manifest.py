@@ -63,7 +63,7 @@ def test_the_catalog_carries_exactly_the_documented_keys():
         "roles.*.region",
         "roles.*.max_tokens",
         "roles.*.max_concurrency",
-        "workflow.dispatch_rules",
+        "workflow_config",
         "workflow.auto_drive.max_parallel",
         "workflow.auto_drive.max_attend",
         "workflow.auto_drive.supervise_merges",
@@ -357,8 +357,12 @@ def test_a_roles_block_leaves_the_manifest_untouched(tmp_path):
 # a reader that trusts stored values is trusting a file nothing validated.
 
 
-def _layout(tmp_path, text="version: 1\n"):
+def _layout(tmp_path, text="version: 1\n", workflow=None):
+    """A workspace whose manifest points at `workflow.yaml` (written beside it), unless *text* sets its own pointer."""
+    if "workflow_config" not in text:
+        text += "workflow_config: workflow.yaml\n"
     (tmp_path / "workspace.yaml").write_text(text, encoding="utf-8")
+    (tmp_path / "workflow.yaml").write_text("pipeline: {}\n" if workflow is None else workflow, encoding="utf-8")
     return layout_for(tmp_path)
 
 
@@ -372,8 +376,8 @@ def _resolved(tmp_path, key, text):
 def test_checked_refuses_a_non_string_where_str_is_declared(tmp_path):
     resolved = _resolved(
         tmp_path,
-        "workflow.dispatch_rules",
-        "version: 1\nworkflow:\n  dispatch_rules: 3\n",
+        "workflow_config",
+        "version: 1\nworkflow_config: 3\n",
     )
     with pytest.raises(WorkspaceError, match="expects a string"):
         checked(resolved, source=tmp_path / "workspace.yaml")
@@ -440,7 +444,7 @@ def test_checked_leaves_a_default_alone():
 
 def test_checked_int_reads_a_good_value_and_the_catalog_default(tmp_path):
     assert checked_int(_layout(tmp_path), "workflow.auto_drive.max_parallel") == 2
-    layout = _layout(tmp_path, "version: 1\nworkflow:\n  auto_drive:\n    max_parallel: 5\n")
+    layout = _layout(tmp_path, workflow="workflow:\n  auto_drive:\n    max_parallel: 5\n")
     assert checked_int(layout, "workflow.auto_drive.max_parallel") == 5
 
 
@@ -458,7 +462,7 @@ def test_max_parallel_description_names_its_worker_pool():
 
 def test_checked_int_reads_max_attend_default_and_override(tmp_path):
     assert checked_int(_layout(tmp_path), "workflow.auto_drive.max_attend") == 1
-    layout = _layout(tmp_path, "version: 1\nworkflow:\n  auto_drive:\n    max_attend: 3\n")
+    layout = _layout(tmp_path, workflow="workflow:\n  auto_drive:\n    max_attend: 3\n")
     assert checked_int(layout, "workflow.auto_drive.max_attend") == 3
 
 
@@ -476,28 +480,28 @@ def test_checked_int_refuses_an_explicit_null(tmp_path):
     # This key has a real default (2), so a workspace can inherit it while
     # believing it set something. `workflow.pipeline.*` deliberately differs —
     # see the note in `workspace_pipeline`.
-    layout = _layout(tmp_path, "version: 1\nworkflow:\n  auto_drive:\n    max_parallel: null\n")
+    layout = _layout(tmp_path, workflow="workflow:\n  auto_drive:\n    max_parallel: null\n")
     with pytest.raises(WorkspaceError, match="explicitly null"):
         checked_int(layout, "workflow.auto_drive.max_parallel")
 
 
 def test_checked_str_reads_a_good_dispatch_reference(tmp_path):
-    layout = _layout(tmp_path, "version: 1\nworkflow:\n  dispatch_rules: dispatch.yaml\n")
-    assert checked_str(layout, "workflow.dispatch_rules") == "dispatch.yaml"
+    layout = _layout(tmp_path, "version: 1\nworkflow_config: dispatch.yaml\n")
+    assert checked_str(layout, "workflow_config") == "dispatch.yaml"
 
 
 def test_checked_str_refuses_a_non_string_and_an_explicit_null(tmp_path):
-    layout = _layout(tmp_path, "version: 1\nworkflow:\n  dispatch_rules: 3\n")
+    layout = _layout(tmp_path, "version: 1\nworkflow_config: 3\n")
     with pytest.raises(WorkspaceError, match="expects a string"):
-        checked_str(layout, "workflow.dispatch_rules")
-    layout = _layout(tmp_path, "version: 1\nworkflow:\n  dispatch_rules: null\n")
+        checked_str(layout, "workflow_config")
+    layout = _layout(tmp_path, "version: 1\nworkflow_config: null\n")
     with pytest.raises(WorkspaceError, match="expects a string"):
-        checked_str(layout, "workflow.dispatch_rules")
+        checked_str(layout, "workflow_config")
 
 
 def test_checked_bool_reads_a_good_value_and_the_catalog_default(tmp_path):
     assert checked_bool(_layout(tmp_path), "workflow.auto_drive.supervise_merges") is False
-    layout = _layout(tmp_path, "version: 1\nworkflow:\n  auto_drive:\n    supervise_merges: true\n")
+    layout = _layout(tmp_path, workflow="workflow:\n  auto_drive:\n    supervise_merges: true\n")
     assert checked_bool(layout, "workflow.auto_drive.supervise_merges") is True
 
 
@@ -505,13 +509,13 @@ def test_checked_bool_refuses_an_int_a_string_and_an_explicit_null(tmp_path):
     # `isinstance(True, int)` is true, so the type gate is asymmetric: an int
     # must not read back as a bool the way `max_parallel: true` must not read
     # back as 1. `1` is the value this test exists to catch.
-    layout = _layout(tmp_path, "version: 1\nworkflow:\n  auto_drive:\n    supervise_merges: 1\n")
+    layout = _layout(tmp_path, workflow="workflow:\n  auto_drive:\n    supervise_merges: 1\n")
     with pytest.raises(WorkspaceError, match="expects a boolean"):
         checked_bool(layout, "workflow.auto_drive.supervise_merges")
-    layout = _layout(tmp_path, "version: 1\nworkflow:\n  auto_drive:\n    supervise_merges: yes-please\n")
+    layout = _layout(tmp_path, workflow="workflow:\n  auto_drive:\n    supervise_merges: yes-please\n")
     with pytest.raises(WorkspaceError, match="expects a boolean"):
         checked_bool(layout, "workflow.auto_drive.supervise_merges")
-    layout = _layout(tmp_path, "version: 1\nworkflow:\n  auto_drive:\n    supervise_merges: null\n")
+    layout = _layout(tmp_path, workflow="workflow:\n  auto_drive:\n    supervise_merges: null\n")
     with pytest.raises(WorkspaceError, match="explicitly null"):
         checked_bool(layout, "workflow.auto_drive.supervise_merges")
 
@@ -533,9 +537,9 @@ def test_resolve_checked_all_refuses_a_hand_edited_explicit_null(tmp_path):
 def test_initial_manifest_references_dispatch_document(tmp_path):
     text = render_initial(today=TODAY)
     assert read(_write(tmp_path, text)).version == MANIFEST_VERSION
-    assert manifest_store(tmp_path / "workspace.yaml").read_explicit()["workflow"] == {
-        "dispatch_rules": "dispatch.yaml"
-    }
+    explicit = manifest_store(tmp_path / "workspace.yaml").read_explicit()
+    assert explicit["workflow_config"] == "workflow.yaml"
+    assert "workflow" not in explicit
     assert "prompt_tail" not in text
 
 
@@ -569,12 +573,16 @@ def test_workspace_store_reads_the_layouts_manifest(tmp_path):
 # --- the local overlay layer ------------------------------------------------
 
 
-def _workspace(tmp_path, base="version: 1\n", local=None):
+def _workspace(tmp_path, base="version: 1\n", local=None, workflow=None, workflow_local=None):
+    """A workspace pointing at `workflow.yaml`; *workflow* / *workflow_local* are that file and its `.local` sibling."""
     root = tmp_path / "works"
     root.mkdir()
-    (root / "workspace.yaml").write_text(base, encoding="utf-8")
+    (root / "workspace.yaml").write_text(base + "workflow_config: workflow.yaml\n", encoding="utf-8")
+    (root / "workflow.yaml").write_text("pipeline: {}\n" if workflow is None else workflow, encoding="utf-8")
     if local is not None:
         (root / "workspace.local.yaml").write_text(local, encoding="utf-8")
+    if workflow_local is not None:
+        (root / "workflow.local.yaml").write_text(workflow_local, encoding="utf-8")
     return layout_for(root)
 
 
@@ -587,17 +595,17 @@ def test_read_picks_up_a_layout_override_from_the_local_file(tmp_path):
 def test_a_local_value_resolves_with_the_local_origin_and_shadows_the_base(tmp_path):
     layout = _workspace(
         tmp_path,
-        "version: 1\nworkflow:\n  auto_drive:\n    max_parallel: 4\n",
-        "workflow:\n  auto_drive:\n    max_parallel: 2\n",
+        workflow="workflow:\n  auto_drive:\n    max_parallel: 4\n",
+        workflow_local="workflow:\n  auto_drive:\n    max_parallel: 2\n",
     )
     got = resolve_checked_key(layout, "workflow.auto_drive.max_parallel", environ={})
-    assert (got.value, got.origin, got.shadowed) == (2, "local", 4)
+    assert (got.value, got.origin, got.shadowed) == (2, "workflow-local", 4)
 
 
 def test_a_local_null_on_a_real_default_key_is_refused(tmp_path):
     # D-001: the local null replaces, then _check_resolved's existing rule
     # applies with no new code.
-    layout = _workspace(tmp_path, "version: 1\n", "workflow:\n  auto_drive:\n    max_parallel: null\n")
+    layout = _workspace(tmp_path, workflow_local="workflow:\n  auto_drive:\n    max_parallel: null\n")
     with pytest.raises(WorkspaceError, match="explicitly null"):
         resolve_checked_key(layout, "workflow.auto_drive.max_parallel", environ={})
 
@@ -605,7 +613,7 @@ def test_a_local_null_on_a_real_default_key_is_refused(tmp_path):
 def test_a_malformed_local_value_is_refused_like_a_malformed_base_one(tmp_path):
     # A hand-edited local file bypasses set-time checks exactly as the base
     # does, so `checked` has to cover its origin too.
-    layout = _workspace(tmp_path, "version: 1\n", "workflow:\n  auto_drive:\n    max_parallel: nope\n")
+    layout = _workspace(tmp_path, workflow_local="workflow:\n  auto_drive:\n    max_parallel: nope\n")
     with pytest.raises(WorkspaceError, match="expects an integer"):
         resolve_checked_key(layout, "workflow.auto_drive.max_parallel", environ={})
 
@@ -614,26 +622,26 @@ def test_a_malformed_local_only_value_is_refused_naming_the_local_file(tmp_path)
     # The offending line lives only in workspace.local.yaml, so the refusal
     # must name that file, not the (actually fine) base workspace.yaml — a
     # user pointed at the wrong file cannot fix a value they cannot find.
-    layout = _workspace(tmp_path, "version: 1\n", "workflow:\n  auto_drive:\n    max_parallel: nope\n")
+    layout = _workspace(tmp_path, workflow_local="workflow:\n  auto_drive:\n    max_parallel: nope\n")
     with pytest.raises(WorkspaceError) as excinfo:
         resolve_checked_key(layout, "workflow.auto_drive.max_parallel", environ={})
     message = str(excinfo.value)
-    assert str(layout.local_manifest_path) in message
-    assert str(layout.manifest_path) not in message
+    assert str(layout.root / "workflow.local.yaml") in message
+    assert str(layout.root / "workflow.yaml") not in message
 
 
 def test_a_malformed_base_only_value_still_names_the_base_file(tmp_path):
     # The mirror case: a base-only malformed value (no overlay at all) must
     # keep naming workspace.yaml, exactly as before this fix.
-    layout = _workspace(tmp_path, "version: 1\nworkflow:\n  auto_drive:\n    max_parallel: nope\n")
+    layout = _workspace(tmp_path, workflow="workflow:\n  auto_drive:\n    max_parallel: nope\n")
     with pytest.raises(WorkspaceError) as excinfo:
         resolve_checked_key(layout, "workflow.auto_drive.max_parallel", environ={})
     message = str(excinfo.value)
-    assert str(layout.manifest_path) in message
+    assert str(layout.root / "workflow.yaml") in message
 
 
-def test_stored_origins_is_the_two_layer_names():
-    assert frozenset({"manifest", "local"}) == STORED_ORIGINS
+def test_stored_origins_is_the_four_layer_names():
+    assert frozenset({"manifest", "local", "workflow", "workflow-local"}) == STORED_ORIGINS
 
 
 def test_a_base_only_value_still_resolves_with_the_manifest_origin(tmp_path):

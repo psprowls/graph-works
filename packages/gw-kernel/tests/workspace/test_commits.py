@@ -29,8 +29,17 @@ def _write(root: Path, rel: str, text: str) -> None:
 
 
 def _set_mode(layout, value: str) -> None:
-    layout.local_manifest_path.parent.mkdir(parents=True, exist_ok=True)
-    layout.local_manifest_path.write_text(f"workflow:\n  workspace_commits: {value}\n", encoding="utf-8", newline="\n")
+    local = layout.root / "dispatch.local.yaml"
+    local.write_text(f"workflow:\n  workspace_commits: {value}\n", encoding="utf-8", newline="\n")
+
+
+def _embedded(host: Path):
+    """A workspace nested inside *host*'s repository, with the pointer and its workflow file."""
+    layout = layout_for(host / ".works")
+    layout.bundle_dir.mkdir(parents=True)
+    layout.manifest_path.write_text("version: 1\nworkflow_config: dispatch.yaml\n", encoding="utf-8", newline="\n")
+    (layout.root / "dispatch.yaml").write_text("{}\n", encoding="utf-8", newline="\n")
+    return layout
 
 
 def _own_repo(tmp_path: Path):
@@ -108,8 +117,7 @@ def test_no_repo_skips_not_a_repo(tmp_path: Path) -> None:
 
 def test_auto_skips_embedded_workspace(tmp_path: Path) -> None:
     host = _init_git(tmp_path / "code")
-    layout = layout_for(host / ".works")
-    layout.bundle_dir.mkdir(parents=True)
+    layout = _embedded(host)
     _write(layout.bundle_dir, "work/a.md", "a\n")
     outcome = commit_workspace(layout, WorkspaceCommit("workspace: t"), ("work/a.md",))
     assert (outcome.status, outcome.reason) == ("skipped", "not-own-repo")
@@ -118,8 +126,7 @@ def test_auto_skips_embedded_workspace(tmp_path: Path) -> None:
 
 def test_on_mode_embedded_commits_relative_to_toplevel(tmp_path: Path) -> None:
     host = _init_git(tmp_path / "code")
-    layout = layout_for(host / ".works")
-    layout.bundle_dir.mkdir(parents=True)
+    layout = _embedded(host)
     _set_mode(layout, "on")
     _write(layout.bundle_dir, "work/a.md", "a\n")
     outcome = commit_workspace(layout, WorkspaceCommit("workspace: t"), ("work/a.md",))
@@ -373,3 +380,17 @@ def test_repository_probe_error_remains_failed(tmp_path: Path, monkeypatch: pyte
     monkeypatch.setattr(commits, "probe_git", lambda *args, **kwargs: GitOutcome(None, "", "error"))
     outcome = commit_workspace(layout, WorkspaceCommit("workspace: error"), ())
     assert (outcome.status, outcome.reason) == ("failed", "git error")
+
+
+def test_an_invalid_commit_mode_names_the_workflow_file(tmp_path: Path) -> None:
+    (tmp_path / "workspace.yaml").write_text(
+        "version: 1\nworkflow_config: workflow.yaml\n", encoding="utf-8", newline="\n"
+    )
+    (tmp_path / "workflow.yaml").write_text(
+        "workflow:\n  workspace_commits: sometimes\n", encoding="utf-8", newline="\n"
+    )
+    with pytest.raises(
+        WorkspaceError,
+        match=r"workflow\.yaml: workflow\.workspace_commits: expects one of auto, on, off, got 'sometimes'",
+    ):
+        commits.commit_mode(layout_for(tmp_path))

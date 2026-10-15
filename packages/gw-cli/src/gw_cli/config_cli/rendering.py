@@ -64,6 +64,8 @@ def render_resolved(result: Resolved, *, json_output: bool) -> str:
         lines.append(f"  note: manifest value {result.shadowed!r} is shadowed by ${result.entry.env_var}")
     elif result.origin == "local" and result.shadowed is not None:
         lines.append(f"  note: workspace.yaml value {result.shadowed!r} is shadowed by workspace.local.yaml")
+    elif result.origin == "workflow-local" and result.shadowed is not None:
+        lines.append(f"  note: workflow file value {result.shadowed!r} is shadowed by its .local sibling")
     return "\n".join(lines)
 
 
@@ -75,7 +77,9 @@ def render_resolved_list(results: Sequence[Resolved], *, json_output: bool) -> s
     for result in results:
         # A fourth origin with no entry here is a KeyError at render time, not
         # a missing glyph — which is why the two move in the same change.
-        marker = {"env": "*", "local": "~", "manifest": "+", "default": " "}[result.origin]
+        marker = {"env": "*", "local": "~", "workflow-local": "~", "manifest": "+", "workflow": "+", "default": " "}[
+            result.origin
+        ]
         lines.append(f"{marker} {result.key} = {result.value!r}  [{result.origin}; default {result.entry.default!r}]")
         lines.append(f"    {result.entry.description}")
     return "\n".join(lines)

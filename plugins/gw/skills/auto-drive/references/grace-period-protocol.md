@@ -17,8 +17,8 @@ preserves an authored one, so a workspace created before this protocol shipped
 still dispatches `relay` (finish-stage) workers with its old tail and no
 grace-period obligation. There is deliberately no migration — the relay tail is
 a value the workspace owns. To upgrade one, append `GRACE_PERIOD_TAIL`'s text to
-the `branch`-variant `prompt_tail` in the dispatch document named by
-`workflow.dispatch_rules` (or its `dispatch.local.yaml` sibling), then run
+the `branch`-variant `prompt_tail` in the workflow file named by
+`workflow_config` (or its `.local` sibling), then run
 `gw config sync`. Until that is done, a finish-stage worker in that workspace
 follows this protocol only because `finishing-relay/SKILL.md`'s R3 names it
 directly.

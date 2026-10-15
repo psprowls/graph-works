@@ -49,7 +49,7 @@ def test_no_workspace_module_spells_the_attribute_names_as_a_set() -> None:
 
 def test_undeclared_attributes_default_to_the_vocabulary(tmp_path: Path) -> None:
     (tmp_path / "workspace.yaml").write_text(
-        "version: 1\nworkflow:\n  dispatch_rules: dispatch.yaml\n", encoding="utf-8", newline=""
+        "version: 1\nworkflow_config: dispatch.yaml\n", encoding="utf-8", newline=""
     )
     (tmp_path / "dispatch.yaml").write_text("{}\n", encoding="utf-8", newline="")
     assert dispatch_config.load_dispatch_config(layout_for(tmp_path)).attributes == dispatch.ATTRIBUTES

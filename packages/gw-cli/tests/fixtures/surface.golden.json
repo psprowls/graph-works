@@ -222,8 +222,8 @@
     },
     {
       "name": "gw config get",
-      "help": "Show a key's effective value and origin (env / local / manifest / default).",
-      "short_help": "Show a key's effective value and origin (env / local / manifest / default).",
+      "help": "Show a key's effective value and origin (env / local / manifest / workflow-local / workflow / default).",
+      "short_help": "Show a key's effective value and origin (env / local / manifest / workflow-local / workflow / default).",
       "usage": [
         "[OPTIONS]",
         "{key}"
@@ -453,7 +453,7 @@
             "--local"
           ],
           "secondary_opts": [],
-          "help": "Write workspace.local.yaml instead of workspace.yaml.",
+          "help": "Write the machine-local layer: workspace.local.yaml, or the workflow file's .local sibling for workflow.* keys.",
           "required": false,
           "default": false,
           "is_flag": true
@@ -580,7 +580,7 @@
             "--local"
           ],
           "secondary_opts": [],
-          "help": "Write workspace.local.yaml instead of workspace.yaml.",
+          "help": "Write the machine-local layer: workspace.local.yaml, or the workflow file's .local sibling for workflow.* keys.",
           "required": false,
           "default": false,
           "is_flag": true

@@ -29,7 +29,7 @@ from work_tracker_okf.paths import references_dir
 
 from gw_kernel.workspace.errors import WorkspaceError
 from gw_kernel.workspace.layout import WorkspaceLayout
-from gw_kernel.workspace.manifest import checked_str
+from gw_kernel.workspace.manifest import resolve_checked_key, value_source
 from gw_kernel.workspace.provenance import GitOutcome, probe_git
 
 CommitMode = Literal["auto", "on", "off"]
@@ -83,10 +83,11 @@ def item_stem(path: str) -> str:
 
 def commit_mode(layout: WorkspaceLayout) -> CommitMode:
     """`workflow.workspace_commits`, validated against its enum."""
-    value = checked_str(layout, MODE_KEY)
+    resolved = resolve_checked_key(layout, MODE_KEY, environ={})
+    value = resolved.value
     if value not in COMMIT_MODES:
         raise WorkspaceError(
-            f"{layout.manifest_path}: {MODE_KEY}: expects one of {', '.join(COMMIT_MODES)}, got {value!r}"
+            f"{value_source(layout, resolved)}: {MODE_KEY}: expects one of {', '.join(COMMIT_MODES)}, got {value!r}"
         )
     return value
 

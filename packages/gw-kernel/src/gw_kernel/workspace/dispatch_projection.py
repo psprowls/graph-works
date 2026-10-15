@@ -8,19 +8,23 @@ import tempfile
 from collections.abc import Mapping
 from dataclasses import asdict, dataclass
 from pathlib import Path
+from typing import Literal
 
-from config_io import PROJECTION_FILENAME, Fingerprint, PlainYamlStore, dotted, set_key, unset_key
+from config_io import PROJECTION_FILENAME, Fingerprint, PlainYamlStore, dotted, find_entry, set_key, unset_key
 
 from gw_kernel.workspace.dispatch_config import (
+    apply_dispatch_write,
     check_dispatch_inputs,
     load_dispatch_config,
     load_prospective_dispatch_config,
+    plan_dispatch_write,
     restore_owned_snapshot,
     source_fingerprint,
 )
 from gw_kernel.workspace.errors import WorkspaceError
 from gw_kernel.workspace.layout import WorkspaceLayout
-from gw_kernel.workspace.manifest import CATALOG, resolve_checked_all, workspace_store
+from gw_kernel.workspace.manifest import CATALOG, is_workflow_key, resolve_checked_all, workflow_store, workspace_store
+from gw_kernel.workspace.workflow_file import WORKFLOW_CONFIG_KEY
 
 
 def build_dispatch_projection(layout: WorkspaceLayout) -> dict[str, object]:
@@ -53,7 +57,7 @@ def build_dispatch_projection(layout: WorkspaceLayout) -> dict[str, object]:
         "dispatch_inputs": inputs,
     }
     payload["dispatch"] = {
-        "reference": dotted.get(payload, "workflow.dispatch_rules"),
+        "reference": dotted.get(payload, WORKFLOW_CONFIG_KEY),
         "shared_path": str(config.shared_path),
         "local_path": str(config.local_path),
         "attributes": sorted(config.attributes),
@@ -82,6 +86,9 @@ def build_dispatch_projection(layout: WorkspaceLayout) -> dict[str, object]:
             for stage, artifact in config.artifacts.items()
         },
     }
+    workflow = workflow_store(layout).read_explicit().get("workflow")
+    if isinstance(workflow, dict) and workflow:
+        payload["workflow"] = workflow
     check_dispatch_inputs(before)
     check_dispatch_inputs(config.source_fingerprints)
     return payload
@@ -163,12 +170,56 @@ class _ValidatedManifestStore:
             self._written = True
 
 
+@dataclass
+class _ValidatedWorkflowStore:
+    """Route config-io's write of one `workflow.*` key through the dispatch-document write path."""
+
+    layout: WorkspaceLayout
+    target: PlainYamlStore
+    layer: Literal["shared", "local"]
+    _written: bool = False
+    _owned: Fingerprint | None = None
+
+    def read(self) -> dict[str, object]:
+        return self.target.read_explicit()
+
+    def read_explicit(self) -> dict[str, object]:
+        return self.target.read_explicit()
+
+    def snapshot(self) -> bytes | None:
+        return self.target.snapshot()
+
+    def restore(self, snapshot: bytes | None) -> None:
+        if self._written:
+            self._written = False
+            restore_owned_snapshot(self.target, snapshot, owned=self._owned)
+
+    def fingerprint(self) -> Fingerprint | None:
+        return self.target.fingerprint()
+
+    def write(self, data: Mapping[str, object]) -> None:
+        apply_dispatch_write(plan_dispatch_write(self.layout, layer=self.layer, document=data))
+        self._owned = self.target.fingerprint()
+        self._written = True
+
+
 def mutate_workspace_config(layout: WorkspaceLayout, key: str, value: str | None, *, local: bool) -> None:
-    """Apply a validated catalog mutation and refresh; restore on sync failure."""
-    store = workspace_store(layout)
-    target = store.overlay if local else store.base
-    inputs = {path: source_fingerprint(path) for path in (layout.manifest_path, layout.local_manifest_path)}
-    checked = _ValidatedManifestStore(layout, target, local, inputs)
+    """Apply a validated catalog mutation to the key's home and refresh; restore on sync failure.
+
+    A `workflow.*` catalog key lives in the workflow file (its `.local` sibling under
+    *local*) and is written through `plan_dispatch_write` / `apply_dispatch_write`;
+    every other key, and an unknown `workflow.*` key (which config-io refuses), goes to the manifest layer.
+    """
+    checked: _ValidatedWorkflowStore | _ValidatedManifestStore
+    if is_workflow_key(key) and find_entry(CATALOG, key) is not None:
+        pair = workflow_store(layout)
+        target = pair.overlay if local else pair.base
+        checked = _ValidatedWorkflowStore(layout, target, "local" if local else "shared")
+    else:
+        store = workspace_store(layout)
+        target = store.overlay if local else store.base
+        inputs = {path: source_fingerprint(path) for path in (layout.manifest_path, layout.local_manifest_path)}
+        checked = _ValidatedManifestStore(layout, target, local, inputs)
     snapshot = target.snapshot()
     try:
         if value is None:

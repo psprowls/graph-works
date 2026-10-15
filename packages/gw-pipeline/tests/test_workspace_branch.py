@@ -48,10 +48,9 @@ def test_no_git_is_disabled_with_a_note(tmp_path):
 
 def test_commits_off_disables(tmp_path):
     layout = _layout(tmp_path)
-    layout.manifest_path.write_text(
-        layout.manifest_path.read_text(encoding="utf-8").replace(
-            "workflow:\n", "workflow:\n  workspace_commits: off\n", 1
-        ),
+    workflow_file = layout.root / "workflow.yaml"
+    workflow_file.write_text(
+        "workflow:\n  workspace_commits: off\n" + workflow_file.read_text(encoding="utf-8"),
         encoding="utf-8",
         newline="\n",
     )
@@ -65,10 +64,9 @@ def test_commits_on_does_not_enable_embedded_workspace(tmp_path):
     outer.mkdir()
     _git(outer, "init", "-b", "main")
     layout = apply_init(plan_init(outer / "ws", today=date(2026, 9, 26), topic="WS")).layout
-    layout.manifest_path.write_text(
-        layout.manifest_path.read_text(encoding="utf-8").replace(
-            "workflow:\n", "workflow:\n  workspace_commits: on\n", 1
-        ),
+    workflow_file = layout.root / "workflow.yaml"
+    workflow_file.write_text(
+        "workflow:\n  workspace_commits: on\n" + workflow_file.read_text(encoding="utf-8"),
         encoding="utf-8",
         newline="\n",
     )

@@ -18,11 +18,9 @@ from starlette.testclient import TestClient
 
 
 def _dispatch(workspace: WorkspaceLayout, *, shared: str, local: str = "") -> None:
-    (workspace.root / "dispatch.yaml").write_text(f"version: 1\npipeline:\n  rules:\n{shared}", encoding="utf-8")
+    (workspace.root / "workflow.yaml").write_text(f"pipeline:\n  rules:\n{shared}", encoding="utf-8")
     if local:
-        (workspace.root / "dispatch.local.yaml").write_text(
-            f"version: 1\npipeline:\n  rules:\n{local}", encoding="utf-8"
-        )
+        (workspace.root / "workflow.local.yaml").write_text(f"pipeline:\n  rules:\n{local}", encoding="utf-8")
 
 
 def test_work_list_is_the_projection(client: TestClient, workspace: WorkspaceLayout) -> None:
@@ -294,7 +292,7 @@ def test_a_malformed_dispatch_file_is_a_workspace_refusal_naming_file_and_rule(
     for url in (f"/v1/dispatch/explain?path={path}", "/v1/dispatch/rules"):
         error = client.get(url).json()["error"]
         assert error["reason"] == "workspace"
-        assert "dispatch.local.yaml: rule 0" in error["message"]
+        assert "workflow.local.yaml: rule 0" in error["message"]
 
 
 def test_a_broken_schema_file_is_a_workspace_refusal(client: TestClient, workspace: WorkspaceLayout) -> None:

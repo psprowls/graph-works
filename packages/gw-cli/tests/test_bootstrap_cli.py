@@ -273,8 +273,8 @@ def test_bootstrap_seeds_dispatch_and_refuses_old_settings(tmp_path):
     args = ["bootstrap", "--workspace", str(root), "--topic", "Demo"]
     first = runner.invoke(app, args)
     assert first.exit_code == 0, first.output
-    assert (root / "dispatch.yaml").exists()
-    assert not (root / "dispatch.local.yaml").exists()
+    assert (root / "workflow.yaml").exists()
+    assert not (root / "workflow.local.yaml").exists()
     before = (root / "workspace.yaml").read_bytes()
     second = runner.invoke(app, args)
     assert second.exit_code == 0

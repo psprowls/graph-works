@@ -6,17 +6,21 @@ from pathlib import Path
 
 import pytest
 from gw_kernel.workspace import manifest
+from gw_kernel.workspace.dispatch_projection import mutate_workspace_config
 from gw_kernel.workspace.errors import WorkspaceError
 from gw_kernel.workspace.layout import layout_for
 from gw_pipeline import gate_config
 from gw_pipeline.gate_config import RepoGate, ScopedGate, repo_gate
 
 
-def _layout(tmp_path: Path, gate: str):
+def _layout(tmp_path: Path, gate: str, workflow: str = ""):
     (tmp_path / "code").mkdir()
     (tmp_path / "workspace.yaml").write_text(
-        f"version: 1\nrepositories:\n  code:\n    path: code\n{gate}", encoding="utf-8", newline="\n"
+        f"version: 1\nworkflow_config: dispatch.yaml\nrepositories:\n  code:\n    path: code\n{gate}",
+        encoding="utf-8",
+        newline="\n",
     )
+    (tmp_path / "dispatch.yaml").write_text(f"{workflow}pipeline: {{}}\n", encoding="utf-8", newline="\n")
     return layout_for(tmp_path)
 
 
@@ -97,20 +101,22 @@ def test_unit_jobs_defaults_to_none(tmp_path: Path) -> None:
 
 @pytest.mark.parametrize("value", ["0", "-1", "true", "'two'"])
 def test_unit_jobs_refuses_nonpositive_or_noninteger(tmp_path: Path, value: str) -> None:
-    layout = _layout(tmp_path, f"workflow:\n  gate:\n    unit_jobs: {value}\n")
+    layout = _layout(tmp_path, "", f"workflow:\n  gate:\n    unit_jobs: {value}\n")
     with pytest.raises(WorkspaceError, match="unit_jobs"):
         gate_config.unit_jobs(layout)
 
 
 def test_new_gate_settings_overlay_and_settable_catalog(tmp_path: Path) -> None:
     layout = _layout(tmp_path, "    gate:\n      units: emit-shared\n      extra_inputs: [docs/**]\n")
-    manifest.set_value(layout.manifest_path, "workflow.gate.unit_jobs", "3")
+    mutate_workspace_config(layout, "workflow.gate.unit_jobs", "3", local=False)
     assert gate_config.unit_jobs(layout) == 3
     (tmp_path / "workspace.local.yaml").write_text(
-        "repositories:\n  code:\n    gate:\n      units: emit-local\n      extra_inputs: [local/**]\n"
-        "workflow:\n  gate:\n    unit_jobs: 1\n",
+        "repositories:\n  code:\n    gate:\n      units: emit-local\n      extra_inputs: [local/**]\n",
         encoding="utf-8",
         newline="\n",
+    )
+    (tmp_path / "dispatch.local.yaml").write_text(
+        "workflow:\n  gate:\n    unit_jobs: 1\n", encoding="utf-8", newline="\n"
     )
     gate = repo_gate(layout, "code")
     assert gate.units == "emit-local" and gate.extra_inputs == ("local/**",)
@@ -129,3 +135,17 @@ def test_units_refuses_wrong_type_or_empty_command(tmp_path: Path, value: str) -
     layout = _layout(tmp_path, f"    gate:\n      units: {value}\n")
     with pytest.raises(WorkspaceError, match="units"):
         repo_gate(layout, "code")
+
+
+def test_unit_jobs_refusal_names_the_local_workflow_file(tmp_path: Path) -> None:
+    (tmp_path / "workspace.yaml").write_text(
+        "version: 1\nworkflow_config: workflow.yaml\n", encoding="utf-8", newline="\n"
+    )
+    (tmp_path / "workflow.yaml").write_text("pipeline: {}\n", encoding="utf-8", newline="\n")
+    (tmp_path / "workflow.local.yaml").write_text(
+        "workflow:\n  gate:\n    unit_jobs: 0\n", encoding="utf-8", newline="\n"
+    )
+    with pytest.raises(
+        WorkspaceError, match=r"workflow\.local\.yaml: workflow\.gate\.unit_jobs: must be a positive integer"
+    ):
+        gate_config.unit_jobs(layout_for(tmp_path))

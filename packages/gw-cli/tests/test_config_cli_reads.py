@@ -22,12 +22,14 @@ def _workspace(tmp_path: Path) -> Path:
     (root / "workspace.yaml").write_text(
         """version: 1
 topic: Demo
+workflow_config: dispatch.yaml
 roles:
   librarian:
     model_id: anthropic.claude-test
 """,
         encoding="utf-8",
     )
+    (root / "dispatch.yaml").write_text("pipeline: {rules: []}\n", encoding="utf-8")
     return root
 
 
@@ -158,7 +160,10 @@ def test_get_refuses_a_hand_edited_invalid_manifest_value(tmp_path: Path) -> Non
 def test_list_refuses_a_hand_edited_explicit_null(tmp_path: Path) -> None:
     root = tmp_path / "workspace"
     root.mkdir()
-    (root / "workspace.yaml").write_text("version: 1\nlayout:\n  bundle_dir: null\n", encoding="utf-8")
+    (root / "workspace.yaml").write_text(
+        "version: 1\nworkflow_config: dispatch.yaml\nlayout:\n  bundle_dir: null\n", encoding="utf-8"
+    )
+    (root / "dispatch.yaml").write_text("pipeline: {rules: []}\n", encoding="utf-8")
 
     result = runner.invoke(config_app, ["list", "--workspace", str(root)])
 
@@ -223,7 +228,7 @@ def test_the_marker_table_covers_every_origin_a_resolved_can_carry() -> None:
     # A fourth origin with no marker is a KeyError at render time, not a
     # missing glyph — so the table and the vocabulary move together.
     entry = ConfigEntry(key="topic", type="str", default=None, description="Display name.")
-    for origin in ("env", "local", "manifest", "default"):
+    for origin in ("env", "local", "workflow-local", "manifest", "workflow", "default"):
         rendered = render_resolved_list([Resolved("topic", "x", origin, entry)], json_output=False)
         assert "topic = 'x'" in rendered
 
@@ -241,8 +246,6 @@ def test_sync_and_real_hook_detect_every_input_change(tmp_path, change):
     shared = root / "dispatch.yaml"
     local = root / "dispatch.local.yaml"
     manifest_path = root / "workspace.yaml"
-    with manifest_path.open("a", encoding="utf-8", newline="") as handle:
-        handle.write("workflow: {dispatch_rules: dispatch.yaml}\n")
     shared.write_text(
         "# authored\npipeline:\n  rules:\n    - match: {}\n      model: original\n", encoding="utf-8", newline=""
     )

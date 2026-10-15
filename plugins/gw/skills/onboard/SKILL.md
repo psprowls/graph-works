@@ -141,12 +141,12 @@ gw config set layout.config_dir .gw
 gw config set layout.cache_dir .gw/cache
 gw config set layout.worktrees_dir .gw/worktrees
 
-# Shared dispatch rules (default reference; optional sibling: dispatch.local.yaml)
-gw config get workflow.dispatch_rules
-# Edit pipeline.rules in the referenced document or its local sibling, then:
+# The workflow file (workflow.yaml for a new workspace; optional sibling: workflow.local.yaml)
+gw config get workflow_config
+# Edit pipeline.rules in the workflow file or its local sibling, then:
 gw config sync
 
-# The auto-drive shell
+# The auto-drive shell (written to the workflow file's workflow: block)
 gw config set workflow.auto_drive.max_parallel 2
 
 # Per-role model overrides for the Python subagent pool
@@ -159,8 +159,7 @@ gw config set roles.<role>.max_concurrency <n>
 
 Dispatch rules select skill, mode, prompt_tail, agent, model and reasoning_effort
 with a `match` mapping (for example, `{variant: planned}`). Shared rules apply
-first; `dispatch.local.yaml` appends machine-local rules for the default path.
-For a custom reference, use its `.local` sibling. Permissions remain the selected agent's existing settings;
+first; the `.local` sibling of the workflow file (`workflow.local.yaml` by default) appends machine-local rules. Permissions remain the selected agent's existing settings;
 configure them in that agent's settings. See
 `../auto-drive/references/dispatch-configuration.md` for the dispatch guide.
 

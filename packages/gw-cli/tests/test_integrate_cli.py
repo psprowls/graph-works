@@ -32,7 +32,7 @@ def setup(tmp_path):
     git(source, "commit", "-m", "source")
     layout = apply_init(plan_init(tmp_path / "ws", today=date(2026, 9, 28), topic="Integrate")).layout
     layout.manifest_path.write_text(
-        f"version: 1\nworkflow: {{dispatch_rules: dispatch.yaml}}\nrepositories:\n  code:\n    path: {repo}\n",
+        f"version: 1\nworkflow_config: workflow.yaml\nrepositories:\n  code:\n    path: {repo}\n",
         encoding="utf-8",
         newline="\n",
     )

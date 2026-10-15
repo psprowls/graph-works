@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import io
 import json
 import re
 from datetime import UTC, datetime
@@ -10,22 +11,26 @@ from pathlib import Path
 from gw_orchestrate.gate import run_gate_run, runs_dir
 from gw_orchestrate.gate_receipts import GateRun, parse_gate_receipt, render_receipt
 from gw_orchestrate.wait import WaitClock
+from ruamel.yaml import YAML
 
 NOW = datetime(2026, 9, 28, 12, 0, 0, tzinfo=UTC)
 TODAY = NOW.date()
 
 
+def set_workflow_gate(env, key: str, value: object) -> None:
+    """Set `workflow.gate.<key>` in the env's committed workflow.yaml, keeping every other key."""
+    path = env.root / "workflow.yaml"
+    yaml = YAML(typ="safe")
+    document = yaml.load(path.read_text(encoding="utf-8")) or {}
+    document.setdefault("workflow", {}).setdefault("gate", {})[key] = value
+    buffer = io.StringIO()
+    yaml.dump(document, buffer)
+    path.write_text(buffer.getvalue(), encoding="utf-8", newline="\n")
+
+
 def set_max_concurrent(env, value: str) -> None:
-    """Write `workflow.gate.max_concurrent: <value>` into the env's committed manifest."""
-    text = env.layout.manifest_path.read_text(encoding="utf-8")
-    text = re.sub(
-        r"^workflow: \{.*\}$",
-        "workflow: {dispatch_rules: dispatch.yaml, gate: {max_concurrent: " + value + "}}",
-        text,
-        count=1,
-        flags=re.MULTILINE,
-    )
-    env.layout.manifest_path.write_text(text, encoding="utf-8", newline="\n")
+    """Write `workflow.gate.max_concurrent: <value>` into the env's committed workflow.yaml."""
+    set_workflow_gate(env, "max_concurrent", YAML(typ="safe").load(value))
 
 
 def raise_(exc):

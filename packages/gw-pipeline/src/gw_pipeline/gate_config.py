@@ -13,7 +13,7 @@ from pathlib import PurePosixPath, PureWindowsPath
 
 from gw_kernel.workspace.errors import WorkspaceError
 from gw_kernel.workspace.layout import WorkspaceLayout
-from gw_kernel.workspace.manifest import resolve_checked_key
+from gw_kernel.workspace.manifest import resolve_checked_key, value_source
 
 _FIELD = re.compile(r"\{[^{}]*\}")
 
@@ -64,11 +64,12 @@ def _globs(layout: WorkspaceLayout, key: str) -> tuple[str, ...]:
 
 
 def unit_jobs(layout: WorkspaceLayout) -> int | None:
-    value = resolve_checked_key(layout, "workflow.gate.unit_jobs", environ={}).value
+    resolved = resolve_checked_key(layout, "workflow.gate.unit_jobs", environ={})
+    value = resolved.value
     if value is None:
         return None
     if not isinstance(value, int) or isinstance(value, bool) or value < 1:
-        raise WorkspaceError(f"{layout.manifest_path}: workflow.gate.unit_jobs: must be a positive integer")
+        raise WorkspaceError(f"{value_source(layout, resolved)}: workflow.gate.unit_jobs: must be a positive integer")
     return value
 
 

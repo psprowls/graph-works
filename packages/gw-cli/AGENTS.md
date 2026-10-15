@@ -79,8 +79,9 @@ loads everything (the walkers need that). The entries are:
   `rendering.warn`.
 - `repo_cli` — `gw repo add|restore|advance`, reference repositories in the `repositories/` lane (routes to `gw_wiki.repositories`); it injects a structural rescan into `run_repo_advance`.
 - `config_cli` — `gw config get|list|set|unset|sync|hooks enable|disable`, the sole programmatic
-  writer for `workspace.yaml` catalog keys. `set`/`unset --local` write the gitignored, per-machine
-  `workspace.local.yaml` overlay instead. `set`/`unset` refresh `.gw/cache/config.json`
+  writer for catalog keys: `workspace.yaml` for manifest keys, the workflow file `workflow_config`
+  names for `workflow.*` keys. `set`/`unset --local` write the gitignored, per-machine overlay
+  instead (`workspace.local.yaml`, or the workflow file's `.local` sibling for `workflow.*`). `set`/`unset` refresh `.gw/cache/config.json`
   automatically; `sync` is the manual refresh after a hand edit.
 - `agent_config_cli` — `gw agent-config show`, a read-only report over core's agent configuration
   model. It injects home, environment, and platform; JSON is projected by `gw-wire`.

@@ -16,7 +16,8 @@ from gw_kernel.workspace.layout import layout_for
 def kernel_workspace(tmp_path):
     layout = layout_for(tmp_path / "kernel-workspace")
     layout.bundle_dir.mkdir(parents=True)
-    layout.manifest_path.write_text("version: 1\n", encoding="utf-8", newline="\n")
+    layout.manifest_path.write_text("version: 1\nworkflow_config: workflow.yaml\n", encoding="utf-8", newline="\n")
+    (layout.root / "workflow.yaml").write_text("pipeline: {}\n", encoding="utf-8", newline="\n")
     return layout
 
 

@@ -10,7 +10,7 @@ from test_run_next import _layout, _spec, _write
 def test_terminal_has_no_profile_even_without_dispatch_config(tmp_path):
     layout = _layout(tmp_path)
     _write(layout, "work/feature-a", phase="done")
-    (layout.root / "dispatch.yaml").unlink()
+    (layout.root / "workflow.yaml").unlink()
     result = run_next(layout, "work/feature-a")
     assert result.dispatch_resolution is None
     assert result.dispatch_preflight is None

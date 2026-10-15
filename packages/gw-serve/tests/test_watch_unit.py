@@ -18,7 +18,7 @@ from readstate_fakes import FakeOpener, state_for
 
 
 def test_watch_sets_cover_the_five_config_paths(workspace: WorkspaceLayout) -> None:
-    shared, local = workspace.root / "dispatch.yaml", workspace.root / "dispatch.local.yaml"
+    shared, local = workspace.root / "workflow.yaml", workspace.root / "workflow.local.yaml"
     sets = watch.watch_sets(workspace, (shared, local))
     assert sets.bundle_dir == workspace.bundle_dir
     assert sets.config_paths == frozenset(
@@ -170,7 +170,7 @@ async def test_manifest_change_that_moves_dispatch_rules_rewatches(
         [
             (
                 workspace,
-                watch.watch_sets(workspace, (workspace.root / "dispatch.yaml", workspace.root / "dispatch.local.yaml")),
+                watch.watch_sets(workspace, (workspace.root / "workflow.yaml", workspace.root / "workflow.local.yaml")),
             ),
             (
                 workspace,
@@ -270,7 +270,7 @@ async def test_invalid_dispatch_reference_keeps_previous_watch_sets(
         config=[
             [
                 {(watchfiles.Change.modified, str(workspace.manifest_path))},
-                {(watchfiles.Change.modified, str(workspace.root / "dispatch.yaml"))},
+                {(watchfiles.Change.modified, str(workspace.root / "workflow.yaml"))},
             ]
         ]
     )

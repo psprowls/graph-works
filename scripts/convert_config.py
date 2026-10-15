@@ -49,6 +49,7 @@ import subprocess
 import sys
 from dataclasses import dataclass
 from pathlib import Path, PureWindowsPath
+from collections.abc import Mapping
 from typing import Literal
 
 from ruamel.yaml import YAML
@@ -462,7 +463,7 @@ def dispose(raw: dict[str, object], *, root: Path, options: Options) -> Conversi
     add(
         Disposition(
             None,
-            "workflow.dispatch_rules",
+            "workflow_config",
             "seed",
             "dispatch.yaml",
             "Initialize new dispatch defaults; old launch choices are never translated.",
@@ -481,7 +482,7 @@ def _render(dispositions: list[Disposition]) -> str:
 
     Rendered by hand rather than dumped, and deliberately not through
     `manifest.render_initial` -- that function cannot express
-    `layout.bundle_dir`, operational `workflow.auto_drive.*`, or `state_gate`. Key order mirrors `render_initial`'s so a converted
+    `layout.bundle_dir`, or `state_gate`. Key order mirrors `render_initial`'s so a converted
     manifest reads like a bootstrapped one.
     """
     values = {d.target_key: d.value for d in dispositions if d.target_key is not None}
@@ -497,22 +498,9 @@ def _render(dispositions: list[Disposition]) -> str:
         lines.append("layout:")
         lines.append(f"  bundle_dir: {_scalar(values['layout.bundle_dir'])}")
 
-    # One `workflow:` block carrying both nested sub-blocks -- two would be a
-    # duplicate key and the second would silently win.
-    workflow_lines: list[str] = []
-    if "workflow.dispatch_rules" in values:
-        workflow_lines.append(f"  dispatch_rules: {_scalar(values['workflow.dispatch_rules'])}")
-    auto_drive_lines: list[str] = []
-    for key in ("max_parallel", "supervise_merges"):
-        dotted_key = f"workflow.auto_drive.{key}"
-        if dotted_key in values:
-            auto_drive_lines.append(f"    {key}: {_scalar(values[dotted_key])}")
-    if auto_drive_lines:
-        workflow_lines.append("  auto_drive:")
-        workflow_lines.extend(auto_drive_lines)
-    if workflow_lines:
-        lines.append("workflow:")
-        lines.extend(workflow_lines)
+    # The workflow settings live in the file this pointer names, not here.
+    if "workflow_config" in values:
+        lines.append(f"workflow_config: {_scalar(values['workflow_config'])}")
 
     repo_paths = {
         key: value for key, value in values.items() if key.startswith("repositories.") and key.endswith(".path")
@@ -602,7 +590,17 @@ def validate_manifest(layout: WorkspaceLayout) -> None:
         raise ConversionRefused(f"dispatch configuration: {exc}") from exc
 
 
-def create_control_plane(layout: WorkspaceLayout) -> list[Path]:
+def _carried_workflow(conversion: Conversion) -> dict[str, object]:
+    """The `workflow.auto_drive.*` values the conversion carries, keyed by leaf."""
+    prefix = "workflow.auto_drive."
+    return {
+        d.target_key[len(prefix) :]: d.value
+        for d in conversion.dispositions
+        if d.target_key is not None and d.target_key.startswith(prefix)
+    }
+
+
+def create_control_plane(layout: WorkspaceLayout, workflow: Mapping[str, object] | None = None) -> list[Path]:
     """The four directories and the gitignore anchor. Returns what it created.
 
     **Deliberately not `init.apply_init`.** That also runs `plan_scaffold` and
@@ -635,9 +633,26 @@ def create_control_plane(layout: WorkspaceLayout) -> list[Path]:
                 handle.write(missing)
             created.append(path)
     shared = layout.root / "dispatch.yaml"
+    carried = dict(workflow or {})
+    if carried and shared.exists():
+        authored = YAML(typ="safe").load(shared.read_text(encoding="utf-8"))
+        block = authored.get("workflow") if isinstance(authored, dict) else None
+        auto_drive = block.get("auto_drive") if isinstance(block, dict) else None
+        auto_drive = auto_drive if isinstance(auto_drive, dict) else {}
+        missing_keys = [key for key, value in carried.items() if auto_drive.get(key) != value]
+        if missing_keys:
+            raise ConversionRefused(
+                f"{shared}: exists; add {', '.join(missing_keys)} under its workflow: block by hand"
+            )
     if not shared.exists():
+        workflow_text = ""
+        if carried:
+            workflow_text = "workflow:\n  auto_drive:\n" + "".join(
+                f"    {key}: {_scalar(value)}\n" for key, value in carried.items()
+            )
         shared.write_text(
-            "pipeline:\n  rules:\n  - match: {stage: finish}\n    prompt_tail: " + json.dumps(RELAY_TAIL_SEED) + "\n",
+            workflow_text
+            + "pipeline:\n  rules:\n  - match: {stage: finish}\n    prompt_tail: " + json.dumps(RELAY_TAIL_SEED) + "\n",
             encoding="utf-8",
             newline="",
         )
@@ -779,17 +794,19 @@ def convert(
         manifest_path.write_text(conversion.manifest_text, encoding="utf-8", newline="")
         created_manifest = True
 
-    # Act 5 -- four readers. A failure unlinks a manifest *this run* created and
-    # leaves one it did not: an unconvertible pre-existing file is the operator's
-    # to look at, not this script's to delete.
+    # Act 6 runs before act 5: readers 2 and 4 read the workflow file the
+    # manifest points at, so `dispatch.yaml` must already exist. A failure in
+    # either unlinks a manifest *this run* created and leaves one it did not:
+    # an unconvertible pre-existing file is the operator's to look at, not this
+    # script's to delete.
     try:
-        validate_manifest(layout)
+        created = tuple(create_control_plane(layout, _carried_workflow(conversion)))  # act 6
+        validate_manifest(layout)  # act 5 -- four readers
     except ConversionRefused:
         if created_manifest:
             manifest_path.unlink(missing_ok=True)
         raise
 
-    created = tuple(create_control_plane(layout))  # act 6
     projection = sync_projection(layout, gw=gw) if sync else None  # act 7
 
     return conversion, Applied(

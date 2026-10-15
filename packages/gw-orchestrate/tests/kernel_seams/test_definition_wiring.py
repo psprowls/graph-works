@@ -60,7 +60,7 @@ ENTER_AT_PLAN = [
 
 
 def _set_shared_path(layout, rules) -> None:
-    shared = layout.root / "dispatch.yaml"
+    shared = layout.root / "workflow.yaml"
     yaml = YAML(typ="safe")
     data = yaml.load(shared.read_text(encoding="utf-8"))
     data.setdefault("pipeline", {})["path"] = rules
@@ -70,7 +70,7 @@ def _set_shared_path(layout, rules) -> None:
 
 
 def _break_local(layout) -> None:
-    (layout.root / "dispatch.local.yaml").write_text(
+    (layout.root / "workflow.local.yaml").write_text(
         "pipeline:\n  path:\n    - match: {stage: design}\n      stages: [finish]\n", encoding="utf-8", newline=""
     )
 
@@ -100,7 +100,7 @@ def test_malformed_path_blocks_advance_and_writes_nothing(tmp_path: Path) -> Non
     repo = _init_git(layout.root.parent)
     _break_local(layout)
     before = {p: p.read_bytes() for p in layout.bundle_dir.rglob("*") if p.is_file()}
-    with pytest.raises(WorkspaceError, match=r"dispatch\.local\.yaml"):
+    with pytest.raises(WorkspaceError, match=r"workflow\.local\.yaml"):
         run_stage_advance(
             layout, FEATURE, today=TODAY, expected_phase="design", cwd=repo, infer_worktree=False, dry_run=False
         )
@@ -114,11 +114,11 @@ def test_advance_without_dispatch_rules_names_the_manifest(tmp_path: Path) -> No
     repo = _init_git(layout.root.parent)
     yaml = YAML(typ="safe")
     data = yaml.load(layout.manifest_path.read_text(encoding="utf-8"))
-    del data["workflow"]["dispatch_rules"]
+    del data["workflow_config"]
     buffer = io.StringIO()
     yaml.dump(data, buffer)
     layout.manifest_path.write_text(buffer.getvalue(), encoding="utf-8", newline="")
-    with pytest.raises(WorkspaceError, match=r"workflow\.dispatch_rules") as raised:
+    with pytest.raises(WorkspaceError, match=r"workflow_config") as raised:
         run_stage_advance(
             layout, FEATURE, today=TODAY, expected_phase="design", cwd=repo, infer_worktree=False, dry_run=True
         )
@@ -130,8 +130,8 @@ def test_advance_without_the_shared_dispatch_file_refuses(tmp_path: Path) -> Non
     _write(layout, FEATURE)
     _spec(layout, FEATURE)
     repo = _init_git(layout.root.parent)
-    (layout.root / "dispatch.yaml").unlink()
-    with pytest.raises(WorkspaceError, match=r"dispatch\.yaml"):
+    (layout.root / "workflow.yaml").unlink()
+    with pytest.raises(WorkspaceError, match=r"workflow\.yaml"):
         run_stage_advance(
             layout, FEATURE, today=TODAY, expected_phase="design", cwd=repo, infer_worktree=False, dry_run=True
         )
@@ -179,7 +179,7 @@ def test_malformed_path_blocks_placement_shells_without_writes(tmp_path: Path, s
     _break_local(layout)
     page = layout.bundle_dir / f"{FEATURE}.md"
     before = page.read_bytes()
-    with pytest.raises(WorkspaceError, match=r"dispatch\.local\.yaml"):
+    with pytest.raises(WorkspaceError, match=r"workflow\.local\.yaml"):
         if shell == "reader":
             placement.run_record_reader(
                 layout,
@@ -221,7 +221,7 @@ def test_malformed_path_refuses_orchestrate(tmp_path: Path) -> None:
     layout = _layout(tmp_path)
     _write(layout, FEATURE)
     _break_local(layout)
-    with pytest.raises(WorkspaceError, match=r"dispatch\.local\.yaml"):
+    with pytest.raises(WorkspaceError, match=r"workflow\.local\.yaml"):
         run_orchestrate(layout, FEATURE)
 
 

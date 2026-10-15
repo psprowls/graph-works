@@ -1194,7 +1194,9 @@ def test_invalid_commit_config_precedes_orchestration_effects(tmp_path: Path, ve
 
     layout = _vault(tmp_path)
     _write(layout, SOLO, type="Feature", phase="design", work_status="open")
-    layout.local_manifest_path.write_text("workflow:\n  workspace_commits: invalid\n", encoding="utf-8", newline="\n")
+    (layout.root / "workflow.local.yaml").write_text(
+        "workflow:\n  workspace_commits: invalid\n", encoding="utf-8", newline="\n"
+    )
     before = {p.relative_to(layout.root): p.read_bytes() for p in layout.root.rglob("*") if p.is_file()}
 
     def invoke():

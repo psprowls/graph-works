@@ -12,15 +12,18 @@ manifest alone" is a plan you edit, not a flag you pass.
 1. Directories — `root`, `.gw/` (the config dir), `.gw/cache/`, `okf/`,
    `.gw/worktrees/`.
 2. `<config_dir>/.gitignore` — the gitignored members — and `<root>/.gitignore`,
-   which ignores `workspace.local.yaml`, `/dispatch.local.yaml` and the repositories
+   which ignores `workspace.local.yaml`, the workflow file's `.local` sibling
+   (`/workflow.local.yaml` for a new workspace) and the repositories
    lane's clone directories (`/<bundle_dir>/repositories/*/references/git/`), the
    local layers that must never be committed. Both are self-contained inside the workspace; the repo's
    own root `.gitignore` is never edited.
    `<bundle_dir>/.obsidian/app.json` — the repositories lane's clone filter merged into
    `userIgnoreFilters`; an unusable file is a notice, never a refusal.
-3. `<root>/workspace.yaml` — created when absent; only a missing dispatch reference
-   is inserted in authored manifests. `<root>/dispatch.yaml` seeds the branch
-   relay tail when absent. Existing dispatch documents are validated and preserved. Carries
+3. `<root>/workspace.yaml` — created when absent; only a missing `workflow_config`
+   pointer is inserted in authored manifests, and a manifest carrying a legacy
+   `workflow.*` key is refused. The file the pointer names (`workflow.yaml` for a new
+   workspace) seeds the branch relay tail when absent; an existing one is validated
+   and preserved. Carries
    the `repositories:`/`ignore:` blocks alongside the four layout overrides
    and provenance -- the workspace's one configuration surface.
 4. `<root>/AGENTS.md` via `render_context_file` over the file's existing
@@ -86,6 +89,11 @@ from gw_kernel.workspace.layout import (
 from gw_kernel.workspace.manifest import defaults, read, render_initial, workspace_store
 from gw_kernel.workspace.pipeline import RELAY_TAIL_SEED
 from gw_kernel.workspace.work_schemas import seed_provenance
+from gw_kernel.workspace.workflow_file import (
+    DEFAULT_WORKFLOW_FILE,
+    WORKFLOW_CONFIG_KEY,
+    check_legacy_workflow_keys,
+)
 
 GITIGNORE_FILENAME = ".gitignore"
 AGENTS_FILENAME = "AGENTS.md"
@@ -104,8 +112,9 @@ SEED_DISPATCH: Mapping[str, object] = {
 
 #: Authored YAML with a commented path/artifacts example, written verbatim.
 SEED_DISPATCH_TEXT = (
-    "# Dispatch rules, pipeline path and stage artifacts for this workspace.\n"
+    "# Workflow configuration for this workspace: dispatch rules, pipeline path and stage artifacts.\n"
     "# Guide: packages/gw-kernel/docs/dispatch-rules.md in the graph-works repository.\n"
+    "# Operational settings (auto_drive, gate, workspace_commits) go under a top-level workflow: block.\n"
     "pipeline:\n"
     "  rules:\n"
     "    # The branch relay: a finish worker relays the integration decision to its coordinator.\n"
@@ -340,12 +349,14 @@ def _lane_gitignore_entry(layout: WorkspaceLayout) -> tuple[str | None, tuple[st
 
 
 def _root_gitignore_write(layout: WorkspaceLayout, extra: tuple[str, ...] = ()) -> PlannedWrite | None:
-    """Append only missing local-file ignores, plus *extra* (the lane clone line), inside this workspace.
+    """Append only missing local-file ignores, plus *extra*, inside this workspace.
+
+    *extra* carries the workflow file's `.local` line and the lane clone line.
 
     One write for the file: two `create` writes to one absent path would have the second overwrite the first.
     """
     path = layout.root / GITIGNORE_FILENAME
-    entries = (LOCAL_MANIFEST_FILENAME, "/dispatch.local.yaml", *extra)
+    entries = (LOCAL_MANIFEST_FILENAME, *extra)
     existing = path.read_bytes().decode("utf-8") if path.exists() else None
     present = set(existing.splitlines()) if existing is not None else set()
     missing = "".join(f"{entry}\n" for entry in entries if entry not in present)
@@ -393,74 +404,68 @@ def _obsidian_exclusion_write(layout: WorkspaceLayout) -> tuple[PlannedWrite | N
     return PlannedWrite(label, path, json.dumps(data, indent=2, ensure_ascii=False) + "\n", "create"), ()
 
 
-def _insert_dispatch_reference(text: str) -> str:
-    """Insert one YAML member using source marks; preserve every authored byte."""
+def _insert_workflow_pointer(text: str) -> str:
+    """Insert `workflow_config: workflow.yaml` at the top level using source marks; preserve every authored byte."""
     reader = YAML(typ="safe")
     root = reader.compose(text)
     if not isinstance(root, MappingNode):
         raise WorkspaceError("workspace.yaml must hold a mapping")
     newline = "\r\n" if "\r\n" in text else "\n"
-    workflow = next((value for key, value in root.value if key.value == "workflow"), None)
-    node = workflow if workflow is not None else root
-    if not isinstance(node, MappingNode):
-        raise WorkspaceError("workspace.yaml: workflow must be a mapping")
-    member = "dispatch_rules: dispatch.yaml" if workflow is not None else "workflow: {dispatch_rules: dispatch.yaml}"
-    if node.flow_style:
-        index = node.end_mark.index - 1
+    member = f"{WORKFLOW_CONFIG_KEY}: {DEFAULT_WORKFLOW_FILE}"
+    if root.flow_style:
+        index = root.end_mark.index - 1
         # Composed alias nodes point back to their anchor, so their source
         # marks cannot identify the final value or separator in this mapping.
         preceding = [token for token in reader.scan(text) if token.start_mark.index < index]
         trailing_comma = isinstance(preceding[-1], FlowEntryToken)
-        insertion = (" " if trailing_comma else ", " if node.value else "") + member
-    elif workflow is not None:
-        index = node.start_mark.index - node.start_mark.column
-        insertion = " " * node.start_mark.column + member + newline
+        insertion = (" " if trailing_comma else ", " if root.value else "") + member
     else:
-        index = node.end_mark.index
+        index = root.end_mark.index
         insertion = (newline if index and text[index - 1] != "\n" else "") + member + newline
     return text[:index] + insertion + text[index:]
 
 
-def _dispatch_init_writes(
+def _workflow_init_writes(
     layout: WorkspaceLayout, manifest_text: str | None
-) -> tuple[list[PlannedWrite], Mapping[Path, Fingerprint | None], tuple[str, ...]]:
+) -> tuple[list[PlannedWrite], Mapping[Path, Fingerprint | None], str | None, tuple[str, ...]]:
+    """The manifest pointer, the workflow-file seed, and the root `.gitignore` line for its `.local` sibling."""
     store = workspace_store(layout)
     base = YAML(typ="safe").load(manifest_text) if manifest_text is not None else store.read_base_explicit()
     overlay = store.read_overlay_explicit()
-    combined = dotted.merge(base, overlay)
+    check_legacy_workflow_keys(
+        manifest_path=layout.manifest_path,
+        base=base,
+        local_manifest_path=layout.local_manifest_path,
+        overlay=overlay,
+    )
     writes: list[PlannedWrite] = []
-    if not dotted.has(combined, "workflow.dispatch_rules"):
+    if not dotted.has(dotted.merge(base, overlay), WORKFLOW_CONFIG_KEY):
         # Retired-key validation is still performed on both raw layers below.
         text = manifest_text if manifest_text is not None else layout.manifest_path.read_bytes().decode("utf-8")
-        updated = _insert_dispatch_reference(text)
+        updated = _insert_workflow_pointer(text)
         prospective = YAML(typ="safe").load(updated)
-        current_workflow = base.get("workflow", {})
-        if not isinstance(current_workflow, Mapping):
-            raise WorkspaceError(f"{layout.manifest_path}: workflow must be a mapping")
-        expected = {**base, "workflow": {**current_workflow, "dispatch_rules": "dispatch.yaml"}}
-        if prospective != expected:
+        if prospective != {**base, WORKFLOW_CONFIG_KEY: DEFAULT_WORKFLOW_FILE}:
             raise WorkspaceError(
-                f"{layout.manifest_path}: cannot insert dispatch reference without changing authored settings; "
-                "add workflow.dispatch_rules explicitly"
+                f"{layout.manifest_path}: cannot insert workflow_config without changing authored settings; "
+                f"add workflow_config: {DEFAULT_WORKFLOW_FILE} explicitly"
             )
         base = prospective
         writes.append(PlannedWrite(MANIFEST_FILENAME, layout.manifest_path, updated, "create"))
     elif manifest_text is not None:
         writes.append(PlannedWrite(MANIFEST_FILENAME, layout.manifest_path, manifest_text, "create"))
-    seed = dict(SEED_DISPATCH)
-    config = load_prospective_dispatch_config(layout, base=base, overlay=overlay, seed=seed)
+    config = load_prospective_dispatch_config(layout, base=base, overlay=overlay, seed=dict(SEED_DISPATCH))
     if config.source_fingerprints[config.shared_path] is None:
         label = os.path.relpath(config.shared_path, layout.root)
         writes.append(PlannedWrite(label, config.shared_path, SEED_DISPATCH_TEXT, "create"))
-    notices = (
-        ()
-        if config.local_path == layout.root / "dispatch.local.yaml"
-        else (
+    try:
+        relative = config.local_path.resolve().relative_to(layout.root.resolve())
+    except ValueError:
+        notice = (
             f"! Local dispatch path: {config.local_path}; add /{config.local_path.name} "
-            f"to {config.local_path.parent / '.gitignore'} (not edited).",
+            f"to {config.local_path.parent / '.gitignore'} (not edited)."
         )
-    )
-    return writes, config.source_fingerprints, notices
+        return writes, config.source_fingerprints, None, (notice,)
+    return writes, config.source_fingerprints, "/" + relative.as_posix(), ()
 
 
 def _workspace_relative(target: Path, root: Path) -> str:
@@ -581,17 +586,6 @@ def plan_init(
         repo_root=repo_root if repo_root is not None else find_repo_root(root),
     )
 
-    writes: list[PlannedWrite] = []
-    gitignore = _gitignore_write(layout)
-    if gitignore is not None:
-        writes.append(gitignore)
-    lane_entry, lane_notices = _lane_gitignore_entry(layout)
-    root_gitignore = _root_gitignore_write(layout, () if lane_entry is None else (lane_entry,))
-    if root_gitignore is not None:
-        writes.append(root_gitignore)
-    obsidian_write, obsidian_notices = _obsidian_exclusion_write(layout)
-    if obsidian_write is not None:
-        writes.append(obsidian_write)
     manifest_text = None
     if not layout.manifest_path.exists():
         repositories: dict[str, str] = {}
@@ -600,9 +594,22 @@ def plan_init(
         manifest_text = render_initial(
             today=today, topic=topic, repositories=repositories, ignore=layout.scanner_excludes
         )
-    dispatch_writes, dispatch_inputs, dispatch_notices = _dispatch_init_writes(layout, manifest_text)
-    notices = (*lane_notices, *obsidian_notices, *dispatch_notices)
-    writes.extend(dispatch_writes)
+    workflow_writes, workflow_inputs, local_entry, workflow_notices = _workflow_init_writes(layout, manifest_text)
+
+    writes: list[PlannedWrite] = []
+    gitignore = _gitignore_write(layout)
+    if gitignore is not None:
+        writes.append(gitignore)
+    lane_entry, lane_notices = _lane_gitignore_entry(layout)
+    extra = tuple(entry for entry in (local_entry, lane_entry) if entry is not None)
+    root_gitignore = _root_gitignore_write(layout, extra)
+    if root_gitignore is not None:
+        writes.append(root_gitignore)
+    obsidian_write, obsidian_notices = _obsidian_exclusion_write(layout)
+    if obsidian_write is not None:
+        writes.append(obsidian_write)
+    notices = (*lane_notices, *obsidian_notices, *workflow_notices)
+    writes.extend(workflow_writes)
     writes.extend(
         _context_writes(
             layout,
@@ -612,7 +619,7 @@ def plan_init(
     )
     writes.extend(_stale_bundle_context_deletes(layout))
     check_dispatch_inputs(manifest_inputs)
-    check_dispatch_inputs(dispatch_inputs)
+    check_dispatch_inputs(workflow_inputs)
 
     return WorkspacePlan(
         layout=layout,
@@ -632,7 +639,7 @@ def plan_init(
         installers=tuple(installers),
         source_fingerprints={
             **{write.path: source_fingerprint(write.path) for write in writes if write.mode != "delete"},
-            **dispatch_inputs,
+            **workflow_inputs,
         },
         notices=notices,
     )

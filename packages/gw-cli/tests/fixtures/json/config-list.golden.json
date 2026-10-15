@@ -202,14 +202,14 @@
     "shadowed": null
   },
   {
-    "key": "workflow.dispatch_rules",
-    "value": "dispatch.yaml",
+    "key": "workflow_config",
+    "value": "workflow.yaml",
     "origin": "manifest",
     "entry": {
-      "key": "workflow.dispatch_rules",
+      "key": "workflow_config",
       "type": "str",
       "default": null,
-      "description": "Shared dispatch-rules document, resolved relative to the workspace root.",
+      "description": "The workflow file (its workflow: and pipeline: sections), resolved relative to the workspace root. Its machine-local overlay is the <stem>.local<suffix> sibling.",
       "kind": "manifest",
       "env_var": null,
       "allowed": [],
@@ -299,7 +299,7 @@
       "key": "workflow.gate.max_concurrent",
       "type": "int",
       "default": null,
-      "description": "How many `gw work gate` runs may execute at once on this machine; unset is unlimited. Set per machine in workspace.local.yaml.",
+      "description": "How many `gw work gate` runs may execute at once on this machine; unset is unlimited. Set per machine in the workflow file's .local sibling.",
       "kind": "manifest",
       "env_var": null,
       "allowed": [],

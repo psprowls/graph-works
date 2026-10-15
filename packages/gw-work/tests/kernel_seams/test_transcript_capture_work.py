@@ -166,9 +166,11 @@ def test_partial_copy_cannot_enter_same_item_commit(
 def test_invalid_commit_config_is_fail_open_before_copy_effects(tmp_path: Path) -> None:
     layout, path = _committed_workspace(tmp_path)
     original = (layout.bundle_dir / f"{path}.md").read_bytes()
-    manifest = layout.manifest_path.read_text(encoding="utf-8")
-    layout.manifest_path.write_text(
-        manifest.replace("workflow:\n", "workflow:\n  workspace_commits: invalid\n"), encoding="utf-8", newline="\n"
+    workflow_file = layout.root / "workflow.yaml"
+    workflow_file.write_text(
+        "workflow:\n  workspace_commits: invalid\n" + workflow_file.read_text(encoding="utf-8"),
+        encoding="utf-8",
+        newline="\n",
     )
     transcript = tmp_path / "session.jsonl"
     transcript.write_bytes(b"complete\n")

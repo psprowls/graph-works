@@ -1,7 +1,8 @@
 # Dispatch configuration and worker preferences
 
-The manifest's `workflow.dispatch_rules` names a shared YAML document. Its
-optional `.local` sibling appends rules after shared rules. Core owns resolution;
+The manifest's `workflow_config` names the workflow file, a shared YAML document
+holding `workflow:` (including the auto-drive limits in `workflow.auto_drive`) and
+`pipeline:`. Its optional `.local` sibling overlays it and appends rules after shared rules. Core owns resolution;
 auto-drive consumes `gw work orchestrate --json` fields and provenance directly.
 See the repository's [complete dispatch guide](../../../../../packages/gw-kernel/docs/dispatch-rules.md)
 for attribute vocabulary, YAML examples, init/ignore behavior and manual cutover.

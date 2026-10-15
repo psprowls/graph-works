@@ -68,20 +68,15 @@ def item(workspace, stage):
 
 def rules(workspace):
     manifest = workspace / "workspace.yaml"
-    manifest.write_text(
-        manifest.read_text().replace(
-            "workflow:", "workflow:\n  auto_drive: {max_parallel: 3, supervise_merges: false}"
-        ),
-        encoding="utf-8",
-    )
     with manifest.open("a", encoding="utf-8", newline="") as stream:
         stream.write("\nroles: {research: {model_id: preserved-model}}\ncustom: {keep: true}\n")
-    (workspace / "dispatch.yaml").write_text(
+    (workspace / "workflow.yaml").write_text(
+        "workflow:\n  auto_drive: {max_parallel: 3, supervise_merges: false}\n"
         "pipeline:\n  rules:\n  - name: shared-model\n    match: {}\n"
         "    agent: claude\n    model: provider model/id\n    reasoning_effort: high\n",
         encoding="utf-8",
     )
-    (workspace / "dispatch.local.yaml").write_text(
+    (workspace / "workflow.local.yaml").write_text(
         "pipeline:\n  rules:\n  - name: local-execute\n    match: {stage: execute}\n    agent: codex\n",
         encoding="utf-8",
     )
@@ -122,7 +117,7 @@ def test_synced_workspace_cli_profile_reaches_orca_and_durable_receipt(workspace
     rules(workspace)
     path = item(workspace, stage)
     authored = {
-        name: (workspace / name).read_bytes() for name in ("workspace.yaml", "dispatch.yaml", "dispatch.local.yaml")
+        name: (workspace / name).read_bytes() for name in ("workspace.yaml", "workflow.yaml", "workflow.local.yaml")
     }
     sync = invoke(workspace, "config", "sync")
     assert sync.exit_code == 0, sync.output
@@ -221,7 +216,7 @@ def test_synced_workspace_cli_profile_reaches_orca_and_durable_receipt(workspace
 def test_local_effort_after_agent_switch_blocks_before_any_task(workspace):
     rules(workspace)
     path = item(workspace, "execute")
-    with (workspace / "dispatch.local.yaml").open("a", encoding="utf-8", newline="") as stream:
+    with (workspace / "workflow.local.yaml").open("a", encoding="utf-8", newline="") as stream:
         stream.write("    reasoning_effort: high\n")
     result = invoke(workspace, "work", "orchestrate", path)
     plan = json.loads(result.stdout)
@@ -236,7 +231,7 @@ def test_local_effort_after_agent_switch_blocks_before_any_task(workspace):
 
 def test_legacy_shared_keys_hidden_by_local_nulls_fail_with_shared_filename(workspace):
     manifest = workspace / "workspace.yaml"
-    text = manifest.read_text().replace("workflow:", "workflow:\n  pipeline: {}")
+    text = manifest.read_text() + "workflow:\n  pipeline: {}\n"
     manifest.write_text(text, encoding="utf-8")
     (workspace / "workspace.local.yaml").write_text("workflow: {pipeline: null}\n", encoding="utf-8")
     before = manifest.read_bytes()

@@ -7,17 +7,24 @@ One resolved profile selects the skill, interaction mode, prompt tail, agent, mo
 ```yaml
 # workspace.yaml
 version: 1
+workflow_config: workflow.yaml
+```
+
+`workspace.yaml` holds a top-level `workflow_config` naming the workflow file. A new workspace names `workflow.yaml`; an existing workspace may keep `dispatch.yaml`. The pointer is settable in either manifest layer (`workspace.local.yaml` wins). A relative path resolves against the directory `workspace.yaml` was read from; an absolute or `~`-prefixed path is used as given. The selected shared file must exist and contain a YAML mapping. Its optional local overlay is the `<stem>.local<suffix>` sibling: `workflow.local.yaml` or, for `team/rules.yml`, `team/rules.local.yml`. A missing local file adds nothing; an empty, unreadable, or malformed existing file is an error.
+
+The workflow file holds exactly two top-level sections, and an unknown key in either is refused naming the file and key.
+
+- `workflow:` carries `auto_drive.max_parallel`, `auto_drive.max_attend`, `auto_drive.supervise_merges`, `gate.unit_jobs`, `gate.max_concurrent` and `workspace_commits`. In the local overlay it deep-merges over the shared file (local wins).
+- `pipeline:` carries the dispatch rules, path and artifacts described below. In the local overlay `rules` and `path` append after the shared file's, `artifacts` replace per stage, and `attributes` replace wholesale.
+
+`gw config get|set|unset|list` keep the same `workflow.*` key names. `set` and `unset` write the workflow file (with `--local`, its `.local` sibling), and `gw config` reports the origins `workflow` and `workflow-local`. Reading a `workflow.*` value parses both workflow-file layers and validates only the top-level keys and the `workflow:` block, never `pipeline:`. A manifest with no `workflow_config`, or a pointer to a missing shared file, fails every `workflow.*` read and every dispatch read with a message that says to run `gw bootstrap`. A workspace with no `workspace.yaml` at all (the pre-manifest legacy layout) instead reads `workflow.*` as catalog defaults.
+
+```yaml
+# workflow.yaml
 workflow:
-  dispatch_rules: dispatch.yaml
   auto_drive:
     max_parallel: 6
     supervise_merges: true
-```
-
-The shared/local manifest read seam selects `workflow.dispatch_rules`. The nonblank path is relative to the workspace root; absolute paths are supported. The selected shared file must exist and contain a YAML mapping. Its optional local sibling inserts `.local` before the extension: `dispatch.local.yaml` or, for `team/rules.yml`, `team/rules.local.yml`. A missing local file adds nothing; an empty, unreadable, or malformed existing file is an error.
-
-```yaml
-# dispatch.yaml
 pipeline:
   attributes: [stage, type, effort, blast_radius, has_spec, has_plan, spec_stale]
   rules:
@@ -38,7 +45,7 @@ pipeline:
 ```
 
 ```yaml
-# dispatch.local.yaml
+# workflow.local.yaml
 pipeline:
   rules:
     - name: local-execution
@@ -158,7 +165,7 @@ Keys are `design`, `plan` and `execute` only. Each entry takes `file` (required)
 A layer's entry for a stage replaces the lower layer's entry for that stage outright, `required` included, so overriding only `file` on `execute` makes coverage gating. `artifacts: {}` adds nothing; `artifacts: null` is invalid.
 
 ```yaml
-# dispatch.local.yaml
+# workflow.local.yaml
 pipeline:
   artifacts:
     design: {file: spec.md}
@@ -188,7 +195,7 @@ Routing variants are retired. A `variant` key in any dispatch rule's match, or `
 
 `gw work next <path> --json` exposes `dispatch.profile` plus per-field `dispatch.provenance`. Orchestration dispatches expose the same fields and provenance. Each origin names `packaged` or the absolute filename, zero-based rule index, optional name, and reason: `set`, `explicit-null`, or `agent-change`. Human output explains agent/model/effort and resets. Attended workflow reports this profile; it does not change the current session's agent or model.
 
-Run `gw config sync --workspace /path/to/workspace` after external edits. The derived `.gw/cache/config.json` includes ordered custom rules, `dispatch.path` (the full path fold, packaged first, each rule with its `origin`), `dispatch.artifacts` (each stage's resolved `file`, `source`, `required` and `origin`), and `_meta.dispatch_inputs` fingerprints for both manifests and both dispatch files. The fingerprints already cover the `path` and `artifacts` blocks. Existence and content hashes detect optional-file creation/removal and unchanged-mtime edits. The routing hook requests a sync for missing or stale metadata; it never evaluates rules. Invalid input leaves the previous projection intact. A malformed `rules`, `path` or `artifacts` block blocks routing; it never falls back to packaged defaults. Never hand-edit the cache.
+Run `gw config sync --workspace /path/to/workspace` after external edits. The derived `.gw/cache/config.json` includes a top-level `workflow` block (the merged `workflow:` values, present when the workflow file sets any), ordered custom rules, `dispatch.path` (the full path fold, packaged first, each rule with its `origin`), `dispatch.artifacts` (each stage's resolved `file`, `source`, `required` and `origin`), and `_meta.dispatch_inputs` fingerprints for both manifests and both workflow-file layers. The fingerprints already cover the `path` and `artifacts` blocks. Existence and content hashes detect optional-file creation/removal and unchanged-mtime edits. The routing hook requests a sync for missing or stale metadata; it never evaluates rules. Invalid input leaves the previous projection intact. A malformed `rules`, `path` or `artifacts` block blocks routing; it never falls back to packaged defaults. Never hand-edit the cache.
 
 Both Python Orca and the plugin launch recipe persist `GW_LAUNCH_V1` plus the unchanged prompt before starting a worker. The envelope freezes agent, model, reasoning effort, dispatch key, and exact placement argv. They compare explicit choices against both `launch.requested` and `launch.effective` (`effort` is the receipt field). Null preferences make no claim about provider-resolved defaults. Missing or mismatched evidence remains unverified, with task/dispatch identity retained. A successful completion needs durable proof before ack/release.
 
@@ -196,14 +203,16 @@ Retries read the original full task spec after restart, rather than resolving ed
 
 ## Initialization and explicit cutover
 
-`gw bootstrap` creates a missing reference and shared dispatch document, and adds `/dispatch.local.yaml` to the workspace root ignore. The seeded document holds the relay rule on `{stage: finish}` and, commented out, an example `path` rule and `artifacts` override. It preserves authored dispatch files and other manifest values, and is idempotent. It creates no local dispatch file unless an explicit local write requests it. Alternate locations report their local filename and required ignore entry; init does not edit another repository's ignore file. Alias/merge shapes that cannot safely accept a narrow reference insertion require an explicit edit.
+`gw bootstrap` writes `workflow_config: workflow.yaml` into a new `workspace.yaml`, creates a missing shared workflow file, and adds the root `.gitignore` line for its `.local` sibling (`/workflow.local.yaml` for a new workspace, derived from the pointer). Over an existing manifest with no `workflow_config` it inserts only the pointer line (`workflow_config: workflow.yaml`), leaving every authored byte and an existing `workflow.yaml` untouched; an existing pointer, including one naming `dispatch.yaml`, is never rewritten. The seeded workflow file holds the relay rule on `{stage: finish}` and, commented out, an example `path` rule and `artifacts` override. Bootstrap is idempotent and creates no local file unless an explicit local write requests it. Alternate locations report their local filename and required ignore entry; init does not edit another repository's ignore file. Alias/merge shapes that cannot safely accept a narrow pointer insertion require an explicit edit.
 
-Legacy keys are refused in **each explicit manifest layer**, including null or empty values hidden by an overlay. There is no translator or compatibility reader. Perform this cutover only for the workspace you intend to change:
+Legacy keys are refused in **each explicit manifest layer**, including null or empty values hidden by an overlay. `workflow.dispatch_rules` is replaced by `workflow_config`, and every other `workflow.*` key in `workspace.yaml` or `workspace.local.yaml` is refused with a message naming its new home (`workflow:` in the workflow file or its `.local` sibling). There is no translator or compatibility reader. Perform this cutover only for the workspace you intend to change:
 
-1. Save the current `workspace.yaml`, `workspace.local.yaml` (if present), `dispatch.yaml` and `dispatch.local.yaml` (if present) for review. Keep `roles.*`, repositories, `workflow.auto_drive.max_parallel`, `workflow.auto_drive.supervise_merges`, and unrelated settings.
-2. Remove these four retired keys from each manifest layer where present: `workflow.pipeline`, `workflow.auto_drive.models`, `workflow.auto_drive.overrides`, `workflow.auto_drive.permission_mode`. For example, run `gw config unset workflow.pipeline --workspace /path/to/workspace`; add `--local` for the local manifest. Repeat for each present key. The removal-only path intentionally defers projection refresh until cleanup is complete.
-3. Rewrite every dispatch rule whose match names `variant`, and drop `variant` from any `attributes` declaration, using the replacement the refusal names (the table in Retired `variant` above).
-4. Run `gw bootstrap --workspace /path/to/workspace`. This initializes a missing shared file/reference and ignore entry; it does not translate old choices. Recreate the desired rules in `dispatch.yaml` and optional `dispatch.local.yaml`, retaining a finish relay tail when using relay mode.
+Until the move in step 2 is done, every `gw` command refuses (including `gw config unset` and `gw bootstrap`), because reading the manifest rejects any layer that still holds `workflow.dispatch_rules` or a moved `workflow.*` key. Make these edits by hand. Once only the four retired keys remain, `gw config unset` works again.
+
+1. Save the current `workspace.yaml`, `workspace.local.yaml` (if present), `dispatch.yaml` and `dispatch.local.yaml` (if present) for review. Keep `roles.*`, repositories and unrelated settings.
+2. By hand, set the top-level `workflow_config` to the workflow file (`dispatch.yaml` if you keep it, otherwise `workflow.yaml`), remove `workflow.dispatch_rules`, and move every remaining `workflow.*` key (`workflow.auto_drive.max_parallel`, `max_attend`, `supervise_merges`, `workflow.gate.*`, `workflow.workspace_commits`) out of each manifest layer into the `workflow:` block of that file, or of its `.local` sibling for `workspace.local.yaml` values. Correct a misspelt `max_attended` to `max_attend` while moving it.
+3. Remove these four retired keys from each manifest layer where present: `workflow.pipeline`, `workflow.auto_drive.models`, `workflow.auto_drive.overrides`, `workflow.auto_drive.permission_mode`. Delete them by hand, or once nothing else retired remains run `gw config unset workflow.pipeline --workspace /path/to/workspace` (add `--local` for the local manifest) and repeat for each present key. The removal-only path intentionally defers projection refresh until cleanup is complete.
+4. Rewrite every dispatch rule whose match names `variant`, and drop `variant` from any `attributes` declaration, using the replacement the refusal names (the table in Retired `variant` above). Recreate the desired rules under `pipeline:` in the workflow file and optional `.local` sibling, retaining a finish relay tail when using relay mode. Run `gw bootstrap --workspace /path/to/workspace` to initialize a missing pointer, shared file and ignore entry; it does not translate old choices.
 5. Run `gw config sync --workspace /path/to/workspace`, then inspect `gw work next <path> --workspace /path/to/workspace --json` and `gw work orchestrate <path> --workspace /path/to/workspace --json` before launch.
 
 Changing source code or installing this version never performs this live configuration cutover automatically.

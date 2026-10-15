@@ -85,7 +85,7 @@ def test_the_guard_sees_the_known_entry_points() -> None:
 
 
 def _set_shared_path(layout, rules) -> None:
-    shared = layout.root / "dispatch.yaml"
+    shared = layout.root / "workflow.yaml"
     yaml = YAML(typ="safe")
     data = yaml.load(shared.read_text(encoding="utf-8"))
     data.setdefault("pipeline", {})["path"] = rules
@@ -95,7 +95,7 @@ def _set_shared_path(layout, rules) -> None:
 
 
 def _break_local(layout) -> None:
-    (layout.root / "dispatch.local.yaml").write_text(
+    (layout.root / "workflow.local.yaml").write_text(
         "pipeline:\n  path:\n    - match: {stage: design}\n      stages: [finish]\n", encoding="utf-8", newline=""
     )
 
@@ -132,7 +132,7 @@ def test_malformed_path_blocks_next_even_for_a_satisfied_gate(tmp_path: Path) ->
     _break_local(layout)
     result = work.run_next(layout, FEATURE)
     assert result.dispatch_preflight is not None
-    assert str(layout.root / "dispatch.local.yaml") in result.dispatch_preflight
+    assert str(layout.root / "workflow.local.yaml") in result.dispatch_preflight
 
 
 def test_malformed_path_is_every_queue_entrys_preflight(tmp_path: Path) -> None:
@@ -156,7 +156,7 @@ def test_explain_raises_on_a_malformed_path(tmp_path: Path) -> None:
     layout = _layout(tmp_path)
     _write(layout, FEATURE)
     _break_local(layout)
-    with pytest.raises(WorkspaceError, match=r"dispatch\.local\.yaml"):
+    with pytest.raises(WorkspaceError, match=r"workflow\.local\.yaml"):
         work.run_dispatch_explain(layout, FEATURE)
 
 
@@ -176,7 +176,7 @@ def test_malformed_path_blocks_a_parent_completion_without_dispatch(tmp_path: Pa
     result = work.run_next(layout, parent)
     assert result.route.dispatch is None
     assert result.route.on_complete is not None
-    assert str(layout.root / "dispatch.local.yaml") in result.dispatch_preflight
+    assert str(layout.root / "workflow.local.yaml") in result.dispatch_preflight
     (entry,) = work.run_work_queue(layout)
     assert entry.item.path == parent
     assert entry.result.dispatch_preflight == result.dispatch_preflight
@@ -197,15 +197,15 @@ def test_missing_manifest_dispatch_reference_has_a_recovery_hint(tmp_path: Path)
     _write(layout, FEATURE)
     yaml = YAML(typ="safe")
     data = yaml.load(layout.manifest_path.read_text(encoding="utf-8"))
-    del data["workflow"]["dispatch_rules"]
+    del data["workflow_config"]
     buffer = io.StringIO()
     yaml.dump(data, buffer)
     layout.manifest_path.write_text(buffer.getvalue(), encoding="utf-8", newline="")
     result = work.run_next(layout, FEATURE)
-    assert "workflow.dispatch_rules" in result.dispatch_preflight
-    assert "initialize or recreate dispatch rules" in result.dispatch_preflight
+    assert "workflow_config" in result.dispatch_preflight
+    assert "run `gw bootstrap`" in result.dispatch_preflight
     assert str(layout.manifest_path) in result.dispatch_preflight
-    with pytest.raises(WorkspaceError, match=r"workflow\.dispatch_rules"):
+    with pytest.raises(WorkspaceError, match=r"workflow_config"):
         work.run_dispatch_explain(layout, FEATURE)
 
 

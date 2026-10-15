@@ -134,7 +134,7 @@ def test_an_epic_waiting_on_children_assembles_nothing(tmp_path: Path) -> None:
 def test_a_dispatch_preflight_assembles_nothing(tmp_path: Path) -> None:
     layout = _layout(tmp_path)
     _write(layout, "work/feature-a", phase="plan")
-    (layout.root / "dispatch.yaml").write_text(
+    (layout.root / "workflow.yaml").write_text(
         "version: 1\npipeline:\n  rules:\n  - match: {}\n    colour: red\n", encoding="utf-8", newline="\n"
     )
     result = work.run_next(layout, "work/feature-a", guidance=GuidanceRequest("auto"))

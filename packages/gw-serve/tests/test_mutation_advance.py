@@ -231,7 +231,7 @@ def test_multi_repository_public_lifecycle(tmp_path: Path, monkeypatch: pytest.M
         git(repo, "commit", "--allow-empty", "-m", "base")
         repos[name] = repo
     layout.manifest_path.write_text(
-        "version: 1\nworkflow: {dispatch_rules: dispatch.yaml}\nrepositories:\n"
+        "version: 1\nworkflow_config: workflow.yaml\nrepositories:\n"
         + "".join(f"  {n}: {{path: {p}}}\n" for n, p in repos.items()),
         encoding="utf-8",
     )

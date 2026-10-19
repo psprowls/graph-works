@@ -29,6 +29,10 @@ def _set_resolution(attrs_json: str | None, resolution: str) -> str:
     return json.dumps(attrs, sort_keys=True)
 
 
+def _has_dot_segment(specifier: str) -> bool:
+    return any(part in {".", ".."} for part in specifier.replace("\\", "/").split("/"))
+
+
 def resolve_file_imports(conn: sqlite3.Connection, repo_root: Path) -> None:
     """Resolve `imports` edges from raw-specifier stub nodes; drop unresolvable ones.
 
@@ -100,10 +104,13 @@ def resolve_file_imports(conn: sqlite3.Connection, repo_root: Path) -> None:
         # share the name == path shape of real files — so probe the working tree.
         # If `specifier` is an actual file under repo_root it is NOT a stub: leave
         # its node and edges untouched (and out of stub_ids, so cleanup spares it).
-        if not Path(specifier).is_absolute() and (repo_root / specifier).is_file():
+        if not Path(specifier).is_absolute() and not _has_dot_segment(specifier) and (repo_root / specifier).is_file():
             # An ABSOLUTE specifier would make `repo_root / specifier` discard
             # repo_root (pathlib) and probe the host path — never treat that as a
             # repo file; let it fall through to resolution (and get dropped).
+            # A `.`/`..` segment marks a relative specifier: a real node's path is
+            # always normalised, and a root-level `./x` would otherwise pass this
+            # probe and survive as a stub with a dotted path.
             continue
         stub_ids.add(stub_id)
         importing_file = repo_root / importing_path

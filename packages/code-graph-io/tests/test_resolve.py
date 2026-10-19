@@ -607,6 +607,31 @@ def test_resolve_file_imports_absolute_specifier_not_spared(conn: sqlite3.Connec
     assert conn.execute("SELECT COUNT(*) FROM nodes WHERE path=?", (str(abs_target),)).fetchone()[0] == 0
 
 
+def test_resolve_file_imports_root_dot_specifier_not_spared(conn: sqlite3.Connection, tmp_path: Path) -> None:
+    """A root-level importer's `./x` specifier also exists as `repo_root / './x'`, so it
+    must not be mistaken for a real file node: the stub would survive with a dotted
+    path that no File page can be placed at. It resolves like any relative import."""
+    (tmp_path / "scripts" / "lib").mkdir(parents=True)
+    (tmp_path / "scripts" / "lib" / "build-defines.mjs").write_text("export const x = 1\n")
+    (tmp_path / "vite.config.ts").write_text("import { x } from './scripts/lib/build-defines.mjs'\n")
+    _seed_file_import(
+        conn,
+        importing_path="vite.config.ts",
+        specifier="./scripts/lib/build-defines.mjs",
+        target_path="scripts/lib/build-defines.mjs",
+    )
+
+    resolve.resolve_file_imports(conn, tmp_path)
+
+    rows = conn.execute(
+        "SELECT d.path, e.attrs_json FROM edges e JOIN nodes d ON e.dst=d.id WHERE e.kind='imports'"
+    ).fetchall()
+    assert len(rows) == 1
+    assert rows[0][0] == "scripts/lib/build-defines.mjs"
+    assert json.loads(rows[0][1])["resolution"] == "exact"
+    assert conn.execute("SELECT COUNT(*) FROM nodes WHERE path LIKE './%'").fetchone()[0] == 0
+
+
 def test_resolve_file_imports_ambiguous(conn: sqlite3.Connection, tmp_path: Path) -> None:
     """If the resolved repo-relative path has >1 real file-node row, fan out as
     ambiguous (do not drop the edge)."""

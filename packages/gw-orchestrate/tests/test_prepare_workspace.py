@@ -209,10 +209,45 @@ def test_failed_git_add_with_no_effect_is_unchanged(ws, monkeypatch):
     from gw_kernel.workspace.provenance import GitOutcome
     from gw_orchestrate import workspace_prepare as prepare
 
-    monkeypatch.setattr(prepare, "probe_git", lambda *a: GitOutcome(1, "", "error", "rejected"))
+    monkeypatch.setattr(prepare, "probe_git", lambda *a, **kw: GitOutcome(1, "", "error", "rejected"))
     result = run_prepare_workspace(ws, EPIC, today=TODAY, apply=True)
     assert result.refusal == "workspace-unprovable" and not result.applied
     assert not (ws.worktrees_dir / "workspace").exists()
+
+
+def test_timed_out_git_add_names_the_timeout_and_the_repair(ws, monkeypatch):
+    from gw_kernel.workspace.provenance import GitOutcome
+    from gw_orchestrate import workspace_prepare as prepare
+
+    probe = prepare.probe_git
+
+    def time_out_after_effect(repo, *args, **kw):
+        if args[:2] == ("worktree", "add"):
+            git(repo, "branch", args[3])
+            return GitOutcome(None, "", "timeout")
+        return probe(repo, *args, **kw)
+
+    monkeypatch.setattr(prepare, "probe_git", time_out_after_effect)
+    result = run_prepare_workspace(ws, EPIC, today=TODAY, apply=True)
+    assert result.refusal == "workspace-unprovable" and result.applied
+    assert "timed out after 1800s" in result.detail
+    assert "git worktree remove --force" in result.detail and "git branch -D" in result.detail
+
+
+def test_git_add_runs_under_the_long_worktree_timeout(ws, monkeypatch):
+    from gw_orchestrate import workspace_prepare as prepare
+
+    probe = prepare.probe_git
+    seen: list[float | None] = []
+
+    def capture(repo, *args, **kw):
+        if args[:2] == ("worktree", "add"):
+            seen.append(kw.get("timeout"))
+        return probe(repo, *args, **kw)
+
+    monkeypatch.setattr(prepare, "probe_git", capture)
+    assert run_prepare_workspace(ws, EPIC, today=TODAY, apply=True).refusal is None
+    assert seen == [1800.0]
 
 
 def test_registered_path_replaced_by_other_clean_repository_refuses(ws):
@@ -233,11 +268,11 @@ def test_failed_git_add_preserves_partial_effect_evidence(ws, monkeypatch):
 
     probe = prepare.probe_git
 
-    def fail_after_effect(repo, *args):
+    def fail_after_effect(repo, *args, **kw):
         if args[:2] == ("worktree", "add"):
             git(repo, "branch", args[3])
             return GitOutcome(1, "", "error", "partial add")
-        return probe(repo, *args)
+        return probe(repo, *args, **kw)
 
     monkeypatch.setattr(prepare, "probe_git", fail_after_effect)
     result = run_prepare_workspace(ws, EPIC, today=TODAY, apply=True)
@@ -250,8 +285,8 @@ def test_real_preparation_guard_detects_edit_during_creation(ws, monkeypatch):
     probe = prepare.probe_git
     page = ws.bundle_dir / f"{EPIC}.md"
 
-    def edit_after_create(repo, *args):
-        outcome = probe(repo, *args)
+    def edit_after_create(repo, *args, **kw):
+        outcome = probe(repo, *args, **kw)
         if args[:2] == ("worktree", "add") and outcome.returncode == 0:
             page.write_text(
                 page.read_text(encoding="utf-8").replace("phase: execute", "phase: finish"),
@@ -272,8 +307,8 @@ def test_dirty_created_checkout_is_not_stamped(ws, monkeypatch):
 
     probe = prepare.probe_git
 
-    def dirty_after_create(repo, *args):
-        outcome = probe(repo, *args)
+    def dirty_after_create(repo, *args, **kw):
+        outcome = probe(repo, *args, **kw)
         if args[:2] == ("worktree", "add") and outcome.returncode == 0:
             (Path(args[4]) / "dirty").write_text("changed", encoding="utf-8", newline="")
         return outcome

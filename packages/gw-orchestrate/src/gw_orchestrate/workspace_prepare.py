@@ -33,6 +33,9 @@ WorkspacePrepareRefusal = Literal[
     "unknown-path", "not-entitled", "workspace-unprovable", "workspace-ambiguous", "stamp-refused"
 ]
 _ITEM_PHASES = code_phases()
+#: Checking out the whole workspace tree is not an advance-path probe; matches
+#: `repositories_okf.git.LONG_TIMEOUT` for the same operation (D-002).
+_WORKTREE_ADD_TIMEOUT_SECONDS = 1800.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -246,7 +249,16 @@ def run_prepare_workspace(
             guard = preparation_guard(layout, owner.path, bundle=bundle)
             if action == "create":
                 parent_existed = Path(worktree).parent.exists()
-                added = probe_git(workspace_path, "worktree", "add", "-b", branch, worktree, base)
+                added = probe_git(
+                    workspace_path,
+                    "worktree",
+                    "add",
+                    "-b",
+                    branch,
+                    worktree,
+                    base,
+                    timeout=_WORKTREE_ADD_TIMEOUT_SECONDS,
+                )
                 if added.returncode != 0:
                     after = observe()
                     applied = (
@@ -255,14 +267,18 @@ def run_prepare_workspace(
                         or Path(worktree).exists()
                         or (not parent_existed and Path(worktree).parent.exists())
                     )
-                    return WorkspacePrepareResult(
-                        path,
-                        tuple(steps),
-                        "workspace-unprovable",
-                        f"{owner.path}: git worktree add failed: {added.stderr.strip()}",
-                        None,
-                        applied,
+                    reason = added.stderr.strip() or (
+                        f"timed out after {_WORKTREE_ADD_TIMEOUT_SECONDS:g}s"
+                        if added.cause == "timeout"
+                        else added.cause
                     )
+                    detail = f"{owner.path}: git worktree add failed: {reason}"
+                    if applied:
+                        detail += (
+                            f"; repair: git worktree unlock {worktree}; "
+                            f"git worktree remove --force {worktree}; git branch -D {branch}"
+                        )
+                    return WorkspacePrepareResult(path, tuple(steps), "workspace-unprovable", detail, None, applied)
                 applied = True
                 context = observe()
                 _, refusal, detail = _classify(owner, context, worktree, branch)

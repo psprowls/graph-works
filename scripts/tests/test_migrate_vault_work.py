@@ -357,12 +357,10 @@ def test_projected_migration_reloads_as_only_path_native_items(tmp_path: Path) -
     assert plan.ok, plan.mutation.refusals
     assert set(plan.mutation.validate_paths) == {entry.new_path for entry in plan.manifest}
     index_members = {write.member for write in plan.mutation.writes if write.member.endswith("/index.md")}
-    assert index_members >= {
-        "work/index.md",
-        "work/_archive/index.md",
-        "work/epic-parent/children/index.md",
-        "work/epic-parent/children/feature-child/children/index.md",
-    }
+    # Lane indexes are `gw work regen-index`'s now: pre-existing ones are carried, none are invented.
+    assert index_members >= {"work/index.md", "work/_archive/index.md"}
+    # Parent-capable items keep their owned directories (structure.owned-directory-missing).
+    assert {"work/epic-parent", "work/epic-parent/children/feature-child"} <= set(plan.mutation.mkdirs)
 
 
 def test_projected_migration_refuses_a_remaining_unmanifested_work_member(tmp_path: Path) -> None:

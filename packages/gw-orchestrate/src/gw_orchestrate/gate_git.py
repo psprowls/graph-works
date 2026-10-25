@@ -109,10 +109,25 @@ def same_repository(worktree: Path, repo: Path, *, git: provenance.GitExecutable
     return _common_dir(worktree, git) == _common_dir(repo, git)
 
 
+def current_branch(worktree: Path, *, git: provenance.GitExecutable | None = None) -> str | None:
+    """The branch *worktree* has checked out; `None` when HEAD is detached."""
+    raw = _git(worktree, "rev-parse", "--abbrev-ref", "HEAD", git=git).strip()
+    return None if raw in ("", "HEAD") else raw
+
+
 def gate_log_dir(worktree: Path, item_slug: str, *, git: provenance.GitExecutable | None = None) -> Path:
     """`<git-dir>/gw-gate/<item_slug>`: inside the git directory, so never dirty."""
     raw = _git(worktree, "rev-parse", "--path-format=absolute", "--git-path", "gw-gate", git=git).strip()
     return Path(raw) / item_slug
 
 
-__all__ = ["GitLeaf", "GitUnavailable", "TreeSnapshot", "gate_log_dir", "ls_tree", "same_repository", "snapshot"]
+__all__ = [
+    "GitLeaf",
+    "GitUnavailable",
+    "TreeSnapshot",
+    "current_branch",
+    "gate_log_dir",
+    "ls_tree",
+    "same_repository",
+    "snapshot",
+]

@@ -16,7 +16,7 @@ from pathlib import Path
 
 from fake import FakeBackend
 from subagents_io.backend import DispatchBackend, WorkerDone, WorkerEvent
-from subagents_io.dispatch import DISPATCH_MODES, PlannedDispatch, WorktreeAction
+from subagents_io.dispatch import DISPATCH_MODES, PlannedDispatch, WorktreePlacement
 from workflow_local.backend import LocalBackend
 
 CHILD = Path(__file__).resolve().parent / "child.py"
@@ -78,7 +78,7 @@ CASES = (
 
 def make_dispatch(
     *program: str,
-    worktree_path: str | None,
+    worktree_path: str,
     key: str = "gw-plan-slug-00000000",
     slug: str = "work/feature-slug",
     phase: str = "plan",
@@ -96,15 +96,7 @@ def make_dispatch(
         mode=mode,
         model=None,
         reasoning_effort=None,
-        worktree=WorktreeAction(
-            action="reuse",
-            path=worktree_path,
-            branch="b",
-            base_branch=None,
-            exists=True,
-            parent_path=None,
-            start_sha=None,
-        ),
+        worktree=WorktreePlacement(path=worktree_path, branch="b", parent_path=None),
         merge_target="main",
         auto_merge=False,
         prompt=" ".join(program),

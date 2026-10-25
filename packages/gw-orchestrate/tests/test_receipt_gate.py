@@ -15,6 +15,7 @@ from work_tracker_okf import decisions as _decisions
 
 def _ready(env: GateEnv) -> None:
     """A committed change under `affects`, after a recorded baseline."""
+    env.branch_off()
     env.state["start_sha"] = git(env.repo, "rev-parse", "HEAD")
     env._write_page()
     text = env.page_text.replace("owner: someone", f"owner: someone\nstart_sha: {env.state['start_sha']}")
@@ -68,12 +69,19 @@ def test_no_gate_configured_refuses_and_names_the_key(env: GateEnv) -> None:
     assert "repositories.code.gate.full" in result.outcome.plan.detail
 
 
-def test_undeclared_repository_refuses_no_gate_configured(env: GateEnv, tmp_path: Path) -> None:
+def test_a_checkout_of_another_repository_refuses_worktree_missing(env: GateEnv, tmp_path: Path) -> None:
     _ready(env)
     other = make_repo(tmp_path / "other")
     result = stage.run_stage_advance(env.layout, env.path, today=TODAY, repo=other, dry_run=True)
-    assert result.outcome.plan.refusal == "no-gate-configured"
-    assert "not a declared repository" in result.outcome.plan.detail
+    assert result.outcome.plan.refusal == "worktree-missing"
+
+
+def test_undeclared_repository_refuses_no_gate_configured(env: GateEnv) -> None:
+    _ready(env)
+    items = stage.load_items(stage.load_workspace_bundle(env.layout, ignore=stage.IGNORE))
+    verdict = stage._receipt_gate(env.layout, items[0], env.repo, None)
+    assert verdict.refusal == "no-gate-configured"
+    assert "not a declared repository" in verdict.detail
 
 
 def test_dry_run_reports_the_same_refusal_and_writes_nothing(env: GateEnv) -> None:

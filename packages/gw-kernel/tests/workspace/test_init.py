@@ -486,6 +486,15 @@ def test_the_rendered_header_names_the_layout_not_a_machine_path(tmp_path):
     assert "`.gw/`" in agents
 
 
+def test_agents_template_names_reconciliation_points(tmp_path):
+    result = _init(tmp_path / "works")
+    agents = (result.layout.root / "AGENTS.md").read_text(encoding="utf-8")
+    assert (
+        "Work-lane indexes are reconciled by `gw scan`, `gw work regen-index` and auto-drive wrap-up; "
+        "lint reports drift in between."
+    ) in agents
+
+
 def test_context_files_land_at_the_workspace_root_never_the_repo_root(tmp_path):
     # D-001: in the in-repo `.works` shape the repo's own AGENTS.md is foreign
     # content that whole-body regeneration must never touch.

@@ -4,24 +4,24 @@ build-backend = "hatchling.build"
 
 [project]
 name = "gw-orchestrate"
-version = "0.1.0"
+version = "0.2.0"
 description = "Work orchestration over resolved Graph Works workspaces."
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
-  "gw-pipeline>=0.1,<0.2",
+  "gw-pipeline>=0.2,<0.3",
   "gw-kernel>=0.7,<0.8",
-  "work-tracker-okf>=0.6.0,<0.7",
+  "work-tracker-okf>=0.7.0,<0.8",
   "okf-io>=0.2.6,<0.3",
   "okf-ext[schemas]>=0.5.5,<0.6",
-  "subagents-io>=0.2,<0.3",
+  "subagents-io>=0.3,<0.4",
 ]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/gw_orchestrate"]
 
 [dependency-groups]
-dev = ["gw-work>=0.1,<0.2"]
+dev = ["gw-work>=0.2,<0.3"]
 
 [tool.uv.sources]
 gw-pipeline = { workspace = true }

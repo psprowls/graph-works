@@ -34,7 +34,7 @@ def e2e(env: GateEnv, tmp_path: Path) -> E2E:
     worktree = tmp_path / "feature-wt"
     git(main, "worktree", "add", "-q", "-b", "feature", str(worktree))
     env.state["start_sha"] = git(main, "rev-parse", "HEAD")
-    env.set_worktree(worktree)
+    env.set_worktree(worktree, "feature")
     page = env.layout.bundle_dir / f"{env.path}.md"
     text = env.page_text.replace("owner: someone", f"owner: someone\nstart_sha: {env.state['start_sha']}")
     page.write_text(text, encoding="utf-8", newline="\n")
@@ -55,10 +55,11 @@ def commit_elsewhere(root: Path) -> None:
 
 
 def run_and_wait(e: E2E, *, worktree: Path | None = None):
+    if worktree is not None:
+        e.env.set_worktree(worktree, "main")
     started = run_gate_run(
         e.env.layout,
         e.env.path,
-        worktree=worktree,
         now=NOW,
         token=f"{time.monotonic_ns() % 10**8:08x}",
         spawn=spawn_runner,
@@ -70,6 +71,11 @@ def run_and_wait(e: E2E, *, worktree: Path | None = None):
     )
     assert waited.status == "finished" and waited.exit == 0 and waited.recorded, waited
     return waited
+
+
+def _check_main(e: E2E):
+    e.env.set_worktree(e.main, "main")
+    return run_gate_check(e.env.layout, e.env.path)
 
 
 def advance(e: E2E):
@@ -90,7 +96,7 @@ def test_one_gate_per_distinct_tree_across_execute_and_finish(e2e: E2E) -> None:
     assert adv.outcome.written, adv.outcome.plan  # execute -> finish passes on the receipt
     assert run_gate_check(e.env.layout, e.env.path).status == "satisfied"  # relay R1: no rerun
     git(e.main, "merge", "--ff-only", "feature")  # fast-forward in the target worktree
-    assert run_gate_check(e.env.layout, e.env.path, worktree=e.main).status == "satisfied"  # R4: no rerun
+    assert _check_main(e).status == "satisfied"  # R4: no rerun
     assert git(e.worktree, "log", "main..feature") == ""  # zero-commit finish: R2 settles
     assert gate_count(e) == 1
 
@@ -102,7 +108,7 @@ def test_a_true_merge_gates_the_new_tree_once(e2e: E2E) -> None:
     run_and_wait(e)
     commit_elsewhere(e.main)  # target moved
     git(e.main, "merge", "--no-ff", "feature", "-m", "merge")
-    assert run_gate_check(e.env.layout, e.env.path, worktree=e.main).status == "unsatisfied"
+    assert _check_main(e).status == "unsatisfied"
     run_and_wait(e, worktree=e.main)
     assert gate_count(e) == 2
-    assert run_gate_check(e.env.layout, e.env.path, worktree=e.main).status == "satisfied"
+    assert _check_main(e).status == "satisfied"

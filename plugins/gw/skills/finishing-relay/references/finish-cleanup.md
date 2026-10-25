@@ -1,8 +1,6 @@
 # Executing a finish cleanup plan
 
-One contract for every caller: `finishing-relay` R5, the `auto-drive`
-Success branch and wrap-up, and attended `workflow` step 5. The plan comes
-from core; the removal happens here, in prose, because core never calls Orca.
+One contract for every caller: `finishing-relay` R5, the `auto-drive` Success branch and wrap-up, and attended `workflow` step 5. The plan comes from core; every removal is `gw work place --remove`, so no caller names a git or Orca command.
 
 ## Get the plan
 
@@ -10,28 +8,21 @@ from core; the removal happens here, in prose, because core never calls Orca.
 uv run --package gw-pipeline python <plugin>/skills/finishing-relay/references/finish-receipt.py cleanup <work-path> --workspace <workspace> --runner-cwd <cwd>
 ```
 
-`<cwd>` is the directory the calling session runs in. Exit 1 means `refusal`
-is set: report it as one line and stop. The item has already resolved, so a
-refusal is never an escalation and never changes item state.
+`<cwd>` is the directory the calling session runs in. Exit 1 means `refusal` is set: report it as one line and stop. The item has already resolved, so a refusal is never an escalation and never changes item state.
 
-The JSON is `{"rows": [...], "refusal": null}`. Each row carries `repo`, `worktree` (absolute, or `""` when only a branch remains), `branch` (or `""`), `target_branch`, `action` (`remove` / `deferred` / `skip`), `reason`, `delete` (`branch-d` / `update-ref`) and `expected`. `update-ref` marks a branch proven merged by a verified squash receipt rather than by ancestry; `expected` is the commit that branch must still point at.
+The JSON is `{"rows": [...], "refusal": null}`. Each row carries `repo`, `worktree` (absolute, or `""` when none remains), `branch`, `action` (`remove` / `deferred` / `skip`), `reason` and `command`, which is `gw work place <work-path> --remove --repo-name <repo>`.
 
-## Execute each `remove` row, in order
+## Execute each row, in order
 
-1. When `orca` is on PATH, and the row has a worktree, run
-   `orca worktree show --worktree path:<worktree> --json`.
-2. **Orca-managed** (the show succeeded) → `orca worktree rm --worktree path:<worktree> --json`. Pass no other flags: never `--force`, and no hooks flags. Orca deletes the branch only when it can prove it merged, so a squash-integrated branch is always retained. For an `update-ref` row, then run `git -C <repo> update-ref -d refs/heads/<branch> <expected>`.
-3. **Otherwise** → `git -C <repo> worktree remove <worktree>` (never `--force`), then delete the branch as the row's `delete` says: `branch-d` → `git -C <repo> branch -d <branch>` (never `-D`); `update-ref` → `git -C <repo> update-ref -d refs/heads/<branch> <expected>`, a compare-and-delete that refuses if the branch moved. `<repo>` is the declared checkout of the row's `repo`: for a code repository, the `repositories.<repo>.path` entry in `<workspace>/workspace.yaml`; the reserved `_workspace` row is the workspace's own Git checkout (`<workspace>`), never a `repositories.<repo>` entry. The main checkout is never a row's worktree.
-4. A row with an empty `worktree` runs only its branch deletion (`branch-d` or `update-ref`, as above).
-5. Any refusal (a dirty worktree, an unmerged branch, a branch Orca retained, an `update-ref` whose branch moved) is reported as `skipped: <reason>` — `skipped: branch moved` for the last — and never retried with force or any other flag.
+- `remove`: run `<command> --json` and report the `chain[]` row actions it returns.
+- `deferred`: the row's worktree contains the caller's own directory, so the caller never removes it. Print `command` for the human to run from another directory (attended), or leave the row for the coordinator (relay).
+- `skip`: report `reason` exactly as the plan gives it.
+- A `place` refusal on a `remove` row (`dirty-worktree`, `not-finished`, `foreign-checkout` and the other kinds) is reported as `skipped: <kind>` and is never retried, never forced: never `--force`, and no other flag.
+
+Branches stay until the item is archived: `gw work archive` deletes the merged branches through `gw work place --prune`.
 
 ## Report
 
-One line per row: `removed <worktree> (<branch>)`, `skipped <worktree>
-(<branch>): <reason>`, or `deferred <worktree> (<branch>)`. Report `skip` and
-`deferred` rows exactly as the plan gives them. A `deferred` row is the
-caller's own cwd: the relay leaves it to the coordinator, and an attended
-session names it for the user.
+One line per row: `removed <worktree> (<branch>)`, `skipped <worktree> (<branch>): <reason>`, or `deferred <worktree> (<branch>)`.
 
-Re-running the plan is safe. Removed rows drop out, a deleted branch counts
-as merged, and nothing unmerged is ever offered for removal.
+Re-running the plan is safe. Removed rows drop out and nothing unmerged is ever offered for removal.

@@ -67,9 +67,19 @@ class OrcaCliError(BackendError):
         super().__init__(f"{' '.join(self.argv)} failed (exit {returncode}): {prefix}{detail}")
 
 
-def _subprocess_run(argv: Sequence[str]) -> OrcaResult:
-    """The default runner. `check=False`: a non-zero exit is `unwrap`'s to report."""
-    completed = subprocess.run(list(argv), capture_output=True, text=True, check=False)
+def _subprocess_run(argv: Sequence[str], *, timeout: float | None = None) -> OrcaResult:
+    """Run with an optional bound; expiration raises `TimeoutError`.
+
+    Default calls remain unbounded for long polling. `check=False`: a
+    non-zero exit is `unwrap`'s to report.
+    """
+    if timeout is None:
+        completed = subprocess.run(list(argv), capture_output=True, text=True, check=False)
+    else:
+        try:
+            completed = subprocess.run(list(argv), capture_output=True, text=True, check=False, timeout=timeout)
+        except subprocess.TimeoutExpired as exc:
+            raise TimeoutError(str(exc)) from exc
     return OrcaResult(returncode=completed.returncode, stdout=completed.stdout, stderr=completed.stderr)
 
 

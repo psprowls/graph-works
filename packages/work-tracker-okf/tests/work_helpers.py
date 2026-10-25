@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from okf_io import Finding, Report, load, load_bundle, validate
-from work_tracker_okf.items import IGNORE, WorkItem
+from work_tracker_okf.items import IGNORE, LegacyPlacement, WorkItem
 from work_tracker_okf.paths import item_page
 from work_tracker_okf.pipeline import PACKAGED_DEFINITION, PipelineDefinition
 
@@ -44,8 +44,6 @@ _DEFAULTS: dict[str, Any] = {
     "dependency_issues": (),
     "owner": None,
     "resolved_in": None,
-    "worktree": None,
-    "branch": None,
     "superseded_by": None,
     "tags": (),
     "sources": (),
@@ -64,7 +62,12 @@ def make_item(path: str, **overrides: Any) -> WorkItem:
     defaults = dict(_DEFAULTS)
     defaults["page_path"] = f"{path}.md"
     defaults["basename"] = path.rsplit("/", 1)[-1]
-    return WorkItem(path=path, **{**defaults, **overrides})
+    merged = {**defaults, **overrides}
+    worktree, branch = merged.pop("worktree", None), merged.pop("branch", None)
+    stamps = dict(merged.pop("repo_stamps", {}))
+    if "legacy_placement" not in merged and (worktree or branch or stamps):
+        merged["legacy_placement"] = LegacyPlacement(worktree, branch, stamps)
+    return WorkItem(path=path, **merged)
 
 
 def write_item(root: Path, path: str, frontmatter: str, *, body: str = EMPTY_PLAN_BODY) -> Path:

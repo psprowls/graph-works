@@ -95,7 +95,7 @@ def workspace(
         page,
         "---\ntype: Feature\ntitle: Example feature\ndescription: d\nstatus: stable\n"
         f"work_status: {status}\nphase: {phase}\neffort: medium\nopened: 2026-09-28\nupdated: 2026-09-28\n"
-        f"repo: code\nworktree: {source}\nbranch: feature\naffects: []\n---\n\nAuthored content.\n",
+        f"repo: code\nworktree: {source}\nbranch: feature\naffects: [src/a.py]\n---\n\nAuthored content.\n",
     )
     return layout
 

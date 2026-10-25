@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "gw-wire"
-version = "0.2.0"
+version = "0.3.0"
 description = "Typed graph-works results projected to plain JSON data, shared by every interface (CLI, serve)."
 authors = [
   { name = "Patrick Sprowls", email = "psprowls@gmail.com" },
@@ -12,9 +12,9 @@ authors = [
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
-  "gw-pipeline>=0.1,<0.2",
-  "gw-work>=0.1,<0.2",
-  "gw-orchestrate>=0.1,<0.2",
+  "gw-pipeline>=0.2,<0.3",
+  "gw-work>=0.2,<0.3",
+  "gw-orchestrate>=0.2,<0.3",
   "gw-kernel>=0.7,<0.8",
   "gw-wiki>=0.1,<0.2",
   "config-io>=0.2,<0.3",

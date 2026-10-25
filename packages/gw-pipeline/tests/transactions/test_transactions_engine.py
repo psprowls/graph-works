@@ -818,10 +818,13 @@ def test_targeted_index_validation_failure_restores_original_index(tmp_path: Pat
     index = work / "index.md"
     index.write_text("# Human prose\n", encoding="utf-8", newline="")
     before = _snapshot(layout.bundle_dir)
-    plan = _plan(
-        layout,
-        writes=(PlannedWrite("work/index.md", _digest(b"# Human prose\n"), b"# Human prose\n"),),
-        validate_paths=("work/feature-target",),
+    plan = replace(
+        _plan(
+            layout,
+            writes=(PlannedWrite("work/index.md", _digest(b"# Human prose\n"), b"# Human prose\n"),),
+            validate_paths=("work/feature-target",),
+        ),
+        operation="indexes",
     )
 
     result = apply_mutation(layout, plan, commit=None)
@@ -851,10 +854,13 @@ def test_targeted_index_validation_reads_the_anchored_bundle(tmp_path: Path, mon
         "<!-- graph-works:work-items:end -->\n",
         encoding="utf-8",
     )
-    plan = _plan(
-        layout,
-        writes=(PlannedWrite("work/index.md", _digest(b"# Human prose\n"), b"# Human prose\n"),),
-        validate_paths=("work/feature-target",),
+    plan = replace(
+        _plan(
+            layout,
+            writes=(PlannedWrite("work/index.md", _digest(b"# Human prose\n"), b"# Human prose\n"),),
+            validate_paths=("work/feature-target",),
+        ),
+        operation="indexes",
     )
     real_plan_indexes = path_plan_indexes
     real_read_text = Path.read_text

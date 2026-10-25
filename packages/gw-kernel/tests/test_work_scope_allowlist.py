@@ -29,19 +29,18 @@ ALLOWED = frozenset(
         ("packages/gw-kernel/src/gw_kernel/workspace/bundle.py", "load_work_bundle"),
         ("packages/gw-work/src/gw_work/commands.py", "run_touch_active_work"),
         ("packages/gw-work/src/gw_work/commands.py", "run_lint"),
+        ("packages/gw-work/src/gw_work/place.py", "run_place"),
+        ("packages/gw-work/src/gw_work/migrate_placement.py", "plan_migrate_placement"),
+        ("packages/gw-work/src/gw_work/migrate_placement.py", "apply_migrate_placement"),
         ("packages/gw-work/src/gw_work/reconcile.py", "run_reconcile_context"),
         ("packages/gw-wiki/src/gw_wiki/lint_drift/lanes.py", "_compose_work"),
         ("packages/gw-orchestrate/src/gw_orchestrate/commands.py", "run_orchestrate"),
         ("packages/gw-pipeline/src/gw_pipeline/finish.py", "inspect_finish"),
-        ("packages/gw-pipeline/src/gw_pipeline/finish.py", "plan_finish_cleanup"),
-        ("packages/gw-orchestrate/src/gw_orchestrate/workspace_prepare.py", "run_prepare_workspace"),
         ("packages/gw-orchestrate/src/gw_orchestrate/gate.py", "_resolve"),
         ("packages/gw-orchestrate/src/gw_orchestrate/asks.py", "run_ask"),
         ("packages/gw-orchestrate/src/gw_orchestrate/asks.py", "run_ask_answer"),
         ("packages/gw-orchestrate/src/gw_orchestrate/integrate.py", "run_integrate"),
-        ("packages/gw-orchestrate/src/gw_orchestrate/merge_workspace.py", "run_merge_workspace"),
-        ("packages/gw-orchestrate/src/gw_orchestrate/placement.py", "run_record_reader"),
-        ("packages/gw-orchestrate/src/gw_orchestrate/placement.py", "run_record_baseline"),
+        ("packages/gw-orchestrate/src/gw_orchestrate/placing.py", "resolve"),
     }
 )
 

@@ -67,12 +67,8 @@ def test_the_dispatch_seam_is_reachable_from_the_front_door():
         "BlockedItem",
         "StageAdvance",
         "PlacementRecord",
-        "ReaderRecord",
-        "read_reader_receipt",
-        "reader_receipt_path",
         "run_record_baseline",
         "run_record_placement",
-        "run_record_reader",
     ):
         assert name not in gw_kernel.__all__
         assert not hasattr(gw_kernel, name)

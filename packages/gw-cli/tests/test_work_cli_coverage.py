@@ -93,7 +93,6 @@ def test_file_output_and_incomplete_paths(monkeypatch: pytest.MonkeyPatch, capsy
             "page_path": "work/a.md",
             "refusal": None,
             "detail": "",
-            "indexes": ["work/index.md"],
             "logged": "- filed",
             "commit": None,
             "warnings": ["warn"],
@@ -105,7 +104,7 @@ def test_file_output_and_incomplete_paths(monkeypatch: pytest.MonkeyPatch, capsy
     main.file("T", "Feature", "S", "", "", "", "", [], "", "", "", "", "", "", True, "", False)
     assert "preview" in capsys.readouterr().out
     main.file("T", "Feature", "S", "", "", "", "", [], "", "", "", "", "", "", False, "", False)
-    assert "reconciled" in capsys.readouterr().out
+    assert "filed work/a" in capsys.readouterr().out
 
     monkeypatch.setattr(
         wire_work,
@@ -115,7 +114,6 @@ def test_file_output_and_incomplete_paths(monkeypatch: pytest.MonkeyPatch, capsy
             "page_path": "work/a.md",
             "refusal": None,
             "detail": "",
-            "indexes": [],
             "logged": None,
             "warnings": [],
             "applied": True,
@@ -171,10 +169,7 @@ def test_next_advance_and_orchestrate_map_failures(
                 owner="",
                 resolved_in="",
                 released_at="",
-                worktree="",
-                branch="",
                 no_infer_worktree=False,
-                start_sha="",
                 return_=False,
                 return_scope=[],
                 skip_gate="",
@@ -223,10 +218,7 @@ def test_advance_output_policy_branches(monkeypatch: pytest.MonkeyPatch, capsys:
         owner="",
         resolved_in="",
         released_at="",
-        worktree="",
-        branch="",
         no_infer_worktree=False,
-        start_sha="",
         return_=False,
         return_scope=[],
         skip_gate="",
@@ -244,10 +236,7 @@ def test_advance_output_policy_branches(monkeypatch: pytest.MonkeyPatch, capsys:
         owner="",
         resolved_in="",
         released_at="",
-        worktree="",
-        branch="",
         no_infer_worktree=False,
-        start_sha="",
         return_=False,
         return_scope=[],
         skip_gate="",
@@ -268,10 +257,7 @@ def test_advance_output_policy_branches(monkeypatch: pytest.MonkeyPatch, capsys:
                 owner="",
                 resolved_in="",
                 released_at="",
-                worktree="",
-                branch="",
                 no_infer_worktree=False,
-                start_sha="",
                 return_=False,
                 return_scope=[],
                 skip_gate="",
@@ -455,93 +441,16 @@ def test_lint_maps_workspace_and_io_failures(monkeypatch: pytest.MonkeyPatch, er
     assert _exit_code(lambda: main.lint(False, "", False)) == code
 
 
-def test_advance_forwards_start_sha_to_core(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(main, "resolve_workspace", lambda workspace: LAYOUT)
-    monkeypatch.setattr(main, "warn_if_stale_routing", lambda: None)
-    seen: dict[str, object] = {}
+def test_advance_has_no_start_sha_option() -> None:
+    import inspect
 
-    def _capture(*args: object, **kwargs: object) -> object:
-        seen.update(kwargs)
-        return SimpleNamespace(outcome=SimpleNamespace(plan=SimpleNamespace(diff=lambda: "preview")))
-
-    monkeypatch.setattr(main, "run_stage_advance", _capture)
-    monkeypatch.setattr(
-        wire_work,
-        "advance_payload",
-        lambda *args: {
-            "refusal": None,
-            "applied": False,
-            "rolled_back": False,
-            "failures": [],
-            "warnings": [],
-            "repo_note": None,
-        },
-    )
-    main.advance(
-        path="work/a",
-        effort="",
-        owner="",
-        resolved_in="",
-        released_at="",
-        worktree="",
-        branch="",
-        no_infer_worktree=False,
-        start_sha="abc1234",
-        return_=False,
-        return_scope=[],
-        skip_gate="",
-        reason="",
-        actor="",
-        dry_run=True,
-        workspace="",
-        json_output=False,
-        expected_phase=None,
-    )
-    assert seen["start_sha"] == "abc1234"
+    assert "start_sha" not in inspect.signature(main.advance).parameters
 
 
-def test_advance_forwards_no_start_sha_as_none(monkeypatch: pytest.MonkeyPatch) -> None:
-    """An empty option string is absence, not a sha — core's own derivation
-    depends on getting `None` here."""
-    monkeypatch.setattr(main, "resolve_workspace", lambda workspace: LAYOUT)
-    monkeypatch.setattr(main, "warn_if_stale_routing", lambda: None)
-    seen: dict[str, object] = {}
+def test_advance_help_lacks_start_sha() -> None:
+    from gw_cli.cli import app
+    from typer.testing import CliRunner
 
-    def _capture(*args: object, **kwargs: object) -> object:
-        seen.update(kwargs)
-        return SimpleNamespace(outcome=SimpleNamespace(plan=SimpleNamespace(diff=lambda: "preview")))
-
-    monkeypatch.setattr(main, "run_stage_advance", _capture)
-    monkeypatch.setattr(
-        wire_work,
-        "advance_payload",
-        lambda *args: {
-            "refusal": None,
-            "applied": False,
-            "rolled_back": False,
-            "failures": [],
-            "warnings": [],
-            "repo_note": None,
-        },
-    )
-    main.advance(
-        path="work/a",
-        effort="",
-        owner="",
-        resolved_in="",
-        released_at="",
-        worktree="",
-        branch="",
-        no_infer_worktree=False,
-        start_sha="",
-        return_=False,
-        return_scope=[],
-        skip_gate="",
-        reason="",
-        actor="",
-        dry_run=True,
-        workspace="",
-        json_output=False,
-        expected_phase=None,
-    )
-    assert seen["start_sha"] is None
+    result = CliRunner().invoke(app, ["work", "advance", "--help"])
+    assert result.exit_code == 0
+    assert "--start-sha" not in result.output

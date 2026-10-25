@@ -55,7 +55,7 @@ def env(tmp_path: Path) -> Env:
     (layout.bundle_dir / "work").mkdir(parents=True, exist_ok=True)
     page = (
         "---\ntype: Feature\ntitle: A\nwork_status: in-progress\nphase: execute\nowner: someone\nrepo: code\n"
-        f"worktree: {repo}\naffects:\n  - packages/a\n---\n\nBody.\n"
+        f"worktree: {repo}\nbranch: main\naffects:\n  - packages/a\n---\n\nBody.\n"
     )
     (layout.bundle_dir / f"{ITEM}.md").write_text(page, encoding="utf-8", newline="\n")
     return Env(root, repo, ITEM)

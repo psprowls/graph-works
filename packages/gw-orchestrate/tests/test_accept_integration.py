@@ -116,3 +116,17 @@ def test_a_verified_entry_is_never_replaced_by_attested_evidence(tmp_path):
 
     assert result.refusal == "receipt-refused" and "verified" in result.detail
     assert read_finish_receipt(layout, OWNER)[1] == (verified,)
+
+
+def test_accept_on_own_decision_owner_leaf(tmp_path):
+    repo, source, sha = hand_integrated(tmp_path)
+    layout = workspace(tmp_path, repo, source)
+
+    result = accept(layout, sha)
+
+    assert (result.refusal, result.applied) == (None, True)
+    assert decisions.load(decisions.ledger_ref(OWNER).path(layout.bundle_dir)).entries[-1].id == result.decision_id
+    page = (layout.bundle_dir / f"{OWNER}.md").read_text(encoding="utf-8")
+    assert "decisions" in page and "finish-receipt" in page
+    assert page.count("[^finish-receipt]:") == 1
+    assert read_finish_receipt(layout, OWNER)[1][0].evidence == "accepted"

@@ -90,10 +90,10 @@ def _finish_errors(layout):
 @pytest.mark.parametrize("redirected", [False, True])
 def test_finish_hold_is_journaled_blocks_and_can_be_answered(tmp_path: Path, shape, redirected) -> None:
     layout = _layout(tmp_path)
-    _page(layout, phase="finish")
+    _page(layout, phase="finish", affects="gw:workspace")
     target = f"{FEATURE}/children/bug-held" if redirected else FEATURE
     if redirected:
-        _page(layout, target, type="Bug", phase="finish")
+        _page(layout, target, type="Bug", phase="finish", affects="gw:workspace")
     kwargs = {"affects": (target,)} if shape == "question" else {"hold": shape, "phase": "finish"}
     draft = _draft(tmp_path, phase="finish", item=target) if shape == "park" else None
     if draft:

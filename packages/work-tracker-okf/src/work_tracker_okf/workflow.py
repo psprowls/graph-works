@@ -15,6 +15,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Literal
 
+from work_tracker_okf.affects import code_affects
 from work_tracker_okf.decisions import HoldFact
 from work_tracker_okf.dependencies import (
     DependencyEdge,
@@ -203,7 +204,7 @@ def state_for(
         dependency_issues=(*item.dependency_issues, *structural_issues),
         child_rollup=rollup,
         open_descendants=open_descendants,
-        has_branch=bool(item.branch or item.repo_stamps),
+        has_branch=bool(code_affects(item.affects)),
     )
 
 

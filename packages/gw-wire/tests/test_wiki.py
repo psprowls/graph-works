@@ -247,6 +247,7 @@ def test_scan_payloads_have_exact_keys_and_exclude_runtime_only_values() -> None
             "stamped",
             "entity_errors",
             "warnings",
+            "work_indexes",
         }
         | _MIRROR_KEYS
     )
@@ -263,6 +264,7 @@ def test_scan_payloads_have_exact_keys_and_exclude_runtime_only_values() -> None
             "entities_deleted",
             "entity_errors",
             "warnings",
+            "work_indexes",
         }
         | _MIRROR_KEYS
     )

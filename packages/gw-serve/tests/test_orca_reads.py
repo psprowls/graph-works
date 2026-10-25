@@ -182,6 +182,7 @@ def test_work_affecting_is_the_projection(client: TestClient, workspace: Workspa
     assert response.json() == wire_work.work_affecting_payload(run_work_affecting(workspace, "code", "packages/a/src"))
     assert [item["path"] for item in response.json()["items"]] == ["work/in-code"]
     assert response.json()["items"][0]["affects"] == ["packages/a"]
+    assert "placement" in response.json()["items"][0]
 
 
 def test_work_affecting_unknown_repository_is_404_with_payload(client: TestClient) -> None:

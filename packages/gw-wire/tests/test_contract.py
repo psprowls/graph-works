@@ -85,7 +85,6 @@ EXPECTED: set[str] = {
     "work.accept_integration_payload",
     "work.advance_payload",
     "work.archive_payload",
-    "work.baseline_payload",
     "work.ask_answer_payload",
     "work.ask_payload",
     "work.decision_payload",
@@ -107,10 +106,8 @@ EXPECTED: set[str] = {
     "work.orchestrate_payload",
     "work.overturn_payload",
     "work.path_mutation_payload",
-    "work.placement_payload",
-    "work.prepare_workspace_payload",
-    "work.merge_workspace_payload",
-    "work.reader_receipt_payload",
+    "work.place_payload",
+    "work.migrate_placement_payload",
     "work.reconcile_payload",
     "work.regen_index_payload",
     "work.reroute_payload",
@@ -194,29 +191,17 @@ def test_projection_is_plain_json_data(name: str, index: int) -> None:
     assert_round_trip_equal(json.loads(json.dumps(payload)), payload)
 
 
-def test_orchestration_projects_repository_identity_and_preparations() -> None:
+def test_orchestration_projects_repository_identity_and_placement() -> None:
     payload = WORK["work.orchestrate_payload"][0]()
     assert payload["repo"]["path"] == "/code"
     assert payload["dispatches"][0]["repo"] == {"name": "ui", "path": "/ui", "source": "item"}
-    preparation = payload["preparations"][0]
-    assert preparation["owner_phase"] == "execute"
-    assert preparation["owner_path"] == "work/e"
-    assert preparation["repo"] == payload["dispatches"][0]["repo"]
-    assert preparation["branch"] == "epic/e"
-    assert preparation["base_branch"] == "main"
-    assert preparation["worktree"]["action"] == "create"
-    assert payload["workspace_preparations"] == [
-        {
-            "owner_path": "work/a",
-            "owner_phase": "execute",
-            "worktree": "/ws-wt/a",
-            "branch": "feature/a",
-            "base_branch": "main",
-        }
-    ]
-    assert payload["dispatches"][0]["workspace"] == {"worktree": "/ws-wt/a", "branch": "feature/a"}
-    assert WORK["work.orchestrate_payload"][1]()["preparations"] == []
-    assert WORK["work.orchestrate_payload"][1]()["workspace_preparations"] == []
+    assert "preparations" not in payload
+    placement = payload["dispatches"][0]["placement"]
+    assert placement["repo"] == {"name": "ui", "path": "/ui"}
+    assert placement["parent_branch"] == "main"
+    assert "workspace_preparations" not in payload
+    assert "workspace" not in payload["dispatches"][0]
+    assert "preparations" not in WORK["work.orchestrate_payload"][1]()
 
 
 def test_repo_adopt_payload_shape() -> None:
@@ -255,4 +240,153 @@ def test_schema_refresh_payload_shape() -> None:
         "provenance": True,
         "written": ["a"],
         "commit": {"status": "committed", "sha": "1" * 40, "reason": None},
+    }
+
+
+def test_migrate_placement_payload_explicit_shape() -> None:
+    plan, applied, empty = (sample() for sample in WORK["work.migrate_placement_payload"])
+    assert plan == {
+        "mode": "plan",
+        "nothing_to_migrate": False,
+        "refusal": None,
+        "rows": [
+            {
+                "item": "work/a",
+                "repo": "code",
+                "worktree": "/wt/a",
+                "branch": "feature/a",
+                "action": "remove-worktree",
+                "reason": None,
+            },
+            {
+                "item": "work/a",
+                "repo": "code",
+                "worktree": "/wt/a",
+                "branch": "feature/a",
+                "action": "delete-branch",
+                "reason": "receipt",
+            },
+            {
+                "item": "work/b",
+                "repo": "code",
+                "worktree": "/wt/b",
+                "branch": "feature/b",
+                "action": "keep",
+                "reason": "dirty",
+            },
+        ],
+        "blockers": [
+            {
+                "item": "work/c",
+                "repo": "code",
+                "worktree": "/wt/c",
+                "legacy_branch": "orca/c",
+                "computed_branch": "feature/c",
+                "commands": ["git -C /wt/c branch -m orca/c feature/c", "gw work place work/c"],
+            }
+        ],
+        "orphans": [{"repo": "code", "branch": "psprowls/gw-reader-1"}],
+        "strips": ["work/a", "work/b", "work/c"],
+        "workspace_stamps": [{"item": "work/c", "worktree": "/ws/c", "branch": "ws/c", "ahead": 3}],
+        "result": None,
+    }
+    assert applied["mode"] == "apply" and applied["result"] == {
+        "removed_worktrees": ["/wt/a"],
+        "deleted_branches": ["feature/a"],
+        "stripped": ["work/a", "work/b"],
+        "failed_step": None,
+        "commit": {
+            "status": "committed",
+            "sha": "1" * 40,
+            "subject": "workspace: migrate-placement strip retired placement fields",
+            "paths": ["okf/work/a.md"],
+            "reason": None,
+        },
+    }
+    assert empty["nothing_to_migrate"] is True and empty["rows"] == [] and empty["refusal"] is None
+
+
+def test_place_payload_explicit_shape() -> None:
+    assert WORK["work.place_payload"][0]() == {
+        "path": "work/e/children/a",
+        "mode": "ensure",
+        "dry_run": False,
+        "repo": {"name": "code", "path": "/code"},
+        "placement": {
+            "branch": "feature/a",
+            "worktree": "/wt/feature/a",
+            "parent_branch": "epic/e",
+            "parent_worktree": "/wt/epic/e",
+            "owner_path": "work/e",
+            "slug": "a",
+        },
+        "chain": [
+            {
+                "path": "work/e",
+                "repo": "code",
+                "branch": "epic/e",
+                "worktree": "/wt/epic/e",
+                "action": "verified",
+                "refresh": None,
+                "orca": "already registered",
+            },
+            {
+                "path": "work/e/children/a",
+                "repo": "code",
+                "branch": "feature/a",
+                "worktree": "/wt/feature/a",
+                "action": "created",
+                "refresh": {"kind": "ff", "from": "old", "to": "new"},
+                "orca": "registered",
+            },
+        ],
+        "start_sha": {"before": None, "after": "new"},
+        "workspace_commit": {"status": "committed", "sha": "ws-sha", "paths": ["okf/work/a.md"]},
+        "dirty_workspace_paths": ["notes.md"],
+        "pruned": None,
+        "refusal": None,
+        "warnings": ["note", "apply: write failed"],
+    }
+
+
+def test_place_payload_refusals_and_predictions() -> None:
+    start = WORK["work.place_payload"][1]()
+    assert start["mode"] == "start"
+    assert start["refusal"] == {"kind": "already-started", "detail": "baseline exists"}
+    assert start["start_sha"] == {"before": "old", "after": "old"}
+    conflict = WORK["work.place_payload"][2]()
+    assert conflict["dry_run"] is True
+    assert conflict["chain"][0]["refresh"] == {"kind": "conflict", "from": None, "to": None}
+    assert conflict["chain"][0]["orca"] is None
+    assert conflict["refusal"] == {"kind": "refresh-conflict", "detail": "conflicts: a.py"}
+    assert conflict["warnings"] == ["note"]
+
+
+def test_place_payload_remove_prune_and_no_repo() -> None:
+    removed = WORK["work.place_payload"][3]()
+    assert removed["mode"] == "remove"
+    assert removed["chain"][0]["action"] == "removed"
+    pruned = WORK["work.place_payload"][4]()
+    assert pruned["path"] is None
+    assert pruned["pruned"] == {
+        "removed_worktrees": ["/wt/old"],
+        "deleted_branches": ["feature/old"],
+        "kept": [
+            {"path": "work/e", "repo": "code", "branch": "epic/e", "why": "open"},
+            {"path": "work/occupied", "repo": "code", "branch": "feature/occupied", "why": "occupied"},
+        ],
+    }
+    assert WORK["work.place_payload"][5]() == {
+        "path": "work/note",
+        "mode": "ensure",
+        "dry_run": False,
+        "repo": None,
+        "placement": None,
+        "chain": [],
+        "start_sha": None,
+        "workspace_commit": None,
+        "dirty_workspace_paths": [],
+        "pruned": None,
+        "refusal": None,
+        "warnings": ["no repo"],
     }

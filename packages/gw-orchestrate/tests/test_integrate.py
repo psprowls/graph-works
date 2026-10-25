@@ -3,11 +3,13 @@
 import os
 import shutil
 import stat
+from typing import get_args
 
 import pytest
+from gw_orchestrate import finish_receipt as finish_receipt_module
 from gw_orchestrate import integrate as integrate_module
 from gw_orchestrate.finish_receipt import FinishReceiptResult
-from gw_orchestrate.integrate import run_integrate
+from gw_orchestrate.integrate import IntegrateRefusal, run_integrate
 from gw_pipeline import finish as finish_module
 from gw_pipeline.finish import VerifiedIntegration, inspect_finish, read_finish_receipt
 from gw_pipeline.test_support.finish_repos import OWNER, TODAY, code_repo, commit_file, git, workspace, write_receipt
@@ -141,10 +143,64 @@ def test_squash_that_stages_nothing_refuses(tmp_path):
     pristine(repo, before)
 
 
-def test_workspace_target_refuses(tmp_path):
-    repo, source = code_repo(tmp_path)
+def test_workspace_target_code_gone():
+    assert "workspace-target" not in get_args(IntegrateRefusal)
 
-    assert run(workspace(tmp_path, repo, source), repo="_workspace").refusal == "workspace-target"
+
+def counted_discovery(monkeypatch):
+    calls = []
+    real = finish_module.discover_integration
+
+    def counting(target):
+        calls.append(target.repo.name)
+        return real(target)
+
+    monkeypatch.setattr(integrate_module, "discover_integration", counting)
+    monkeypatch.setattr(finish_receipt_module, "discover_integration", counting)
+    return calls
+
+
+def test_apply_integrated_discovers_once(tmp_path, monkeypatch):
+    repo, source = code_repo(tmp_path)
+    calls = counted_discovery(monkeypatch)
+
+    assert run(workspace(tmp_path, repo, source), "squash").outcome == "integrated"
+    assert len(calls) == 1
+
+
+def test_apply_already_integrated_discovers_once(tmp_path, monkeypatch):
+    repo, source = code_repo(tmp_path)
+    git(repo, "merge", "--ff-only", "feature")
+    calls = counted_discovery(monkeypatch)
+
+    assert run(workspace(tmp_path, repo, source), "merge").outcome == "already-integrated"
+    assert len(calls) == 1
+
+
+def test_plan_only_discovers_once(tmp_path, monkeypatch):
+    repo, source = code_repo(tmp_path)
+    calls = counted_discovery(monkeypatch)
+
+    assert run(workspace(tmp_path, repo, source), "squash", apply=False).outcome == "planned"
+    assert len(calls) == 1
+
+
+@pytest.mark.parametrize("landed", [False, True])
+def test_recorder_receives_evidence_on_both_apply_paths(tmp_path, monkeypatch, landed):
+    repo, source = code_repo(tmp_path)
+    if landed:
+        git(repo, "merge", "--ff-only", "feature")
+    seen = []
+    real = integrate_module.record_finish_in
+
+    def wrapped(*args, **kwargs):
+        seen.append(kwargs.get("evidence"))
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(integrate_module, "record_finish_in", wrapped)
+
+    assert run(workspace(tmp_path, repo, source), "merge").refusal is None
+    assert len(seen) == 1 and seen[0] is not None
 
 
 def test_dirty_target_refuses(tmp_path):

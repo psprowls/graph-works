@@ -523,7 +523,7 @@ def test_retention_warnings_are_visible_without_changing_exit_status(
         assert json.loads(result.stdout)["warnings"] == list(warnings)
         assert "retained" not in result.stderr
     else:
-        assert result.stdout == ""
+        assert all(line.startswith("reconciled ") for line in result.stdout.splitlines())
         assert [line for line in result.stderr.splitlines() if line.startswith("Warning:")] == [
             f"Warning: {warning}" for warning in warnings
         ]
@@ -599,3 +599,180 @@ def test_repo_scan_incomplete_apply_exits_one(monkeypatch: pytest.MonkeyPatch, i
 
     assert result.exit_code == exit_codes.GENERIC
     assert result.stderr == "Error: scan --repo code: incomplete\n"
+
+
+# --- work-lane index reconciliation -------------------------------------------------------------
+
+
+def _file_item(workspace: Path, title: str) -> str:
+    result = runner.invoke(
+        app,
+        [
+            "work",
+            "file",
+            "--title",
+            title,
+            "--kind",
+            "Feature",
+            "--summary",
+            "One line",
+            "--workspace",
+            str(workspace),
+            "--json",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    return str(json.loads(result.stdout)["path"])
+
+
+def _outdated_index(workspace: Path) -> Path:
+    """Reconcile once, then file an item so `work/index.md` exists but is behind the disk."""
+    runner.invoke(app, ["work", "regen-index", "--workspace", str(workspace)])
+    _file_item(workspace, "Alpha")
+    return workspace / "okf" / "work" / "index.md"
+
+
+def _index_codes(workspace: Path) -> list[str]:
+    result = runner.invoke(app, ["work", "lint", "--workspace", str(workspace), "--json"])
+    return [f["code"] for f in json.loads(result.stdout)["findings"] if f["code"].startswith("structure.index-")]
+
+
+def _stub_structural_scan(monkeypatch: pytest.MonkeyPatch, *, errors: tuple[str, ...] = ()) -> None:
+    async def fake_run_scan(*args: object, **kwargs: object) -> ScanResult:
+        return ScanResult(structural=StructuralSummary(), worklist=ScanWorklist(short_head="abc123"), errors=errors)
+
+    async def fake_build_worklist(*_a: object, **_k: object) -> tuple[ScanWorklist, StructuralSummary]:
+        return ScanWorklist(short_head="abc123"), StructuralSummary()
+
+    monkeypatch.setattr(scan_module, "run_scan", fake_run_scan)
+    monkeypatch.setattr(scan_module, "build_scan_worklist", fake_build_worklist)
+
+
+def test_scan_reconciles_outdated_work_index(monkeypatch: pytest.MonkeyPatch, initialized_workspace: Path) -> None:
+    _file_item(initialized_workspace, "Alpha")
+    assert _index_codes(initialized_workspace)
+    _stub_structural_scan(monkeypatch)
+
+    result = runner.invoke(app, ["scan", "--no-narrate", "--json", "--workspace", str(initialized_workspace)])
+
+    assert result.exit_code == 0, result.output
+    indexes = json.loads(result.stdout)["work_indexes"]["indexes"]
+    assert any(i.endswith("work/index.md") for i in indexes)
+    assert _index_codes(initialized_workspace) == []
+
+
+def test_emit_worklist_reconciles_work_index(monkeypatch: pytest.MonkeyPatch, initialized_workspace: Path) -> None:
+    _file_item(initialized_workspace, "Alpha")
+    _stub_structural_scan(monkeypatch)
+
+    result = runner.invoke(app, ["scan", "--emit-worklist", "--workspace", str(initialized_workspace)])
+
+    assert result.exit_code == 0, result.output
+    assert any(i.endswith("work/index.md") for i in json.loads(result.stdout)["work_indexes"]["indexes"])
+    assert _index_codes(initialized_workspace) == []
+
+
+def test_scan_with_reconciled_indexes_writes_nothing(
+    monkeypatch: pytest.MonkeyPatch, initialized_workspace: Path
+) -> None:
+    _file_item(initialized_workspace, "Alpha")
+    runner.invoke(app, ["work", "regen-index", "--workspace", str(initialized_workspace)])
+    index = initialized_workspace / "okf" / "work" / "index.md"
+    before = index.read_bytes()
+    _stub_structural_scan(monkeypatch)
+
+    result = runner.invoke(app, ["scan", "--no-narrate", "--json", "--workspace", str(initialized_workspace)])
+
+    assert result.exit_code == 0, result.output
+    work_indexes = json.loads(result.stdout)["work_indexes"]
+    assert work_indexes["indexes"] == []
+    assert work_indexes["commit"] is None
+    assert index.read_bytes() == before
+
+
+def test_repo_scan_does_not_reconcile(monkeypatch: pytest.MonkeyPatch, initialized_workspace: Path) -> None:
+    index = _outdated_index(initialized_workspace)
+    before = index.read_bytes()
+
+    def fake_run_repo_scan(*args: object, **kwargs: object) -> RepoScanRun:
+        return RepoScanRun("alpha", StructuralSummary(), None, None)
+
+    monkeypatch.setattr(scan_module, "run_repo_scan", fake_run_repo_scan)
+
+    result = runner.invoke(
+        app, ["scan", "--repo", "alpha", "--no-narrate", "--json", "--workspace", str(initialized_workspace)]
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "work_indexes" not in json.loads(result.stdout)
+    assert index.read_bytes() == before
+
+
+@pytest.mark.parametrize("mode", [["--no-narrate", "--json"], ["--emit-worklist"]])
+def test_failed_scan_does_not_reconcile(
+    monkeypatch: pytest.MonkeyPatch, initialized_workspace: Path, mode: list[str]
+) -> None:
+    index = _outdated_index(initialized_workspace)
+    before = index.read_bytes()
+
+    async def fake_run_scan(*args: object, **kwargs: object) -> ScanResult:
+        return ScanResult(structural=StructuralSummary(), worklist=ScanWorklist(short_head="x"), errors=("boom",))
+
+    async def fake_build_worklist(*_a: object, **_k: object) -> tuple[ScanWorklist, StructuralSummary]:
+        return ScanWorklist(short_head="x"), StructuralSummary(entities=SyncSummary(catalog_declined=(("p", "r"),)))
+
+    monkeypatch.setattr(scan_module, "run_scan", fake_run_scan)
+    monkeypatch.setattr(scan_module, "build_scan_worklist", fake_build_worklist)
+
+    result = runner.invoke(app, ["scan", *mode, "--workspace", str(initialized_workspace)])
+
+    assert result.exit_code == exit_codes.GENERIC
+    assert "work_indexes" not in result.stdout or '"work_indexes": null' in result.stdout
+    assert index.read_bytes() == before
+
+
+def test_reconcile_refusal_exits_nonzero(monkeypatch: pytest.MonkeyPatch, initialized_workspace: Path) -> None:
+    _stub_structural_scan(monkeypatch)
+    monkeypatch.setattr(scan_module, "run_regen_indexes", lambda *a, **k: object())
+    monkeypatch.setattr(
+        scan_module,
+        "regen_index_payload",
+        lambda _r: {
+            "indexes": [],
+            "warnings": [],
+            "refusals": [{"path": "work/a", "kind": "bad", "detail": "why"}],
+            "applied": False,
+            "rolled_back": False,
+            "failures": [],
+            "commit": None,
+        },
+    )
+
+    result = runner.invoke(app, ["scan", "--no-narrate", "--json", "--workspace", str(initialized_workspace)])
+
+    assert result.exit_code == exit_codes.GENERIC
+    assert "work index reconciliation refused" in result.stderr
+    assert json.loads(result.stdout)["work_indexes"]["refusals"]
+
+
+def test_reconcile_incomplete_apply_exits_nonzero(monkeypatch: pytest.MonkeyPatch, initialized_workspace: Path) -> None:
+    _stub_structural_scan(monkeypatch)
+    monkeypatch.setattr(scan_module, "run_regen_indexes", lambda *a, **k: object())
+    monkeypatch.setattr(
+        scan_module,
+        "regen_index_payload",
+        lambda _r: {
+            "indexes": ["i"],
+            "warnings": [],
+            "refusals": [],
+            "applied": True,
+            "rolled_back": True,
+            "failures": ["f"],
+            "commit": None,
+        },
+    )
+
+    result = runner.invoke(app, ["scan", "--workspace", str(initialized_workspace)])
+
+    assert result.exit_code == exit_codes.GENERIC
+    assert "work index reconciliation incomplete" in result.stderr

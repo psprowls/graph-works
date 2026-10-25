@@ -91,3 +91,24 @@ def test_shipped_imports_obey_the_boundary() -> None:
         module = ".".join(("gw_orchestrate", *path.relative_to(SRC).with_suffix("").parts))
         found.extend(f"{path}:{target}" for target in offenders(path.read_text(encoding="utf-8"), module=module))
     assert found == []
+
+
+def test_finish_consolidation():
+    roots = [SRC, Path(__file__).resolve().parents[2] / "gw-pipeline/src/gw_pipeline"]
+    refused_classes = 0
+    for root in roots:
+        for file in root.rglob("*.py"):
+            tree = ast.parse(file.read_text(encoding="utf-8"))
+            for node in ast.walk(tree):
+                if isinstance(node, ast.ClassDef) and node.name == "FinishRefused":
+                    refused_classes += 1
+                if isinstance(node, ast.Assign) and any(
+                    isinstance(t, ast.Name) and t.id == "_TERMINAL" for t in node.targets
+                ):
+                    pytest.fail(f"{file}: _TERMINAL assignment")
+                if isinstance(node, ast.FunctionDef):
+                    assert not (file.name == "accept_integration.py" and node.name == "_resolve")
+                    assert not (file.name == "integrate.py" and node.name == "_sha")
+                assert not (isinstance(node, ast.Name) and node.id == "observe_integration")
+                assert not (isinstance(node, ast.FunctionDef) and node.name == "observe_integration")
+    assert refused_classes == 1

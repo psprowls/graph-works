@@ -14,23 +14,22 @@ from gw_orchestrate.dispatch import DispatchFailure, DispatchResult, ObservedPla
 from gw_orchestrate.dispatch_record import Overrides
 from gw_orchestrate.reroute import RerouteResult
 from gw_orchestrate.wait import Absorbed, WaitResult
+from gw_pipeline.placement import EffectivePlacement
 from gw_wire import config as wire_config
 from gw_wire import work
 from gw_wire._jsonable import commit_payload
-from gw_work.commands import DispatchExplanation, OpenDecision
+from gw_work.commands import BoardRow, DispatchExplanation, OpenDecision
 from gw_work.reconcile import CitedDecision, CommitRef, LandedSibling, ReconcileContext
 from samples_work import (
     BUNDLE,
     advance,
     archive_run,
     bare_next,
-    baseline,
     decision,
     filing,
     next_result,
     overturn,
     path_mutation,
-    placement,
     regen,
     status,
 )
@@ -62,8 +61,6 @@ def test_mutation_payloads_include_commit_outcome() -> None:
     advanced.application.commit = outcome
     assert work.advance_payload(advanced, "work/a")["commit"] == commit_payload(outcome)
     assert work.advance_payload(advance(applied=False), "work/a")["commit"] is None
-    assert work.placement_payload(placement(applied=False))["commit"] is None
-    assert work.baseline_payload(baseline(applied=False))["commit"] is None
     assert work.file_payload(filing(applied=False))["commit"] is None
     assert work.regen_index_payload(regen(applied=False))["commit"] is None
     archived = work.archive_payload(archive_run(applied=False), dry_run=True)
@@ -101,15 +98,6 @@ def test_next_projects_normalization_commits() -> None:
     result = next_result(full=True)
     result.application.commits = (outcome,)
     assert work.next_payload(result, bundle_root=BUNDLE)["commits"] == [commit_payload(outcome)]
-
-
-def test_placement_pending_commit_failure_warns_once() -> None:
-    result = placement(applied=False)
-    result.pending_commit = CommitOutcome("failed", None, "workspace: placement", (), "hook-failed")
-    result.warnings = ("workspace commit failed: hook-failed",)
-    payload = work.placement_payload(result)
-    assert payload["commit"] == commit_payload(result.pending_commit)
-    assert payload["warnings"] == ["workspace commit failed: hook-failed"]
 
 
 def _wait_message(**over: object) -> dict:
@@ -195,7 +183,7 @@ def test_worker_dispatch_payload_exact_success_shape() -> None:
         display_name="A",
         dispatch_id="ctx_1",
         terminal="term_1",
-        placement=ObservedPlacement("create", "/wt", "feature/a", "A", "repo_1", "parent_1", True, ("created",)),
+        placement=ObservedPlacement("/wt", "feature/a", "A", ("created",), "a" * 40),
         recorded="written",
         probe="submitted-heartbeat",
         delivery="verified",
@@ -231,15 +219,11 @@ def test_worker_dispatch_payload_exact_success_shape() -> None:
         "run_id": "run_1",
         "terminal": "term_1",
         "placement": {
-            "action": "create",
             "path": "/wt",
             "branch": "feature/a",
             "display_name": "A",
-            "repo_id": "repo_1",
-            "parent_worktree_id": "parent_1",
-            "lineage_set": True,
             "notes": ["created"],
-            "start_sha": None,
+            "start_sha": "a" * 40,
         },
         "recorded": "written",
         "probe": "submitted-heartbeat",
@@ -469,6 +453,8 @@ def test_projection_helpers_cover_live_and_preview_shapes(tmp_path: Path) -> Non
         wiki_commit=None,
         pointer_cleared=True,
         logged="archived",
+        pruned=None,
+        prune_warnings=(),
     )
     archived = work.archive_payload(archive_run, dry_run=False)
     assert archived["indexes"] == ["work/index.md"] and archived["conflict"] == ["work/a"]
@@ -523,15 +509,6 @@ def test_complex_payloads_project_explicit_current_fields(tmp_path: Path) -> Non
     )
     assert work.overturn_payload(overturn)["follow_up_filed"] is True
 
-    worktree = SimpleNamespace(
-        action="create",
-        path="/tmp/w",
-        branch="b",
-        base_branch="main",
-        exists=False,
-        parent_path="/tmp/parent",
-        start_sha=None,
-    )
     dispatch = SimpleNamespace(
         key="work/a#execute",
         slug="work/a",
@@ -543,7 +520,6 @@ def test_complex_payloads_project_explicit_current_fields(tmp_path: Path) -> Non
         agent="codex",
         model="m",
         reasoning_effort="high",
-        worktree=worktree,
         merge_target="main",
         auto_merge=True,
         prompt="go",
@@ -559,15 +535,13 @@ def test_complex_payloads_project_explicit_current_fields(tmp_path: Path) -> Non
         live=("x",),
         dispatches=(dispatch,),
         dispatch_repos={dispatch.key: SimpleNamespace(name="code", path=Path("/code"), source="sole")},
-        preparations=(),
-        workspace_preparations=(),
         plan=SimpleNamespace(
             finish_targets={},
             dispatch_resolutions={dispatch.key: resolve_dispatch({"stage": "execute", "has_plan": True}, rules=())},
             human_checkpoints={},
-            workspace_placements={},
+            placements={},
         ),
-        advances=(SimpleNamespace(path="work/b", reason="done", worktree="w", branch="b", mode="return"),),
+        advances=(SimpleNamespace(path="work/b", reason="done", mode="return"),),
         blocked=(SimpleNamespace(path="work/c", kind="dependency", reason="wait"),),
         decisions_owner_path="work/e",
         decisions_ledger_path="ledger",
@@ -594,7 +568,8 @@ def test_complex_payloads_project_explicit_current_fields(tmp_path: Path) -> Non
     assert orchestrate_result["dispatches"][0]["path"] == "work/a"
     assert orchestrate_result["dispatches"][0]["auto_merge"] is True
     assert orchestrate_result["dispatches"][0]["human_checkpoints"] is None
-    assert orchestrate_result["dispatches"][0]["worktree"]["parent_path"] == "/tmp/parent"
+    assert orchestrate_result["dispatches"][0]["placement"] is None
+    assert "worktree" not in orchestrate_result["dispatches"][0]
     assert orchestrate_result["advances"][0]["mode"] == "return"
     assert orchestrate_result["supervise_merges"] is False
     assert orchestrate_result["holds"] == []
@@ -635,8 +610,6 @@ def test_orchestrate_payload_carries_holds() -> None:
         supervise_merges=False,
         live=(),
         dispatches=(),
-        preparations=(),
-        workspace_preparations=(),
         advances=(),
         blocked=(),
         decisions_owner_path="work/e",
@@ -683,8 +656,9 @@ def test_work_list_payload_maps_parent_path_to_parent() -> None:
         parent_path="work/e",
         updated="2026-09-19",
     )
+    placement = EffectivePlacement("code", "/w/a", "feature/a", None, "computed")
 
-    assert work.work_list_payload([item]) == {
+    assert work.work_list_payload([BoardRow(item, placement), BoardRow(item, None)]) == {
         "items": [
             {
                 "path": "work/e/children/a",
@@ -696,7 +670,20 @@ def test_work_list_payload_maps_parent_path_to_parent() -> None:
                 "owner": None,
                 "parent": "work/e",
                 "updated": "2026-09-19",
-            }
+                "placement": {"repo": "code", "branch": "feature/a", "worktree": "/w/a", "source": "computed"},
+            },
+            {
+                "path": "work/e/children/a",
+                "type": "Feature",
+                "title": "A",
+                "work_status": "open",
+                "phase": "plan",
+                "effort": "medium",
+                "owner": None,
+                "parent": "work/e",
+                "updated": "2026-09-19",
+                "placement": None,
+            },
         ]
     }
 
@@ -818,7 +805,7 @@ def test_finish_target_projection_is_explicit_and_ordered() -> None:
     result = next_result(full=True)
     result.finish_targets = (
         FinishTarget(ItemRepo("core", Path("/core"), "frontmatter"), "/core/epic", "epic/a", "main", "/core", "merge"),
-        FinishTarget(ItemRepo(None, None, "sole"), "/ui/epic", "epic/a", "trunk", None),
+        FinishTarget(ItemRepo(None, None, "sole"), "/ui/epic", "epic/a", "trunk", "/ui"),
     )
     result.state.phase = "finish"
     assert work.next_payload(result, bundle_root=BUNDLE)["finish_targets"] == [
@@ -835,8 +822,8 @@ def test_finish_target_projection_is_explicit_and_ordered() -> None:
             "worktree": "/ui/epic",
             "source_branch": "epic/a",
             "target_branch": "trunk",
-            "target_worktree": None,
-            "default_strategy": None,
+            "target_worktree": "/ui",
+            "default_strategy": "squash",
         },
     ]
 
@@ -942,63 +929,6 @@ def test_ask_answer_payload_shapes_success_and_refusal() -> None:
         "reply_body": None,
         "refusals": ["payload-invalid"],
     }
-
-
-def test_pin_detached_worktree_projection():
-    action = SimpleNamespace(
-        action="pin-detached",
-        path=None,
-        branch=None,
-        base_branch="epic/x",
-        exists=None,
-        parent_path="/epic",
-        start_sha="a" * 40,
-    )
-    assert work._worktree(action) == {
-        "action": "pin-detached",
-        "path": None,
-        "branch": None,
-        "base_branch": "epic/x",
-        "exists": None,
-        "parent_path": "/epic",
-        "start_sha": "a" * 40,
-    }
-
-
-def test_reader_receipt_payload_freezes_attempt_and_outcome_fields() -> None:
-    from gw_orchestrate.placement import ReaderRecord
-    from work_tracker_okf.placement import ReaderObservation, ReaderReceiptPlan
-
-    observation = ReaderObservation("task_1", "ctx_1", "key", "repo", "/reader", "a" * 40)
-    plan = ReaderReceiptPlan("work/a", "work/a", "design", "design", observation, None, "")
-    payload = work.reader_receipt_payload(ReaderRecord(plan, Path("/cache/ctx_1.json"), True, False))
-    assert payload == {
-        "path": "work/a",
-        "root": "work/a",
-        "expected_phase": "design",
-        "current_phase": "design",
-        "observation": {
-            "task_id": "task_1",
-            "dispatch_id": "ctx_1",
-            "dispatch_key": "key",
-            "repo": "repo",
-            "worktree": "/reader",
-            "start_sha": "a" * 40,
-        },
-        "receipt_path": str(Path("/cache/ctx_1.json")),
-        "written": True,
-        "replayed": False,
-        "conflict": None,
-        "refusal": None,
-    }
-    refused = ReaderReceiptPlan("work/a", "work/a", "design", None, observation, "unknown-path", "missing")
-    payload = work.reader_receipt_payload(ReaderRecord(refused, None, False, False))
-    assert payload["receipt_path"] is None and payload["current_phase"] is None
-    assert payload["refusal"] == {"reason": "unknown-path", "detail": "missing"}
-    payload = work.reader_receipt_payload(
-        ReaderRecord(plan, Path("/cache/ctx_1.json"), False, False, "attempt-mismatch")
-    )
-    assert payload["conflict"] == "attempt-mismatch"
 
 
 def test_wait_liveness_preserves_empty_populated_and_uncomputed():
@@ -1178,3 +1108,93 @@ def test_next_payload_always_has_empty_path_and_artifacts_defaults() -> None:
     payload = work.next_payload(result, bundle_root=BUNDLE)
     assert payload["path"] is None
     assert payload["artifacts"] == {}
+
+
+def _placement_sample() -> SimpleNamespace:
+    return SimpleNamespace(
+        repo_name="ui",
+        repo_root=Path("/ui"),
+        branch="feature/x-1a2b3c4d",
+        worktree=Path("/ui-wt/x"),
+        parent_branch="epic/e",
+        parent_worktree=Path("/ui-wt/e"),
+        owner_path="work/e",
+        slug="x",
+    )
+
+
+def _orchestration_with(placements: dict[str, object]) -> SimpleNamespace:
+    dispatch = SimpleNamespace(
+        key="work/a#execute",
+        slug="work/a",
+        phase="execute",
+        kind="Feature",
+        effort="medium",
+        skill="tdd",
+        mode="worktree",
+        agent="codex",
+        model="m",
+        reasoning_effort="high",
+        merge_target="main",
+        auto_merge=True,
+        prompt="go",
+    )
+    return SimpleNamespace(
+        path="work/e",
+        terminal=False,
+        max_parallel=2,
+        slots_free=1,
+        max_attend=1,
+        attend_slots_free=0,
+        supervise_merges=False,
+        live=(),
+        dispatches=(dispatch,),
+        dispatch_repos={dispatch.key: SimpleNamespace(name="code", path=Path("/code"), source="sole")},
+        plan=SimpleNamespace(
+            finish_targets={},
+            dispatch_resolutions={dispatch.key: resolve_dispatch({"stage": "execute", "has_plan": True}, rules=())},
+            human_checkpoints={},
+            placements=placements,
+        ),
+        advances=(SimpleNamespace(path="work/b", reason="done", mode="return"),),
+        blocked=(),
+        decisions_owner_path="work/e",
+        decisions_ledger_path="ledger",
+        open_decisions=(),
+        assumed_decisions=(),
+        decision_counts={},
+        holds=(),
+        warnings=(),
+        code_repo="/code",
+        code_repo_name="code",
+        code_repo_source="sole",
+    )
+
+
+def test_orchestrate_payload_placement_block() -> None:
+    coded = work.orchestrate_payload(_orchestration_with({"work/a#execute": _placement_sample()}))
+    assert coded["dispatches"][0]["placement"] == {
+        "repo": {"name": "ui", "path": "/ui"},
+        "branch": "feature/x-1a2b3c4d",
+        "worktree": "/ui-wt/x",
+        "parent_branch": "epic/e",
+        "parent_worktree": "/ui-wt/e",
+        "owner_path": "work/e",
+        "slug": "x",
+    }
+    assert set(coded["dispatches"][0]["placement"]) == {
+        "repo",
+        "branch",
+        "worktree",
+        "parent_branch",
+        "parent_worktree",
+        "owner_path",
+        "slug",
+    }
+    assert work.orchestrate_payload(_orchestration_with({}))["dispatches"][0]["placement"] is None
+
+
+def test_orchestrate_payload_has_no_preparations_or_advance_pair() -> None:
+    payload = work.orchestrate_payload(_orchestration_with({}))
+    assert "preparations" not in payload
+    assert payload["advances"] == [{"path": "work/b", "reason": "done", "mode": "return"}]

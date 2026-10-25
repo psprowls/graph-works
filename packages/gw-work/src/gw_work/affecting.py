@@ -9,11 +9,12 @@ from gw_kernel.guidance.closure import affects_overlap
 from gw_kernel.workspace.errors import WorkspaceError
 from gw_kernel.workspace.layout import WorkspaceLayout
 from gw_kernel.workspace.repos import declared_repositories, resolve_item_repo
+from gw_pipeline.placement import EffectivePlacement
 from work_tracker_okf.affects import code_affects
 from work_tracker_okf.items import WorkItem, item_index
 from work_tracker_okf.vocabulary import TERMINAL_STATUSES
 
-from gw_work.commands import run_work_list
+from gw_work.commands import run_work_board
 
 
 @dataclass(frozen=True, slots=True)
@@ -22,6 +23,7 @@ class AffectingRow:
 
     item: WorkItem
     matching: tuple[str, ...]
+    placement: EffectivePlacement | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -42,7 +44,9 @@ def run_work_affecting(layout: WorkspaceLayout, repo: str, path: str) -> WorkAff
     """
     if repo not in declared_repositories(layout):
         return WorkAffecting(repo, path, (), "unknown-repository")
-    items = tuple(item for item in run_work_list(layout) if item.work_status not in TERMINAL_STATUSES)
+    board = tuple(row for row in run_work_board(layout) if row.item.work_status not in TERMINAL_STATUSES)
+    items = tuple(row.item for row in board)
+    placements = {row.item.path: row.placement for row in board}
     index = item_index(items)
     rows: list[AffectingRow] = []
     for item in items:
@@ -54,5 +58,5 @@ def run_work_affecting(layout: WorkspaceLayout, repo: str, path: str) -> WorkAff
             continue
         matching = tuple(entry for entry in code_affects(item.affects) if affects_overlap([entry], [path]))
         if matching:
-            rows.append(AffectingRow(item, matching))
+            rows.append(AffectingRow(item, matching, placements[item.path]))
     return WorkAffecting(repo, path, tuple(rows), None)

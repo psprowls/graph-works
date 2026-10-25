@@ -1,9 +1,9 @@
 """Integrate one code repository's finish source into its target with an explicit strategy.
 
-The code-repository sibling of `merge_workspace`: gw, not the finishing
+gw, not the finishing
 worker, chooses the merge flags, so the receipt's verification always matches
 how the result was made. Plans by default; only `apply=True` changes Git
-(ADR 2026-08-18). `_workspace` targets keep `merge-workspace` / the anchor path.
+(ADR 2026-08-18).
 """
 
 from __future__ import annotations
@@ -21,6 +21,7 @@ from gw_kernel.workspace.provenance import GitOutcome
 from gw_pipeline.decision_owner import decision_context, locked_decision_owner
 from gw_pipeline.finish import (
     FinishPlan,
+    FinishRefused,
     FinishTarget,
     IntegrationStrategy,
     VerifiedIntegration,
@@ -30,11 +31,12 @@ from gw_pipeline.finish import (
     finish_toolchain,
     merge_tree_unsupported,
     read_finish_receipt,
+    resolve_commit,
     resolve_finish_targets,
     verify_integration,
 )
-from gw_pipeline.workspace_branch import WORKSPACE_REPO
 from work_tracker_okf.items import WorkItem, load_items
+from work_tracker_okf.vocabulary import TERMINAL_STATUSES
 
 from gw_orchestrate.finish_receipt import receipt_problem, record_finish_in
 
@@ -42,7 +44,6 @@ IntegrateRefusal = Literal[
     "unknown-path",
     "not-at-finish",
     "no-target",
-    "workspace-target",
     "dirty",
     "not-fast-forward",
     "nothing-to-integrate",
@@ -52,7 +53,6 @@ IntegrateRefusal = Literal[
 ]
 StrategySource = Literal["flag", "config", "default"]
 IntegrateOutcome = Literal["planned", "integrated", "already-integrated"]
-_TERMINAL = frozenset({"resolved", "wontfix", "superseded"})
 #: A merge or commit runs the repository's own hooks; the 5s probe cap is too short.
 _MERGE_TIMEOUT_SECONDS = 120.0
 #: Another operation's state in the target worktree; never aborted by gw.
@@ -79,14 +79,13 @@ class IntegrateResult:
     applied: bool
 
 
-class _Refused(Exception):
+class _Refused(FinishRefused):
+    refusal: IntegrateRefusal
+
     def __init__(
         self, refusal: IntegrateRefusal, detail: str, conflicts: tuple[str, ...] = (), *, restored: bool = False
     ) -> None:
-        super().__init__(detail)
-        self.refusal = refusal
-        self.detail = detail
-        self.conflicts = conflicts
+        super().__init__(refusal, detail, conflicts)
         self.restored = restored
 
 
@@ -101,25 +100,20 @@ def _output(outcome: GitOutcome) -> str:
     return (outcome.stderr or outcome.stdout).strip()
 
 
-def _sha(worktree: Path, ref: str) -> str:
-    resolved = _run(worktree, "rev-parse", "--verify", "--end-of-options", ref + "^{commit}")
-    if resolved.returncode != 0:
+def _head(worktree: Path, ref: str) -> str:
+    resolved = resolve_commit(worktree, ref)
+    if resolved is None:
         raise _Refused("git-unavailable", f"cannot resolve {ref} in {worktree}")
-    return resolved.stdout.strip()
+    return resolved
 
 
 def _target(
     layout: WorkspaceLayout, items: Sequence[WorkItem], path: str, repo_name: str
 ) -> tuple[WorkItem, FinishTarget, Path, FinishPlan]:
-    if repo_name == WORKSPACE_REPO:
-        raise _Refused(
-            "workspace-target",
-            "the workspace repository integrates with `gw work merge-workspace` (main) or in its epic anchor",
-        )
     item = next((i for i in items if i.path == path), None)
     if item is None:
         raise _Refused("unknown-path", f"unknown work item {path!r}")
-    if item.phase != "finish" or item.work_status in _TERMINAL:
+    if item.phase != "finish" or item.work_status in TERMINAL_STATUSES:
         raise _Refused("not-at-finish", f"{path} is at {item.phase!r} ({item.work_status})")
     plan = resolve_finish_targets(layout, items, path)
     if plan.blockers:
@@ -205,7 +199,7 @@ def _merge_observed(
             raise _Refused(
                 "not-fast-forward", _output(merged) + _restore(worktree, before, merge_head=False), restored=True
             )
-        return _sha(worktree, "HEAD")
+        return _head(worktree, "HEAD")
     if strategy == "merge":
         merged = _run(
             worktree, "merge", "--no-ff", "--no-edit", "-m", f"Merge {target.source_branch} for {item.path}", source
@@ -219,7 +213,7 @@ def _merge_observed(
                 conflicts,
                 restored=True,
             )
-        return _sha(worktree, "HEAD")
+        return _head(worktree, "HEAD")
     squashed = _run(worktree, "merge", "--squash", source)
     if squashed.returncode != 0:
         conflicts = _conflicts(worktree)
@@ -252,7 +246,7 @@ def _merge_observed(
             f"git commit refused: {_output(committed)}" + _restore(worktree, before, merge_head=False),
             restored=True,
         )
-    return _sha(worktree, "HEAD")
+    return _head(worktree, "HEAD")
 
 
 @finish_toolchain
@@ -301,16 +295,22 @@ def run_integrate(
             applied,
         )
 
-    def observe(items: Sequence[WorkItem]) -> tuple[WorkItem, Path, VerifiedIntegration | None]:
-        nonlocal target, source, before, chosen, source_of
+    def validate(items: Sequence[WorkItem]) -> tuple[WorkItem, Path]:
+        nonlocal target
         item, target, worktree, plan = _target(layout, items, path, repo_name)
         problem = receipt_problem(layout, path, plan)  # read-only: refuse before Git is touched
         if problem is not None:
             raise _Refused("receipt-refused", problem)
+        return item, worktree
+
+    def observe(items: Sequence[WorkItem]) -> tuple[WorkItem, Path, VerifiedIntegration | None]:
+        nonlocal source, before, chosen, source_of
+        item, worktree = validate(items)
+        assert target is not None
         if chosen is None:
             chosen, source_of = finish_strategy(layout, repo_name)
-        source = _sha(worktree, "refs/heads/" + target.source_branch)
-        before = _sha(worktree, "refs/heads/" + target.target_branch)
+        source = _head(worktree, "refs/heads/" + target.source_branch)
+        before = _head(worktree, "refs/heads/" + target.target_branch)
         _require_clean(worktree, target.target_branch)
         settled = _settled(layout, path, target)
         if (
@@ -325,8 +325,13 @@ def run_integrate(
                 raise _Refused("git-unavailable", unsupported)
         return item, worktree, settled
 
+    settled: VerifiedIntegration | None
     try:
-        _item, _worktree, settled = observe(load_items(load_work_bundle(layout)))
+        if apply:
+            # pre-lock validation: it observes the repositories, and the lock-held pass observes them again
+            validate(load_items(load_work_bundle(layout)))
+        else:
+            _item, _worktree, settled = observe(load_items(load_work_bundle(layout)))
     except _Refused as refused:
         return result(refused.refusal, refused.detail, conflicts=refused.conflicts)
     if not apply:
@@ -353,7 +358,7 @@ def run_integrate(
                 )
                 outcome: IntegrateOutcome = "integrated"
             else:
-                result_commit, evidence, outcome = settled.result_commit, None, "already-integrated"
+                result_commit, evidence, outcome = settled.result_commit, settled, "already-integrated"
         except _Refused as refused:
             return result(refused.refusal, refused.detail, conflicts=refused.conflicts)
         fresh = context

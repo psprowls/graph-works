@@ -10,11 +10,12 @@ turned a rename of `work_io.lifecycle_lint` into a split.
 
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 
 from okf_io import Finding, Rule, RuleContext, Severity
 
 from work_tracker_okf._rules._common import LaneConfig, active, days_since, items, text_key, with_documents
+from work_tracker_okf.affects import code_affects
 from work_tracker_okf.hierarchy import sweep_eligible
 from work_tracker_okf.items import WorkItem
 from work_tracker_okf.pipeline import (
@@ -41,6 +42,7 @@ CODES: tuple[str, ...] = (
     "state.archive-eligible",
     "state.spec-baseline-malformed",
     "state.phase-off-path",
+    "state.retired-placement",
 )
 
 #: `Finding.spec` is "the thing that says so". None of these cites an OKF
@@ -92,8 +94,8 @@ def companions(ctx: RuleContext) -> Iterable[Finding]:
     Three notes a rewrite drops by not knowing about them:
 
     - **The decomposing-type exemption on `resolved`.** An Epic or Release
-      with no branch or repository stamps resolves through its children.
-      A stamped item must record a `resolved_in` ref.
+      whose `affects` touch no code resolves through its children.
+      An item that owns a branch (code `affects`) must record a `resolved_in` ref.
     - **Rule 5 narrows to `owner` alone** (C5-C). work-io also accepted
       `related_prs`; `sources[]` is the lane's pointer surface now, and a second
       parallel list of references is the duplication the port exists to remove.
@@ -107,7 +109,7 @@ def companions(ctx: RuleContext) -> Iterable[Finding]:
             yield _finding(
                 "state.in-progress-without-owner", "error", item, "`work_status: in-progress` with no `owner`"
             )
-        owns_no_branch = not item.branch and not item.repo_stamps
+        owns_no_branch = not code_affects(item.affects)
         exempt = item.type in DECOMPOSING_TYPES and owns_no_branch
         if status == "resolved" and not exempt and not item.resolved_in:
             yield _finding("state.resolved-without-ref", "warn", item, "`work_status: resolved` with no `resolved_in`")
@@ -177,7 +179,37 @@ def baselines(ctx: RuleContext) -> Iterable[Finding]:
                 "state.spec-baseline-malformed",
                 "warn",
                 item,
-                "`spec_baseline` must be a mapping of `code`/`workspace` to full lowercase commit ids; ignored",
+                "`spec_baseline` must be a mapping of `code` to a full lowercase commit id; ignored",
+            )
+
+
+def _mapping_keys(value: object) -> frozenset[str]:
+    return frozenset(str(key) for key in value) if isinstance(value, Mapping) else frozenset()
+
+
+def retired_placement(ctx: RuleContext) -> Iterable[Finding]:
+    """One warning per retired placement key an active item still carries.
+
+    Every `repo_stamps` entry is retired, the legacy workspace one included: workspace writes land on the
+    primary checkout, so no writer records a workspace stamp any more.
+    """
+    for item, document in with_documents(ctx):
+        if item.archived:
+            continue
+        raw = document.fm_raw
+        retired = [key for key in ("worktree", "branch") if key in raw]
+        if _mapping_keys(raw.get("repo_stamps")) or (
+            "repo_stamps" in raw and not isinstance(raw.get("repo_stamps"), Mapping)
+        ):
+            retired.append("repo_stamps")
+        if "workspace" in _mapping_keys(raw.get("spec_baseline")):
+            retired.append("spec_baseline.workspace")
+        for key in retired:
+            yield _finding(
+                "state.retired-placement",
+                "warn",
+                item,
+                f"retired placement field {key}; run gw work migrate-placement",
             )
 
 
@@ -226,4 +258,4 @@ def _off_path(definition: PipelineDefinition) -> Rule:
 
 def rules(config: LaneConfig) -> tuple[Rule, ...]:
     """The state rules, including a path check using the supplied definition."""
-    return (coherence, companions, staleness, terminal, baselines, _off_path(config.definition))
+    return (coherence, companions, staleness, terminal, baselines, retired_placement, _off_path(config.definition))

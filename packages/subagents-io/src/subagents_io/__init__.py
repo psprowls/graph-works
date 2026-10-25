@@ -43,7 +43,7 @@ from __future__ import annotations
 import importlib
 from typing import TYPE_CHECKING, Any
 
-__version__ = "0.2.1"
+__version__ = "0.3.0"
 
 _EXPORTS: dict[str, tuple[str, str]] = {
     "Adapter": ("subagents_io.adapters", "Adapter"),
@@ -67,11 +67,9 @@ _EXPORTS: dict[str, tuple[str, str]] = {
     "WorkerEventBase": ("subagents_io.backend", "WorkerEventBase"),
     "WorkerQuestion": ("subagents_io.backend", "WorkerQuestion"),
     "WorkerRecord": ("subagents_io.backend", "WorkerRecord"),
-    "WorktreeNotProvisioned": ("subagents_io.backend", "WorktreeNotProvisioned"),
     "DISPATCH_MODES": ("subagents_io.dispatch", "DISPATCH_MODES"),
-    "WORKTREE_ACTIONS": ("subagents_io.dispatch", "WORKTREE_ACTIONS"),
     "PlannedDispatch": ("subagents_io.dispatch", "PlannedDispatch"),
-    "WorktreeAction": ("subagents_io.dispatch", "WorktreeAction"),
+    "WorktreePlacement": ("subagents_io.dispatch", "WorktreePlacement"),
     "FanOutResult": ("subagents_io.pool", "FanOutResult"),
     "PerItemError": ("subagents_io.pool", "PerItemError"),
     "SubagentPool": ("subagents_io.pool", "SubagentPool"),
@@ -129,9 +127,8 @@ if TYPE_CHECKING:
         WorkerEventBase,
         WorkerQuestion,
         WorkerRecord,
-        WorktreeNotProvisioned,
     )
-    from subagents_io.dispatch import DISPATCH_MODES, WORKTREE_ACTIONS, PlannedDispatch, WorktreeAction
+    from subagents_io.dispatch import DISPATCH_MODES, PlannedDispatch, WorktreePlacement
     from subagents_io.pool import FanOutResult, PerItemError, SubagentPool, TaskResult
     from subagents_io.roles import RoleBinding, RoleSpec, resolve_role_spec
     from subagents_io.routing import ModelResolution, resolve_model, validate_rules
@@ -189,14 +186,12 @@ __all__ = [  # noqa: RUF022 -- sorted with plain `sorted()`, not isort's natural
     "UnknownWorker",
     "UnsupportedMode",
     "WORKER_STATES",
-    "WORKTREE_ACTIONS",
     "WorkerDone",
     "WorkerEvent",
     "WorkerEventBase",
     "WorkerQuestion",
     "WorkerRecord",
-    "WorktreeAction",
-    "WorktreeNotProvisioned",
+    "WorktreePlacement",
     "aggregate_trace",
     "collapse_runs",
     "is_groupable",

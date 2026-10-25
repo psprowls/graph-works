@@ -200,11 +200,8 @@ def test_concurrent_context_edit_matches_full_locked_oracle(tmp_path, monkeypatc
                 baseline_bundle=baseline if variant == "partial" else None,
                 commit=None,
             )
-        if edit == "title":
-            assert application.rolled_back
-            assert any(transactions.STALE_INVENTORY_DETAIL in f for f in application.failures)
-        else:
-            assert application.ok, application.failures
+        # A reparent no longer writes lane indexes, so a renamed sibling is not a stale inventory.
+        assert application.ok, application.failures
         assert len(observed) == 2
         if variant == "partial":
             assert observed[0] is baseline
@@ -444,10 +441,6 @@ def test_new_context_member_after_effects_matches_full_snapshot_oracle(tmp_path,
             "ancestor-child": "work/outer/children/bug-new",
             "unrelated": "work/third/children/bug-new",
         }[addition]
-        stale_lane = {
-            "source-sibling": "work/left/children/index.md",
-            "destination-sibling": "work/destination/children/index.md",
-        }.get(addition)
         bundle, plan = commands._plan_reparent_partial(layout, [source], "work/destination")
         baseline = loaders.reclassify_ignored(bundle, IGNORE)
         assert baseline.partial is not None
@@ -476,11 +469,8 @@ def test_new_context_member_after_effects_matches_full_snapshot_oracle(tmp_path,
             application = transactions.apply_mutation(
                 layout, plan, baseline_bundle=baseline if variant == "partial" else None, commit=None
             )
-        if stale_lane is not None:
-            assert application.rolled_back
-            assert application.failures == (f"validation failed: {stale_lane}: {transactions.STALE_INVENTORY_DETAIL}",)
-        else:
-            assert application.ok, application.failures
+        # A reparent no longer writes lane indexes, so a new sibling is never a stale inventory.
+        assert application.ok, application.failures
         assert len(observed) == 2
         if variant == "partial":
             assert loads[0].partial is not None

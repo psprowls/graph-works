@@ -67,7 +67,9 @@ def test_round_trip_matches_the_cli_projection(
 
     applied = _apply(client, headers, params, planned.json())
     assert applied.status_code == 200, applied.text
-    assert applied.json()["result"] == expected
+    # Prune warnings name the repository path, which differs between the two workspaces.
+    served = json.dumps(applied.json()["result"]).replace(str(tmp_path), "<tmp>")
+    assert json.loads(served) == json.loads(json.dumps(expected).replace(str(tmp_path / "twin"), "<tmp>"))
     assert not (layout.bundle_dir / f"{DONE}.md").exists()
 
 

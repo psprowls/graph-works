@@ -19,12 +19,7 @@ import subprocess
 import sys
 import tempfile
 
-HELPER = runpy.run_path(
-    str(
-        Path(__file__).resolve().parents[1]
-        / "skills/auto-drive/references/launch-worker.py"
-    )
-)
+HELPER = runpy.run_path(str(Path(__file__).resolve().parents[1] / "skills/auto-drive/references/launch-worker.py"))
 FIXTURES = Path(__file__).resolve().parent / "fixtures" / "orca-lifecycle"
 
 
@@ -37,9 +32,7 @@ def ok(**result):
 
 
 def action(op, payload, mode="attend", authority=None):
-    return HELPER["lifecycle_action"](op, payload, mode=mode, authority=authority)[
-        "action"
-    ]
+    return HELPER["lifecycle_action"](op, payload, mode=mode, authority=authority)["action"]
 
 
 class ReleaseTests(unittest.TestCase):
@@ -62,9 +55,7 @@ class ReleaseTests(unittest.TestCase):
         self.assertEqual(action("release", payload, mode="attend"), "close-terminal")
         for mode in ("autonomous", "relay", None):
             with self.subTest(mode=mode):
-                self.assertEqual(
-                    action("release", payload, mode=mode), "report-retained"
-                )
+                self.assertEqual(action("release", payload, mode=mode), "report-retained")
 
     def test_other_retained_reasons_are_reported(self):
         for reason in (
@@ -115,9 +106,7 @@ class StopTests(unittest.TestCase):
             "done",
         )
         self.assertEqual(action("stop", fixture("stop-stopped.json")), "done")
-        self.assertEqual(
-            action("stop", fixture("stop-already-settled-after-stop.json")), "done"
-        )
+        self.assertEqual(action("stop", fixture("stop-already-settled-after-stop.json")), "done")
         self.assertEqual(
             action(
                 "stop",
@@ -137,14 +126,10 @@ class StopTests(unittest.TestCase):
         payload = ok(state="stop_unknown", alreadySettled=False, processAction="none")
         for authority in ("park", "user-authorized", "exit-evidence"):
             with self.subTest(authority=authority):
-                self.assertEqual(
-                    action("stop", payload, authority=authority), "abandon-then-close"
-                )
+                self.assertEqual(action("stop", payload, authority=authority), "abandon-then-close")
         for authority in ("none", "already-settled", None):
             with self.subTest(authority=authority):
-                self.assertEqual(
-                    action("stop", payload, authority=authority), "abandon-report"
-                )
+                self.assertEqual(action("stop", payload, authority=authority), "abandon-report")
 
     def test_already_settled_terminal_states_are_done(self):
         for state in ("succeeded", "failed", "stopped", "abandoned"):
@@ -210,9 +195,7 @@ class DefensiveTests(unittest.TestCase):
                 ):
                     with self.subTest(op=op, payload=payload):
                         self.assertEqual(action(op, payload), "inspect")
-            self.assertEqual(
-                action("stop", ok(state="stop_unknown"), authority=value), "inspect"
-            )
+            self.assertEqual(action("stop", ok(state="stop_unknown"), authority=value), "inspect")
 
     def test_result_state_wins_over_error_code(self):
         for state, expected in (("released", "done"), ("evaporated", "inspect")):
@@ -236,18 +219,13 @@ class DefensiveTests(unittest.TestCase):
 
     def test_settled_requires_literal_true(self):
         for settled in (False, 1, "true", [], None):
-            self.assertEqual(
-                action("stop", ok(state="succeeded", alreadySettled=settled)), "inspect"
-            )
+            self.assertEqual(action("stop", ok(state="succeeded", alreadySettled=settled)), "inspect")
 
     def test_cli_registration_and_recorded_receipt(self):
         result = subprocess.run(
             [
                 sys.executable,
-                str(
-                    Path(__file__).resolve().parents[1]
-                    / "skills/auto-drive/references/launch-worker.py"
-                ),
+                str(Path(__file__).resolve().parents[1] / "skills/auto-drive/references/launch-worker.py"),
                 "classify-lifecycle",
                 "--op",
                 "stop",

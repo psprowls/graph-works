@@ -6,10 +6,12 @@ import asyncio
 import shutil
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 import typer
 from gw_kernel.workspace.config import load_workspace_config
 from gw_kernel.workspace.errors import ScanError
+from gw_kernel.workspace.layout import WorkspaceLayout
 from gw_wiki.scan.commands import (
     BRIEFS_DIRNAME,
     WORKLIST_FILENAME,
@@ -24,6 +26,8 @@ from gw_wiki.scan.commands import (
 from gw_wiki.scan.repo_scan import run_repo_scan
 from gw_wiki.scan.scan_contract import UnsupportedWorklistSchema
 from gw_wire.wiki import repo_scan_payload, scan_apply_payload, scan_emit_payload, scan_normal_payload
+from gw_wire.work import regen_index_payload
+from gw_work import run_regen_indexes
 
 from gw_cli import exit_codes
 from gw_cli.json_output import encode
@@ -46,6 +50,28 @@ def _reset_results_dir(path: Path) -> None:
 def _emit_json(payload: dict[str, object]) -> None:
     """Write a process-boundary payload with no incidental stdout."""
     typer.echo(encode(payload))
+
+
+def _reconcile_work_indexes(layout: WorkspaceLayout) -> dict[str, Any]:
+    """Reconcile the work-lane indexes a successful full scan leaves behind."""
+    plan = regen_index_payload(run_regen_indexes(layout, dry_run=True))
+    if not plan["indexes"] or plan["refusals"]:
+        # Nothing to write (or nothing safe to write): no apply, so no commit either.
+        return plan
+    return regen_index_payload(run_regen_indexes(layout, dry_run=False))
+
+
+def _report_work_indexes(work_indexes: dict[str, Any], *, json_output: bool) -> None:
+    """Print the reconciliation for text mode, then fail on a refusal or incomplete apply."""
+    for warning in work_indexes["warnings"]:
+        typer.echo(f"Warning: {warning}", err=True)
+    if not json_output:
+        for index in work_indexes["indexes"]:
+            typer.echo(f"reconciled {index}")
+    if work_indexes["refusals"]:
+        exit_error("work index reconciliation refused")
+    if work_indexes["applied"] and (work_indexes["rolled_back"] or work_indexes["failures"]):
+        exit_error("work index reconciliation incomplete")
 
 
 def scan(
@@ -146,6 +172,7 @@ def scan(
             emit_scan_worklist(worklist, out_dir=cache_dir)
             canonical_results_dir = scan_results_dir(layout)
             _reset_results_dir(canonical_results_dir)
+            emit_work_indexes = None if structural.errors else _reconcile_work_indexes(layout)
             _emit_json(
                 scan_emit_payload(
                     worklist_path=cache_dir / WORKLIST_FILENAME,
@@ -153,22 +180,28 @@ def scan(
                     results_dir=canonical_results_dir,
                     short_head=worklist.short_head,
                     structural=structural,
+                    work_indexes=emit_work_indexes,
                 )
             )
             # Both lanes, not just the entity one: a mirror repo that failed
             # mid-write must exit non-zero here exactly as an index refusal does.
             if structural.errors:
                 exit_error("scan emitted entity errors")
+            if emit_work_indexes is not None:
+                _report_work_indexes(emit_work_indexes, json_output=True)
             return
 
         result = asyncio.run(run_scan(layout, config, today=now.date(), at=now, narrate=not no_narrate, dry_run=False))
+        work_indexes = _reconcile_work_indexes(layout) if result.ok else None
     except (OSError, ScanError, ValueError) as exc:
         exit_error(str(exc), cause=exc)
 
     if json_output:
-        _emit_json(scan_normal_payload(result))
+        _emit_json(scan_normal_payload(result, work_indexes=work_indexes))
     else:
         for warning in result.structural.warnings:
             typer.echo(f"Warning: {warning}", err=True)
     if not result.ok:
         exit_error("scan completed with entity errors")
+    if work_indexes is not None:
+        _report_work_indexes(work_indexes, json_output=json_output)

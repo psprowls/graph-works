@@ -314,3 +314,106 @@ def test_direct_entries_does_not_mistake_a_slug_ending_in_index_for_an_index_pag
     targets, unreadable = _direct_entries(text, "work", frozenset())
     assert targets == ("feature-regen-index.md",)
     assert unreadable == ()
+
+
+_REMEDIATION = "; run `gw work regen-index`"
+
+
+def _two_items(root: Path) -> None:
+    write_item(root, "work/feature-a", "type: Feature\nwork_status: open\n")
+    write_item(root, "work/feature-b", "type: Feature\nwork_status: open\n")
+
+
+def test_outdated_entry_text_reports_one_drift_per_index(tmp_path: Path) -> None:
+    _two_items(tmp_path)
+    (tmp_path / "work" / "index.md").write_text(
+        "# Items\n\n- [Feature: T](feature-a.md) — open · design\n- [Feature: T](feature-b.md) — resolved · done\n",
+        encoding="utf-8",
+    )
+
+    drift = lane_report(tmp_path).by_code("structure.index-drift")
+
+    assert len(drift) == 1
+    assert drift[0].path == "work/index.md"
+    assert "2 outdated" in (drift[0].message or "")
+    assert (drift[0].message or "").endswith(_REMEDIATION)
+
+
+def test_marker_only_drift_words_without_a_zero_count(tmp_path: Path) -> None:
+    _two_items(tmp_path)
+    (tmp_path / "work" / "index.md").write_text(
+        "# Items\n\n<!-- graph-works:work-items:start -->\n"
+        "- [Feature: T](feature-a.md) \u2014 open \u00b7 not started\n"
+        "- [Feature: T](feature-b.md) \u2014 open \u00b7 not started\n"
+        "<!-- graph-works:work-items:end -->\n",
+        encoding="utf-8",
+    )
+
+    drift = lane_report(tmp_path).by_code("structure.index-drift")
+
+    assert len(drift) == 1
+    assert drift[0].message == "lane index differs from its reconciled form" + _REMEDIATION
+
+
+def test_drift_suppressed_when_entry_code_fires(tmp_path: Path) -> None:
+    _two_items(tmp_path)
+    (tmp_path / "work" / "index.md").write_text(
+        "# Items\n\n- [Feature: T](feature-a.md) — open · design\n",
+        encoding="utf-8",
+    )
+
+    report = lane_report(tmp_path)
+
+    assert report.by_code("structure.index-entry-missing")
+    assert not report.by_code("structure.index-drift")
+
+
+def test_reconciled_index_with_prose_has_no_drift(tmp_path: Path) -> None:
+    _two_items(tmp_path)
+    (tmp_path / "work" / "index.md").write_text(
+        "# Items\n\nSome prose paragraph about the lane.\n\n<!-- a human comment -->\n\n"
+        "- [Feature: T](feature-a.md) — open · not started\n- [Feature: T](feature-b.md) — open · not started\n",
+        encoding="utf-8",
+    )
+
+    codes = {f.code for f in lane_report(tmp_path).findings}
+
+    assert not {code for code in codes if code.startswith("structure.index-")}
+
+
+def test_reconciled_crlf_index_has_no_drift(tmp_path: Path) -> None:
+    _two_items(tmp_path)
+    (tmp_path / "work" / "index.md").write_bytes(
+        b"# Items\r\n\r\n- [Feature: T](feature-a.md) \xe2\x80\x94 open \xc2\xb7 not started\r\n"
+        b"- [Feature: T](feature-b.md) \xe2\x80\x94 open \xc2\xb7 not started\r\n"
+    )
+
+    assert not lane_report(tmp_path).by_code("structure.index-drift")
+
+
+def test_entry_codes_carry_remediation(tmp_path: Path) -> None:
+    release = "work/release-cutover"
+    lane = f"{release}/children"
+    epic = f"{lane}/epic-migration"
+    write_item(tmp_path, release, "type: Release\nwork_status: open\n")
+    write_item(tmp_path, epic, "type: Epic\nwork_status: open\n")
+    write_item(tmp_path, f"{epic}/children/feature-import", "type: Feature\nwork_status: open\n")
+    (tmp_path / lane / "index.md").write_text(
+        "# Items\n\n"
+        "- [Stale](gone.md)\n"
+        "- [Nested](epic-migration/children/feature-import.md)\n"
+        "- [Nested again](epic-migration/children/feature-import.md)\n"
+        "- [Bug: a] broken](nowhere.md) — open · design\n",
+        encoding="utf-8",
+    )
+
+    findings = [f for f in lane_report(tmp_path).findings if f.code.startswith("structure.index-entry-")]
+
+    assert {f.code for f in findings} == {
+        "structure.index-entry-missing",
+        "structure.index-entry-stale",
+        "structure.index-entry-duplicate",
+        "structure.index-entry-non-direct",
+        "structure.index-entry-unreadable",
+    }
+    assert all((f.message or "").endswith(_REMEDIATION) for f in findings)

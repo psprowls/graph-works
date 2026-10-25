@@ -276,17 +276,7 @@ def test_dense_human_renderers_cover_every_optional_group(capsys: pytest.Capture
                     "reasoning_effort": None,
                     "provenance": {},
                     "model": "m",
-                    "worktree": {"action": "create"},
-                    "workspace": {"worktree": "/ws-wt/a", "branch": "feature/a"},
-                }
-            ],
-            "workspace_preparations": [
-                {
-                    "owner_path": "work/a",
-                    "owner_phase": "execute",
-                    "branch": "feature/a",
-                    "worktree": "/ws-wt/a",
-                    "base_branch": "main",
+                    "placement": {"branch": "feature/x-1a2b3c4d", "worktree": "/wt/code/feature/x-1a2b3c4d"},
                 }
             ],
             "advances": [{"path": "work/a", "reason": "ready", "mode": "advance"}],
@@ -317,8 +307,8 @@ def test_dense_human_renderers_cover_every_optional_group(capsys: pytest.Capture
     captured = capsys.readouterr()
     header = next(line for line in captured.out.splitlines() if line.startswith("work/e: terminal="))
     assert "slots_free=1/2 attend_slots_free=0/1" in header
-    assert "worktree=create workspace=feature/a" in captured.out
-    assert "  workspace-prepare work/a (execute): feature/a at /ws-wt/a from main" in captured.out
+    assert "feature/x-1a2b3c4d @ /wt/code/feature/x-1a2b3c4d\n" in captured.out
+    assert "workspace-prepare" not in captured.out
     assert "CONTRADICTION" in captured.out
     assert "partial" in captured.err
     assert "  guidance: 1 entries, 2,870 tokens → /tmp/guidance-design.md\n" in captured.out
@@ -345,7 +335,6 @@ def test_render_orchestrate_prints_supervise_merges_only_when_true(
         "attend_slots_free": 0,
         "supervise_merges": False,
         "dispatches": [],
-        "workspace_preparations": [],
         "advances": [],
         "blocked": [],
         "decisions": {"open": []},
@@ -386,8 +375,6 @@ def test_render_orchestrate_prints_holds(capsys: pytest.CaptureFixture[str]) -> 
         supervise_merges=False,
         live=(),
         dispatches=(),
-        preparations=(),
-        workspace_preparations=(),
         advances=(),
         blocked=(),
         decisions_owner_path="work/e",
@@ -468,3 +455,73 @@ def test_render_next_carried_context_none_and_warnings_pass_through(capsys: pyte
     captured = capsys.readouterr()
     assert "  carried context: none\n" in captured.out
     assert "landed_since: unavailable: x" in captured.err and "frame note" in captured.err
+
+
+def test_render_orchestrate_prints_branch_at_worktree(capsys: pytest.CaptureFixture[str]) -> None:
+    def payload(placement: dict[str, str] | None) -> dict[str, object]:
+        return {
+            "path": "work/e",
+            "terminal": False,
+            "slots_free": 1,
+            "max_parallel": 2,
+            "max_attend": 1,
+            "attend_slots_free": 0,
+            "supervise_merges": False,
+            "dispatches": [
+                {
+                    "key": "work/a#execute",
+                    "skill": "tdd",
+                    "mode": "worktree",
+                    "agent": "codex",
+                    "reasoning_effort": None,
+                    "provenance": {},
+                    "model": "m",
+                    "placement": placement,
+                }
+            ],
+            "advances": [],
+            "blocked": [],
+            "decisions": {"open": []},
+            "holds": [],
+            "warnings": [],
+        }
+
+    rendering.render_orchestrate(
+        payload({"branch": "feature/x-1a2b3c4d", "worktree": "/w/worktrees/code/feature/x-1a2b3c4d"})
+    )
+    assert "feature/x-1a2b3c4d @ /w/worktrees/code/feature/x-1a2b3c4d" in capsys.readouterr().out
+    rendering.render_orchestrate(payload(None))
+    assert "model=m workspace\n" in capsys.readouterr().out
+
+
+def test_render_migrate_placement_lists_rows_blockers_and_orphans(capsys: pytest.CaptureFixture[str]) -> None:
+    payload: dict[str, object] = {
+        "nothing_to_migrate": False,
+        "mode": "plan",
+        "strips": ["work/a"],
+        "rows": [{"action": "adopt", "repo": "code", "worktree": "/wt/a", "branch": "feature/a", "reason": None}],
+        "blockers": [
+            {
+                "item": "work/b",
+                "legacy_branch": "psprowls/b",
+                "computed_branch": "feature/b",
+                "commands": ["git branch -m psprowls/b feature/b"],
+            }
+        ],
+        "orphans": [{"repo": "code", "branch": "stale/c"}],
+        "workspace_stamps": [{"item": "work/d", "worktree": "/ws/d", "branch": "ws/d", "ahead": 2}],
+    }
+    rendering.render_migrate_placement(payload)
+    out = capsys.readouterr().out
+    assert "migrate-placement plan: 1 pages carry retired keys" in out
+    assert "  adopt code /wt/a (-)" in out
+    assert "blocker work/b: psprowls/b != feature/b\n    git branch -m psprowls/b feature/b" in out
+    assert "orphan code stale/c" in out
+    assert "legacy workspace placement work/d: worktree /ws/d, branch ws/d, 2 commits ahead of main" in out
+    assert out.endswith("re-run with --apply to migrate\n")
+    rendering.render_migrate_placement(
+        {**payload, "mode": "apply", "rows": [], "blockers": [], "orphans": [], "workspace_stamps": []}
+    )
+    assert capsys.readouterr().out == "migrate-placement applied: 1 pages carry retired keys\n"
+    rendering.render_migrate_placement({**payload, "nothing_to_migrate": True})
+    assert capsys.readouterr().out == "nothing to migrate\n"

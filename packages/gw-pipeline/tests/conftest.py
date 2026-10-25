@@ -20,3 +20,5 @@ from gw_kernel.testing import (
 from gw_kernel.testing import (
     stale_graph_dir as stale_graph_dir,
 )
+
+pytest_plugins = ("place_fixture",)

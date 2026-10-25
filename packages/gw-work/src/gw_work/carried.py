@@ -33,7 +33,7 @@ from typing import Final
 from gw_kernel.workspace import provenance
 from gw_kernel.workspace.layout import WorkspaceLayout
 from gw_pipeline.landed import landed_since
-from gw_pipeline.workspace_placement import ReturnDestination, confined_member, resolve_destination
+from gw_pipeline.members import confined_member
 from okf_io import Bundle
 from work_tracker_okf.affects import code_affects
 from work_tracker_okf.items import WorkItem
@@ -109,10 +109,10 @@ def _landed_since(inp: SlotInput) -> SlotFill:
     if result.code_baseline is None:
         return SlotFill(
             lines=("No spec baseline recorded; landed-since unavailable.",),
-            data=MappingProxyType({"code_baseline": None, "workspace_baseline": result.workspace_baseline}),
+            data=MappingProxyType({"code_baseline": None}),
             warnings=result.warnings,
         )
-    lines = [f"Spec baseline: code `{_short(result.code_baseline)}`, workspace `{_short(result.workspace_baseline)}`."]
+    lines = [f"Spec baseline: code `{_short(result.code_baseline)}`."]
     if result.entries:
         lines.extend(
             f"- `{e.sibling.path}` resolved in `{_short(e.sibling.resolved_in)}` — "
@@ -136,25 +136,14 @@ def _landed_since(inp: SlotInput) -> SlotFill:
         lines.append(f"- … and {len(commits) - _COMMIT_CAP} more")
     if diff_command is not None:
         lines.append(f"Diff: `{diff_command}`")
-    workspace_commits: int | None = None
-    if result.workspace_baseline is not None:
-        out = provenance.run_git(inp.layout.root, "rev-list", "--count", f"{result.workspace_baseline}..HEAD")
-        if out is not None and out.strip().isdigit():
-            workspace_commits = int(out.strip())
-            lines.append(
-                f"Workspace: {workspace_commits} commits since `{_short(result.workspace_baseline)}` "
-                f"(`git -C {inp.layout.root} log --oneline {result.workspace_baseline}..HEAD`)."
-            )
     data: dict[str, JsonValue] = {
         "code_baseline": result.code_baseline,
-        "workspace_baseline": result.workspace_baseline,
         "siblings": [
             {"path": e.sibling.path, "resolved_in": e.sibling.resolved_in, "overlaps": e.overlaps}
             for e in result.entries
         ],
         "commits": [{"sha": sha, "subject": subject} for sha, subject in commits],
         "diff_command": diff_command,
-        "workspace_commits": workspace_commits,
     }
     return SlotFill(lines=tuple(lines), data=MappingProxyType(data), warnings=result.warnings)
 
@@ -208,29 +197,21 @@ def _execute_return(inp: SlotInput) -> SlotFill:
         else:
             lines.append(
                 f"Canonical plan: {record.plan} (sha256 `{_short(record.plan_sha256)}`), "
-                f"read it in the main workspace ({plan_path}) even if your content root's copy is older."
+                f"read it in the main workspace ({plan_path})."
             )
     if design is not None:
         lines.append(f"Design: {design}")
-    coverage: dict[str, JsonValue] = {
-        "resource": record.coverage,
-        "path": None,
-        "worktree": None,
-        "branch": None,
-    }
+    coverage: dict[str, JsonValue] = {"resource": record.coverage, "path": None}
     try:
-        destination = resolve_destination(inp.layout, {item.path: item for item in inp.items}, inp.item)
-        if isinstance(destination, ReturnDestination):
-            path = confined_member(destination.bundle_root, record.coverage.removeprefix("/"))
-            coverage.update(path=str(path), worktree=destination.worktree, branch=destination.branch)
-            lines.append(
-                f"Report in: {path} under `## Returned scope {record.id}`; "
-                "keep the row ids and set `Report state: reported`."
-            )
-        else:
-            warnings.append(f"execute_return: destination unavailable: {destination[1]}")
+        path = confined_member(inp.layout.bundle_dir, record.coverage.removeprefix("/"))
     except (OSError, ValueError) as exc:
         warnings.append(f"execute_return: destination unavailable: {exc}")
+    else:
+        coverage["path"] = str(path)
+        lines.append(
+            f"Report in: {path} under `## Returned scope {record.id}`; "
+            "keep the row ids and set `Report state: reported`."
+        )
     data: dict[str, JsonValue] = {
         "return_id": record.id,
         "scope": [{"id": row.id, "text": row.text} for row in record.scope],

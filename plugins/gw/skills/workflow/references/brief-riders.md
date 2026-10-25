@@ -17,8 +17,8 @@ plugin supplies it.
 
 **Substitutions.** `<workspace>` is replaced with the resolved absolute
 workspace path before inlining. `<work-path>` is the item's canonical path.
-`<worktree>` / `<branch>` come from the item's own frontmatter — see the
-execute riders' conditional note.
+Nothing is substituted from frontmatter for placement: the execute riders read
+the brief's `Code root:` line (`SKILL.md` step 3).
 
 **Ledger obligations are not a rider.** Recording relayed answers, amending answered decisions and filing in-stage changes as `assumed` is the `SKILL.md` step 3 **Decision ledger** bullet, which every stage brief carries regardless of `action.skill`. Riders carry no copy of it.
 
@@ -192,38 +192,19 @@ project root. Hence the positive form below.
 > item. You are authorized to write code for the scope named in `affects`, and
 > not to widen it.
 >
-> **Isolation.** Isolation is mandatory, not a consent question — do not ask
-> whether to create a worktree. If `git rev-parse --git-dir` differs from
-> `git rev-parse --git-common-dir` you are already in a linked worktree; proceed
-> without creating another.
+> **Isolation.** gw created this item's worktree. The brief's `Code root:` line
+> names it. `cd` there first, so `git rev-parse --git-dir` and `--git-common-dir`
+> show a linked worktree. Do not ask whether to create a worktree, and do not
+> create one or switch its branch. Give the code root to every subagent you
+> dispatch. Under a supervised dispatch with no `Code root:` line, this session
+> already starts in the item's worktree: stay in it. When the brief has neither
+> a `Code root:` line nor a supervised dispatch, the item touches only the
+> workspace: work in `<workspace>` and create no worktree. Worktree lifecycle is
+> `gw work place`'s. These riders only point the stage at the worktree it made.
 >
 > **Waiting.** Add `--notify` to the `gw work gate run <work-path>` command you start the gate with, keeping any `--worktree` or `--scope` flags it already has. If it reports `satisfied`, continue. If it reports `notify.registered: true`, end your turn now, with no `gate wait` and no polling: when the gate finishes, a line starting `Gate run` is typed into this terminal as your next prompt. Then run the `gw work gate wait <work-path> --run <id>` it names, once, and act on the result. If `notify.registered` is false, or the run is `current` and `notify` is null, wait as below. Wait on the gate with `gw work gate wait <work-path>` as one blocking call at its default timeout; never pass a smaller `--timeout`. Give your shell tool its maximum call timeout (600000 ms where it takes milliseconds). If the tool hands control back before the command ends, keep waiting on that same process with the longest yield your tool allows, at least 60 s; never use short yields and never start a second wait beside it. When it reports `running`, call it again at once, without a sleep. Wait on subagents with your tool's subagent-wait call at a 300000 ms timeout where it takes one; it returns as soon as a subagent finishes, so never use a shorter timeout and never loop on short checks. After each wake, do any heartbeat, coordinator check or progress update that is due in one call, then wait again.
 >
 > **Context.** Read each skill file once; re-open only a named section. Hand work to subagents as files, not pasted text.
-
-**Conditional clause.** When the item's frontmatter carries `worktree:` and
-`branch:`, step 3 appends this sentence to the **Isolation** paragraph, with the
-values substituted:
-
-> The item's frontmatter names worktree `<worktree>` on branch `<branch>`; work
-> there.
-
-`gw work advance` stamps both fields when it moves an item into `phase:
-execute`, so on the pipeline path they are normally present — but an item edited
-by hand may lack them. When either is absent the sentence is omitted and the
-stock skill's own directory selection applies. They are read from the item's
-page the same way step 3 already reads `title`, `kind`, `summary`, `affects` and
-`effort`; they are **not** in `gw work next`'s JSON, and nothing here adds them.
-
-**This rider is the only source of isolation on the execute path.**
-`skills/test-driven-development/SKILL.md` never mentions worktrees at all, so on
-the `execute` / unplanned path nothing else supplies it.
-
-**Worktree lifecycle is Orca's, not these skills'.** There is no
-`$WORKSPACE/worktrees/` directory tier here and no cleanup widening in
-`finishing-a-development-branch`; the rider names the worktree outright when the
-item knows it. If that stops being true, the fix is a paragraph appended here —
-not a code change.
 
 ---
 
@@ -243,22 +224,19 @@ composer that reads only this section still emits the whole behavior.
 > item. You are authorized to write code for the scope named in `affects`, and
 > not to widen it.
 >
-> **Isolation.** Isolation is mandatory, not a consent question — do not ask
-> whether to create a worktree. If `git rev-parse --git-dir` differs from
-> `git rev-parse --git-common-dir` you are already in a linked worktree; proceed
-> without creating another.
+> **Isolation.** gw created this item's worktree. The brief's `Code root:` line
+> names it. `cd` there first, so `git rev-parse --git-dir` and `--git-common-dir`
+> show a linked worktree. Do not ask whether to create a worktree, and do not
+> create one or switch its branch. Give the code root to every subagent you
+> dispatch. Under a supervised dispatch with no `Code root:` line, this session
+> already starts in the item's worktree: stay in it. When the brief has neither
+> a `Code root:` line nor a supervised dispatch, the item touches only the
+> workspace: work in `<workspace>` and create no worktree. Worktree lifecycle is
+> `gw work place`'s. These riders only point the stage at the worktree it made.
 >
 > **Waiting.** Add `--notify` to the `gw work gate run <work-path>` command you start the gate with, keeping any `--worktree` or `--scope` flags it already has. If it reports `satisfied`, continue. If it reports `notify.registered: true`, end your turn now, with no `gate wait` and no polling: when the gate finishes, a line starting `Gate run` is typed into this terminal as your next prompt. Then run the `gw work gate wait <work-path> --run <id>` it names, once, and act on the result. If `notify.registered` is false, or the run is `current` and `notify` is null, wait as below. Wait on the gate with `gw work gate wait <work-path>` as one blocking call at its default timeout; never pass a smaller `--timeout`. Give your shell tool its maximum call timeout (600000 ms where it takes milliseconds). If the tool hands control back before the command ends, keep waiting on that same process with the longest yield your tool allows, at least 60 s; never use short yields and never start a second wait beside it. When it reports `running`, call it again at once, without a sleep. Wait on subagents with your tool's subagent-wait call at a 300000 ms timeout where it takes one; it returns as soon as a subagent finishes, so never use a shorter timeout and never loop on short checks. After each wake, do any heartbeat, coordinator check or progress update that is due in one call, then wait again.
 >
 > **Context.** Read each skill file once; re-open only a named section. Hand work to subagents as files, not pasted text.
-
-**Conditional clause.** Identical to the `subagent-driven-development` rider:
-when the item's frontmatter carries `worktree:` and `branch:`, append
-
-> The item's frontmatter names worktree `<worktree>` on branch `<branch>`; work
-> there.
-
-and omit it when either is absent.
 
 ---
 
@@ -287,9 +265,9 @@ resolves an item; the rider leaves the stock skill unmodified.
 > integrated targets explicitly because cross-repository atomicity is not
 > promised. PR, keep/hold and discard never resolve the item.
 >
-> **Gates are receipts.** For each code target, except one already contained (`git log <target_branch>..<source_branch>` empty: no gate), run `gw work gate check <work-path>` in the source worktree before Step 1's tests, adding `--worktree <source worktree>` to `check` and to `run` when the source worktree is not the item's stamped one. `satisfied` replaces Step 1's test run; name the receipt's owner and run id in the summary. Otherwise run `gw work gate run <work-path>` and `gw work gate wait <work-path>` in place of Step 1's test command. When `git log <target_branch>..<source_branch>` is empty the target is already contained: take the on-target confirm path with no gate. After a clean merge run `gw work gate check <work-path> --worktree <target worktree>`; only when it is unsatisfied run `gw work gate run <work-path> --worktree <target worktree>` and `wait`. Any other merged tree is also `satisfied` when every unit's current hash already has green evidence; otherwise `gate run` executes only the stale units and the repo-wide step, never the whole suite, whether the target is an epic anchor or `main`. Never run the repository's check command directly as the gate. Add `--notify` to the `gw work gate run <work-path>` command you start the gate with, keeping any `--worktree` or `--scope` flags it already has. If it reports `satisfied`, continue. If it reports `notify.registered: true`, end your turn now, with no `gate wait` and no polling: when the gate finishes, a line starting `Gate run` is typed into this terminal as your next prompt. Then run the `gw work gate wait <work-path> --run <id>` it names, once, and act on the result. If `notify.registered` is false, or the run is `current` and `notify` is null, wait as below. Wait on the gate with `gw work gate wait <work-path>` as one blocking call at its default timeout; never pass a smaller `--timeout`. Give your shell tool its maximum call timeout (600000 ms where it takes milliseconds). If the tool hands control back before the command ends, keep waiting on that same process with the longest yield your tool allows, at least 60 s; never use short yields and never start a second wait beside it. When it reports `running`, call it again at once, without a sleep. Wait on subagents with your tool's subagent-wait call at a 300000 ms timeout where it takes one; it returns as soon as a subagent finishes, so never use a shorter timeout and never loop on short checks. After each wake, do any heartbeat, coordinator check or progress update that is due in one call, then wait again.
+> **Gates are receipts.** For each code target, except one already contained (`git log <target_branch>..<source_branch>` empty: no gate), run `gw work gate check <work-path>` in the source worktree before Step 1's tests; gw resolves the checkout from the item's computed placement. `satisfied` replaces Step 1's test run; name the receipt's owner and run id in the summary. Otherwise run `gw work gate run <work-path>` and `gw work gate wait <work-path>` in place of Step 1's test command. When `git log <target_branch>..<source_branch>` is empty the target is already contained: take the on-target confirm path with no gate. After a clean merge run `gw work gate check <work-path>`; only when it is unsatisfied run `gw work gate run <work-path>` and `wait`. Any other merged tree is also `satisfied` when every unit's current hash already has green evidence; otherwise `gate run` executes only the stale units and the repo-wide step, never the whole suite, whether the target is an epic anchor or `main`. Never run the repository's check command directly as the gate. Add `--notify` to the `gw work gate run <work-path>` command you start the gate with, keeping any `--worktree` or `--scope` flags it already has. If it reports `satisfied`, continue. If it reports `notify.registered: true`, end your turn now, with no `gate wait` and no polling: when the gate finishes, a line starting `Gate run` is typed into this terminal as your next prompt. Then run the `gw work gate wait <work-path> --run <id>` it names, once, and act on the result. If `notify.registered` is false, or the run is `current` and `notify` is null, wait as below. Wait on the gate with `gw work gate wait <work-path>` as one blocking call at its default timeout; never pass a smaller `--timeout`. Give your shell tool its maximum call timeout (600000 ms where it takes milliseconds). If the tool hands control back before the command ends, keep waiting on that same process with the longest yield your tool allows, at least 60 s; never use short yields and never start a second wait beside it. When it reports `running`, call it again at once, without a sleep. Wait on subagents with your tool's subagent-wait call at a 300000 ms timeout where it takes one; it returns as soon as a subagent finishes, so never use a shorter timeout and never loop on short checks. After each wake, do any heartbeat, coordinator check or progress update that is due in one call, then wait again.
 >
-> **Integration strategy.** Offer the integration choice as `squash`, `merge` (merge commit, `--no-ff`) or `ff` (fast-forward), listing each code target's `default_strategy` from `finish_targets` first. Integrate every code target with `gw work integrate <work-path> --repo <name> --strategy <choice> --apply --json` in place of the stock skill's own `git merge`: gw merges in the target worktree and records the receipt. Never run `git merge` for a code repository. `_workspace` targets keep `gw work merge-workspace` (workspace `main`) or an anchor merge followed by `record --repo _workspace`. A refusal holds the entire finish; `receipt-refused` means the integration landed and only `record` is needed. When the human says a target is integrated but gw cannot verify it (rebase, external squash, PR merged upstream), record it with `gw work accept-integration <work-path> --repo <name> --evidence <sha> --reason "<why>" --by <human>` — never with a hand `gw work advance`. Keep source worktrees and branches until verification.
+> **Integration strategy.** Offer the integration choice as `squash`, `merge` (merge commit, `--no-ff`) or `ff` (fast-forward), listing each code target's `default_strategy` from `finish_targets` first. Integrate every code target with `gw work integrate <work-path> --repo <name> --strategy <choice> --apply --json` in place of the stock skill's own `git merge`: gw merges in the target worktree and records the receipt. Never run `git merge` for a code repository. A refusal holds the entire finish; `receipt-refused` means the integration landed and only `record` is needed. When the human says a target is integrated but gw cannot verify it (rebase, external squash, PR merged upstream), record it with `gw work accept-integration <work-path> --repo <name> --evidence <sha> --reason "<why>" --by <human>` — never with a hand `gw work advance`. Keep source worktrees and branches until verification.
 >
 > **Receipt procedure.** Use the absolute installed plugin path and the orchestration runtime (from an external
 > checkout add `--project <graph-works source root>` to `uv run`, or use an
@@ -298,16 +276,13 @@ resolves an item; the rider leaves the stock skill unmodified.
 >
 > `uv run --package gw-pipeline python <plugin>/skills/finishing-relay/references/finish-receipt.py inspect <work-path> --workspace <workspace>`
 >
-> After each workspace-anchor target's merge and merged-result checks, run:
->
-> `uv run --package gw-orchestrate python <plugin>/skills/finishing-relay/references/finish-receipt.py record <work-path> --workspace <workspace> --repo <name>`
->
-> `record` commits the receipt itself; do not commit the workspace.
-> If receipt writing fails after a merge, retry `record`:
+> `gw work integrate` records each code target's receipt and commits the receipt itself; do not commit the workspace.
+> If receipt writing fails after a merge (`receipt-refused`), do not integrate again; repair with
+> `uv run --package gw-orchestrate python <plugin>/skills/finishing-relay/references/finish-receipt.py record <work-path> --workspace <workspace> --repo <name>`:
 > it rediscovers the merge, fast-forward or squash without another merge. Preserve partial receipts
 > when a later target fails. Inspect again after every target is recorded; only
 > `complete: true` allows workflow's one advance, using that inspection's
-> `resolved_in` and `--no-infer-worktree`. Malformed receipts require repair;
+> `resolved_in`. Malformed receipts require repair;
 > stale evidence blocks until refreshed. Never hand-author completion claims.
 >
 > **On-target check.** Before Step 4's menu, compare

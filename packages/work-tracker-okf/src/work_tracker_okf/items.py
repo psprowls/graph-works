@@ -60,14 +60,14 @@ def is_commit_oid(value: object) -> bool:
 
 @dataclass(frozen=True, slots=True)
 class SpecBaseline:
-    """Commits a design spec was written against, stamped at design exit.
+    """Commit a design spec was written against, stamped at design exit.
 
-    Either repository may be absent. Re-stamping overwrites both; the
-    spec's reconciled headings preserve the history.
+    The code commit may be absent. Re-stamping overwrites it; the spec's
+    reconciled headings preserve the history. A legacy `workspace` key is
+    validated and ignored.
     """
 
     code: str | None = None
-    workspace: str | None = None
 
 
 _SPEC_BASELINE_KEYS = frozenset({"code", "workspace"})
@@ -81,7 +81,7 @@ def spec_baseline_of(value: object) -> tuple[SpecBaseline | None, bool]:
         return None, True
     if any(not is_commit_oid(entry) for entry in value.values()):
         return None, True
-    return SpecBaseline(code=value.get("code"), workspace=value.get("workspace")), False
+    return SpecBaseline(code=value.get("code")), False
 
 
 @dataclass(frozen=True, slots=True)
@@ -92,6 +92,16 @@ class Stamp:
     worktree: str
     branch: str
     start_sha: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class LegacyPlacement:
+    """The retired stored placement: the optional scalar `worktree`/`branch` pair for the
+    item's own repository and the per-repository `repo_stamps` map."""
+
+    worktree: str | None
+    branch: str | None
+    repos: Mapping[str, Stamp]
 
 
 @dataclass(frozen=True, slots=True)
@@ -149,8 +159,6 @@ class WorkItem:
     dependency_issues: tuple[DependencyIssue, ...]
     owner: str | None
     resolved_in: str | None
-    worktree: str | None
-    branch: str | None
     superseded_by: str | None
     tags: tuple[str, ...]
     sources: tuple[Source, ...]
@@ -161,11 +169,11 @@ class WorkItem:
     released_at: str | None
     invalid_optional_fields: tuple[str, ...] = ()
     repo: str | None = None
-    repo_stamps: Mapping[str, Stamp] = MappingProxyType({})
     start_sha: str | None = None
     finish_obligations: tuple[Obligation, ...] = ()
     spec_baseline: SpecBaseline | None = None
     execute_return: ExecuteReturn | None = None
+    legacy_placement: LegacyPlacement | None = None
 
 
 def _text(value: object) -> str:
@@ -228,6 +236,8 @@ def _project(
     source_ids = {source.id for source in sources if source.id is not None}
     dependencies = parse_dependencies(data.get("depends_on"))
     repo_stamps, stamps_malformed = _repo_stamps(data.get("repo_stamps"))
+    worktree = _optional_text(data.get("worktree"))
+    branch = _optional_text(data.get("branch"))
     spec_baseline, baseline_malformed = spec_baseline_of(data.get("spec_baseline"))
     obligations, obligations_malformed = parse_obligations(data.get("finish_obligations"))
     if "finish_obligations" in data and data["finish_obligations"] is None:
@@ -259,8 +269,9 @@ def _project(
         dependency_issues=dependencies.issues,
         owner=_optional_text(data.get("owner")),
         resolved_in=_optional_text(data.get("resolved_in")),
-        worktree=_optional_text(data.get("worktree")),
-        branch=_optional_text(data.get("branch")),
+        legacy_placement=(
+            LegacyPlacement(worktree, branch, repo_stamps) if worktree or branch or repo_stamps else None
+        ),
         superseded_by=_optional_text(data.get("superseded_by")),
         tags=tags,
         sources=sources,
@@ -270,7 +281,6 @@ def _project(
         target_date=_optional_text(data.get("target_date")),
         released_at=_optional_text(data.get("released_at")),
         repo=_optional_text(data.get("repo")),
-        repo_stamps=repo_stamps,
         finish_obligations=obligations,
         spec_baseline=spec_baseline,
         execute_return=execute_return,
@@ -317,6 +327,7 @@ __all__ = [
     "COMMIT_OID",
     "IGNORE",
     "WORK_DIR",
+    "LegacyPlacement",
     "SpecBaseline",
     "Stamp",
     "WorkItem",

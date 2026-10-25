@@ -8,11 +8,10 @@ from datetime import UTC, date, datetime
 import pytest
 from gw_kernel import apply_init, plan_init
 from gw_kernel.workspace import bundle as bundle_mod
-from gw_orchestrate import asks, gate, integrate, merge_workspace, placement, workspace_prepare
+from gw_orchestrate import asks, gate, integrate
 from gw_orchestrate import commands as orchestrate
 from work_tracker_okf import asks as pure_asks
 from work_tracker_okf.items import IGNORE
-from work_tracker_okf.placement import ReaderObservation
 
 TODAY = date(2026, 10, 2)
 
@@ -129,7 +128,8 @@ def _phase(layout, phase, *, stamped=False):
     page = layout.bundle_dir / f"{ITEM}.md"
     text = page.read_text(encoding="utf-8").replace("phase: plan", f"phase: {phase}")
     if stamped:
-        text = text.replace("affects: []", f"worktree: {layout.root.parent / 'source'}\nbranch: feature\naffects: []")
+        stamp = f"worktree: {layout.root.parent / 'source'}\nbranch: feature\naffects: [feature.txt]"
+        text = text.replace("affects: []", stamp)
     _write(page, text)
 
 
@@ -137,27 +137,9 @@ def test_orchestrate_plan_matches_legacy(layout, monkeypatch):
     _equivalent(layout, monkeypatch, orchestrate, lambda lay: orchestrate.run_orchestrate(lay, ITEM))
 
 
-def test_preparation_guard_token_is_load_independent(layout):
-    assert placement.preparation_guard(layout, ITEM, bundle=bundle_mod.load_work_bundle(layout)) == (
-        placement.preparation_guard(layout, ITEM, bundle=_legacy(layout))
-    )
-
-
-def test_workspace_preparation_matches_legacy_at_both_reads(layout, monkeypatch):
-    _phase(layout, "execute")
-    result = _equivalent(
-        layout,
-        monkeypatch,
-        workspace_prepare,
-        lambda lay: workspace_prepare.run_prepare_workspace(lay, ITEM, today=TODAY),
-        loads=2,
-    )
-    assert result.refusal is None and len(result.steps) == 1 and not result.applied
-
-
 def test_gate_resolution_matches_legacy(layout, monkeypatch):
     _phase(layout, "execute", stamped=True)
-    result = _equivalent(layout, monkeypatch, gate, lambda lay: gate._resolve(lay, ITEM, None))
+    result = _equivalent(layout, monkeypatch, gate, lambda lay: gate._resolve(lay, ITEM))
     assert isinstance(result, tuple) and result[0].repo == "code"
 
 
@@ -220,52 +202,3 @@ def test_integrate_preview_matches_legacy(layout, monkeypatch):
         lambda lay: integrate.run_integrate(lay, ITEM, repo_name="code", strategy="ff", today=TODAY),
     )
     assert result.refusal is None and result.outcome == "planned" and not result.applied
-
-
-@pytest.mark.parametrize("stamped", [False, True], ids=["missing-target", "planned"])
-def test_merge_workspace_precheck_matches_legacy(layout, monkeypatch, stamped):
-    _phase(layout, "finish")
-    if stamped:
-        source = layout.root.parent / "workspace-source"
-        _git(layout.root, "worktree", "add", "-b", "workspace-feature", str(source))
-        page = layout.bundle_dir / f"{ITEM}.md"
-        _write(
-            page,
-            page.read_text(encoding="utf-8").replace(
-                "affects: []",
-                f"repo_stamps:\n  _workspace:\n    worktree: {source}\n    branch: workspace-feature\naffects: []",
-            ),
-        )
-    result = _equivalent(
-        layout,
-        monkeypatch,
-        merge_workspace,
-        lambda lay: merge_workspace.run_merge_workspace(lay, ITEM, today=TODAY),
-    )
-    assert result.refusal == (None if stamped else "no-workspace-target") and not result.applied
-    if stamped:
-        assert (result.source_branch, result.target_branch) == ("workspace-feature", "main")
-
-
-def test_reader_receipt_preview_matches_legacy(layout, monkeypatch):
-    observation = ReaderObservation(
-        "task_1", "ctx_1", "dispatch-key", "code", str(layout.root.parent / "source"), "a" * 40
-    )
-    result = _equivalent(
-        layout,
-        monkeypatch,
-        placement,
-        lambda lay: placement.run_record_reader(lay, ITEM, root=ITEM, phase="plan", observation=observation),
-    )
-    assert result.plan.refusal is None and not result.written
-
-
-def test_execute_baseline_preview_matches_legacy(layout, monkeypatch):
-    _phase(layout, "execute")
-    result = _equivalent(
-        layout,
-        monkeypatch,
-        placement,
-        lambda lay: placement.run_record_baseline(lay, ITEM, cwd=lay.root.parent / "code", today=TODAY),
-    )
-    assert result.plan.refusal is None and result.plan.changed and not result.written

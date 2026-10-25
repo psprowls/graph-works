@@ -8,7 +8,7 @@ import pytest
 from gw_kernel.workspace.dispatch import DispatchRule, RuleOrigin
 from gw_kernel.workspace.errors import WorkspaceError
 from gw_orchestrate import commands as orchestrate
-from test_orchestrate_plan import _ANY_TIP, _item  # same helpers the plan suite uses
+from test_orchestrate_plan import REPO, WORKTREES, _code_context, _item, _refusing_first  # the plan suite's helpers
 
 ROOT = "work/epic-attend"
 
@@ -19,14 +19,16 @@ def _plan(items, **overrides):
         "max_parallel": 4,
         "max_attend": 1,
         "live": (),
-        "worktree_inventory": {"epic/root": "/wt/root"},
-        "worktree_exists": {"/wt/root": True},
         "workspace": "/ws",
         "default_base": "main",
-        "branch_tips": _ANY_TIP,
+        "worktrees_dir": WORKTREES,
     }
     kwargs.update(overrides)
     return orchestrate.plan(items, ROOT, **kwargs)  # type: ignore[arg-type]
+
+
+def _contexts():
+    return {"git-code": _code_context()}
 
 
 def _child(name: str, **overrides: object):
@@ -218,21 +220,13 @@ def test_live_state_classification_error_counts_as_attend_and_warns() -> None:
 
 
 def test_attend_candidate_refused_after_capacity_consumes_no_attend_slot() -> None:
-    # Design is in READ_ONLY_PHASES, so placement refuses through `_reader_source`,
-    # which runs after the capacity check.
+    # A held placement chain (D-010) refuses after the capacity check.
     first, second = _design("a"), _design("b")
-    items = (_epic(first, second), first, second)
-    real = orchestrate._reader_source
-
-    def source(item, **kwargs):
-        if item.path == first.path:
-            return orchestrate._Refusal("worktree-unprovable", "test refusal")
-        return real(item, **kwargs)
-
-    with mock.patch.object(orchestrate, "_reader_source", side_effect=source):
-        result = _plan(items)
+    items, extra = _refusing_first((_epic(first, second), first, second), first.path)
+    result = _plan(items, item_repos={item.path: REPO for item in items}, repo_contexts=_contexts(), **extra)
     assert [dispatch.slug for dispatch in result.dispatches] == [second.path]
-    assert (first.path, "worktree-unprovable") in _kinds(result)
+    assert (first.path, "worktree-pending") in _kinds(result)
+    assert result.dispatches[0].mode == "attend"
 
 
 def test_max_attend_zero_blocks_every_attend_candidate_only() -> None:

@@ -5,14 +5,13 @@ These tests do not claim live worker or provider validation.
 
 import json
 import runpy
-from argparse import Namespace
 from dataclasses import replace
 from pathlib import Path
 
 import pytest
 from fake_orca_cli import FakeOrcaCLI
 from subagents_io.backend import BackendError
-from subagents_io.dispatch import PlannedDispatch, WorktreeAction
+from subagents_io.dispatch import PlannedDispatch, WorktreePlacement
 from workflow_orca import OrcaBackend
 from workflow_orca._cli import OrcaCliError, OrcaResult, unwrap
 from workflow_orca._launch import (
@@ -37,7 +36,7 @@ def dispatch():
         agent="claude",
         model=None,
         reasoning_effort=None,
-        worktree=WorktreeAction("reuse", "/tmp/example", "feature/example", None, True, None, None),
+        worktree=WorktreePlacement("/tmp/example", "feature/example", None),
         merge_target="main",
         auto_merge=False,
         prompt="Perform the test task.",
@@ -59,7 +58,7 @@ def test_null_preferences_are_omitted(dispatch):
 
 
 def test_envelope_freezes_request_and_exact_placement_before_prompt(dispatch):
-    argv = ["--worktree", "new-top-level", "--repo", "path:/repo with spaces"]
+    argv = ["--worktree", "path:/tmp/example"]
     spec = encode_launch_spec(dispatch, placement_argv=argv)
     assert spec.startswith(LAUNCH_SPEC_PREFIX)
     assert spec.split("\n", 1)[1] == dispatch.prompt
@@ -73,6 +72,11 @@ def test_envelope_freezes_request_and_exact_placement_before_prompt(dispatch):
         "mode": dispatch.mode,
         "worktree_path": dispatch.worktree.path,
     }
+
+
+def test_encode_launch_spec_always_writes_worktree_path(dispatch):
+    spec = encode_launch_spec(dispatch, placement_argv=["--worktree", f"path:{dispatch.worktree.path}"])
+    assert decode_launch_spec(spec)["worktree_path"] == dispatch.worktree.path == "/tmp/example"
 
 
 V1 = {
@@ -356,28 +360,6 @@ def test_current_runtime_camel_case_heartbeat_survives_terminal_free_read(dispat
     assert session.describe(dispatch.key).last_heartbeat_at == "2026-08-14T00:00:00Z"
 
 
-def test_current_runtime_worktree_id_readback(dispatch):
-    class CurrentContractCLI(SyntheticStartCLI):
-        def _cmd_worker_show(self, argv):
-            raw = super()._cmd_worker_show(argv)
-            body = json.loads(raw.stdout)
-            body["result"]["worker"]["worktreeId"] = "repo::/actual/path"
-            return OrcaResult(0, json.dumps(body), "")
-
-        def __call__(self, argv):
-            if list(argv[1:3]) == ["worktree", "show"]:
-                self.calls.append(tuple(argv))
-                return self._ok({"worktree": {"path": "/actual/path", "branch": "refs/heads/actual"}})
-            return super().__call__(argv)
-
-    cli = CurrentContractCLI()
-    session = OrcaBackend(run=cli, repo_selector="name:repo").open_session("test")
-    action = WorktreeAction("fork-child", None, "planned", "main", None, None, None)
-    record = session.launch(replace(dispatch, worktree=action))
-    assert record.worktree_path == "/actual/path"
-    assert record.worktree_branch == "actual"
-
-
 def test_another_event_cannot_ack_a_batch_with_unverified_success(dispatch):
     from subagents_io.backend import Heartbeat
 
@@ -526,30 +508,11 @@ def plugin_recipe():
         ("codex", "provider model/é", "opaque-effort"),
     ],
 )
-def test_plugin_and_backend_share_exact_envelope(dispatch, plugin_recipe, tmp_path, capsys, agent, model, effort):
+def test_plugin_decodes_the_backend_envelope_exactly(dispatch, plugin_recipe, tmp_path, agent, model, effort):
     selected = replace(dispatch, agent=agent, model=model, reasoning_effort=effort, prompt="Prompt é\r\n\r\n")
-    placement = ["--worktree", "new-top-level", "--repo", "path:/repo with spaces", "--name", "feature/x"]
-    dispatch_path, placement_path = tmp_path / "dispatch.json", tmp_path / "placement.json"
-    dispatch_path.write_text(
-        json.dumps(
-            {
-                "key": selected.key,
-                "agent": agent,
-                "model": model,
-                "reasoning_effort": effort,
-                "mode": selected.mode,
-                "worktree": {"path": selected.worktree.path},
-                "prompt": selected.prompt,
-            }
-        ),
-        encoding="utf-8",
-    )
-    placement_path.write_text(json.dumps(placement), encoding="utf-8")
-    plugin_recipe["encode"](Namespace(dispatch=str(dispatch_path), placement=str(placement_path)))
-    plugin_spec = capsys.readouterr().out
+    placement = ["--worktree", "path:/repo with spaces"]
     backend_spec = encode_launch_spec(selected, placement_argv=placement)
-    assert plugin_spec == backend_spec
-    request = decode_launch_spec(plugin_spec)
+    request = decode_launch_spec(backend_spec)
     assert request["placement_argv"] == placement
     spec_path = tmp_path / "task.txt"
     spec_path.write_bytes(backend_spec.encode())

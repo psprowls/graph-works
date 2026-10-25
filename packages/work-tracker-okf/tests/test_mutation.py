@@ -12,7 +12,6 @@ from work_tracker_okf.mutation import (
     _collision_refusals,
     _directory_collision_refusals,
     _directory_preconditions,
-    _future_items,
     _lane_mapping,
     _member_mapping,
     _opaque_warnings,
@@ -123,7 +122,7 @@ def test_mutation_mapping_helpers_cover_missing_cycles_and_owned_members(tmp_pat
     }
 
 
-def test_future_item_and_lane_mappings_rewrite_all_structural_paths() -> None:
+def test_lane_mapping_rewrites_child_lane_paths() -> None:
     root = make_item(
         "work/epic",
         type="Epic",
@@ -131,10 +130,6 @@ def test_future_item_and_lane_mappings_rewrite_all_structural_paths() -> None:
     )
     child = make_item("work/feature", type="Bug", parent_path=root.path, ancestor_paths=(root.path,))
     mapping = {root.path: "work/_archive/epic", child.path: "work/_archive/epic/children/feature"}
-    future = _future_items((root, child), mapping)
-    assert future[0].archived
-    assert future[1].parent_path == "work/_archive/epic"
-    assert future[1].archived
     assert _lane_mapping((root, child), mapping) == {"work/epic/children": "work/_archive/epic/children"}
     assert _lane_mapping((child,), {}) == {}
 
@@ -352,7 +347,7 @@ def test_planned_bytes_match_whether_or_not_the_artifact_exists(tmp_path: Path) 
     assert page_without.after == page_with.after
 
 
-def test_reparenting_across_lanes_reconciles_by_link_target_not_markers(tmp_path: Path) -> None:
+def test_archiving_across_lanes_leaves_indexes_without_entries_untouched(tmp_path: Path) -> None:
     write_item(tmp_path, "work/bug-dangling", "type: Bug\nwork_status: resolved\nphase: execute\n")
     (tmp_path / "work/index.md").write_text(
         "# Work\n\nHuman prose about this lane, with no markers at all.\n", encoding="utf-8"
@@ -370,12 +365,11 @@ def test_reparenting_across_lanes_reconciles_by_link_target_not_markers(tmp_path
 
     assert plan.ok, plan.refusals
     by_member = {write.member: write for write in plan.writes}
-    destination_index = by_member["work/_archive/index.md"].after.decode("utf-8")
-    assert "graph-works:work-items" not in destination_index
-    assert "bug-dangling.md" in destination_index
+    assert "work/index.md" not in by_member
+    assert "work/_archive/index.md" not in by_member
 
 
-def test_archiving_prunes_the_vacated_entry_from_the_source_lane_index(tmp_path: Path) -> None:
+def test_archiving_leaves_the_vacated_entry_in_the_source_lane_index(tmp_path: Path) -> None:
     """A moved item's own entry in the source lane's index must be pruned, not
     relinked in place. The generic okf-ext rewrite retargets a moved item's own
     stale link (``bug-done.md`` -> ``_archive/bug-done.md``) before
@@ -400,8 +394,7 @@ def test_archiving_prunes_the_vacated_entry_from_the_source_lane_index(tmp_path:
 
     assert plan.ok, plan.refusals
     by_member = {write.member: write for write in plan.writes}
-    source_index = by_member["work/index.md"].after.decode("utf-8")
-    assert "bug-done" not in source_index
+    assert "work/index.md" not in by_member
 
 
 def test_reconciliation_preimage_takes_entries_raw_and_everything_else_rewritten() -> None:
@@ -422,6 +415,25 @@ def test_reconciliation_preimage_falls_back_to_raw_bytes_when_it_cannot_pair_lin
     raw = b"# Work\n\n- [Epic: X](epic-x.md)\n"
 
     assert _reconciliation_preimage(raw, None) == raw
-    assert _reconciliation_preimage(None, b"anything\n") is None
     assert _reconciliation_preimage(raw, b"# Work\n- [Epic: X](_archive/epic-x.md)\n") == raw
     assert _reconciliation_preimage(raw, b"# Work\n\n\xff\n") == raw
+
+
+def test_archive_repairs_prose_link_but_not_entries(tmp_path: Path) -> None:
+    write_item(tmp_path, "work/x", "type: Bug\nwork_status: resolved\nphase: execute\n")
+    design = tmp_path / "work/x/references/01-design.md"
+    design.parent.mkdir(parents=True)
+    design.write_text("---\ntitle: D\ndescription: D\n---\n\nbody\n", encoding="utf-8")
+    (tmp_path / "work/index.md").write_text(
+        "# Work\n\nSee [design](x/references/01-design.md).\n\n- [Bug: X](x.md) — open · design\n",
+        encoding="utf-8",
+    )
+    bundle = load_bundle(tmp_path)
+    items = load_written_items(tmp_path)
+
+    plan = _plan_path_mutation(bundle, items, "archive", {"work/x": "work/_archive/x"}, roots=("work/x",))
+
+    assert plan.ok, plan.refusals
+    text = {write.member: write for write in plan.writes}["work/index.md"].after.decode("utf-8")
+    assert "(_archive/x/references/01-design.md)" in text
+    assert "- [Bug: X](x.md) — open · design" in text

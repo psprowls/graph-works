@@ -78,10 +78,9 @@ def test_every_core_call_to_a_definition_taking_callable_passes_it() -> None:
 
 def test_the_guard_sees_the_known_entry_points() -> None:
     from work_tracker_okf.compose import advance_and_stamp
-    from work_tracker_okf.placement import plan_placement, plan_reader_receipt
     from work_tracker_okf.workflow import route
 
-    assert all(_takes_definition(f) for f in (route, advance_and_stamp, plan_placement, plan_reader_receipt))
+    assert all(_takes_definition(f) for f in (route, advance_and_stamp))
 
 
 def _set_shared_path(layout, rules) -> None:

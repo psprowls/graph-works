@@ -52,6 +52,7 @@ def test_before_apply_can_abort_and_is_not_called_for_dry_runs(tmp_path: Path, o
     assert candidates == []
     with pytest.raises(Rejected):
         run(False, reject)
+    # The live candidate carries the same prune preview the dry run showed.
     assert candidates == [planned]
     assert {
         p.relative_to(layout.bundle_dir): p.read_bytes() for p in layout.bundle_dir.rglob("*") if p.is_file()

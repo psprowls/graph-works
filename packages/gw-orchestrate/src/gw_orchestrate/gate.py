@@ -26,6 +26,7 @@ from gw_kernel.workspace.layout import WorkspaceLayout
 from gw_kernel.workspace.manifest import resolve_checked_key, value_source
 from gw_kernel.workspace.repos import resolve_item_repo
 from gw_pipeline.gate_config import ScopedGate, repo_gate, unit_jobs
+from gw_pipeline.placement_resolve import item_placement, worktree_missing_detail
 from okf_ext.locking import locked
 from work_tracker_okf.affects import code_affects
 from work_tracker_okf.items import WorkItem, load_items
@@ -50,8 +51,7 @@ from gw_orchestrate.wait import WaitClock
 
 GateRefusal = Literal[
     "unknown-item",
-    "no-worktree",
-    "foreign-worktree",
+    "worktree-missing",
     "git-unavailable",
     "dirty-tree",
     "no-gate-configured",
@@ -305,9 +305,7 @@ def _git_detail(failure: provenance.GitFailure) -> str:
     return f"git unavailable ({failure.cause}): {failure.detail}"
 
 
-def _resolve(
-    layout: WorkspaceLayout, path: str, worktree: Path | None
-) -> tuple[GateTarget, WorkItem] | GateCheckResult:
+def _resolve(layout: WorkspaceLayout, path: str) -> tuple[GateTarget, WorkItem] | GateCheckResult:
     items = load_items(load_work_bundle(layout))
     by_path = {item.path: item for item in items}
     item = by_path.get(path)
@@ -319,15 +317,21 @@ def _resolve(
         return _check_refusal("no-gate-configured", str(exc))
     if chosen.name is None or chosen.path is None:
         return _check_refusal("no-gate-configured", chosen.note or f"{path}: no code repository resolved")
-    raw = worktree if worktree is not None else (Path(item.worktree) if item.worktree else None)
-    if raw is None:
-        return _check_refusal("no-worktree", f"{path} has no `worktree:` stamp; pass --worktree")
+    placement = item_placement(layout, item, by_path)  # the repository resolved above, so this cannot raise
+    if placement is None:
+        return _check_refusal("no-gate-configured", f"{path}: no placement resolved in {chosen.name}")
+    raw = Path(placement.worktree)
     executable = provenance.gate_git(layout)
     if isinstance(executable, provenance.GitFailure):
         return _check_refusal("git-unavailable", _git_detail(executable))
+    missing = _check_refusal("worktree-missing", worktree_missing_detail(path, placement))
     try:
-        if not raw.is_dir() or not gate_git.same_repository(raw, chosen.path, git=executable):
-            return _check_refusal("foreign-worktree", f"{raw} is not a checkout of {chosen.name} ({chosen.path})")
+        if (
+            not raw.is_dir()
+            or not gate_git.same_repository(raw, chosen.path, git=executable)
+            or gate_git.current_branch(raw, git=executable) != placement.branch
+        ):
+            return missing
         snap = gate_git.snapshot(raw, git=executable)
     except gate_git.GitUnavailable as exc:
         return _check_refusal("git-unavailable", str(exc))
@@ -336,8 +340,8 @@ def _resolve(
     return GateTarget(path, chosen.name, chosen.path, raw.resolve(), snap.head, snap.tree), item
 
 
-def resolve_target(layout: WorkspaceLayout, path: str, *, worktree: Path | None) -> GateTarget | GateCheckResult:
-    resolved = _resolve(layout, path, worktree)
+def resolve_target(layout: WorkspaceLayout, path: str) -> GateTarget | GateCheckResult:
+    resolved = _resolve(layout, path)
     return resolved if isinstance(resolved, GateCheckResult) else resolved[0]
 
 
@@ -690,7 +694,6 @@ def run_gate_run(
     path: str,
     *,
     scope: GateScope = "full",
-    worktree: Path | None = None,
     now: datetime,
     token: str,
     spawn: Spawn,
@@ -702,7 +705,7 @@ def run_gate_run(
     env = os.environ if environ is None else environ
     terminal = env.get(TERMINAL_ENV, "").strip() if notify else ""
     limit = gate_max_concurrent(layout)  # a bad value refuses here, before anything is written
-    resolved = _resolve(layout, path, worktree)
+    resolved = _resolve(layout, path)
     if isinstance(resolved, GateCheckResult):
         return _run_refusal(resolved.refusal or "no-run", resolved.detail)
     target, item = resolved
@@ -945,9 +948,9 @@ def run_gate_run(
     )  # fmt: skip
 
 
-def run_gate_check(layout: WorkspaceLayout, path: str, *, worktree: Path | None = None) -> GateCheckResult:
+def run_gate_check(layout: WorkspaceLayout, path: str) -> GateCheckResult:
     """Whether the worktree's current tree already has a satisfying receipt. Writes nothing."""
-    resolved = _resolve(layout, path, worktree)
+    resolved = _resolve(layout, path)
     if isinstance(resolved, GateCheckResult):
         if resolved.refusal == "dirty-tree":
             return GateCheckResult("unsatisfied", None, "dirty", None, resolved.tree, ())

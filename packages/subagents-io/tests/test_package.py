@@ -101,14 +101,12 @@ def test_the_public_surface_is_the_spec_s_module_table():
         "UnknownWorker",
         "UnsupportedMode",
         "WORKER_STATES",
-        "WORKTREE_ACTIONS",
         "WorkerDone",
         "WorkerEvent",
         "WorkerEventBase",
         "WorkerQuestion",
         "WorkerRecord",
-        "WorktreeAction",
-        "WorktreeNotProvisioned",
+        "WorktreePlacement",
         "aggregate_trace",
         "collapse_runs",
         "is_groupable",
@@ -124,3 +122,12 @@ def test_the_public_surface_is_the_spec_s_module_table():
         "validate_rules",
         "write_trace_record",
     }
+
+
+def test_no_provisioning_vocabulary():
+    import subagents_io
+    from subagents_io.backend import DispatchBackend
+
+    for name in ("WorktreeAction", "WORKTREE_ACTIONS", "WorktreeNotProvisioned"):
+        assert not hasattr(subagents_io, name), name
+    assert "provisions_worktrees" not in DispatchBackend.__annotations__

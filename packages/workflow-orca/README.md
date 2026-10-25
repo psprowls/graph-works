@@ -9,26 +9,16 @@ this one drives Orca.
 
 ## Surface
 
-`OrcaBackend(*, run=…, repo_selector=None)` opens a named,
-durable session over an Orca Run — `open_session(name)` binds an existing Run
-whose `objective` equals `name`, or creates one. `repo_selector` is required
-for any dispatch that creates a worktree (`fork-child` or `create-top-level`),
-since both launch top-level in that repository; a planned `parent_path` is
-then linked with `orca worktree set`. `OrcaSession` implements the
+`OrcaBackend(*, run=…)` opens a named, durable session over an Orca Run — `open_session(name)` binds an existing Run whose `objective` equals `name`, or creates one. Every launch passes `--worktree path:<dispatch.worktree.path>`: the worker runs in the checkout the planner already placed, and the backend never creates, forks, links or names a worktree.
+
+`OrcaSession` implements the
 eight `DispatchSession` methods. Agent, model and reasoning effort come from each
 `PlannedDispatch`; there is no session-wide agent choice. Explicit models require
 `orchestration.worker-launch-preferences.v1` on `orca status --json`. Model IDs
 and effort values are opaque. Effort without a model is refused before creating
 a task; null settings are omitted from argv.
 
-`pin-detached` is refused with `WorktreeNotProvisioned` before task creation
-or worker launch, including requests with a supplied path. This backend's
-`provisions_worktrees=True` covers branch creation, not preparing and proving
-a detached checkout at `start_sha`. Graph Works auto-drive prepares readers
-itself — `gw work dispatch` through `OrcaCliPort.worktree_list` /
-`worktree_create` (core detaches and verifies the new checkout), or the
-legacy launcher helper — and launches at that exact path; it does not route
-these requests through `OrcaSession.launch`.
+Graph Works auto-drive launches every stage through `gw work dispatch`, into the worktree the placement engine already made; its `OrcaCliPort` never creates a worktree (names and parent links are `OrcaPlacementNotifier`'s).
 
 Before worker-start, task-create persists a frozen version-1 launch envelope in
 `--spec`. The first line is `GW_LAUNCH_V1 ` followed by compact JSON containing

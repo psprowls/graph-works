@@ -508,7 +508,7 @@ wheels = [
 
 [[package]]
 name = "gw-cli"
-version = "0.4.0"
+version = "0.5.0"
 source = { editable = "packages/gw-cli" }
 dependencies = [
     { name = "click" },
@@ -586,7 +586,7 @@ requires-dist = [
 
 [[package]]
 name = "gw-orchestrate"
-version = "0.1.0"
+version = "0.2.0"
 source = { editable = "packages/gw-orchestrate" }
 dependencies = [
     { name = "gw-kernel" },
@@ -617,7 +617,7 @@ dev = [{ name = "gw-work", editable = "packages/gw-work" }]
 
 [[package]]
 name = "gw-pipeline"
-version = "0.1.0"
+version = "0.2.0"
 source = { editable = "packages/gw-pipeline" }
 dependencies = [
     { name = "code-graph-io" },
@@ -640,7 +640,7 @@ requires-dist = [
 
 [[package]]
 name = "gw-serve"
-version = "0.4.0"
+version = "0.5.0"
 source = { editable = "packages/gw-serve" }
 dependencies = [
     { name = "config-io" },
@@ -729,7 +729,7 @@ dev = [{ name = "gw-work", editable = "packages/gw-work" }]
 
 [[package]]
 name = "gw-wire"
-version = "0.2.0"
+version = "0.3.0"
 source = { editable = "packages/gw-wire" }
 dependencies = [
     { name = "config-io" },
@@ -756,7 +756,7 @@ requires-dist = [
 
 [[package]]
 name = "gw-work"
-version = "0.1.0"
+version = "0.2.0"
 source = { editable = "packages/gw-work" }
 dependencies = [
     { name = "code-graph-io" },
@@ -2047,7 +2047,7 @@ wheels = [
 
 [[package]]
 name = "subagents-io"
-version = "0.2.1"
+version = "0.3.0"
 source = { editable = "packages/subagents-io" }
 dependencies = [
     { name = "langchain-core" },
@@ -2517,7 +2517,7 @@ wheels = [
 
 [[package]]
 name = "work-tracker-okf"
-version = "0.6.0"
+version = "0.7.0"
 source = { editable = "packages/work-tracker-okf" }
 dependencies = [
     { name = "okf-ext", extra = ["schemas"] },
@@ -2534,7 +2534,7 @@ requires-dist = [
 
 [[package]]
 name = "workflow-local"
-version = "0.1.0"
+version = "0.2.0"
 source = { editable = "packages/workflow-local" }
 dependencies = [
     { name = "subagents-io" },
@@ -2545,7 +2545,7 @@ requires-dist = [{ name = "subagents-io", editable = "packages/subagents-io" }]
 
 [[package]]
 name = "workflow-orca"
-version = "0.2.1"
+version = "0.3.0"
 source = { editable = "packages/workflow-orca" }
 dependencies = [
     { name = "subagents-io" },

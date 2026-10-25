@@ -44,8 +44,6 @@ def _item(path: str, **overrides: object) -> WorkItem:
         "dependency_issues": (),
         "owner": None,
         "resolved_in": None,
-        "worktree": None,
-        "branch": None,
         "superseded_by": None,
         "tags": (),
         "sources": (),

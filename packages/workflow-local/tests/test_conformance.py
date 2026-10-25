@@ -10,7 +10,6 @@ from subagents_io.backend import (
     UnsupportedMode,
     WorkerDone,
     WorkerQuestion,
-    WorktreeNotProvisioned,
 )
 from subagents_io.dispatch import DISPATCH_MODES
 
@@ -19,14 +18,6 @@ def test_supported_modes_is_a_subset_of_the_vocabulary(case, tmp_path):
     backend = case.make(tmp_path / "root")
     assert backend.supported_modes <= DISPATCH_MODES
     assert backend.supported_modes
-
-
-def test_provisions_worktrees_is_declared(case, tmp_path):
-    # Every case this suite knows obtains no worktree of its own; a backend
-    # that does (the workflow-orca sibling) sets this True and is what
-    # inherits this scenario by adding a third BackendCase.
-    backend = case.make(tmp_path / "root")
-    assert backend.provisions_worktrees is False
 
 
 def test_open_session_binds_or_creates_by_name(case, tmp_path):
@@ -39,12 +30,6 @@ def test_open_session_binds_or_creates_by_name(case, tmp_path):
     second = backend.open_session("s")
     assert [w.key for w in second.workers()] == ["gw-plan-slug-00000000"]
     second.close()
-
-
-def test_launch_refuses_an_unprovisioned_worktree(session, tmp_path):
-    del tmp_path
-    with pytest.raises(WorktreeNotProvisioned):
-        session.launch(make_dispatch("done:succeeded", worktree_path=None))
 
 
 def test_launch_refuses_a_duplicate_key(session, tmp_path):

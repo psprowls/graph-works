@@ -419,3 +419,75 @@ def test_run_lint_retains_ignored_members_and_prunes_only_clones(tmp_path, monke
     assert bundle.member_id("docs/page.md") == "docs/page.md"
     assert "docs/page" not in bundle.concepts
     assert "work/feature-a" in bundle.concepts
+
+
+def test_scoped_lint_omits_index_findings(tmp_path):
+    layout = _workspace(tmp_path)
+    _write(layout, "epic-x", _EPIC)
+    children = layout.bundle_dir / "work" / "epic-x" / "children"
+    children.mkdir(parents=True, exist_ok=True)
+    (children / "feature-kid.md").write_text(_FEATURE.format(slug="feature-kid"), encoding="utf-8")
+    ledger = children / "feature-kid" / "references" / "00-decisions.md"
+    ledger.parent.mkdir(parents=True, exist_ok=True)
+    ledger.write_text("# Decisions\n", encoding="utf-8")
+    (children / "index.md").write_text(
+        "# Items\n\n- [Feature: feature-kid](feature-kid.md) — open · design\n", encoding="utf-8"
+    )
+
+    scoped = work.run_lint(layout, _config(layout), today=TODAY, path="work/epic-x")
+    full = work.run_lint(layout, _config(layout), today=TODAY, path=None)
+
+    assert not [f for f in scoped.findings if f.code.startswith("structure.index-")]
+    assert any(f.code == "structure.index-drift" for f in full.findings)
+
+
+_MARKER_START = "<!-- graph-works:work-items:start -->"
+_MARKER_END = "<!-- graph-works:work-items:end -->"
+
+
+def _index_codes(layout) -> list[str]:
+    report = work.run_lint(layout, _config(layout), today=TODAY, path=None)
+    return [f.code for f in report.findings if f.code.startswith("structure.index-")]
+
+
+@pytest.mark.parametrize("lane", ["work", "work/epic-x/children"])
+def test_marker_only_drift_is_worded_without_a_zero_count_and_regen_clears_it(tmp_path, lane) -> None:
+    layout = _workspace(tmp_path)
+    _write(layout, "epic-x", _EPIC)
+    children = layout.bundle_dir / "work" / "epic-x" / "children"
+    children.mkdir(parents=True, exist_ok=True)
+    (children / "feature-kid.md").write_text(_FEATURE.format(slug="feature-kid"), encoding="utf-8")
+    ledger = children / "feature-kid" / "references" / "00-decisions.md"
+    ledger.parent.mkdir(parents=True, exist_ok=True)
+    ledger.write_text("# Decisions\n", encoding="utf-8")
+    bundle = load_bundle(layout.bundle_dir, ignore=IGNORE)
+    for plan in plan_indexes(bundle.root, load_items(bundle)):
+        plan.path.parent.mkdir(parents=True, exist_ok=True)
+        plan.path.write_text(plan.after, encoding="utf-8")
+    assert _index_codes(layout) == []
+    index = layout.bundle_dir / lane / "index.md"
+    index.write_text(f"{_MARKER_START}\n{index.read_text(encoding='utf-8')}{_MARKER_END}\n", encoding="utf-8")
+
+    report = work.run_lint(layout, _config(layout), today=TODAY, path=None)
+    drift = [f for f in report.findings if f.code == "structure.index-drift"]
+
+    assert len(drift) == 1
+    assert drift[0].message == "lane index differs from its reconciled form; run `gw work regen-index`"
+    assert "0 outdated" not in drift[0].message
+
+    result = work.run_regen_indexes(layout, dry_run=False)
+
+    assert result.application is not None and result.application.ok
+    assert _index_codes(layout) == []
+
+
+def test_regen_clears_outdated_entry_drift(tmp_path) -> None:
+    layout = _workspace(tmp_path)
+    _write(layout, "feature-a", _FEATURE)
+    index = layout.bundle_dir / "work" / "index.md"
+    index.write_text(index.read_text(encoding="utf-8").replace("open", "resolved"), encoding="utf-8")
+    assert "structure.index-drift" in _index_codes(layout)
+
+    work.run_regen_indexes(layout, dry_run=False)
+
+    assert _index_codes(layout) == []

@@ -107,3 +107,31 @@ def test_new_receipts_are_version_2(tmp_path):
     assert "receipt_version: 2\n" in (layout.bundle_dir / OWNER / "references/04-finish-receipt.md").read_text(
         encoding="utf-8"
     )
+
+
+def _discovery_spawns(tmp_path, monkeypatch, later_commits):
+    from gw_pipeline import finish
+    from gw_pipeline.test_support.finish_repos import target
+
+    tmp_path.mkdir()
+    repo, source = code_repo(tmp_path)
+    squash(repo)
+    for index in range(later_commits):
+        git(repo, "commit", "--allow-empty", "-m", f"later {index}")
+    calls = []
+    real = finish.finish_git
+
+    def counting(*args, **kwargs):
+        calls.append(args[1:])
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(finish, "finish_git", counting)
+    found = finish.discover_integration(target(repo, source))
+    assert not isinstance(found, str) and found.strategy == "squash"
+    return len(calls)
+
+
+def test_discovery_spawn_count_is_constant(tmp_path, monkeypatch):
+    short = _discovery_spawns(tmp_path / "short", monkeypatch, 4)
+    long = _discovery_spawns(tmp_path / "long", monkeypatch, 49)
+    assert short == long

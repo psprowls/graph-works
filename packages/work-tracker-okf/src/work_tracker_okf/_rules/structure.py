@@ -7,6 +7,7 @@ import re
 from collections import Counter
 from collections.abc import Iterable
 from pathlib import PurePosixPath
+from typing import Final
 
 from okf_io import Finding, Rule, RuleContext, Severity
 
@@ -30,11 +31,15 @@ CODES: tuple[str, ...] = (
     "structure.index-entry-duplicate",
     "structure.index-entry-non-direct",
     "structure.index-entry-unreadable",
+    "structure.index-drift",
     "structure.finish-obligations-malformed",
     "structure.execute-return-malformed",
 )
 
 _SPEC = "work_tracker_okf._rules.structure"
+
+#: Appended to every `structure.index-*` message: the one command that repairs them.
+INDEX_REMEDIATION: Final = "; run `gw work regen-index`"
 
 
 def _finding(code: str, severity: Severity, item: WorkItem, message: str) -> Finding:
@@ -217,30 +222,34 @@ def indexes(ctx: RuleContext) -> Iterable[Finding]:
         targets, unreadable = ((), ()) if document is None else _direct_entries(document.raw_text, plan.lane, all_pages)
         pages = tuple(_target_page(plan.lane, target) for target in targets)
         counts = Counter(pages)
+        fired = False
         for page in sorted(expected - set(pages)):
+            fired = True
             yield Finding(
                 code="structure.index-entry-missing",
                 severity="warn",
-                message=f"lane index has no entry for direct item page `{page}`",
+                message=f"lane index has no entry for direct item page `{page}`{INDEX_REMEDIATION}",
                 spec=_SPEC,
                 path=f"{plan.lane}/index.md",
                 line=None,
             )
         for line in unreadable:
+            fired = True
             yield Finding(
                 code="structure.index-entry-unreadable",
                 severity="warn",
-                message=f"lane index link-bullet is not a readable entry: {line!r}",
+                message=f"lane index link-bullet is not a readable entry: {line!r}{INDEX_REMEDIATION}",
                 spec=_SPEC,
                 path=f"{plan.lane}/index.md",
                 line=None,
             )
         for page, count in sorted(counts.items()):
             if count > 1:
+                fired = True
                 yield Finding(
                     code="structure.index-entry-duplicate",
                     severity="warn",
-                    message=f"lane index links item page `{page}` {count} times",
+                    message=f"lane index links item page `{page}` {count} times{INDEX_REMEDIATION}",
                     spec=_SPEC,
                     path=f"{plan.lane}/index.md",
                     line=None,
@@ -249,10 +258,33 @@ def indexes(ctx: RuleContext) -> Iterable[Finding]:
                 continue
             code = "structure.index-entry-non-direct" if page in all_pages else "structure.index-entry-stale"
             detail = "is not a direct descendant of this lane" if page in all_pages else "names no work item"
+            fired = True
             yield Finding(
                 code=code,
                 severity="warn",
-                message=f"lane index entry `{page}` {detail}",
+                message=f"lane index entry `{page}` {detail}{INDEX_REMEDIATION}",
+                spec=_SPEC,
+                path=f"{plan.lane}/index.md",
+                line=None,
+            )
+        if fired or document is None:
+            continue
+        # `plan.after` is the reconciler's own output, so any difference from `plan.before`
+        # (both read with universal newlines, so line endings never count) is drift the
+        # rewriter would repair: outdated entry text, legacy markers, ordering.
+        if plan.before != plan.after:
+            present = {line.strip() for line in document.raw_text.splitlines()}
+            outdated = sum(1 for entry in plan.entries if entry not in present)
+            noun = "entry" if outdated == 1 else "entries"
+            detail = (
+                f"lane index has {outdated} outdated {noun}"
+                if outdated
+                else "lane index differs from its reconciled form"
+            )
+            yield Finding(
+                code="structure.index-drift",
+                severity="warn",
+                message=f"{detail}{INDEX_REMEDIATION}",
                 spec=_SPEC,
                 path=f"{plan.lane}/index.md",
                 line=None,

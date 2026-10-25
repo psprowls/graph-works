@@ -10,6 +10,7 @@ from pathlib import Path
 from types import MappingProxyType
 from types import SimpleNamespace as ns
 
+from gw_kernel.workspace.commits import CommitOutcome
 from gw_kernel.workspace.dispatch import packaged_rules_matching, resolve_dispatch
 from gw_orchestrate.accept_integration import AcceptIntegrationResult
 from gw_orchestrate.asks import AskAnswerResult, AskResult
@@ -18,19 +19,26 @@ from gw_orchestrate.dispatch_record import Overrides
 from gw_orchestrate.gate import GateCheckResult, GateRunResult, GateWaitResult, NotifyResult, PlannedUnit
 from gw_orchestrate.gate_receipts import GateEvidence, GateRun, UnitEvidence
 from gw_orchestrate.integrate import IntegrateResult
-from gw_orchestrate.merge_workspace import MergeWorkspaceResult
-from gw_orchestrate.placement import ReaderRecord
 from gw_orchestrate.reroute import RerouteResult
 from gw_orchestrate.wait import Absorbed, WaitResult
-from gw_orchestrate.workspace_prepare import WorkspacePrepareResult, WorkspaceStep
+from gw_pipeline.place import PlaceRefusal, PlaceResult, PlaceStep, PruneKept, PruneReport, Refresh
+from gw_pipeline.placement import EffectivePlacement, Placement
+from gw_pipeline.transactions import MutationApplication
 from gw_wire import work
 from gw_work.affecting import AffectingRow, WorkAffecting
 from gw_work.carried import CarriedContext, FilledSlot, SlotFill
-from gw_work.commands import DispatchExplanation, ItemRead, ItemSource
+from gw_work.commands import BoardRow, DispatchExplanation, ItemRead, ItemSource
+from gw_work.migrate_placement import (
+    MigrationBlocker,
+    MigrationOrphan,
+    MigrationPlan,
+    MigrationResult,
+    MigrationRow,
+    WorkspaceStamp,
+)
 from gw_work.obligations import ObligationRecord
 from gw_work.reconcile import CitedDecision, CommitRef, LandedSibling, ReconcileContext
 from work_tracker_okf.obligations import Obligation, ObligationPlan
-from work_tracker_okf.placement import ReaderObservation, ReaderReceiptPlan
 from work_tracker_okf.workflow import Blocker
 
 BUNDLE = Path("/ws/okf")
@@ -217,48 +225,10 @@ def advance(*, applied: bool, bypass: bool = False) -> object:
     )
 
 
-def placement(*, applied: bool) -> object:
-    plan = ns(
-        path="work/a",
-        root="work/a",
-        expected_phase="execute",
-        current_phase="execute",
-        before=(None, None),
-        after=("/wt", "b"),
-        repo=None,
-        start_before=None,
-        start_after="a" * 40,
-        changed=True,
-        refusal=None if applied else "stale",
-        detail="d",
-    )
-    return ns(
-        plan=plan,
-        application=APPLICATION if applied else None,
-        written=applied,
-        repo_note="note",
-        pending_commit=None,
-        warnings=(),
-    )
-
-
-def baseline(*, applied: bool) -> object:
-    plan = ns(
-        path="work/a",
-        before=None,
-        after="a" * 40,
-        changed=True,
-        refusal=None if applied else "not-execute",
-        detail="d",
-    )
-    return ns(plan=plan, application=APPLICATION if applied else None, written=applied, repo_note="note")
-
-
 def filing(*, applied: bool) -> object:
     plan = ns(
         filing=ns(path="work/a", target=Path("/ws/okf/work/a.md"), detail=""),
         refusal=None,
-        indexes=(ns(path=Path("/ws/okf/work/index.md"), changed=True), ns(path=Path("/ws/x.md"), changed=False)),
         log=ns(entry="- filed") if applied else None,
         warnings=("p",),
     )
@@ -323,6 +293,16 @@ def archive_run(*, applied: bool, wiki: bool = False) -> object:
         wiki_commit=None,
         pointer_cleared=applied,
         logged="archived" if applied else None,
+        prune_warnings=("prune work/a: git-unavailable: x",) if applied else (),
+        pruned=(
+            ns(
+                removed_worktrees=("/wt/a",),
+                deleted_branches=("feature-a",),
+                kept=(ns(path="work/a", repo="code", branch="feature-a", why="dirty"),),
+            )
+            if applied
+            else None
+        ),
     )
 
 
@@ -367,8 +347,15 @@ def overturn(*, applied: bool) -> object:
 
 
 def orchestrate(*, busy: bool) -> object:
-    worktree = ns(
-        action="create", path="/wt", branch="b", base_branch="main", exists=False, parent_path="/p", start_sha=None
+    placement = ns(
+        repo_name="ui",
+        repo_root=Path("/ui"),
+        branch="feature/a-1a2b3c4d",
+        worktree=Path("/wt"),
+        parent_branch="main",
+        parent_worktree=Path("/p"),
+        owner_path="work/e",
+        slug="a",
     )
     dispatch = ns(
         key="work/a#execute",
@@ -381,7 +368,6 @@ def orchestrate(*, busy: bool) -> object:
         agent="codex",
         model="m",
         reasoning_effort="high",
-        worktree=worktree,
         merge_target="main",
         auto_merge=True,
         prompt="go",
@@ -401,27 +387,10 @@ def orchestrate(*, busy: bool) -> object:
             finish_targets={},
             dispatch_resolutions={dispatch.key: RESOLUTION},
             human_checkpoints={dispatch.key: ns(status="declared", items=("Task 2: skim",))},
-            workspace_placements={dispatch.key: ns(worktree="/ws-wt/a", branch="feature/a")} if busy else {},
+            placements={dispatch.key: placement} if busy else {},
         ),
         dispatch_repos={dispatch.key: ns(name="ui", path=Path("/ui"), source="item")},
-        preparations=(
-            ns(
-                owner_path="work/e",
-                owner_phase="execute",
-                repo=ns(name="ui", path=Path("/ui"), source="item"),
-                branch="epic/e",
-                base_branch="main",
-                worktree=worktree,
-            ),
-        )
-        if busy
-        else (),
-        workspace_preparations=(
-            ns(owner_path="work/a", owner_phase="execute", worktree="/ws-wt/a", branch="feature/a", base_branch="main"),
-        )
-        if busy
-        else (),
-        advances=(ns(path="work/b", reason="done", worktree="w", branch="b", mode="return"),) if busy else (),
+        advances=(ns(path="work/b", reason="done", mode="return"),) if busy else (),
         blocked=(ns(path="work/c", kind="dependency", reason="wait"),) if busy else (),
         decisions_owner_path="work/e",
         decisions_ledger_path="ledger",
@@ -450,7 +419,136 @@ RECONCILE = ReconcileContext(
     warnings=("partial",),
 )
 
+PLACE_PARENT = Placement(
+    "work/e",
+    "work/e",
+    "Epic",
+    "e",
+    "code",
+    Path("/code"),
+    "epic/e",
+    Path("/wt/epic/e"),
+    "main",
+    Path("/code"),
+    None,
+)
+PLACE_CHILD = Placement(
+    "work/e/children/a",
+    "work/e/children/a",
+    "Feature",
+    "a",
+    "code",
+    Path("/code"),
+    "feature/a",
+    Path("/wt/feature/a"),
+    "epic/e",
+    Path("/wt/epic/e"),
+    "work/e",
+)
+PLACE_ENSURE = PlaceResult(
+    PLACE_CHILD.path,
+    "ensure",
+    False,
+    PLACE_CHILD,
+    (
+        PlaceStep(PLACE_PARENT, "verified", None, "already registered"),
+        PlaceStep(PLACE_CHILD, "created", Refresh("ff", "old", "new"), "registered", "internal detail"),
+    ),
+    (None, "new"),
+    CommitOutcome("committed", "ws-sha", "internal subject", ("okf/work/a.md",), None),
+    ("notes.md",),
+    None,
+    None,
+    ("note",),
+    MutationApplication("tx", Path("/journal"), (), (), (), ("internal warning",), ("write failed",), True),
+)
+PLACE_START_REFUSED = replace(
+    PLACE_ENSURE,
+    mode="start",
+    chain=(),
+    start_sha=("old", "old"),
+    workspace_commit=None,
+    application=None,
+    refusal=PlaceRefusal("already-started", "baseline exists"),
+)
+PLACE_CONFLICT = replace(
+    PLACE_ENSURE,
+    dry_run=True,
+    chain=(PlaceStep(PLACE_CHILD, "verified", Refresh("conflict", None, None, ("a.py",)), None),),
+    start_sha=None,
+    workspace_commit=None,
+    application=None,
+    refusal=PlaceRefusal("refresh-conflict", "conflicts: a.py"),
+)
+PLACE_REMOVE = replace(
+    PLACE_CONFLICT,
+    mode="remove",
+    dry_run=False,
+    refusal=None,
+    chain=(PlaceStep(PLACE_CHILD, "removed", None, None),),
+)
+PLACE_PRUNE = replace(
+    PLACE_REMOVE,
+    path=None,
+    mode="prune",
+    placement=None,
+    chain=(),
+    pruned=PruneReport(
+        ("/wt/old",),
+        ("feature/old",),
+        (
+            PruneKept("work/e", "code", "epic/e", "open"),
+            PruneKept("work/occupied", "code", "feature/occupied", "occupied"),
+        ),
+    ),
+)
+PLACE_NO_REPO = PlaceResult("work/note", "ensure", False, None, (), None, None, (), None, None, ("no repo",))
+
+MIGRATION_PLAN = MigrationPlan(
+    rows=(
+        MigrationRow("work/a", "code", "/wt/a", "feature/a", "remove-worktree", None),
+        MigrationRow("work/a", "code", "/wt/a", "feature/a", "delete-branch", "receipt"),
+        MigrationRow("work/b", "code", "/wt/b", "feature/b", "keep", "dirty"),
+    ),
+    blockers=(
+        MigrationBlocker(
+            "work/c",
+            "code",
+            "/wt/c",
+            "orca/c",
+            "feature/c",
+            ("git -C /wt/c branch -m orca/c feature/c", "gw work place work/c"),
+        ),
+    ),
+    orphans=(MigrationOrphan("code", "psprowls/gw-reader-1"),),
+    strips=("work/a", "work/b", "work/c"),
+    refusal=None,
+    workspace_stamps=(WorkspaceStamp("work/c", "/ws/c", "ws/c", 3),),
+)
+MIGRATION_RESULT = MigrationResult(
+    ("/wt/a",),
+    ("feature/a",),
+    (MigrationRow("work/b", "code", "/wt/b", "feature/b", "keep", "dirty"),),
+    ("work/a", "work/b"),
+    CommitOutcome(
+        "committed", "1" * 40, "workspace: migrate-placement strip retired placement fields", ("okf/work/a.md",), None
+    ),
+)
+
 WORK: dict[str, tuple[Callable[[], object], ...]] = {
+    "work.migrate_placement_payload": (
+        lambda: work.migrate_placement_payload(MIGRATION_PLAN),
+        lambda: work.migrate_placement_payload(MIGRATION_PLAN, MIGRATION_RESULT),
+        lambda: work.migrate_placement_payload(MigrationPlan((), (), (), (), None)),
+    ),
+    "work.place_payload": (
+        lambda: work.place_payload(PLACE_ENSURE),
+        lambda: work.place_payload(PLACE_START_REFUSED),
+        lambda: work.place_payload(PLACE_CONFLICT),
+        lambda: work.place_payload(PLACE_REMOVE),
+        lambda: work.place_payload(PLACE_PRUNE),
+        lambda: work.place_payload(PLACE_NO_REPO),
+    ),
     "work.obligation_payload": (
         lambda: work.obligation_payload(
             ObligationRecord(ObligationPlan("work/a", (), (Obligation("Tag it", "deferred", "2026-09-29"),)))
@@ -496,16 +594,7 @@ WORK: dict[str, tuple[Callable[[], object], ...]] = {
                 key="work/a#execute",
                 run_id="run_1",
                 task_id="task_1",
-                placement=ObservedPlacement(
-                    "create",
-                    "/wt",
-                    "b",
-                    "A",
-                    "repo_1",
-                    None,
-                    True,
-                    ("created",),
-                ),
+                placement=ObservedPlacement("/wt", "b", "A", ("created",), "a" * 40),
                 delivery="verified",
             )
         ),
@@ -677,25 +766,6 @@ WORK: dict[str, tuple[Callable[[], object], ...]] = {
         lambda: work.advance_payload(advance(applied=True), "work/a"),
         lambda: work.advance_payload(advance(applied=False), "work/a"),
     ),
-    "work.reader_receipt_payload": tuple(
-        lambda refusal=refusal: work.reader_receipt_payload(
-            ReaderRecord(
-                ReaderReceiptPlan(
-                    "work/a",
-                    "work/a",
-                    "design",
-                    None if refusal else "design",
-                    ReaderObservation("task_1", "ctx_1", "key", "repo", "/reader", "a" * 40),
-                    refusal,
-                    "missing" if refusal else "",
-                ),
-                None if refusal else Path("/cache/ctx_1.json"),
-                not refusal,
-                False,
-            )
-        )
-        for refusal in (None, "unknown-path")
-    ),
     "work.accept_integration_payload": (
         lambda: work.accept_integration_payload(
             AcceptIntegrationResult(
@@ -814,54 +884,6 @@ WORK: dict[str, tuple[Callable[[], object], ...]] = {
             )
         ),
     ),
-    "work.merge_workspace_payload": (
-        lambda: work.merge_workspace_payload(
-            MergeWorkspaceResult("work/a", "feature", "main", None, "", None, None, False)
-        ),
-        lambda: work.merge_workspace_payload(
-            MergeWorkspaceResult("work/a", "feature", "main", None, "", "abc", "receipt.md", True)
-        ),
-        lambda: work.merge_workspace_payload(
-            MergeWorkspaceResult("work/a", None, None, "disabled", "off", None, None, False)
-        ),
-        lambda: work.merge_workspace_payload(
-            MergeWorkspaceResult("work/a", "feature", "main", "receipt-refused", "retry", "abc", "receipt.md", True)
-        ),
-    ),
-    "work.prepare_workspace_payload": (
-        lambda: work.prepare_workspace_payload(WorkspacePrepareResult("work/a", (), None, "", "disabled", False)),
-        lambda: work.prepare_workspace_payload(
-            WorkspacePrepareResult("work/a", (), "not-entitled", "design", None, False)
-        ),
-        lambda: work.prepare_workspace_payload(
-            WorkspacePrepareResult(
-                "work/a",
-                (WorkspaceStep("work/a", "execute", "/wt/a", "feature/a", "main", "create", True),),
-                None,
-                "",
-                None,
-                True,
-            )
-        ),
-        lambda: work.prepare_workspace_payload(
-            WorkspacePrepareResult(
-                "work/a/children/b",
-                (WorkspaceStep("work/a", None, "/wt/a", "epic/a", "main", "adopt", True),),
-                "stamp-refused",
-                "commit failed",
-                None,
-                True,
-            )
-        ),
-    ),
-    "work.placement_payload": (
-        lambda: work.placement_payload(placement(applied=True)),
-        lambda: work.placement_payload(placement(applied=False)),
-    ),
-    "work.baseline_payload": (
-        lambda: work.baseline_payload(baseline(applied=True)),
-        lambda: work.baseline_payload(baseline(applied=False)),
-    ),
     "work.file_payload": (
         lambda: work.file_payload(filing(applied=True)),
         lambda: work.file_payload(filing(applied=False)),
@@ -969,16 +991,19 @@ WORK: dict[str, tuple[Callable[[], object], ...]] = {
     "work.work_list_payload": (
         lambda: work.work_list_payload(
             [
-                ns(
-                    path="work/a",
-                    type="Bug",
-                    title="A",
-                    work_status="accepted",
-                    phase=None,
-                    effort=None,
-                    owner="pat",
-                    parent_path=None,
-                    updated="2026-09-01",
+                BoardRow(
+                    ns(
+                        path="work/a",
+                        type="Bug",
+                        title="A",
+                        work_status="accepted",
+                        phase=None,
+                        effort=None,
+                        owner="pat",
+                        parent_path=None,
+                        updated="2026-09-01",
+                    ),
+                    EffectivePlacement("code", "/w/a", "bug/a", None, "legacy"),
                 )
             ]
         ),

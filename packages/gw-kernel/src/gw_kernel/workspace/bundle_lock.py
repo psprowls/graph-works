@@ -62,7 +62,7 @@ def commit_pending(
     """Commit *commit*'s items' `references/` and `extra_paths` under the bundle lock, with no plan.
 
     For a verb whose plan is a no-op but whose item still owns freshly written
-    files (an unchanged record-placement's `orca-placement/<key>.json`), and for
+    files (a prior stage's `orca-placement/<key>.json`), and for
     the wiki half of `gw work archive`, which applies outside `apply_mutation`.
     """
     mode = commit_mode(layout)

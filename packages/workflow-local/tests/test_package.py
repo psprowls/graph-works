@@ -28,7 +28,7 @@ def test_declares_its_one_runtime_dependency_and_no_extras():
     # move — a vendor SDK arriving as an extra would make this the package that
     # runs two backends, and the naming rule is one package per backend.
     meta = _metadata()
-    assert meta["project"]["dependencies"] == ["subagents-io>=0.2,<0.3"]
+    assert meta["project"]["dependencies"] == ["subagents-io>=0.3,<0.4"]
     assert "optional-dependencies" not in meta["project"]
 
 

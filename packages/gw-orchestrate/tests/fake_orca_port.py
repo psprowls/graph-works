@@ -30,8 +30,6 @@ class FakeOrcaPort:
     worktrees: dict[str, dict[str, Any] | None] = field(default_factory=dict)
     #: Rows `worktree_list` returns; a reader test seeds a marked checkout here.
     listed: list[dict[str, Any]] = field(default_factory=list)
-    #: `worktree_create` calls this with its keyword arguments and returns the row it gives back.
-    create: Callable[..., dict[str, Any]] | None = None
     tasks: list[dict[str, Any]] = field(default_factory=list)
     workers: list[dict[str, Any]] = field(default_factory=list)
     start: dict[str, Any] = field(
@@ -86,17 +84,6 @@ class FakeOrcaPort:
         self._record("worktree_list", repo_id)
         return [dict(row) for row in self.listed]
 
-    def worktree_create(self, *, name, repo_id, base_branch, comment):
-        self._record("worktree_create", worktree_name=name, repo_id=repo_id, base_branch=base_branch, comment=comment)
-        assert self.create is not None, "worktree_create was not scripted"
-        return self.create(name=name, repo_id=repo_id, base_branch=base_branch, comment=comment)
-
-    def worktree_set_parent(self, worktree_id, parent_id):
-        self._record("worktree_set_parent", worktree_id, parent_id)
-        row = self.worktrees.get(f"id:{worktree_id}")
-        if row is not None:
-            row["parent_id"] = parent_id
-
     def worktree_set_status(self, worktree_id, status):
         self._record("worktree_set_status", worktree_id, status)
 
@@ -119,8 +106,8 @@ class FakeOrcaPort:
             if task["id"] == task_id:
                 task["status"] = status
 
-    def worker_start(self, run_id, task_id, *, request, placement_argv):
-        self._record("worker_start", run_id, task_id, request=request, placement_argv=placement_argv)
+    def worker_start(self, run_id, task_id, *, request, placement_argv, retry_of=None):
+        self._record("worker_start", run_id, task_id, request=request, placement_argv=placement_argv, retry_of=retry_of)
         self.workers.insert(
             0,
             {

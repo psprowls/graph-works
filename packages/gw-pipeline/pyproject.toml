@@ -4,13 +4,13 @@ build-backend = "hatchling.build"
 
 [project]
 name = "gw-pipeline"
-version = "0.1.0"
+version = "0.2.0"
 description = "Pipeline engine and services over resolved kernel workspace primitives."
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
   "gw-kernel>=0.7,<0.8",
-  "work-tracker-okf>=0.6.0,<0.7",
+  "work-tracker-okf>=0.7.0,<0.8",
   "okf-io>=0.2.6,<0.3",
   "okf-ext[schemas]>=0.5.5,<0.6",
   "code-graph-io>=0.3.2,<0.4",

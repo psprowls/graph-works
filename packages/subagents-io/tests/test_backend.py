@@ -21,7 +21,6 @@ from subagents_io.backend import (
     WorkerEventBase,
     WorkerQuestion,
     WorkerRecord,
-    WorktreeNotProvisioned,
 )
 
 EVENT_TYPES = get_args(WorkerEvent)
@@ -119,7 +118,7 @@ def test_worker_record_is_frozen_and_carries_seven_fields():
 
 
 def test_the_worktree_fields_default_to_absent():
-    # A backend that provisions nothing — and every construction written
+    # A backend that reads nothing back — and every construction written
     # before these fields existed — must keep compiling and keep meaning
     # "not known", not "" and not the planner's guess.
     rec = WorkerRecord(key="s#plan", handle="h", state="running", last_heartbeat_at=None, detail=None)
@@ -127,9 +126,9 @@ def test_the_worktree_fields_default_to_absent():
     assert rec.worktree_branch is None
 
 
-@pytest.mark.parametrize("err", [UnsupportedMode, UnknownWorker, WorktreeNotProvisioned])
+@pytest.mark.parametrize("err", [UnsupportedMode, UnknownWorker])
 def test_every_backend_error_shares_one_catchable_base(err):
-    # One base so a coordinator can catch the category; three subclasses
+    # One base so a coordinator can catch the category; two subclasses
     # because each names a different caller mistake.
     assert issubclass(err, BackendError)
     assert issubclass(err, RuntimeError)
@@ -150,4 +149,5 @@ def test_the_session_protocol_names_the_eight_methods():
 
 def test_the_backend_protocol_is_the_session_factory():
     attrs = set(DispatchBackend.__protocol_attrs__)
-    assert {"name", "supported_modes", "provisions_worktrees", "open_session"} <= attrs
+    assert {"name", "supported_modes", "open_session"} <= attrs
+    assert "provisions_worktrees" not in attrs

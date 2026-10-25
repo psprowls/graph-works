@@ -20,9 +20,6 @@ VERBS = [
     ["work", "file"],
     ["work", "next"],
     ["work", "advance"],
-    ["work", "record-baseline"],
-    ["work", "record-placement"],
-    ["work", "record-reader"],
     ["work", "touch-active-work"],
     ["work", "status"],
     ["work", "lint"],
@@ -47,8 +44,8 @@ VERBS = [
 ]
 
 
-def test_the_surface_is_exactly_twenty_seven_verbs() -> None:
-    assert len(VERBS) == 27
+def test_the_surface_is_exactly_twenty_four_verbs() -> None:
+    assert len(VERBS) == 24
 
 
 @pytest.mark.parametrize("verb", VERBS, ids=lambda verb: " ".join(verb))
@@ -116,10 +113,11 @@ def test_file_declares_only_the_path_native_identity_and_dependency_flags() -> N
     assert "--parent" not in opts
 
 
-def test_advance_declares_the_donor_provenance_pair() -> None:
+def test_advance_declares_no_placement_options() -> None:
     payload = json.loads(runner.invoke(app, ["help", "work", "advance", "--json"]).stdout)
     opts = {opt for option in payload["options"] for opt in option["opts"]}
-    assert {"--owner", "--effort", "--resolved-in", "--released-at", "--worktree", "--branch"} <= opts
+    assert {"--owner", "--effort", "--resolved-in", "--released-at"} <= opts
+    assert not {"--worktree", "--branch"} & opts
 
 
 def _imported_roots(path: Path) -> set[str]:
@@ -193,14 +191,42 @@ def test_advance_declares_the_inference_opt_out() -> None:
     assert "--no-infer-worktree" in opts
 
 
-def test_record_placement_declares_its_observation_and_no_lifecycle_flags() -> None:
-    payload = json.loads(runner.invoke(app, ["help", "work", "record-placement", "--json"]).stdout)
-    opts = {opt for option in payload["options"] for opt in option["opts"]}
-    assert {"--root", "--phase", "--worktree", "--branch", "--dry-run", "--workspace", "--json", "--start-sha"} <= opts
-    assert not opts & {"--effort", "--owner", "--resolved-in", "--released-at", "--return"}
+def test_retired_verbs_absent() -> None:
+    """The stamp writers are gone; `place` remains."""
+    top = runner.invoke(app, ["work", "--help"]).output
+    for retired in ("record-placement", "record-baseline", "record-reader"):
+        assert retired not in top
+        assert runner.invoke(app, ["help", "work", retired, "--json"]).exit_code != 0
+    surface = json.loads(runner.invoke(app, ["util", "describe-surface", "--json"]).stdout)
+    live = {tuple(entry["path"]) for entry in surface["commands"]}
+    assert not live & {("work", "record-placement"), ("work", "record-baseline"), ("work", "record-reader")}
+    assert ("work", "place") in live
 
 
 def test_touch_active_work_declares_only_workspace_and_json() -> None:
     payload = json.loads(runner.invoke(app, ["help", "work", "touch-active-work", "--json"]).stdout)
     opts = {opt for option in payload["options"] for opt in option["opts"]}
     assert opts - {"--help"} == {"--workspace", "--json"}
+
+
+def test_workspace_verbs_absent() -> None:
+    """Workspace writes land on the primary checkout: no verb prepares or merges a workspace branch."""
+    from gw_wire import work as wire_work
+
+    top = runner.invoke(app, ["work", "--help"]).output
+    surface = json.loads(runner.invoke(app, ["util", "describe-surface", "--json"]).stdout)
+    live = {tuple(entry["path"]) for entry in surface["commands"]}
+    for verb in ("prepare-workspace", "merge-workspace"):
+        assert verb not in top
+        assert ("work", verb) not in live
+        assert runner.invoke(app, ["help", "work", verb, "--json"]).exit_code != 0
+    assert not hasattr(wire_work, "prepare_workspace_payload")
+
+
+def test_merge_workspace_is_unknown() -> None:
+    from gw_wire import work as wire_work
+
+    result = runner.invoke(app, ["work", "merge-workspace", "--help"])
+    assert result.exit_code != 0
+    assert "No such command" in result.output
+    assert not hasattr(wire_work, "merge_workspace_payload")

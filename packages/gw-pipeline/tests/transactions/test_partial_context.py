@@ -114,11 +114,12 @@ def test_postcondition_context_completes_only_escaping_dependency_or_lane(tmp_pa
     monkeypatch.setattr(transactions, "_validate_postconditions", changed)
     monkeypatch.setattr(transactions, "validate", validate)
     application = transactions.apply_mutation(layout, plan, baseline_bundle=baseline, commit=None)
-    assert application.ok == (change != "new-lane-member"), application.failures
-    assert application.rolled_back == (change == "new-lane-member")
+    # A reparent no longer writes lane indexes, so a lane member that appears mid-apply is not a stale inventory.
+    assert application.ok, application.failures
+    assert not application.rolled_back
     assert (observed[1].partial is None) == (change != "new-unrelated-member")
     if change == "new-lane-member":
-        assert transactions.only_stale_inventory(application)
+        assert "work/destination/children/bug-new" in observed[1].concepts
     elif change == "dependency":
         assert "work/far/children/bug-target" in observed[1].concepts
     else:
@@ -240,7 +241,9 @@ def test_absolute_postcondition_failures_report_specific_unverified_condition(tm
             transactions, "_extra_rules", lambda *args: (_ for _ in ()).throw(ValueError("schema denied"))
         )
     elif fault == "index-read":
-        mutation = authored_plan(layout, writes=(PlannedWrite("work/index.md", None, b"index"),))
+        mutation = replace(
+            authored_plan(layout, writes=(PlannedWrite("work/index.md", None, b"index"),)), operation="indexes"
+        )
         monkeypatch.setattr(
             transactions, "_read_bytes_at", lambda *args: (_ for _ in ()).throw(OSError("index denied"))
         )

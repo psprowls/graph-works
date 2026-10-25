@@ -200,4 +200,4 @@ def test_the_file_command_places_the_page_in_the_canonical_work_lane(tmp_path: P
 
     assert result.exit_code == 0, result.output
     assert (root / "work" / "bug-a-declared-bug.md").is_file()
-    assert (root / "work" / "index.md").is_file()
+    assert not (root / "work" / "index.md").exists()

@@ -1,5 +1,6 @@
 """Durable return preparation against real workspace Git checkouts."""
 
+import json
 from datetime import date
 from hashlib import sha256
 from pathlib import Path
@@ -9,7 +10,7 @@ from gw_kernel import apply_init, plan_init
 from gw_kernel.testing.transactions import git as _git
 from gw_kernel.testing.transactions import init_git as _init_git
 from gw_orchestrate import stage_advance as stage
-from gw_orchestrate.workspace_prepare import run_prepare_workspace
+from gw_pipeline.placement import NullNotifier
 from okf_io import load
 
 TODAY = date(2026, 10, 5)
@@ -30,7 +31,7 @@ def write(path, text):
 
 def commit(root):
     git(root, "add", ".")
-    git(root, "commit", "-m", "fixture update")
+    git(root, "commit", "--allow-empty", "-m", "fixture update")
 
 
 def document(layout):
@@ -50,9 +51,7 @@ def ws(tmp_path):
     write(layout.bundle_dir / PLAN, "# Plan\n")
     _init_git(layout.root)
     git(layout.root, "config", "core.autocrlf", "false")
-    prepared = run_prepare_workspace(layout, PATH, today=TODAY, apply=True)
-    assert prepared.refusal is None and prepared.applied, prepared
-    content = Path(prepared.steps[-1].worktree)
+    content = layout.root
     doc = document(layout)
     doc.set("phase", "finish")
     doc.save()
@@ -62,14 +61,11 @@ def ws(tmp_path):
 
 
 def advance(layout, **kwargs):
-    return stage.run_stage_advance(
-        layout, PATH, today=TODAY, return_=True, return_scope=SCOPE, dry_run=False, infer_worktree=False, **kwargs
-    )
+    return stage.run_stage_advance(layout, PATH, today=TODAY, return_=True, return_scope=SCOPE, dry_run=False, **kwargs)
 
 
-def test_return_with_explicit_scope_reopens_content_coverage_and_records_intent(ws):
+def test_return_with_explicit_scope_reopens_coverage_and_records_intent(ws):
     layout, content = ws
-    before = (layout.bundle_dir / COVERAGE).read_bytes()
     result = advance(layout)
     assert result.outcome.plan.refusal is None, result
     assert result.application.ok, result.application
@@ -77,9 +73,8 @@ def test_return_with_explicit_scope_reopens_content_coverage_and_records_intent(
     assert document(layout).fm_data()["phase"] == "execute"
     assert record["state"] == "active"
     assert record["plan_sha256"] == sha256((layout.bundle_dir / PLAN).read_bytes()).hexdigest()
-    assert "Report state: prepared" in (content / "okf" / COVERAGE).read_text(encoding="utf-8")
-    assert git(content, "log", "-1", "--format=%s").startswith("workspace: reopen")
-    assert (layout.bundle_dir / COVERAGE).read_bytes() == before
+    assert "Report state: prepared" in (layout.bundle_dir / COVERAGE).read_text(encoding="utf-8")
+    assert git(content, "log", "-1", "--format=%s").startswith("workspace: advance")
     assert not tuple((layout.cache_dir / "execute-returns").glob("*.json"))
 
 
@@ -89,7 +84,11 @@ def snapshot(layout, content):
         git(content, "status", "--porcelain"),
         git(layout.root, "rev-parse", "HEAD"),
         git(content, "rev-parse", "HEAD"),
-        sorted(str(p.relative_to(layout.cache_dir)) for p in layout.cache_dir.rglob("*")),
+        sorted(
+            str(p.relative_to(layout.cache_dir))
+            for p in layout.cache_dir.rglob("*")
+            if p.relative_to(layout.cache_dir).parts[0] != "decisions"
+        ),
     )
 
 
@@ -127,37 +126,53 @@ def test_malformed_execute_return_refuses(ws):
     assert result.outcome.plan.refusal == "return-metadata-invalid"
 
 
-@pytest.mark.parametrize("damage", ["dirty", "missing"])
-def test_unverified_content_refuses(ws, damage):
-    layout, content = ws
-    if damage == "dirty":
-        write(content / "untracked", "dirt")
-    else:
-        doc = document(layout)
-        stamps = doc.fm_data()["repo_stamps"]
-        stamps["_workspace"]["worktree"] = str(content / "missing")
-        doc.set("repo_stamps", stamps)
-        doc.save()
-    result = advance(layout)
-    assert result.outcome.plan.refusal == "return-destination-unverified"
-    assert document(layout).fm_data()["phase"] == "finish"
-
-
-@pytest.mark.parametrize("mode", ["disabled", "unstamped"])
+@pytest.mark.parametrize("mode", ["disabled", "enabled"])
 def test_canonical_bundle_uses_one_transaction(ws, mode):
-    layout, content = ws
-    doc = document(layout)
-    if mode == "unstamped":
-        doc.delete("repo_stamps")
-        doc.save()
-    else:
+    layout, _ = ws
+    if mode == "disabled":
         write((layout.root / "workflow.local.yaml"), "workflow:\n  workspace_commits: off\n")
-    old = git(content, "rev-parse", "HEAD")
     result = advance(layout)
     assert result.application.ok, result
     assert "Report state: prepared" in (layout.bundle_dir / COVERAGE).read_text(encoding="utf-8")
-    assert git(content, "rev-parse", "HEAD") == old
     assert not tuple((layout.cache_dir / "execute-returns").glob("*.json"))
+
+
+def test_return_writes_coverage_to_primary_bundle(ws, tmp_path):
+    layout, _ = ws
+    retired = tmp_path / "retired-worktree"
+    retired.mkdir()
+    doc = document(layout)
+    doc.set("repo_stamps", {"_workspace": {"worktree": str(retired), "branch": "retired"}})
+    doc.save()
+    commit(layout.root)
+    result = advance(layout)
+    assert result.application.ok, result
+    assert "Report state: prepared" in (layout.bundle_dir / COVERAGE).read_text(encoding="utf-8")
+    assert not any(retired.iterdir())
+
+
+def test_legacy_journal_naming_worktree_refuses(ws, tmp_path):
+    import json
+
+    from gw_pipeline.execute_return import journal_path
+
+    layout, _ = ws
+    path = journal_path(layout, PATH)
+    write(path, json.dumps({"version": 2, "path": PATH, "worktree": str(tmp_path / "retired")}))
+    before = (layout.bundle_dir / COVERAGE).read_bytes()
+    result = advance(layout)
+    assert result.outcome.plan.refusal == "return-pending"
+    assert "retired workspace worktree" in result.outcome.plan.detail
+    assert (layout.bundle_dir / COVERAGE).read_bytes() == before
+    assert document(layout).fm_data()["phase"] == "finish"
+
+
+def test_no_destination_unverified_refusal():
+    from typing import get_args
+
+    from work_tracker_okf.advance import RefusalReason
+
+    assert "return-destination-unverified" not in get_args(RefusalReason)
 
 
 @pytest.mark.parametrize("change", ["missing-coverage", "no-plan", "custom-coverage"])
@@ -187,47 +202,6 @@ def test_optional_and_configured_artifacts(ws, change):
         assert "plan" not in record and "plan_sha256" not in record
 
 
-@pytest.mark.parametrize("failure", ["raise", "failed-application"])
-def test_interrupted_publish_resumes_exact_intent(ws, monkeypatch, failure):
-    from gw_orchestrate.execute_return import pending_return
-
-    layout, content = ws
-    original = stage.apply_mutation
-
-    def fail(*args, **kwargs):
-        if failure == "raise":
-            raise OSError("canonical interrupted")
-
-        # A failed read guard is a real transaction failure with no canonical effect.
-        def reject():
-            raise OSError("canonical interrupted")
-
-        return original(*args, **{**kwargs, "validate_read_set": reject})
-
-    monkeypatch.setattr(stage, "apply_mutation", fail)
-    try:
-        first = advance(layout)
-        assert not first.application.ok
-        assert "pending" in " ".join(first.warnings)
-    except OSError:
-        assert failure == "raise"
-    op = pending_return(layout, PATH)
-    assert op is not None and op.state == "content-committed"
-    assert document(layout).fm_data()["phase"] == "finish"
-    head = git(content, "rev-parse", "HEAD")
-    changed = stage.run_stage_advance(layout, PATH, today=TODAY, return_=True, return_scope=("different",))
-    assert changed.outcome.plan.refusal == "return-pending"
-    finished = stage.run_stage_advance(layout, PATH, today=TODAY)
-    assert finished.outcome.plan.refusal == "return-pending"
-    monkeypatch.setattr(stage, "apply_mutation", original)
-    result = advance(layout)
-    assert result.application.ok, result
-    assert document(layout).fm_data()["execute_return"]["id"] == op.return_id
-    assert git(content, "rev-parse", "HEAD") == head
-    assert (content / "okf" / COVERAGE).read_text(encoding="utf-8").count("## Returned scope") == 1
-    assert pending_return(layout, PATH) is None
-
-
 def test_exact_published_return_recovers_after_journal_cleanup_crash(ws, monkeypatch):
     from gw_orchestrate import execute_return as returns
 
@@ -236,44 +210,17 @@ def test_exact_published_return_recovers_after_journal_cleanup_crash(ws, monkeyp
     monkeypatch.setattr(returns, "finish_return", lambda *_: None)
     first = advance(layout)
     assert first.application.ok, first
-    assert returns.pending_return(layout, PATH) is not None
+    pending = returns.pending_return(layout, PATH)
+    assert pending is not None
+    from gw_pipeline.execute_return import journal_path
+
+    assert not {"worktree", "branch", "identity"} & set(json.loads(journal_path(layout, PATH).read_text("utf-8")))
     before = (git(layout.root, "rev-parse", "HEAD"), git(content, "rev-parse", "HEAD"))
     monkeypatch.setattr(returns, "finish_return", original)
     replay = advance(layout, expected_phase="finish")
     assert replay.outcome.plan.refusal is None, replay
     assert returns.pending_return(layout, PATH) is None
     assert (git(layout.root, "rev-parse", "HEAD"), git(content, "rev-parse", "HEAD")) == before
-
-
-@pytest.mark.parametrize("change", ["coverage", "plan", "page", "placement"])
-def test_changed_evidence_before_publish_refuses(ws, monkeypatch, change):
-    from gw_orchestrate import execute_return as returns
-
-    layout, content = ws
-    original = returns.apply_content
-
-    def changed(*args, **kwargs):
-        op = original(*args, **kwargs)
-        if change == "coverage":
-            write(content / "okf" / COVERAGE, "tampered\n")
-        elif change == "plan":
-            write(layout.bundle_dir / PLAN, "changed plan\n")
-        else:
-            doc = document(layout)
-            if change == "page":
-                doc.set("owner", "someone-else")
-            else:
-                stamps = doc.fm_data()["repo_stamps"]
-                stamps["_workspace"]["worktree"] = str(content / "missing")
-                doc.set("repo_stamps", stamps)
-            doc.save()
-        return op
-
-    monkeypatch.setattr(returns, "apply_content", changed)
-    result = advance(layout)
-    assert not result.application.ok, result
-    assert document(layout).fm_data()["phase"] == "finish"
-    assert returns.pending_return(layout, PATH) is not None
 
 
 @pytest.mark.parametrize("raw", ["{", "[]", '{"version": true}', '{"version": 1, "path": "different"}'])
@@ -304,37 +251,6 @@ def test_pending_publication_blocks_next_and_dispatch_plan(ws, monkeypatch):
     assert any("pending" in block.reason for block in dispatched.blocked)
 
 
-@pytest.mark.parametrize("root", ["content", "canonical"])
-def test_commit_failure_retains_fence_and_finish(ws, monkeypatch, root):
-    from gw_kernel.workspace.commits import CommitOutcome
-    from gw_kernel.workspace.errors import WorkspaceError
-    from gw_orchestrate.execute_return import pending_return
-    from gw_pipeline import transactions
-
-    layout, content = ws
-    original = transactions.commit_workspace
-    target = content if root == "content" else layout.root
-
-    def fail(checkout, request, *args, **kwargs):
-        if checkout.root == target:
-            if root == "canonical":
-                git(checkout.root, "add", f"okf/{PATH}.md")
-            return CommitOutcome("failed", None, request.subject, (), "test commit failure")
-        return original(checkout, request, *args, **kwargs)
-
-    monkeypatch.setattr(transactions, "commit_workspace", fail)
-    try:
-        result = advance(layout)
-        assert not result.outcome.written
-        assert not result.application.ok
-    except WorkspaceError:
-        assert root == "content"
-    assert document(layout).fm_data()["phase"] == "finish"
-    assert pending_return(layout, PATH) is not None
-    if root == "canonical":
-        assert git(layout.root, "status", "--porcelain") == ""
-
-
 def test_pending_return_rejects_saved_dispatch_plan_before_orca(ws, monkeypatch):
     from datetime import UTC, datetime
 
@@ -356,7 +272,7 @@ def test_pending_return_rejects_saved_dispatch_plan_before_orca(ws, monkeypatch)
                 "mode": "autonomous",
                 "agent": "claude",
                 "prompt": "old plan",
-                "worktree": {"action": "reuse"},
+                "placement": None,
             }
         ],
     }
@@ -366,6 +282,7 @@ def test_pending_return_rejects_saved_dispatch_plan_before_orca(ws, monkeypatch)
         plan=plan,
         run_id="run_1",
         port=port,
+        notifier=NullNotifier(),
         today=TODAY,
         clock=lambda: datetime(2026, 10, 5, tzinfo=UTC),
     )
@@ -373,37 +290,8 @@ def test_pending_return_rejects_saved_dispatch_plan_before_orca(ws, monkeypatch)
     assert not port.calls
 
 
-@pytest.mark.parametrize("boundary", ["before-content", "after-content-commit"])
-def test_intent_journal_replays_only_proven_content_progress(ws, monkeypatch, boundary):
-    from gw_orchestrate import execute_return as returns
-
-    layout, content = ws
-    original = returns.write_operation
-
-    def interrupt(layout, op):
-        if boundary == "before-content" and op.state == "intent":
-            original(layout, op)
-            raise OSError("crash after intent")
-        if boundary == "after-content-commit" and op.state == "content-committed":
-            raise OSError("crash after content commit")
-        original(layout, op)
-
-    monkeypatch.setattr(returns, "write_operation", interrupt)
-    with pytest.raises(OSError):
-        advance(layout)
-    op = returns.pending_return(layout, PATH)
-    assert op.state == "intent"
-    head = git(content, "rev-parse", "HEAD")
-    monkeypatch.setattr(returns, "write_operation", original)
-    result = advance(layout)
-    assert result.application.ok
-    assert document(layout).fm_data()["execute_return"]["id"] == op.return_id
-    if boundary == "after-content-commit":
-        assert git(content, "rev-parse", "HEAD") == head
-
-
-@pytest.mark.parametrize("damage", ["utf8", "escape", "commit-off"])
-def test_unreadable_or_uncommittable_destination_refuses(ws, tmp_path, damage):
+@pytest.mark.parametrize("damage", ["utf8", "escape"])
+def test_unreadable_coverage_refuses(ws, tmp_path, damage):
     layout, content = ws
     target = content / "okf" / COVERAGE
     if damage == "utf8":
@@ -415,10 +303,8 @@ def test_unreadable_or_uncommittable_destination_refuses(ws, tmp_path, damage):
         target.unlink()
         target.symlink_to(external)
         commit(content)
-    else:
-        write(content / "workflow.local.yaml", "workflow:\n  workspace_commits: off\n")
     result = advance(layout)
-    assert result.outcome.plan.refusal == "return-destination-unverified"
+    assert result.outcome.plan.refusal == "return-evidence-missing"
     assert document(layout).fm_data()["phase"] == "finish"
     assert not tuple((layout.cache_dir / "execute-returns").glob("*.json"))
 
@@ -503,54 +389,14 @@ def test_return_preserves_crlf_and_no_final_newline_in_committed_blob(ws, autocr
     assert (content / "okf" / COVERAGE).read_bytes().startswith(before + b"\r\n\r\n## Returned scope")
 
 
-def test_pending_journal_rejects_malformed_fields_all_or_nothing(ws, monkeypatch):
-    import json
-    from copy import deepcopy
-
-    from gw_orchestrate import execute_return as returns
-    from gw_pipeline.execute_return import journal_path
-
-    layout, _ = ws
-    monkeypatch.setattr(returns, "finish_return", lambda *_: None)
-    assert advance(layout).application.ok
-    path = journal_path(layout, PATH)
-    valid = json.loads(path.read_text(encoding="utf-8"))
-    for key, value in [
-        ("destination", []),
-        ("state", []),
-        ("content_commit", None),
-        ("version", True),
-        ("record", {}),
-        ("coverage_member", "../outside"),
-        ("canonical_after_sha256", False),
-        ("page_sha256", ""),
-        ("plan_member", "/outside"),
-        ("coverage_after_sha256", []),
-    ]:
-        raw = deepcopy(valid)
-        raw[key] = value
-        write(path, json.dumps(raw))
-        assert returns.pending_return(layout, PATH).malformed, key
-    raw = deepcopy(valid)
-    raw["destination"]["identity"] = "relative"
-    write(path, json.dumps(raw))
-    assert returns.pending_return(layout, PATH).malformed
-    path.unlink()
-    path.mkdir()
-    assert returns.pending_return(layout, PATH).malformed
-
-
 def test_custom_bundle_layout_is_preserved(ws):
     from dataclasses import replace
 
     layout, content = ws
-    # Both checkouts use the same authored relative layout; no basename guess.
     (layout.root / "okf").rename(layout.root / "knowledge")
-    (content / "okf").rename(content / "knowledge")
-    for root in (layout.root, content):
-        manifest = root / "workspace.yaml"
-        write(manifest, manifest.read_text(encoding="utf-8") + "\nlayout:\n  bundle_dir: knowledge\n")
-        commit(root)
+    manifest = layout.root / "workspace.yaml"
+    write(manifest, manifest.read_text(encoding="utf-8") + "\nlayout:\n  bundle_dir: knowledge\n")
+    commit(layout.root)
     layout = replace(layout, bundle_dir=layout.root / "knowledge")
     result = advance(layout)
     assert result.application.ok, result
@@ -634,9 +480,9 @@ def test_saved_dispatch_admission_serializes_concurrent_return(ws, tmp_path, mon
     port.worktrees["id:wt1"] = {
         "id": "wt1",
         "repo_id": "repo1",
-        "path": str(code_worktree),
-        "branch": "feature/return",
-        "display_name": "feature/return",
+        "path": str(layout.root),
+        "branch": None,
+        "display_name": "workspace",
         "is_main": False,
         "parent_id": None,
     }
@@ -650,14 +496,7 @@ def test_saved_dispatch_admission_serializes_concurrent_return(ws, tmp_path, mon
                 "mode": "autonomous",
                 "agent": "claude",
                 "prompt": "saved plan",
-                "worktree": {
-                    "action": "create-top-level",
-                    "path": None,
-                    "branch": "feature/return",
-                    "base_branch": "main",
-                    "exists": False,
-                    "parent_path": None,
-                },
+                "placement": None,
                 "repo": {"name": "code", "path": str(code), "source": "manifest"},
             }
         ],
@@ -710,6 +549,7 @@ def test_saved_dispatch_admission_serializes_concurrent_return(ws, tmp_path, mon
                 plan=plan,
                 run_id="run_1",
                 port=port,
+                notifier=NullNotifier(),
                 today=TODAY,
                 clock=lambda: datetime(2026, 10, 5, tzinfo=UTC),
                 sleep=lambda _: None,
@@ -793,7 +633,7 @@ def test_saved_dispatch_waits_for_return_and_refuses_pending_without_calls(ws, m
                 "mode": "autonomous",
                 "agent": "claude",
                 "prompt": "saved",
-                "worktree": {"action": "reuse"},
+                "placement": None,
             }
         ],
     }
@@ -807,6 +647,7 @@ def test_saved_dispatch_waits_for_return_and_refuses_pending_without_calls(ws, m
             plan=plan,
             run_id="run_1",
             port=port,
+            notifier=NullNotifier(),
             today=TODAY,
             clock=lambda: datetime(2026, 10, 5, tzinfo=UTC),
         )
@@ -824,7 +665,7 @@ def test_saved_dispatch_waits_for_return_and_refuses_pending_without_calls(ws, m
 
 
 def complete(layout, **kwargs):
-    return stage.run_stage_advance(layout, PATH, today=TODAY, expected_phase="execute", infer_worktree=False, **kwargs)
+    return stage.run_stage_advance(layout, PATH, today=TODAY, expected_phase="execute", **kwargs)
 
 
 def report(layout, content, *, checked=True):
@@ -906,12 +747,14 @@ def code_gate(layout, tmp_path, *, receipt=True):
     write(code / "src/a.py", "old\n")
     _init_git(code)
     baseline = git(code, "rev-parse", "HEAD")
+    git(code, "checkout", "-qb", "feat")
     write(code / "src/a.py", "new\n")
     commit(code)
     gate_ready(layout, code, PATH)
     doc = document(layout)
     doc.set("repo", "code")
     doc.set("worktree", str(code))
+    doc.set("branch", "feat")
     doc.set("start_sha", baseline)
     doc.set("affects", ["src/a.py"])
     doc.save()
@@ -921,14 +764,10 @@ def code_gate(layout, tmp_path, *, receipt=True):
     return code
 
 
-@pytest.mark.parametrize("canonical_coverage", [True, False])
-def test_reported_rows_complete_and_derive_obligations_from_destination(ws, tmp_path, canonical_coverage):
+def test_reported_rows_complete_and_derive_obligations_from_coverage(ws, tmp_path):
     layout, content = ws
     assert advance(layout).application.ok
     report(layout, content, checked=False)
-    if not canonical_coverage:
-        (layout.bundle_dir / COVERAGE).unlink()
-        commit(layout.root)
     code_gate(layout, tmp_path)
     result = complete(layout, dry_run=False)
     assert result.application is not None and result.application.ok, result
@@ -1083,37 +922,6 @@ def test_completion_holds_evidence_locks_through_commit(ws, monkeypatch, writer_
     assert held_at_commit == [True], "evidence lock released before completion commit"
 
 
-def test_completion_refuses_destination_changed_while_acquiring_locks(ws, tmp_path, monkeypatch):
-    from contextlib import contextmanager
-
-    from gw_orchestrate import execute_return as returns
-
-    layout, content = ws
-    assert advance(layout).application.ok
-    report(layout, content)
-    other = tmp_path / "other-content"
-    git(layout.root, "worktree", "add", "-b", "alternate", str(other))
-    write(other / "okf" / COVERAGE, (content / "okf" / COVERAGE).read_text(encoding="utf-8"))
-    commit(other)
-    original = returns.completion_locks
-
-    @contextmanager
-    def change_after_lock(*args, **kwargs):
-        with original(*args, **kwargs) as locked:
-            doc = document(layout)
-            stamps = doc.fm_data()["repo_stamps"]
-            stamps["_workspace"].update(worktree=str(other), branch="alternate")
-            doc.set("repo_stamps", stamps)
-            doc.save()
-            yield locked
-
-    monkeypatch.setattr(returns, "completion_locks", change_after_lock)
-    result = complete(layout, dry_run=False)
-    assert result.outcome.plan.refusal == "return-destination-unverified", result
-    assert document(layout).fm_data()["phase"] == "execute"
-    assert document(layout).fm_data()["execute_return"]["state"] == "active"
-
-
 @pytest.mark.parametrize("destination", ["no-plan", "unstamped", "disabled"])
 def test_reported_completion_supports_optional_plan_and_canonical_destination(ws, destination):
     layout, content = ws
@@ -1175,9 +983,7 @@ def test_completion_refuses_decision_owner_changed_while_acquiring_locks(ws, mon
     write(content / "okf" / coverage, "- [x] Original acceptance delivered\n")
     commit(layout.root)
     commit(content)
-    returned = stage.run_stage_advance(
-        layout, child, today=TODAY, return_=True, return_scope=SCOPE, dry_run=False, infer_worktree=False
-    )
+    returned = stage.run_stage_advance(layout, child, today=TODAY, return_=True, return_scope=SCOPE, dry_run=False)
     assert returned.application.ok, returned
     target = content / "okf" / coverage
     write(
@@ -1203,7 +1009,7 @@ def test_completion_refuses_decision_owner_changed_while_acquiring_locks(ws, mon
 
     monkeypatch.setattr(returns, "completion_locks", change_after_lock)
     with pytest.raises(WorkspaceError, match="decision owner changed; inspect and retry"):
-        stage.run_stage_advance(layout, child, today=TODAY, dry_run=False, infer_worktree=False)
+        stage.run_stage_advance(layout, child, today=TODAY, dry_run=False)
     data = load(layout.bundle_dir / f"{child}.md").fm_data()
     assert data["phase"] == "execute"
     assert data["execute_return"]["state"] == "active"

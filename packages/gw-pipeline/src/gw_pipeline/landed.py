@@ -117,7 +117,6 @@ class LandedEntry:
 @dataclass(frozen=True, slots=True)
 class LandedSince:
     code_baseline: str | None
-    workspace_baseline: str | None
     repo: Path | None
     entries: tuple[LandedEntry, ...] = ()
     warnings: tuple[str, ...] = ()
@@ -134,17 +133,16 @@ def landed_since(layout: WorkspaceLayout, items: Sequence[WorkItem], item: WorkI
     """
     baseline = item.spec_baseline
     code = baseline.code if baseline is not None else None
-    workspace = baseline.workspace if baseline is not None else None
     candidates = landed_siblings(items, item)
     if code is None or not candidates:
-        return LandedSince(code, workspace, None)
+        return LandedSince(code, None)
     by_path = {candidate.path: candidate for candidate in items}
     try:
         repo = resolve_item_repo(layout, item, by_path).path
     except WorkspaceError as exc:
-        return LandedSince(code, workspace, None, warnings=(f"landed-since: {exc}",))
+        return LandedSince(code, None, warnings=(f"landed-since: {exc}",))
     if repo is None:
-        return LandedSince(code, workspace, None, warnings=("landed-since: no code repository resolved",))
+        return LandedSince(code, None, warnings=("landed-since: no code repository resolved",))
     own = set(code_affects(item.affects))
     entries: list[LandedEntry] = []
     warnings: list[str] = []
@@ -170,7 +168,7 @@ def landed_since(layout: WorkspaceLayout, items: Sequence[WorkItem], item: WorkI
             continue
         overlaps = bool(own & set(code_affects(sibling.affects)))
         entries.append(LandedEntry(sibling, overlaps))
-    return LandedSince(code, workspace, repo, tuple(entries), tuple(warnings))
+    return LandedSince(code, repo, tuple(entries), tuple(warnings))
 
 
 def stale_spec_for(layout: WorkspaceLayout, items: Sequence[WorkItem], item: WorkItem) -> tuple[str, ...]:

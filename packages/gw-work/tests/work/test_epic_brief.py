@@ -93,7 +93,7 @@ def _world(
         (refs_dir / "02-plan.md").write_text(plan, encoding="utf-8", newline="\n")
     _page(layout, EPIC, _item_front("The Epic", type=epic_type, extra=sources))
     (refs_dir / "00-decisions.md").write_text(LEDGER, encoding="utf-8", newline="\n")
-    base = f"spec_baseline:\n  code: {CODE}\n  workspace: {WS}\n" if baseline else ""
+    base = f"spec_baseline:\n  code: {CODE}\n" if baseline else ""
     _page(layout, CHILD, _item_front("Feature A", extra=base))
     _page(layout, SIB, _item_front("Feature B", affects=sib_affects, landed=SHA_B))
     _page(layout, OLD, _item_front("Feature C", affects="packages/z", landed=SHA_C))
@@ -109,7 +109,6 @@ def _no_git(
     monkeypatch.setattr(
         eb, "compare_to_baseline", lambda repo, ref, base: (new or {}).get(ref, BaselineComparison(False))
     )
-    monkeypatch.setattr(eb.provenance, "run_git", lambda cwd, *args: ws)
 
 
 def test_covered_epic_is_the_nearest_epic_or_release_ancestor(tmp_path: Path) -> None:
@@ -238,21 +237,12 @@ def test_no_code_repository_is_one_warning_and_no_marker(tmp_path: Path, monkeyp
     assert not any("new since your baseline" in line for line in brief.lines)
 
 
-def test_workspace_commits_on_the_epic_design_or_ledger_flag(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_epic_brief_has_no_workspace_commit_flag(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     layout, items, child = _world(tmp_path, baseline=True, sib_affects="packages/z")
     _no_git(monkeypatch, ws="2")
-    assert eb.epic_brief(layout, items, child).lines[-1] == (
-        "Read the full epic design before relying on this brief: "
-        f"2 workspace commit(s) touched the epic design or ledger since {WS[:12]}."
-    )
-
-
-def test_an_unreadable_workspace_count_is_a_warning_not_a_flag(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    layout, items, child = _world(tmp_path, baseline=True, sib_affects="packages/z")
-    _no_git(monkeypatch, ws=None)
     brief = eb.epic_brief(layout, items, child)
     assert brief.lines[-1] == eb.NO_FLAGS_LINE
-    assert f"epic_brief: could not count workspace commits since {WS[:12]}" in brief.warnings
+    assert not any("workspace commit" in line for line in brief.lines)
 
 
 def test_index_row_falls_back_to_the_design_child_index(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

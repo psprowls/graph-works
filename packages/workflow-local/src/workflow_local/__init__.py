@@ -18,7 +18,7 @@ JSONL event file, one JSONL reply file.
 
 from __future__ import annotations
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 
 from workflow_local.backend import LocalBackend, LocalSession
 from workflow_local.ledger import LedgerEntry, read_ledger, write_ledger

@@ -238,160 +238,6 @@ def test_work_orchestrate_plans_a_tagged_item_without_repo_name(two_repos: tuple
     assert json.loads(result.stdout)["repo"] == {"name": "ui", "path": str(ui.resolve()), "source": "frontmatter"}
 
 
-def _placement_args(root: Path, path: str, phase: str, worktree: str) -> list[str]:
-    return [
-        "work",
-        "record-placement",
-        path,
-        "--root",
-        path,
-        "--phase",
-        phase,
-        "--worktree",
-        worktree,
-        "--branch",
-        "feature/placed",
-        "--workspace",
-        str(root),
-        "--json",
-    ]
-
-
-@pytest.mark.parametrize(
-    ("tag", "flag"),
-    [(None, None), ("nope", None), ("ui", "code")],
-    ids=("ambiguous", "unknown-tag", "conflicting-flag"),
-)
-@pytest.mark.parametrize("unchanged_pair", (False, True), ids=("new-pair", "unchanged-pair"))
-def test_placement_preview_and_live_refuse_invalid_repo_selection(
-    two_repos: tuple[Path, Path, Path], tag: str | None, flag: str | None, unchanged_pair: bool
-) -> None:
-    root, _code, _ui = two_repos
-    path = _file(root, "Invalid placement", "apps/ui")
-    page = root / "okf" / f"{path}.md"
-    document = load(page)
-    document.set("phase", "design")
-    if tag is not None:
-        document.set("repo", tag)
-    worktree = str(root / "observed")
-    if unchanged_pair:
-        document.set("worktree", worktree)
-        document.set("branch", "feature/placed")
-    document.save()
-    before = page.read_bytes()
-    args = _placement_args(root, path, "design", worktree)
-    if flag is not None:
-        args.extend(("--repo-name", flag))
-
-    errors = []
-    for suffix in (["--dry-run"], []):
-        result = runner.invoke(app, [*args, *suffix])
-        assert result.exit_code == exit_codes.SCHEMA_MISMATCH, result.output
-        errors.append(json.loads(result.stdout)["error"])
-        assert page.read_bytes() == before
-    assert errors[0] == errors[1]
-    assert errors[0]["reason"] == "workspace"
-    assert errors[0]["payload"] is None
-    assert path in errors[0]["message"]
-
-
-@pytest.mark.parametrize("direct_tag", (False, True), ids=("inherited-tag", "direct-tag"))
-def test_inherited_repo_placement_lifecycle_through_cli(two_repos: tuple[Path, Path, Path], direct_tag: bool) -> None:
-    root, _code, ui = two_repos
-    epic = runner.invoke(
-        app,
-        [
-            "work",
-            "file",
-            "--title",
-            "UI epic",
-            "--kind",
-            "Epic",
-            "--summary",
-            "d",
-            "--repo",
-            "ui",
-            "--workspace",
-            str(root),
-            "--json",
-        ],
-    )
-    assert epic.exit_code == 0, epic.output
-    epic_path = json.loads(epic.stdout)["path"]
-    child_args = [
-        "work",
-        "file",
-        "--title",
-        "UI feature",
-        "--kind",
-        "Feature",
-        "--summary",
-        "d",
-        "--parent-path",
-        epic_path,
-        "--affects",
-        "apps/ui",
-        "--workspace",
-        str(root),
-        "--json",
-    ]
-    if direct_tag:
-        child_args.extend(("--repo", "ui"))
-    child = runner.invoke(app, child_args)
-    assert child.exit_code == 0, child.output
-    child_path = json.loads(child.stdout)["path"]
-    page = root / "okf" / f"{child_path}.md"
-    document = load(page)
-    document.set("phase", "design")
-    document.save()
-
-    orchestrated = runner.invoke(app, ["work", "orchestrate", child_path, "--workspace", str(root), "--json"])
-    assert orchestrated.exit_code == 0, orchestrated.output
-    assert json.loads(orchestrated.stdout)["repo"] == {"name": "ui", "path": str(ui.resolve()), "source": "frontmatter"}
-
-    worktree = str(root / "observed")
-    args = _placement_args(root, child_path, "design", worktree)
-    for suffix, expected in (
-        (["--dry-run"], (True, False)),
-        ([], (True, True)),
-        (["--dry-run"], (False, False)),
-        ([], (False, False)),
-    ):
-        before = page.read_bytes()
-        result = runner.invoke(app, [*args, *suffix])
-        assert result.exit_code == 0, result.output
-        payload = json.loads(result.stdout)
-        assert (payload["changed"], payload["written"]) == expected
-        assert payload["refusal"] is None
-        stored = load(page).fm_data()
-        assert "repo_stamps" not in stored
-        if not direct_tag:
-            assert "repo" not in stored
-        if expected[1]:
-            assert stored["worktree"] == worktree
-            assert stored["branch"] == "feature/placed"
-        else:
-            assert page.read_bytes() == before
-
-
-def test_work_record_placement_repo_name_selects_the_declared_repo(two_repos: tuple[Path, Path, Path]) -> None:
-    root, _code, _ui = two_repos
-    path = _file(root, "Placed", "apps/ui")
-    document = load(root / "okf" / f"{path}.md")
-    document.set("phase", "design")
-    document.save()
-    phase = "design"
-    worktree = str(Path(Path.cwd().anchor, "wt", "placed"))
-
-    refused = runner.invoke(app, _placement_args(root, path, phase, worktree))
-    assert refused.exit_code == exit_codes.SCHEMA_MISMATCH
-    assert "repo_name" in refused.output
-
-    result = runner.invoke(app, [*_placement_args(root, path, phase, worktree), "--repo-name", "ui"])
-    assert result.exit_code == 0, result.output
-    assert json.loads(result.stdout)["written"] is True
-
-
 def test_work_advance_no_longer_refuses_in_a_two_repo_workspace(two_repos: tuple[Path, Path, Path]) -> None:
     """The test process's cwd is in neither declared repo: inference is
     skipped with a note, and the advance still applies."""
@@ -411,25 +257,6 @@ def test_work_file_repo_writes_the_repo_field(two_repos: tuple[Path, Path, Path]
     assert result.exit_code == 0, result.output
     path = json.loads(result.stdout)["path"]
     assert load(root / "okf" / f"{path}.md").fm_data()["repo"] == "ui"
-
-
-def test_work_record_placement_repo_writes_repo_stamps(two_repos: tuple[Path, Path, Path]) -> None:
-    root, _code, _ui = two_repos
-    args = ["work", "file", "--title", "Placed", "--kind", "Feature", "--summary", "d", "--affects", "apps/ui"]
-    path = json.loads(runner.invoke(app, [*args, "--repo", "code", "--workspace", str(root), "--json"]).stdout)["path"]
-    document = load(root / "okf" / f"{path}.md")
-    document.set("phase", "design")
-    document.save()
-    worktree = str(Path(Path.cwd().anchor, "wt", "placed"))
-
-    result = runner.invoke(app, [*_placement_args(root, path, "design", worktree), "--repo", "ui"])
-
-    assert result.exit_code == 0, result.output
-    payload = json.loads(result.stdout)
-    assert payload["written"] is True and payload["repo"] == "ui"
-    assert load(root / "okf" / f"{path}.md").fm_data()["repo_stamps"] == {
-        "ui": {"worktree": worktree, "branch": "feature/placed"}
-    }
 
 
 def test_root_repo_flag_does_not_override_foreign_child_assignment(two_repos: tuple[Path, Path, Path]) -> None:
@@ -488,15 +315,11 @@ def test_root_repo_flag_does_not_override_foreign_child_assignment(two_repos: tu
     assert payload["repo"] == {"name": "code", "path": str(code.resolve()), "source": "flag"}
     [dispatch] = payload["dispatches"]
     assert dispatch["repo"] == {"name": "ui", "path": str(ui.resolve()), "source": "frontmatter"}
-    assert dispatch["worktree"] == {
-        "action": "pin-detached",
-        "path": None,
-        "branch": None,
-        "base_branch": "epic/root",
-        "exists": None,
-        "parent_path": str(anchor.resolve()),
-        "start_sha": sha,
-    }
-    assert payload["preparations"] == []
-    assert payload["workspace_preparations"] == []
-    assert all("workspace" in dispatch for dispatch in payload["dispatches"])
+    assert "worktree" not in dispatch
+    assert dispatch["placement"]["repo"]["name"] == "ui"
+    from gw_pipeline.placement import branch_name
+
+    assert dispatch["placement"]["parent_branch"] == branch_name("work/epic-root", "Epic")
+    assert "preparations" not in payload
+    assert "workspace_preparations" not in payload
+    assert all("workspace" not in dispatch for dispatch in payload["dispatches"])

@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "workflow-local"
-version = "0.1.0"
+version = "0.2.0"
 description = "A subprocess DispatchBackend for subagents-io: a durable per-session ledger, JSONL event and reply files, and a reaper that settles a silent child."
 authors = [
   { name = "Patrick Sprowls", email = "psprowls@gmail.com" },
@@ -16,7 +16,7 @@ requires-python = ">=3.12"
 # There is deliberately no `[project.optional-dependencies]` — a vendor SDK
 # arriving here as an extra would make this the package that runs two backends,
 # and the naming rule is one package per backend.
-dependencies = ["subagents-io>=0.2,<0.3"]
+dependencies = ["subagents-io>=0.3,<0.4"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/workflow_local"]

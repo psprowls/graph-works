@@ -156,6 +156,31 @@ def _render_dispatch(profile: dict[str, Any], provenance: dict[str, Any]) -> Non
         )
 
 
+def render_migrate_placement(payload: dict[str, Any]) -> None:
+    """Human summary of a migrate-placement plan or result."""
+    if payload["nothing_to_migrate"]:
+        typer.echo("nothing to migrate")
+        return
+    verb = "applied" if payload["mode"] == "apply" else "plan"
+    typer.echo(f"migrate-placement {verb}: {len(payload['strips'])} pages carry retired keys")
+    for row in payload["rows"]:
+        typer.echo(f"  {row['action']} {row['repo']} {row['worktree'] or row['branch']} ({row['reason'] or '-'})")
+    for blocker in payload["blockers"]:
+        typer.echo(f"blocker {blocker['item']}: {blocker['legacy_branch']} != {blocker['computed_branch']}")
+        for command in blocker["commands"]:
+            typer.echo(f"    {command}")
+    for orphan in payload["orphans"]:
+        typer.echo(f"orphan {orphan['repo']} {orphan['branch']}")
+    for stamp in payload["workspace_stamps"]:
+        ahead = "unknown" if stamp["ahead"] is None else str(stamp["ahead"])
+        typer.echo(
+            f"legacy workspace placement {stamp['item']}: worktree {stamp['worktree'] or '-'}, "
+            f"branch {stamp['branch'] or '-'}, {ahead} commits ahead of main; left in place, merge or prune by hand"
+        )
+    if payload["mode"] == "plan":
+        typer.echo("re-run with --apply to migrate")
+
+
 def render_commit(commit: dict[str, Any] | None) -> None:
     """Report a made commit or the actionable embedded-workspace note."""
     if commit is None:
@@ -241,46 +266,6 @@ def render_advance(payload: dict[str, Any]) -> None:
 
 
 # ---------------------------------------------------------------------------
-# record-placement
-# ---------------------------------------------------------------------------
-
-
-def render_placement(payload: dict[str, Any]) -> None:
-    if payload["written"]:
-        verb = "recorded"
-    elif payload["changed"]:
-        verb = "would record"
-    else:
-        verb = "unchanged"
-    after = payload["after"]
-    typer.echo(
-        f"[ok] {payload['path']}: {verb} worktree={after['worktree']} branch={after['branch']} "
-        f"(phase={payload['expected_phase']}, root={payload['root']})"
-    )
-    before = payload["before"]
-    if payload["changed"] and (before["worktree"] or before["branch"]):
-        typer.echo(f"  was: worktree={before['worktree']} branch={before['branch']}")
-    if payload["repo_note"]:
-        warn(payload["repo_note"])
-
-
-# ---------------------------------------------------------------------------
-# record-reader
-# ---------------------------------------------------------------------------
-
-
-def render_reader_receipt(payload: dict[str, Any]) -> None:
-    verb = "recorded" if payload["written"] else "replayed" if payload["replayed"] else "would record"
-    observation = payload["observation"]
-    typer.echo(
-        f"[ok] {payload['path']}: {verb} reader worktree={observation['worktree']} "
-        f"start_sha={observation['start_sha']} "
-        f"(phase={payload['expected_phase']}, root={payload['root']})"
-    )
-    typer.echo(f"  receipt: {payload['receipt_path']}")
-
-
-# ---------------------------------------------------------------------------
 # file
 # ---------------------------------------------------------------------------
 
@@ -343,6 +328,18 @@ def render_lint(report: object) -> None:
 # ---------------------------------------------------------------------------
 
 
+def render_pruned(pruned: dict[str, Any] | None) -> None:
+    """One line per removed worktree, deleted branch and kept row."""
+    if pruned is None:
+        return
+    for worktree in pruned["removed_worktrees"]:
+        typer.echo(f"pruned worktree {worktree}")
+    for branch in pruned["deleted_branches"]:
+        typer.echo(f"pruned branch {branch}")
+    for kept in pruned["kept"]:
+        typer.echo(f"kept {kept['branch']} ({kept['repo']}, {kept['path']}): {kept['why']}")
+
+
 # ---------------------------------------------------------------------------
 # decisions
 # ---------------------------------------------------------------------------
@@ -384,6 +381,13 @@ def render_obligations(payload: dict[str, Any]) -> None:
 # ---------------------------------------------------------------------------
 
 
+def _placement_text(dispatch: dict[str, Any]) -> str:
+    placement = dispatch["placement"]
+    if placement is None:
+        return "workspace"
+    return f"{placement['branch']} @ {placement['worktree']}"
+
+
 def render_orchestrate(payload: dict[str, Any]) -> None:
     free = payload["slots_free"]
     max_p = payload["max_parallel"]
@@ -398,13 +402,7 @@ def render_orchestrate(payload: dict[str, Any]) -> None:
         _render_dispatch(dispatch, dispatch["provenance"])
         typer.echo(
             f"  dispatch {dispatch['key']}: {dispatch['skill']} mode={dispatch['mode']} "
-            f"model={dispatch['model']} worktree={dispatch['worktree']['action']}"
-            f"{(' workspace=' + dispatch['workspace']['branch']) if dispatch['workspace'] else ''}"
-        )
-    for preparation in payload["workspace_preparations"]:
-        typer.echo(
-            f"  workspace-prepare {preparation['owner_path']} ({preparation['owner_phase']}): "
-            f"{preparation['branch']} at {preparation['worktree']} from {preparation['base_branch']}"
+            f"model={dispatch['model']} {_placement_text(dispatch)}"
         )
     for advance in payload["advances"]:
         typer.echo(f"  advance {advance['path']} (mode={advance['mode']}): {advance['reason']}")
@@ -447,16 +445,6 @@ def render_reconcile(payload: dict[str, Any]) -> None:
         typer.echo(f"  diff: {payload['diff_command']}")
     for warning in payload["warnings"]:
         warn(warning)
-
-
-def render_prepare_workspace(payload: dict[str, Any]) -> None:
-    """Render the ordered workspace preparation plan or applied steps."""
-    prefix = "" if payload["applied"] else "would "
-    for step in payload["steps"]:
-        typer.echo(
-            f"[ok] {step['owner_path']}: {prefix}{step['action']} {step['branch']} "
-            f"at {step['worktree']} (from {step['base_branch']})"
-        )
 
 
 def _unit_lines(units: list[dict[str, Any]]) -> None:
@@ -550,15 +538,5 @@ def render_accept_integration(payload: dict[str, Any]) -> None:
     )
     if payload["decision_id"]:
         typer.echo(f"  decision: {payload['decision_id']} in {payload['ledger_path']}")
-    if payload["receipt_path"]:
-        typer.echo(f"  receipt: {payload['receipt_path']}")
-
-
-def render_merge_workspace(payload: dict[str, Any]) -> None:
-    """Render the planned or applied integration and its receipt."""
-    action = "merged" if payload["applied"] else "would merge"
-    typer.echo(f"[ok] {payload['path']}: {action} {payload['source_branch']} into {payload['target_branch']}")
-    if payload["merge_commit"]:
-        typer.echo(f"  merge commit: {payload['merge_commit']}")
     if payload["receipt_path"]:
         typer.echo(f"  receipt: {payload['receipt_path']}")

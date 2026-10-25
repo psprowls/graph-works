@@ -1,4 +1,5 @@
 import difflib
+import inspect
 from datetime import date
 
 import pytest
@@ -154,7 +155,7 @@ def test_release_finish_records_released_at_and_resolves():
 
 # --- a stamped parent resolves only with a resolution ref (D-002) ---------
 
-_STAMP = {"branch": "epic/integration-1a2b3c4d", "worktree": "/wt/integration"}
+_STAMP = {"affects": ("packages/x",)}
 
 
 def _stamped(type_: str, **overrides):
@@ -235,7 +236,7 @@ def test_a_stamped_parent_with_an_open_child_is_blocked_not_resolved(type_: str)
 def test_a_parent_with_an_open_grandchild_is_blocked_regardless_of_branch_ownership(type_: str, has_branch: bool):
     child_path = "work/parent-int/children/feature-done"
     grandchild_path = f"{child_path}/children/bug-late"
-    parent = _stamped(type_, branch=_STAMP["branch"] if has_branch else None, child_paths=(child_path,))
+    parent = _stamped(type_, affects=_STAMP["affects"] if has_branch else (), child_paths=(child_path,))
     child = make_item(
         child_path,
         type="Feature",
@@ -269,7 +270,7 @@ def test_a_parent_with_an_open_grandchild_is_blocked_regardless_of_branch_owners
 def test_a_held_parent_cannot_finish_or_return_regardless_of_branch_ownership(
     type_: str, has_branch: bool, return_: bool
 ):
-    item = _stamped(type_, branch=_STAMP["branch"] if has_branch else None)
+    item = _stamped(type_, affects=_STAMP["affects"] if has_branch else ())
     hold = HoldFact(item.path, "D-009", "skip", "finish")
     plan = advance(
         (item,),
@@ -694,13 +695,10 @@ def test_apply_raises_nothing_of_its_own_on_an_unparseable_document():
         apply(document, plan)
 
 
-def test_advance_stamps_worktree_and_branch_when_supplied() -> None:
-    items = (make_item("x", type="Feature", work_status="open", phase="design", effort="medium"),)
-    plan = _plan_for(items, "x", worktree="/tmp/wt/x", branch="feature/x")
-    assert plan.refusal is None
-    changed = {change.key: change.after for change in plan.changes}
-    assert changed["worktree"] == "/tmp/wt/x"
-    assert changed["branch"] == "feature/x"
+def test_advance_has_no_placement_parameters() -> None:
+    parameters = inspect.signature(advance).parameters
+    assert "worktree" not in parameters
+    assert "branch" not in parameters
 
 
 def test_advance_without_provenance_keywords_changes_nothing_extra() -> None:
@@ -709,31 +707,12 @@ def test_advance_without_provenance_keywords_changes_nothing_extra() -> None:
     assert "branch" not in _keys(_plan_for(items, "x"))
 
 
-def test_advance_does_not_rewrite_an_unchanged_worktree() -> None:
-    items = (make_item("x", type="Feature", work_status="open", phase="design", effort="medium", worktree="/tmp/wt/x"),)
-    assert "worktree" not in _keys(_plan_for(items, "x", worktree="/tmp/wt/x"))
-
-
-def test_advance_drops_the_recorded_start_sha_when_the_placement_changes() -> None:
-    sha = "a" * 40
+def test_start_sha_kept_on_any_advance() -> None:
     items = (
-        make_item(
-            "x",
-            type="Feature",
-            work_status="open",
-            phase="design",
-            effort="medium",
-            worktree="/tmp/wt/x",
-            branch="feature/x",
-            start_sha=sha,
-        ),
+        make_item("x", type="Feature", work_status="in-progress", phase="execute", effort="medium", start_sha="a" * 40),
     )
-    plan = _plan_for(items, "x", worktree="/tmp/wt/y", branch="feature/y")
-    assert {change.key: change.after for change in plan.changes}["start_sha"] is None
-    document = parse("---\nworktree: /tmp/wt/x\nbranch: feature/x\nstart_sha: " + sha + "\n---\n\nbody\n")
-    apply(document, plan)
-    assert "start_sha" not in document.fm_data()
-    assert "start_sha" not in _keys(_plan_for(items, "x", worktree="/tmp/wt/x", branch="feature/x"))
+    plan = _plan_for(items, "x")
+    assert not any(change.key == "start_sha" for change in plan.changes)
 
 
 # --- the way home ---------------------------------------------------------
@@ -791,7 +770,6 @@ def test_the_gate_vocabulary_is_closed_and_in_the_refusal_reason() -> None:
         "worktree-missing",
         "git-unavailable",
         "uncommitted-work",
-        "no-start-sha",
         "range-unreadable",
         "no-commits",
         "no-affects-touched",

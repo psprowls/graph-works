@@ -80,9 +80,7 @@ def test_stale_base_refuses_before_any_write(stale: WorkspaceLayout, dry_run: bo
     before = _tree(stale)
     head_before = _head(stale)
     called: list[object] = []
-    result = run_stage_advance(
-        stale, PATH, today=TODAY, infer_worktree=False, dry_run=dry_run, before_apply=called.append
-    )
+    result = run_stage_advance(stale, PATH, today=TODAY, dry_run=dry_run, before_apply=called.append)
     assert result.outcome.plan.refusal == "schema-drift", result
     assert BASE in (result.outcome.plan.detail or "")
     assert "gw config sync --schemas --workspace" in (result.outcome.plan.detail or "")
@@ -96,13 +94,13 @@ def test_stale_base_refuses_before_any_write(stale: WorkspaceLayout, dry_run: bo
 
 def test_refresh_then_advance_succeeds(stale: WorkspaceLayout) -> None:
     ws.apply_schema_refresh(ws.plan_schema_refresh(stale))
-    result = run_stage_advance(stale, PATH, today=TODAY, infer_worktree=False, dry_run=False)
+    result = run_stage_advance(stale, PATH, today=TODAY, dry_run=False)
     assert result.outcome.plan.refusal is None
     assert result.application is not None and result.application.ok
     assert result.outcome.written
     assert result.outcome.plan.transition is not None and result.outcome.plan.transition.phase == "plan"
     text = (stale.bundle_dir / f"{PATH}.md").read_text(encoding="utf-8")
-    assert "spec_baseline:" in text and "phase: plan" in text
+    assert "phase: plan" in text and "workspace:" not in text
 
 
 def test_drift_between_preflight_and_apply_aborts_without_writes(stale: WorkspaceLayout) -> None:
@@ -113,7 +111,7 @@ def test_drift_between_preflight_and_apply_aborts_without_writes(stale: Workspac
     def edit_schema(_candidate: object) -> None:
         (ws.declarations_dir_for(stale) / BASE).write_bytes(_old_base())
 
-    result = run_stage_advance(stale, PATH, today=TODAY, infer_worktree=False, dry_run=False, before_apply=edit_schema)
+    result = run_stage_advance(stale, PATH, today=TODAY, dry_run=False, before_apply=edit_schema)
     assert result.application is not None and not result.application.ok
     assert any("schema-drift" in failure for failure in result.application.failures)
     assert not result.application.rolled_back
@@ -147,9 +145,8 @@ def test_stale_schemas_refuse_before_execute_gates(
         stale,
         PATH,
         today=TODAY,
-        infer_worktree=False,
         dry_run=dry_run,
-        skip_gate="no-start-sha",
+        skip_gate="no-commits",
         skip_reason="reviewed",
         actor="human:test",
     )
@@ -170,7 +167,6 @@ def test_schema_drift_is_not_a_bypassable_code(stale: WorkspaceLayout) -> None:
         stale,
         PATH,
         today=TODAY,
-        infer_worktree=False,
         dry_run=False,
         skip_gate="schema-drift",
         skip_reason="reviewed",

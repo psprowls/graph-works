@@ -191,12 +191,9 @@ def test_active_work_typed_result_matches_legacy(layout, monkeypatch, path):
     assert result.refusal == {ITEM: None, "work/feature-bad": "unreadable", "work/missing": "unknown-item"}[path]
 
 
-@pytest.mark.parametrize(
-    "call", [finish.inspect_finish, lambda lay, path: finish.plan_finish_cleanup(lay, path, runner_cwd=None)]
-)
-def test_finish_results_match_legacy(layout, monkeypatch, call):
+def test_finish_results_match_legacy(layout, monkeypatch):
     _phase(layout, "finish", stamped=True)
-    _equivalent(layout, monkeypatch, finish, lambda lay: call(lay, ITEM))
+    _equivalent(layout, monkeypatch, finish, lambda lay: finish.inspect_finish(lay, ITEM))
 
 
 def test_reconcile_context_matches_legacy(layout, monkeypatch):

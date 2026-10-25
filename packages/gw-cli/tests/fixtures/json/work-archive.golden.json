@@ -5,10 +5,7 @@
   "path_mapping": {
     "work/bug-done": "work/_archive/bug-done"
   },
-  "indexes": [
-    "work/_archive/index.md",
-    "work/index.md"
-  ],
+  "indexes": [],
   "warnings": [],
   "refusals": [],
   "applied": true,
@@ -20,6 +17,11 @@
     "subject": "workspace: archive bug-done",
     "paths": [],
     "reason": "not-a-repo"
+  },
+  "pruned": {
+    "removed_worktrees": [],
+    "deleted_branches": [],
+    "kept": []
   },
   "wiki_commit": null,
   "pointer_cleared": false,

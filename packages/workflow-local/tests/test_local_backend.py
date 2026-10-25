@@ -20,9 +20,8 @@ from subagents_io.backend import (
     UnknownWorker,
     WorkerDone,
     WorkerQuestion,
-    WorktreeNotProvisioned,
 )
-from subagents_io.dispatch import DISPATCH_MODES, PlannedDispatch, WorktreeAction
+from subagents_io.dispatch import DISPATCH_MODES, PlannedDispatch, WorktreePlacement
 from workflow_local.backend import LocalBackend
 from workflow_local.ledger import LEDGER_NAME, read_ledger
 
@@ -34,15 +33,7 @@ CHILD = Path(__file__).resolve().parent / "child.py"
 def dispatch(
     tmp_path, *program, key="gw-plan-slug-00000000", slug="work/feature-slug", phase="plan", mode="autonomous", path=...
 ):
-    worktree = WorktreeAction(
-        action="reuse",
-        path=str(tmp_path) if path is ... else path,
-        branch="b",
-        base_branch=None,
-        exists=True,
-        parent_path=None,
-        start_sha=None,
-    )
+    worktree = WorktreePlacement(path=str(tmp_path) if path is ... else path, branch="b", parent_path=None)
     return PlannedDispatch(
         agent="claude",
         key=key,
@@ -102,21 +93,6 @@ def test_supported_modes_is_all_of_dispatch_modes(tmp_path):
     assert make_backend(tmp_path).supported_modes == DISPATCH_MODES
 
 
-def test_provisions_worktrees_is_false(tmp_path):
-    # This backend never touches git; launch() keeps raising
-    # WorktreeNotProvisioned for an unset worktree.path.
-    assert make_backend(tmp_path).provisions_worktrees is False
-
-
-def test_launch_refuses_an_unprovisioned_worktree(tmp_path):
-    # Git stays out of this package. Provisioning belongs beside the one module
-    # declared to run it.
-    session = make_backend(tmp_path / "root").open_session("s")
-    with pytest.raises(WorktreeNotProvisioned):
-        session.launch(dispatch(tmp_path, "done:succeeded", path=None))
-    assert session.workers() == []
-
-
 def test_launch_refuses_a_duplicate_key(tmp_path):
     # Silently returning the existing record would make a re-dispatch after a
     # failure read as a success -- matches workflow-orca's own duplicate-key
@@ -142,13 +118,13 @@ def test_the_child_sees_exactly_the_three_contract_variables(tmp_path):
     session.close()
 
 
-def test_main_runs_the_worker_in_the_checkout_it_names(tmp_path):
+def test_launch_runs_in_dispatch_path(tmp_path):
     checkout = tmp_path / "ws" / ".gw" / "worktrees" / "demo" / "main"
     checkout.mkdir(parents=True)
     session = make_backend(tmp_path / "root").open_session("s")
     planned = replace(
         dispatch(tmp_path, "pwd", "done:succeeded"),
-        worktree=WorktreeAction("main", str(checkout), "main", None, True, None, None),
+        worktree=WorktreePlacement(str(checkout), None, None),
     )
     record = session.launch(planned)
     drain(session, until=is_done)
@@ -506,7 +482,7 @@ def _pid_alive(pid):
 
 
 def test_the_local_backend_reports_no_worktree_of_its_own(tmp_path):
-    # `provisions_worktrees is False` here: this backend runs a subprocess in
+    # this backend runs a subprocess in
     # a worktree someone else made, and never learns a branch. Both fields
     # stay None, which is the protocol's own word for "not known" — not "",
     # and not the plan's guess.
@@ -531,28 +507,3 @@ def test_open_session_refuses_when_the_platform_changes_under_a_live_backend(tmp
     monkeypatch.setattr(backend_module.sys, "platform", "win32")
     with pytest.raises(BackendError):
         backend.open_session("s")
-
-
-def test_launch_refuses_pin_detached(tmp_path):
-    session = make_backend(tmp_path / "root").open_session("s")
-    action = WorktreeAction("pin-detached", None, None, "epic/x", None, None, "a" * 40)
-    planned = replace(dispatch(tmp_path, "done:succeeded"), worktree=action)
-    with pytest.raises(WorktreeNotProvisioned):
-        session.launch(planned)
-    assert session.workers() == []
-
-
-def test_launch_refuses_pin_detached_with_a_supplied_path_before_starting_a_process(tmp_path, monkeypatch):
-    from workflow_local import backend as backend_module
-
-    session = make_backend(tmp_path / "root").open_session("s")
-    action = WorktreeAction("pin-detached", str(tmp_path), None, "epic/x", None, None, "a" * 40)
-    planned = replace(dispatch(tmp_path, "done:succeeded"), worktree=action)
-
-    def fail_if_started(*args, **kwargs):
-        pytest.fail("pin-detached must be refused before subprocess launch")
-
-    monkeypatch.setattr(backend_module.subprocess, "Popen", fail_if_started)
-    with pytest.raises(WorktreeNotProvisioned, match="pin-detached"):
-        session.launch(planned)
-    assert session.workers() == []

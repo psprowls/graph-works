@@ -135,6 +135,8 @@ def _run(
         wiki_plan=wiki_plan,
         conflict=(),
         pointer_cleared=False,
+        pruned=None,
+        prune_warnings=(),
         logged=None,
         result=result,
         wiki=wiki,

@@ -41,7 +41,9 @@ def _copy_work(work: WorkSnapshot) -> WorkSnapshot:
     return WorkSnapshot(
         replace(
             item,
-            repo_stamps=MappingProxyType(dict(item.repo_stamps)),
+            legacy_placement=replace(item.legacy_placement, repos=MappingProxyType(dict(item.legacy_placement.repos)))
+            if item.legacy_placement is not None
+            else None,
             sources=tuple(
                 replace(
                     source,

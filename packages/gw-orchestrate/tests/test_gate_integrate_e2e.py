@@ -8,6 +8,7 @@ items is what keeps it to the stale units plus repo-wide.
 from __future__ import annotations
 
 import json
+import re
 import sys
 import time
 from dataclasses import dataclass
@@ -38,15 +39,25 @@ def manifest(depends: dict[str, list[str]]) -> str:
     return json.dumps({"version": 1, "jobs": 2, "repo_wide": {"command": COUNT.format(name="rw")}, "units": units})
 
 
-def item(env: GateEnv, path: str, worktree: Path, *, affects: list[str], start_sha: str | None = None) -> None:
+def item(
+    env: GateEnv, path: str, worktree: Path, *, affects: list[str], start_sha: str | None = None, branch: str = "main"
+) -> None:
     lines = ["type: Feature", f"title: {path}", "work_status: in-progress", "phase: execute", "owner: someone"]
-    lines += ["repo: code", f"worktree: {worktree}"]
+    lines += ["repo: code", f"worktree: {worktree}", f"branch: {branch}"]
     if start_sha is not None:
         lines.append(f"start_sha: {start_sha}")
     lines += ["affects:", *(f"  - {entry}" for entry in affects)]
     page = env.layout.bundle_dir / f"{path}.md"
     page.parent.mkdir(parents=True, exist_ok=True)
     page.write_text("---\n" + "\n".join(lines) + "\n---\n\nBody.\n", encoding="utf-8", newline="\n")
+
+
+def restamp(env: GateEnv, path: str, worktree: Path, branch: str) -> None:
+    """Point the item's stamp at *worktree* (on *branch*): the gate measures the item's own placement."""
+    page = env.layout.bundle_dir / f"{path}.md"
+    text = re.sub(r"^worktree: .*$", f"worktree: {worktree}", page.read_text(encoding="utf-8"), flags=re.M)
+    text = re.sub(r"^branch: .*$", f"branch: {branch}", text, flags=re.M)
+    page.write_text(text, encoding="utf-8", newline="\n")
 
 
 def commit(root: Path, relative: str, text: str) -> None:
@@ -60,11 +71,13 @@ def counted(env: GateEnv) -> list[str]:
     return path.read_text(encoding="utf-8").split() if path.exists() else []
 
 
-def gate(env: GateEnv, path: str, worktree: Path | None = None) -> list[str]:
+def gate(env: GateEnv, path: str, worktree: Path | None = None, branch: str = "main") -> list[str]:
     """Run one gate to a recorded green result; return the sorted names it actually executed."""
+    if worktree is not None:
+        restamp(env, path, worktree, branch)
     before = len(counted(env))
     token = f"{time.monotonic_ns() % 10**8:08x}"
-    started = run_gate_run(env.layout, path, worktree=worktree, now=NOW, token=token, spawn=spawn_runner)
+    started = run_gate_run(env.layout, path, now=NOW, token=token, spawn=spawn_runner)
     assert started.status in {"started", "running"}, started
     clock = WaitClock(wall=lambda: NOW, monotonic=time.monotonic)
     waited = run_gate_wait(
@@ -79,8 +92,9 @@ def advance(env: GateEnv, path: str) -> None:
     assert result.outcome.written, result.outcome.plan
 
 
-def owners(env: GateEnv, path: str, worktree: Path) -> dict[str, str]:
-    check = run_gate_check(env.layout, path, worktree=worktree)
+def owners(env: GateEnv, path: str, worktree: Path, branch: str) -> dict[str, str]:
+    restamp(env, path, worktree, branch)
+    check = run_gate_check(env.layout, path)
     assert check.status == "satisfied", check
     assert check.match is not None
     return {unit.name: unit.owner for unit in check.match.units}
@@ -116,8 +130,8 @@ def through_anchor(env: GateEnv, tmp_path: Path, shape: str) -> Anchor:
     child_a, child_b = tmp_path / "child-a", tmp_path / "child-b"
     git(env.repo, "worktree", "add", "-q", "-b", "child-a", str(child_a), "epic")
     git(env.repo, "worktree", "add", "-q", "-b", "child-b", str(child_b), "epic")
-    item(env, CHILD_A, child_a, affects=["packages/a"], start_sha=start)
-    item(env, CHILD_B, child_b, affects=["packages/c"], start_sha=start)
+    item(env, CHILD_A, child_a, affects=["packages/a"], start_sha=start, branch="child-a")
+    item(env, CHILD_B, child_b, affects=["packages/c"], start_sha=start, branch="child-b")
 
     # 3. Child B executes (c plus its reverse closure plus repo-wide) and fast-forwards onto the anchor.
     commit(child_b, "packages/c/m.py", "c2")
@@ -125,7 +139,7 @@ def through_anchor(env: GateEnv, tmp_path: Path, shape: str) -> Anchor:
     advance(env, CHILD_B)
     git(anchor, "merge", "--ff-only", "child-b")
     before = counted(env)
-    assert owners(env, CHILD_B, anchor)["c"] == CHILD_B
+    assert owners(env, CHILD_B, anchor, "epic")["c"] == CHILD_B
     assert counted(env) == before  # a check runs nothing
 
     # 4. Child A executes on a tree without B: a plus its reverse closure plus repo-wide.
@@ -135,9 +149,10 @@ def through_anchor(env: GateEnv, tmp_path: Path, shape: str) -> Anchor:
 
     # 5. A merges onto the anchor (a new tree): only what both children together made stale re-runs.
     git(anchor, "merge", "--no-ff", "child-a", "-m", "merge child-a")
-    assert run_gate_check(env.layout, CHILD_A, worktree=anchor).status == "unsatisfied"
-    assert gate(env, CHILD_A, anchor) == (["a", "rw"] if depends else ["rw"])
-    assert owners(env, CHILD_A, anchor) == {"a": CHILD_A, "b": BASE, "c": CHILD_B}
+    restamp(env, CHILD_A, anchor, "epic")
+    assert run_gate_check(env.layout, CHILD_A).status == "unsatisfied"
+    assert gate(env, CHILD_A, anchor, "epic") == (["a", "rw"] if depends else ["rw"])
+    assert owners(env, CHILD_A, anchor, "epic") == {"a": CHILD_A, "b": BASE, "c": CHILD_B}
     return Anchor(env, anchor, depends)
 
 
@@ -151,7 +166,7 @@ def test_epic_finish_onto_unmoved_main_runs_nothing(env: GateEnv, tmp_path: Path
     through_anchor(env, tmp_path, shape)
     before = counted(env)
     git(env.repo, "merge", "--ff-only", "epic")  # 6. main unmoved: a fast-forward to the anchor's tree
-    check = run_gate_check(env.layout, EPIC, worktree=env.repo)
+    check = run_gate_check(env.layout, EPIC)
     assert check.status == "satisfied" and check.match is not None, check
     assert {unit.name: unit.owner for unit in check.match.units} == {"a": CHILD_A, "b": BASE, "c": CHILD_B}
     assert check.match.owner == CHILD_A  # repo-wide from the anchor merge's run
@@ -166,6 +181,6 @@ def test_epic_finish_onto_moved_main_reruns_only_what_main_staled(
     scenario = through_anchor(env, tmp_path, shape)
     commit(env.repo, f"packages/{moved}/main.py", "moved")  # 7. main moves under one unit
     git(env.repo, "merge", "--no-ff", "epic", "-m", "merge epic")
-    assert run_gate_check(env.layout, EPIC, worktree=env.repo).status == "unsatisfied"
+    assert run_gate_check(env.layout, EPIC).status == "unsatisfied"
     dependents = [name for name, deps in scenario.depends.items() if moved in deps]
     assert gate(env, EPIC, env.repo) == sorted([moved, *dependents, "rw"])

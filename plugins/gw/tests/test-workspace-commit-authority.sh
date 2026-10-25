@@ -20,7 +20,8 @@ grep -q "retry the owning operation or run a gw verb that writes those exact pat
 if grep -q "owning item's next gw verb commits them" skills/auto-drive/SKILL.md; then
   echo "FAIL: auto-drive claims the next verb commits unrelated dirty paths"; fail=1
 fi
-grep -q "record-placement commits" skills/auto-drive/SKILL.md || { echo "FAIL: auto-drive placement note"; fail=1; }
+# Computed placement retired the coordinator's saved placement file and its commit note; gw work dispatch writes nothing the coordinator commits.
+if grep -q "orca-placement/<key>.json" skills/auto-drive/SKILL.md; then echo "FAIL: auto-drive still saves a placement file"; fail=1; fi
 grep -q "AGENTS.md" skills/workflow/references/editing-work-items.md || { echo "FAIL: editing-work-items commit pointer"; fail=1; }
 [ "$fail" -eq 0 ] && echo "ok: workspace commit authority"
 exit "$fail"

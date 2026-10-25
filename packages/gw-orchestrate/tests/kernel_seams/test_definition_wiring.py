@@ -10,12 +10,10 @@ import pytest
 from gw_kernel import apply_init, plan_init
 from gw_kernel.testing.transactions import init_git as _init_git
 from gw_kernel.workspace.errors import WorkspaceError
-from gw_orchestrate import placement
 from gw_orchestrate.commands import run_orchestrate
 from gw_orchestrate.stage_advance import run_stage_advance
 from gw_work import commands as work
 from ruamel.yaml import YAML
-from work_tracker_okf.placement import ReaderObservation
 
 TODAY = date(2026, 8, 23)
 
@@ -86,9 +84,7 @@ def test_advance_agrees_with_next_on_a_workspace_path(tmp_path: Path) -> None:
     _spec(layout, FEATURE)
     _set_shared_path(layout, SKIP_PLAN)
     repo = _init_git(layout.root.parent)
-    advanced = run_stage_advance(
-        layout, FEATURE, today=TODAY, expected_phase="design", cwd=repo, infer_worktree=False, dry_run=True
-    )
+    advanced = run_stage_advance(layout, FEATURE, today=TODAY, expected_phase="design", cwd=repo, dry_run=True)
     phase = next(change.after for change in advanced.outcome.plan.changes if change.key == "phase")
     assert phase == work.run_next(layout, FEATURE).route.on_complete.phase == "execute"
 
@@ -101,9 +97,7 @@ def test_malformed_path_blocks_advance_and_writes_nothing(tmp_path: Path) -> Non
     _break_local(layout)
     before = {p: p.read_bytes() for p in layout.bundle_dir.rglob("*") if p.is_file()}
     with pytest.raises(WorkspaceError, match=r"workflow\.local\.yaml"):
-        run_stage_advance(
-            layout, FEATURE, today=TODAY, expected_phase="design", cwd=repo, infer_worktree=False, dry_run=False
-        )
+        run_stage_advance(layout, FEATURE, today=TODAY, expected_phase="design", cwd=repo, dry_run=False)
     assert {p: p.read_bytes() for p in layout.bundle_dir.rglob("*") if p.is_file()} == before
 
 
@@ -119,9 +113,7 @@ def test_advance_without_dispatch_rules_names_the_manifest(tmp_path: Path) -> No
     yaml.dump(data, buffer)
     layout.manifest_path.write_text(buffer.getvalue(), encoding="utf-8", newline="")
     with pytest.raises(WorkspaceError, match=r"workflow_config") as raised:
-        run_stage_advance(
-            layout, FEATURE, today=TODAY, expected_phase="design", cwd=repo, infer_worktree=False, dry_run=True
-        )
+        run_stage_advance(layout, FEATURE, today=TODAY, expected_phase="design", cwd=repo, dry_run=True)
     assert str(layout.manifest_path) in str(raised.value)
 
 
@@ -132,76 +124,7 @@ def test_advance_without_the_shared_dispatch_file_refuses(tmp_path: Path) -> Non
     repo = _init_git(layout.root.parent)
     (layout.root / "workflow.yaml").unlink()
     with pytest.raises(WorkspaceError, match=r"workflow\.yaml"):
-        run_stage_advance(
-            layout, FEATURE, today=TODAY, expected_phase="design", cwd=repo, infer_worktree=False, dry_run=True
-        )
-
-
-@pytest.mark.parametrize("custom_path", [False, True])
-def test_reader_receipt_uses_the_workspace_entry_phase(tmp_path: Path, custom_path: bool) -> None:
-    layout = _layout(tmp_path)
-    _write(layout, FEATURE)
-    _unphased(layout, FEATURE)
-    if custom_path:
-        _set_shared_path(layout, ENTER_AT_PLAN)
-    page = layout.bundle_dir / f"{FEATURE}.md"
-    before = page.read_bytes()
-    record = placement.run_record_reader(
-        layout,
-        FEATURE,
-        root=FEATURE,
-        phase="plan",
-        observation=ReaderObservation("task_1", "ctx_1", "dispatch-key", "repo", "/observed", "a" * 40),
-        dry_run=False,
-    )
-    assert record.plan.refusal == (None if custom_path else "phase-mismatch")
-    assert record.written == custom_path
-    assert (placement.read_reader_receipt(layout, FEATURE, "ctx_1") is not None) == custom_path
-    assert page.read_bytes() == before
-
-
-def test_placement_uses_the_workspace_entry_phase(tmp_path: Path) -> None:
-    layout = _layout(tmp_path)
-    _write(layout, FEATURE)
-    _unphased(layout, FEATURE)
-    _set_shared_path(layout, [{"match": {"type": "Feature"}, "stages": ["execute", "finish"]}])
-    record = placement.run_record_placement(
-        layout, FEATURE, root=FEATURE, phase="execute", worktree="/observed", branch="feature-a", today=TODAY
-    )
-    assert record.plan.refusal is None
-    assert record.plan.changes
-
-
-@pytest.mark.parametrize("shell", ["reader", "placement"])
-def test_malformed_path_blocks_placement_shells_without_writes(tmp_path: Path, shell: str) -> None:
-    layout = _layout(tmp_path)
-    _write(layout, FEATURE, phase="plan" if shell == "reader" else "execute")
-    _break_local(layout)
-    page = layout.bundle_dir / f"{FEATURE}.md"
-    before = page.read_bytes()
-    with pytest.raises(WorkspaceError, match=r"workflow\.local\.yaml"):
-        if shell == "reader":
-            placement.run_record_reader(
-                layout,
-                FEATURE,
-                root=FEATURE,
-                phase="plan",
-                observation=ReaderObservation("task_1", "ctx_1", "dispatch-key", "repo", "/observed", "a" * 40),
-                dry_run=False,
-            )
-        else:
-            placement.run_record_placement(
-                layout,
-                FEATURE,
-                root=FEATURE,
-                phase="execute",
-                worktree="/observed",
-                branch="feature-a",
-                today=TODAY,
-                dry_run=False,
-            )
-    assert page.read_bytes() == before
-    assert not (layout.cache_dir / "reader-receipts").exists()
+        run_stage_advance(layout, FEATURE, today=TODAY, expected_phase="design", cwd=repo, dry_run=True)
 
 
 def test_orchestrate_plans_the_same_stage_next_dispatches(tmp_path: Path) -> None:
@@ -237,9 +160,7 @@ def test_unstamped_design_has_spec_advance_matches_next(tmp_path: Path, dry_run:
     page = layout.bundle_dir / f"{FEATURE}.md"
     before = page.read_bytes()
     preview = work.run_next(layout, FEATURE)
-    advanced = run_stage_advance(
-        layout, FEATURE, today=TODAY, expected_phase="design", cwd=repo, infer_worktree=False, dry_run=dry_run
-    )
+    advanced = run_stage_advance(layout, FEATURE, today=TODAY, expected_phase="design", cwd=repo, dry_run=dry_run)
     assert advanced.outcome.plan.refusal is None
     phase = next(change.after for change in advanced.outcome.plan.changes if change.key == "phase")
     assert phase == preview.route.on_complete.phase == "execute"
@@ -249,8 +170,7 @@ def test_unstamped_design_has_spec_advance_matches_next(tmp_path: Path, dry_run:
         assert "phase: execute" in page.read_text(encoding="utf-8")
 
 
-@pytest.mark.parametrize("dry_run", [True, False])
-def test_unstamped_design_has_spec_reader_matches_planned_dispatch(tmp_path: Path, dry_run: bool) -> None:
+def test_unstamped_design_has_spec_plan_matches_planned_dispatch(tmp_path: Path) -> None:
     layout = _layout(tmp_path)
     _write(layout, FEATURE)
     _unphased(layout, FEATURE)
@@ -262,33 +182,4 @@ def test_unstamped_design_has_spec_reader_matches_planned_dispatch(tmp_path: Pat
     before = {p: p.read_bytes() for p in layout.bundle_dir.rglob("*") if p.is_file()}
     assert work.run_next(layout, FEATURE).route.dispatch.stage == "plan"
     assert [d.phase for d in run_orchestrate(layout, FEATURE).dispatches] == ["plan"]
-    record = placement.run_record_reader(
-        layout,
-        FEATURE,
-        root=FEATURE,
-        phase="plan",
-        observation=ReaderObservation("task_1", "ctx_1", "dispatch-key", "repo", "/observed", "a" * 40),
-        dry_run=dry_run,
-    )
-    assert record.plan.refusal is None
-    assert record.written == (not dry_run)
     assert {p: p.read_bytes() for p in layout.bundle_dir.rglob("*") if p.is_file()} == before
-    if dry_run:
-        assert not (layout.cache_dir / "reader-receipts").exists()
-
-
-def test_unstamped_design_has_spec_placement_matches_next(tmp_path: Path) -> None:
-    layout = _layout(tmp_path)
-    _write(layout, FEATURE)
-    _unphased(layout, FEATURE)
-    _spec(layout, FEATURE)
-    _set_shared_path(layout, [{"match": {"type": "Feature", "has_spec": True}, "stages": ["execute", "finish"]}])
-    page = layout.bundle_dir / f"{FEATURE}.md"
-    before = page.read_bytes()
-    assert work.run_next(layout, FEATURE).route.dispatch.stage == "execute"
-    record = placement.run_record_placement(
-        layout, FEATURE, root=FEATURE, phase="execute", worktree="/observed", branch="feature-a", today=TODAY
-    )
-    assert record.plan.refusal is None
-    assert record.plan.changes
-    assert page.read_bytes() == before

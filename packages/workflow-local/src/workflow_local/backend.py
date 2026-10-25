@@ -44,7 +44,6 @@ from subagents_io.backend import (
     WorkerEvent,
     WorkerQuestion,
     WorkerRecord,
-    WorktreeNotProvisioned,
 )
 from subagents_io.dispatch import DISPATCH_MODES, PlannedDispatch
 
@@ -152,15 +151,6 @@ class LocalSession:
         # duplicate-key refusal (subagents_io.backend.DispatchSession.launch).
         if dispatch.key in self._entries:
             raise BackendError(f"{self.name}: key {dispatch.key!r} already has a worker in this session")
-        if dispatch.worktree.action == "pin-detached":
-            raise WorktreeNotProvisioned(
-                f"{dispatch.key}: pin-detached requires a verified detached checkout at "
-                f"{dispatch.worktree.start_sha}; this backend cannot verify or prepare one"
-            )
-        if dispatch.worktree.path is None:
-            raise WorktreeNotProvisioned(
-                f"{dispatch.key}: worktree.path is None — this backend does not provision worktrees"
-            )
         handle = _handle_for(dispatch.key)
         worker_dir = self._dir / handle
         worker_dir.mkdir(parents=True, exist_ok=True)
@@ -440,9 +430,6 @@ class LocalBackend:
         #: `replies.jsonl` carries the answer back, so `attend` and `relay` are
         #: genuinely supported rather than declared.
         self.supported_modes = DISPATCH_MODES
-        #: This backend never touches git; `launch()` keeps raising
-        #: WorktreeNotProvisioned for an unset worktree.path.
-        self.provisions_worktrees = False
         self._root = root
         self._argv_for = argv_for
         self._env = env

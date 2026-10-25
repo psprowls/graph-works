@@ -49,11 +49,7 @@ loads everything (the walkers need that). The entries are:
   proposal mutation commands route through core's vertical calls, while index and proposal listing
   retain their lower-layer calls. Root-level aliases `gw bootstrap|scan|ingest|query` are `ROOT_REGISTRY`
   entries.
-- `work_cli` — `gw work ...` (the work-item pipeline verbs, `decision` sub-app,
-  `gate` sub-app (`run|wait|check`), `reconcile-context`), plus root-level aliases `gw next` and `gw archive` listed in
-  `ROOT_REGISTRY`. `gw next` is a genuine alias — it reuses `gw work
-  next`'s own callback object rather than a copy (see `util_cli/main.py`'s `work_next_callback()`),
-  so the two can never drift.
+- `work_cli` — `gw work ...` (the work-item pipeline verbs, `decision` sub-app, `gate` sub-app (`run|wait|check`), `reconcile-context`, `place [PATH] [--ensure|--start|--remove|--prune]`), plus root-level aliases `gw next` and `gw archive` listed in `ROOT_REGISTRY`. `gw next` is a genuine alias — it reuses `gw work next`'s own callback object rather than a copy (see `util_cli/main.py`'s `work_next_callback()`), so the two can never drift.
 
   `gw work orchestrate` produces a saved plan; `gw work dispatch KEY --plan FILE|- --run RUN`
   executes one selected entry through core's journal and the `work_cli/orca.py` adapter.

@@ -5,6 +5,7 @@ from okf_io import Bundle
 from work_helpers import load_written_items, write_item
 from work_tracker_okf.dependencies import DependencyEdge
 from work_tracker_okf.items import (
+    LegacyPlacement,
     SpecBaseline,
     Stamp,
     WorkItem,
@@ -91,7 +92,7 @@ def test_repo_and_repo_stamps_project(tmp_path) -> None:
     )
     (item,) = load_written_items(tmp_path)
     assert item.repo == "code"
-    assert dict(item.repo_stamps) == {"ui": Stamp("/wt/ui", "epic/x")}
+    assert dict(item.legacy_placement.repos) == {"ui": Stamp("/wt/ui", "epic/x")}
     assert item.invalid_optional_fields == ()
 
 
@@ -99,7 +100,7 @@ def test_absent_repo_fields_project_empty(tmp_path) -> None:
     write_item(tmp_path, "work/feature-a", _BASE)
     (item,) = load_written_items(tmp_path)
     assert item.repo is None
-    assert dict(item.repo_stamps) == {}
+    assert item.legacy_placement is None
     assert item.invalid_optional_fields == ()
 
 
@@ -111,14 +112,14 @@ def test_malformed_repo_fields_project_as_absent_and_are_named(tmp_path) -> None
     )
     (item,) = load_written_items(tmp_path)
     assert item.repo is None
-    assert dict(item.repo_stamps) == {"ok": Stamp("/wt/ok", "b")}
+    assert dict(item.legacy_placement.repos) == {"ok": Stamp("/wt/ok", "b")}
     assert item.invalid_optional_fields == ("repo", "repo_stamps")
 
 
 def test_a_non_mapping_repo_stamps_is_a_projection_problem(tmp_path) -> None:
     write_item(tmp_path, "work/feature-a", _BASE + "repo_stamps: [ui]\n")
     (item,) = load_written_items(tmp_path)
-    assert dict(item.repo_stamps) == {}
+    assert item.legacy_placement is None
     assert item.invalid_optional_fields == ("repo_stamps",)
 
 
@@ -194,19 +195,19 @@ def test_a_malformed_scalar_start_sha_is_flagged_not_raised(tmp_path, raw: str) 
 
 def test_a_repo_stamp_may_carry_a_start_sha(tmp_path) -> None:
     item = _sha_item(tmp_path, f"repo_stamps:\n  ui:\n    worktree: /wt/ui\n    branch: b\n    start_sha: {SHA}\n")
-    assert item.repo_stamps["ui"].start_sha == SHA
+    assert item.legacy_placement.repos["ui"].start_sha == SHA
     assert "repo_stamps" not in item.invalid_optional_fields
 
 
 def test_a_repo_stamp_without_start_sha_still_loads(tmp_path) -> None:
     item = _sha_item(tmp_path, "repo_stamps:\n  ui:\n    worktree: /wt/ui\n    branch: b\n")
-    assert item.repo_stamps["ui"].start_sha is None
+    assert item.legacy_placement.repos["ui"].start_sha is None
     assert "repo_stamps" not in item.invalid_optional_fields
 
 
 def test_a_repo_stamp_with_a_bad_start_sha_is_malformed(tmp_path) -> None:
     item = _sha_item(tmp_path, "repo_stamps:\n  ui:\n    worktree: /wt/ui\n    branch: b\n    start_sha: nope\n")
-    assert "ui" not in item.repo_stamps
+    assert item.legacy_placement is None
     assert "repo_stamps" in item.invalid_optional_fields
 
 
@@ -219,8 +220,8 @@ def test_commit_oid_accepts_sha1_and_sha256_only() -> None:
     ("authored", "expected", "invalid"),
     [
         (None, None, False),
-        ({"code": "a" * 40, "workspace": "b" * 40}, SpecBaseline("a" * 40, "b" * 40), False),
-        ({"workspace": "b" * 40}, SpecBaseline(workspace="b" * 40), False),
+        ({"code": "a" * 40, "workspace": "b" * 40}, SpecBaseline("a" * 40), False),
+        ({"workspace": "b" * 40}, SpecBaseline(), False),
         ({"code": "a" * 64}, SpecBaseline(code="a" * 64), False),
         ({}, SpecBaseline(), False),
         ({"code": "abc123"}, None, True),
@@ -245,5 +246,51 @@ def test_spec_baseline_projects_from_page(tmp_path, malformed) -> None:
     )
     write_item(tmp_path, "work/feature-baseline", "type: Feature\n" + baseline)
     item = load_written_items(tmp_path)[0]
-    assert item.spec_baseline == (None if malformed else SpecBaseline("a" * 40, "b" * 40))
+    assert item.spec_baseline == (None if malformed else SpecBaseline("a" * 40))
     assert ("spec_baseline" in item.invalid_optional_fields) is malformed
+
+
+_SHA = "a" * 40
+
+
+def test_legacy_placement_scalar_pair(tmp_path) -> None:
+    write_item(tmp_path, "work/feature-a", _BASE + "worktree: /w\nbranch: b\n")
+    (item,) = load_written_items(tmp_path)
+    assert item.legacy_placement == LegacyPlacement("/w", "b", {})
+
+
+def test_legacy_placement_repo_stamps_only(tmp_path) -> None:
+    write_item(
+        tmp_path,
+        "work/feature-a",
+        _BASE + f"repo_stamps:\n  other:\n    worktree: /o\n    branch: ob\n    start_sha: {_SHA}\n",
+    )
+    (item,) = load_written_items(tmp_path)
+    assert item.legacy_placement is not None
+    assert item.legacy_placement.worktree is None
+    assert item.legacy_placement.repos["other"] == Stamp("/o", "ob", _SHA)
+
+
+def test_legacy_placement_absent(tmp_path) -> None:
+    write_item(tmp_path, "work/feature-a", _BASE)
+    (item,) = load_written_items(tmp_path)
+    assert item.legacy_placement is None
+
+
+def test_malformed_repo_stamps_still_named(tmp_path) -> None:
+    write_item(tmp_path, "work/feature-a", _BASE + "repo_stamps: [1]\n")
+    (item,) = load_written_items(tmp_path)
+    assert "repo_stamps" in item.invalid_optional_fields
+    assert item.legacy_placement is None
+
+
+def test_spec_baseline_workspace_ignored_not_malformed(tmp_path) -> None:
+    write_item(tmp_path, "work/feature-ws-only", f"type: Feature\nspec_baseline:\n  workspace: {'b' * 40}\n")
+    write_item(
+        tmp_path, "work/feature-both", f"type: Feature\nspec_baseline:\n  code: {'a' * 40}\n  workspace: {'b' * 40}\n"
+    )
+    items = {i.path: i for i in load_written_items(tmp_path)}
+    assert items["work/feature-ws-only"].spec_baseline == SpecBaseline(code=None)
+    assert "spec_baseline" not in items["work/feature-ws-only"].invalid_optional_fields
+    assert items["work/feature-both"].spec_baseline == SpecBaseline(code="a" * 40)
+    assert "spec_baseline" not in items["work/feature-both"].invalid_optional_fields

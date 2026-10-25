@@ -110,9 +110,10 @@ def test_execute_advance_upserts_and_derives_obligations_from_the_renamed_covera
     ).stdout.strip()
     _write(layout, "work/feature-x", phase="execute", work_status="in-progress", extra=f"start_sha: {start}\n")
     assert work.run_regen_indexes(layout, dry_run=False).application.ok
-    (repo / "packages/a/x.py").write_text("two\n", encoding="utf-8")
-    subprocess.run(["git", "commit", "-am", "change"], cwd=repo, check=True, capture_output=True)
-    gate_ready(layout, repo, "work/feature-x")
+    from _gate_helpers import place_item
+
+    wt = place_item(layout, repo, "work/feature-x")
+    gate_ready(layout, repo, "work/feature-x", tree_of=wt)
     coverage = layout.bundle_dir / "work/feature-x/references/coverage.md"
     coverage.parent.mkdir(parents=True, exist_ok=True)
     coverage.write_text("- [x] one\n- [ ] two -- not done\n", encoding="utf-8")
@@ -178,8 +179,9 @@ def test_packaged_execute_to_finish_still_requires_a_gate_receipt(tmp_path: Path
         ["git", "rev-parse", "HEAD"], cwd=repo, check=True, capture_output=True, text=True
     ).stdout.strip()
     _write(layout, "work/feature-x", phase="execute", work_status="in-progress", extra=f"start_sha: {start}\n")
-    (repo / "packages/a/x.py").write_text("two\n", encoding="utf-8")
-    subprocess.run(["git", "commit", "-am", "change"], cwd=repo, check=True, capture_output=True)
+    from _gate_helpers import place_item
+
+    place_item(layout, repo, "work/feature-x")
     page = layout.bundle_dir / "work/feature-x.md"
     before = page.read_bytes()
 

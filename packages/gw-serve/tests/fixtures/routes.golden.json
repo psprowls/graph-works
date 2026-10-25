@@ -634,30 +634,6 @@
           "summary": ""
         },
         {
-          "name": "worktree",
-          "type": "str",
-          "required": false,
-          "default": null,
-          "location": "body",
-          "summary": ""
-        },
-        {
-          "name": "branch",
-          "type": "str",
-          "required": false,
-          "default": null,
-          "location": "body",
-          "summary": ""
-        },
-        {
-          "name": "start_sha",
-          "type": "str",
-          "required": false,
-          "default": null,
-          "location": "body",
-          "summary": ""
-        },
-        {
           "name": "return",
           "type": "bool",
           "required": false,
@@ -724,30 +700,6 @@
         {
           "name": "released_at",
           "type": "date",
-          "required": false,
-          "default": null,
-          "location": "body",
-          "summary": ""
-        },
-        {
-          "name": "worktree",
-          "type": "str",
-          "required": false,
-          "default": null,
-          "location": "body",
-          "summary": ""
-        },
-        {
-          "name": "branch",
-          "type": "str",
-          "required": false,
-          "default": null,
-          "location": "body",
-          "summary": ""
-        },
-        {
-          "name": "start_sha",
-          "type": "str",
           "required": false,
           "default": null,
           "location": "body",

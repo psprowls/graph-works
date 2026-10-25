@@ -389,3 +389,21 @@ def test_escaped_references_match_full_plan_findings_and_durable_outcome(tmp_pat
     else:
         assert public.application is None
         assert _snapshot(layout.bundle_dir) == before
+
+
+def test_reparent_leaves_source_and_destination_indexes(tmp_path):
+    layout = _workspace(tmp_path)
+    _write(layout, "work/e", kind="Epic")
+    _write(layout, "work/a")
+    before = {
+        "work/index.md": b"# Work\n\n- [Bug: a](a.md) \xe2\x80\x94 open \xc2\xb7 execute\n",
+        "work/e/children/index.md": b"# Children\n",
+    }
+    for member, content in before.items():
+        path = layout.bundle_dir / member
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(content)
+    result = commands.run_reparent(layout, ["work/a"], "work/e", dry_run=False)
+    assert result.application is not None and result.application.ok, result.application
+    for member, content in before.items():
+        assert (layout.bundle_dir / member).read_bytes() == content

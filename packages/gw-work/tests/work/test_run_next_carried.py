@@ -92,7 +92,7 @@ def test_shipped_registry_at_plan_reports_no_spec_baseline(tmp_path: Path) -> No
             "landed_since",
             SlotFill(
                 lines=("No spec baseline recorded; landed-since unavailable.",),
-                data={"code_baseline": None, "workspace_baseline": None},
+                data={"code_baseline": None},
             ),
         ),
     ]

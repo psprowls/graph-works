@@ -28,10 +28,10 @@ def test_the_cli_is_not_a_runtime_dependency() -> None:
 
 
 def test_interface_packages_pin_the_renamed_wire() -> None:
-    assert _project("gw-wire")["version"] == "0.2.0"
-    assert _project("gw-cli")["version"] == "0.4.0"
+    assert _project("gw-wire")["version"] == "0.3.0"
+    assert _project("gw-cli")["version"] == "0.5.0"
     for name in ("gw-cli", "gw-serve"):
         deps = _project(name)["dependencies"]
         assert isinstance(deps, list)
-        assert "gw-wire>=0.2,<0.3" in deps
+        assert "gw-wire>=0.3,<0.4" in deps
         assert not any(str(d).startswith("graph-works-") for d in deps)

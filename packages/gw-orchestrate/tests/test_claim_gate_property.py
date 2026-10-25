@@ -11,6 +11,7 @@ from gw_kernel.workspace.repos import ItemRepo
 from gw_orchestrate import commands as orchestrate
 from gw_orchestrate.claims import CODE_WRITE_PHASES, Claim, claims_for, conflicts
 from gw_pipeline.finish import FinishPlan, FinishTarget
+from gw_pipeline.placement import branch_name
 from gw_pipeline.repo_context import RepositoryContext
 from test_orchestrate_plan import _branch_tail_rules, _item
 from work_tracker_okf.items import Stamp, WorkItem
@@ -103,6 +104,7 @@ def _plan(seed: int):
         live=live,
         workspace="/ws",
         default_base="main",
+        worktrees_dir="/wt",
         item_repos=repos,
         repo_contexts=contexts,
     )
@@ -167,10 +169,11 @@ def test_claim_gate_property(seed: int) -> None:
     for dispatch in result.dispatches:
         candidate = _claims(by_path[dispatch.slug], repo_of[dispatch.slug])
         assert not [(a, b) for a in candidate for b in (*held_live, *accepted) if conflicts(a, b)]
-        if dispatch.phase in orchestrate.READ_ONLY_PHASES:
-            assert dispatch.worktree.action == orchestrate.READER_ACTION
-            assert dispatch.worktree.path is None
-        else:
+        # Every stage runs in its item's computed worktree; readers still reserve no affects.
+        placement = result.placements[dispatch.key]
+        assert placement.worktree == Path("/wt") / repo_of[dispatch.slug] / branch_name(dispatch.slug, "Feature")
+        assert dispatch.worktree.path == str(placement.worktree)
+        if dispatch.phase not in orchestrate.READ_ONLY_PHASES:
             accepted.extend(candidate)
     assert not [(a, b) for a in new for b in new if conflicts(a, b)]
     assert not [(a, b) for a in new for b in held_live if conflicts(a, b)]
@@ -195,6 +198,7 @@ def test_finish_target_property(seed: int) -> None:
         max_parallel=5,
         workspace="/ws",
         default_base="main",
+        worktrees_dir="/wt",
         live=live,
         item_repos=repos,
         repo_contexts=contexts,
@@ -256,6 +260,7 @@ def test_claim_gate_property_is_not_vacuous() -> None:
             max_parallel=5,
             workspace="/ws",
             default_base="main",
+            worktrees_dir="/wt",
             live=live,
             item_repos=repos,
             repo_contexts=contexts,

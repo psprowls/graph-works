@@ -219,7 +219,7 @@ class OrcaCliPort:
 
     def liveness(self, run_id: str, *, now: datetime) -> list[dict[str, Any]]:
         """Observe an existing Run without binding its consumer or nudging workers."""
-        session = OrcaSession(name=run_id, run_id=run_id, run=self._run, repo_selector=None)
+        session = OrcaSession(name=run_id, run_id=run_id, run=self._run)
         return liveness_data(session.liveness(now=now))
 
     def __init__(self, *, run: Callable[[Sequence[str]], OrcaResult] = _subprocess_run) -> None:
@@ -236,6 +236,11 @@ class OrcaCliPort:
     def repo_list(self) -> list[OrcaRepo]:
         result = self._call_top(("repo", "list"))
         return [{"id": str(row["id"]), "path": str(row["path"])} for row in _rows(result.get("repos"))]
+
+    def repo_show(self, selector: str) -> str | None:
+        """Read the repository's configured worktree base, when supplied."""
+        result = self._call_top(("repo", "show", "--repo", selector))
+        return _string(_object(result.get("repo")).get("worktreeBasePath"))
 
     def worktree_show(self, selector: str) -> OrcaWorktree | None:
         result = self._call_top(("worktree", "show", "--worktree", selector))
@@ -281,32 +286,13 @@ class OrcaCliPort:
                 listed.append(_worktree(row))
         return listed
 
-    def worktree_create(self, *, name: str, repo_id: str, base_branch: str, comment: str) -> OrcaWorktree:
-        """Create one independent, setup-skipped checkout; the caller detaches and verifies it."""
-        argv = (
-            "worktree",
-            "create",
-            "--name",
-            name,
-            "--repo",
-            f"id:{repo_id}",
-            "--base-branch",
-            base_branch,
-            "--no-parent",
-            "--setup",
-            "skip",
-            "--comment",
-            comment,
-        )
-        row = _object(self._call_top(argv).get("worktree"))
-        if not row or not isinstance(row.get("id"), str):
-            raise OrcaCliError(
-                ("orca", *argv, "--json"), returncode=0, stderr="", message="worktree create returned no worktree"
-            )
-        return _worktree(row)
-
-    def worktree_set_parent(self, worktree_id: str, parent_id: str) -> None:
-        self._call_top(("worktree", "set", "--worktree", f"id:{worktree_id}", "--parent-worktree", f"id:{parent_id}"))
+    def worktree_set(self, selector: str, *, display_name: str, parent: str | None = None) -> None:
+        """Name a discovered checkout and optionally link it beneath a parent."""
+        argv = ["worktree", "set", "--worktree", selector]
+        if parent is not None:
+            argv.extend(("--parent-worktree", parent))
+        argv.extend(("--display-name", display_name))
+        self._call_top(argv)
 
     def worktree_set_status(self, worktree_id: str, status: str) -> None:
         self._call_top(("worktree", "set", "--worktree", f"id:{worktree_id}", "--workspace-status", status))
@@ -344,8 +330,15 @@ class OrcaCliPort:
         self._call(("task-update", "--id", task_id, "--status", status, "--run", run_id))
 
     def worker_start(
-        self, run_id: str, task_id: str, *, request: dict[str, Any], placement_argv: list[str]
+        self,
+        run_id: str,
+        task_id: str,
+        *,
+        request: dict[str, Any],
+        placement_argv: list[str],
+        retry_of: str | None = None,
     ) -> OrcaStart:
+        """`worker-start` on *task_id*; *retry_of* adds `--retry-of <dispatch-id>` to relaunch that dispatch."""
         argv = ["worker-start", "--task", task_id, "--agent", str(request["agent"]), "--run", run_id, *placement_argv]
         model = request.get("model")
         effort = request.get("reasoning_effort")
@@ -353,6 +346,8 @@ class OrcaCliPort:
             argv.extend(("--model", str(model)))
         if effort is not None:
             argv.extend(("--effort", str(effort)))
+        if retry_of is not None:
+            argv.extend(("--retry-of", retry_of))
         try:
             result = self._call(argv)
         except OrcaCliError as exc:

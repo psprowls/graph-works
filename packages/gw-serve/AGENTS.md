@@ -159,7 +159,7 @@ All `GET`, read-only, token-guarded like the other reads.
 | `/v1/wiki/proposal/checks` | Mechanical review checks for one proposal. |
 | `/v1/wiki/proposal/preview` | The would-be page a promotion produces, with its diff. |
 
-Advance always passes `infer_worktree=False`. Archive uses `wiki_slugs=()`;
+Advance takes no placement parameters (`worktree`, `branch` are refused as unknown). Archive uses `wiki_slugs=()`;
 omitted or `null` paths mean sweep, while an empty paths list is `400`.
 Adding a mutation = one `MutationSpec` in `mutation_specs.py` +
 `mutation_routes()` in `ROUTES` + a golden regen.

@@ -9,7 +9,7 @@ import pytest
 from gw_kernel.workspace.repos import ItemRepo
 from gw_orchestrate import commands as orchestrate
 from gw_pipeline.finish import FinishPlan, FinishTarget
-from test_orchestrate_plan import _branch_tail_rules, _item, _plan
+from test_orchestrate_plan import _branch_tail_rules, _item, _plan, _restamp
 from work_tracker_okf.items import Stamp
 
 ROOT = "work/epic-x"
@@ -38,7 +38,6 @@ def _run(finish_plans, *, items=None, **kw):
         ROOT,
         dispatch_rules=RELAY,
         finish_plans=finish_plans,
-        worktree_exists={"/wt/a": True, "/wt/b": True, "/epic": True},
         **kw,
     )
 
@@ -83,7 +82,7 @@ def test_a_live_finish_keeps_its_target_after_revalidation_fails(current_phase) 
 
 def test_a_live_finish_keeps_failed_target_when_another_repo_still_validates() -> None:
     items = _items()
-    items = (replace(items[0], repo_stamps={"ui": Stamp("/ui/epic", "epic/x")}), *items[1:])
+    items = (_restamp(items[0], repo_stamps={"ui": Stamp("/ui/epic", "epic/x")}), *items[1:])
     ui = ItemRepo("ui", Path("/ui"), "frontmatter")
     plans = {
         A: FinishPlan((FinishTarget(ui, "/ui/a", "feature/a", "epic/x", "/ui/epic"),), ("core anchor dirty",)),
@@ -115,7 +114,6 @@ def test_a_profile_refused_first_candidate_does_not_starve_the_second() -> None:
         ROOT,
         dispatch_rules=(),
         finish_plans=plans,
-        worktree_exists={"/wt/a": True, "/wt/b": True, "/epic": True},
     )
     assert {(b.path, b.kind) for b in result.blocked} == {(A, "relay-untailed"), (B, "relay-untailed")}
 

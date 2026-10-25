@@ -64,7 +64,7 @@
     "sections/Spike.yaml",
     "tags.yaml: perf",
     "tags.yaml: security",
-    "log.md: installed by work-tracker-okf/0.6.0",
+    "log.md: installed by work-tracker-okf/0.7.0",
     "schema/_base-diataxis.schema.json",
     "schema/Tutorial.schema.json",
     "schema/HowTo.schema.json",

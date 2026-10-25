@@ -57,20 +57,15 @@ class UnknownWorker(BackendError):
     """No worker with that key or reply token exists in this session."""
 
 
-class WorktreeNotProvisioned(BackendError):
-    """The dispatch's `worktree.path` is None; a backend does not create it."""
-
-
 @dataclass(frozen=True)
 class WorkerRecord:
     """What a backend knows about one worker it launched.
 
     `worktree_path` and `worktree_branch` are what the worker *actually* runs
     on, as the backend read it back after launching — not what a planner
-    asked for. They are optional because a backend that provisions no
-    worktree (`provisions_worktrees is False`) has nothing to report, and
-    because a read-back that failed must say "not known" rather than invent a
-    value. `None` therefore means exactly one thing: this backend did not
+    asked for. They are optional because a backend that cannot read the worktree back
+    has nothing to report, and because a read-back that failed must say "not
+    known" rather than invent a value. `None` therefore means exactly one thing: this backend did not
     learn it. Comparing either field against a plan is a caller's business;
     a backend records, it does not reconcile.
     """
@@ -172,19 +167,9 @@ class DispatchBackend(Protocol):
     launching it, rather than discovering the gap when a human is expected and
     no channel exists; `launch()` raises `UnsupportedMode` for a dispatch
     outside the set.
-
-    `provisions_worktrees` is `False` on every backend this package ships.
-    It exists so a future backend that obtains its own worktrees (Orca's
-    `worker-start --worktree new-top-level --repo id:<repo>`, see the
-    `workflow-orca` sibling) can declare that capability on the shared
-    Protocol instead of a new method —
-    a coordinator checks the flag before it plans, rather than discovering the
-    gap when a `PlannedDispatch` that worked on one backend raises
-    `WorktreeNotProvisioned` on another.
     """
 
     name: str
     supported_modes: frozenset[str]  # a subset of DISPATCH_MODES
-    provisions_worktrees: bool  # True only for a backend that obtains its own worktrees
 
     def open_session(self, name: str) -> DispatchSession: ...

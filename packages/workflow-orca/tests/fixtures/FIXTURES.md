@@ -29,7 +29,6 @@ Re-capture with these commands, replacing the ids with live ones:
 | `worktree_show_renamed.json` | `orca worktree show --worktree id:<repoId>::<path> --json` (note: **not** an `orchestration` subcommand) |
 | `repo_list.json` | `orca repo list --json` (hand-authored) |
 | `worktree_list.json` | `orca worktree list --repo id:<repoId> --json` (hand-authored, trimmed: the 2026-09-27 live shape is `worktrees[]`, `totalCount`, `truncated`, `hostScope.omittedHostIds`, with `comment` on every row) |
-| `worktree_create.json` | `orca worktree create --name <n> --repo id:<repoId> --base-branch <ref> --no-parent --setup skip --comment <marker> --json` (hand-authored from `worktree_show_renamed.json`'s row shape plus `comment`) |
 | `terminal_send.json` | `orca terminal send --terminal <term> --text "" --enter --json` (hand-authored) |
 | `worker_start_effects.json` | `orca orchestration worker-start --task <task> --agent claude --run <run> --json` (hand-authored from `worker_start.json` with `effects` and launch receipt, omitting `agentTerminalHandle` to exercise the live fallback) |
 | `inbox_run_questions.json` | `orca orchestration inbox --terminal run:<run> --limit 1000 --json` (hand-authored, trimmed) |
@@ -37,7 +36,7 @@ Re-capture with these commands, replacing the ids with live ones:
 | `inbox_dispatch_empty.json` | as above, against a Dispatch with no replies (hand-authored) |
 | `worker_list_questions.json` | `orca orchestration worker-list --run <run> --json` (hand-authored, trimmed) |
 
-**`check_batch.json`, `check_heartbeat_only.json`, `check_consumer_fenced.json`, `repo_list.json`, `terminal_send.json`, `worker_start_effects.json`, `worktree_list.json`, and `worktree_create.json` are hand-authored, not captured verbatim.** A `check` batch
+**`check_batch.json`, `check_heartbeat_only.json`, `check_consumer_fenced.json`, `repo_list.json`, `terminal_send.json`, `worker_start_effects.json`, and `worktree_list.json` are hand-authored, not captured verbatim.** A `check` batch
 requires the capturing terminal to be the Run's bound coordinator with live
 traffic, which the plan author did not have. It is hand-authored from two
 verified sources: the flag vocabulary of `orca orchestration send --help`

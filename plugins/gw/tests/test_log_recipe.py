@@ -28,7 +28,8 @@ class LogRecipeTests(unittest.TestCase):
         # Split the retired heading literal so the production denylist need not
         # exempt this test file. This is intentionally malformed fixture data.
         bad = "## " + "[2026-04-23] lint | invalid"
-        self.before = ("""---
+        self.before = (
+            """---
 type: Log
 ---
 # Log
@@ -52,17 +53,26 @@ type: Log
   - **scan** nested detail
 
   ```md
-""" + "  " + bad + """
+"""
+            + "  "
+            + bad
+            + """
   - **lint** fenced bullet
   ```
 
-""" + bad + "\n- **lint** invalid section entry\n").encode()
+"""
+            + bad
+            + "\n- **lint** invalid section entry\n"
+        ).encode()
         self.log.write_bytes(self.before)
 
     def run_recipe(self, *args):
         result = subprocess.run(
-            [sys.executable, "-", str(self.log), *args], input=self.recipe,
-            text=True, capture_output=True, check=False,
+            [sys.executable, "-", str(self.log), *args],
+            input=self.recipe,
+            text=True,
+            capture_output=True,
+            check=False,
         )
         self.assertEqual(self.log.read_bytes(), self.before, "retrieval must be read-only")
         return result
@@ -72,7 +82,9 @@ type: Log
         self.assertEqual(result.returncode, 0, result.stderr)
         # Rendering nested/code content once, grouping duplicate dates, and
         # retaining unlabelled entries are all observable output contracts.
-        self.assertEqual(result.stdout, """## 2026-04-21
+        self.assertEqual(
+            result.stdout,
+            """## 2026-04-21
 
 - **INGEST** latest
 
@@ -85,7 +97,10 @@ type: Log
   - **scan** nested detail
 
   ```md
-""" + "  ## " + "[2026-04-23] lint | invalid\n" + """  - **lint** fenced bullet
+"""
+            + "  ## "
+            + "[2026-04-23] lint | invalid\n"
+            + """  - **lint** fenced bullet
   ```
 
 - filed unlabelled
@@ -98,7 +113,8 @@ type: Log
 
 - lint | old plain
 
-""")
+""",
+        )
         self.assertEqual(result.stderr.count("Invalid log section"), 1)
         self.assertIn("body line 26", result.stderr)
         self.assertNotIn("invalid section entry", result.stdout)
@@ -119,9 +135,7 @@ type: Log
         self.log.write_bytes(self.before)
         result = self.run_recipe()
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(result.stdout, "## 2026-04-20\n\n" + "".join(
-            f"- item {n}\n\n" for n in range(11, 1, -1)
-        ))
+        self.assertEqual(result.stdout, "## 2026-04-20\n\n" + "".join(f"- item {n}\n\n" for n in range(11, 1, -1)))
 
     def test_zero_and_empty_match_are_explained(self):
         for args in (("--last", "0"), ("--op", "delete"), ("--since", "2026-05-01")):
@@ -131,8 +145,13 @@ type: Log
                 self.assertEqual(result.stdout, "No matching log entries.\n")
 
     def test_bad_arguments_fail_clearly(self):
-        for args in (("--last", "-1"), ("--last", "oops"), ("--op", "invented"),
-                     ("--since", "20260420"), ("--since", "2026-02-30")):
+        for args in (
+            ("--last", "-1"),
+            ("--last", "oops"),
+            ("--op", "invented"),
+            ("--since", "20260420"),
+            ("--since", "2026-02-30"),
+        ):
             with self.subTest(args=args):
                 result = self.run_recipe(*args)
                 self.assertEqual(result.returncode, 2)
@@ -149,9 +168,11 @@ class LogGuardTests(unittest.TestCase):
             self.assertEqual(baseline.returncode, 0, baseline.stdout)
             target = plugin / "RELEASE-NOTES.md"
             original = target.read_bytes() if target.exists() else b""
-            for claim in ("## " + "[YYYY-MM-DD] <op> | <title>",
-                          "## " + "[2026-09-18] lint | check",
-                          'grep "^## ' + '\\[" log.md | tail -10'):
+            for claim in (
+                "## " + "[YYYY-MM-DD] <op> | <title>",
+                "## " + "[2026-09-18] lint | check",
+                'grep "^## ' + '\\[" log.md | tail -10',
+            ):
                 with self.subTest(claim=claim):
                     target.write_bytes(original + b"\n" + claim.encode() + b"\n")
                     result = subprocess.run(["bash", str(guard)], capture_output=True, text=True)

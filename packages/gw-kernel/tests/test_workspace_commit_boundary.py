@@ -24,11 +24,6 @@ CallSite = tuple[str, str, int, ast.Call]
 ROLLBACK_EXEMPTIONS: dict[CallKey, str] = {
     (
         "packages/gw-orchestrate/src/gw_orchestrate/execute_return.py",
-        "apply_publication",
-        "restore",
-    ): "Restore the proven canonical preimage after failed cross-root publication; rollback must not commit.",
-    (
-        "packages/gw-orchestrate/src/gw_orchestrate/execute_return.py",
         "_restore_local",
         "restore",
     ): "Restore proven local publication preimages before guarded index restoration; rollback must not commit.",

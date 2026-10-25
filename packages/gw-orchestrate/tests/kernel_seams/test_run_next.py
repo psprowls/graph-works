@@ -81,8 +81,6 @@ def test_a_plan_stage_reconcile_completion_ends_the_loop(tmp_path: Path) -> None
 
     layout, repo, _, _ = _landed_plan(tmp_path)
     assert work.run_next(layout, CHILD).route.dispatch == Dispatch("plan")
-    advanced = run_stage_advance(
-        layout, CHILD, today=TODAY, expected_phase="plan", cwd=repo, infer_worktree=False, dry_run=False
-    )
+    advanced = run_stage_advance(layout, CHILD, today=TODAY, expected_phase="plan", cwd=repo, dry_run=False)
     assert advanced.outcome.written
     assert work.run_next(layout, CHILD).route.dispatch == Dispatch("plan")

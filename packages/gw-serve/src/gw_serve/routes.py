@@ -289,7 +289,7 @@ _READ = (*_LAYOUT, Catch(OSError, "io", 1))
 
 def _work_list(context: ServeContext, _args: Mapping[str, object]) -> Reply:
     def read(layout: WorkspaceLayout, session: ReadSession) -> Reply:
-        return Reply(200, wire_work.work_list_payload(work.run_work_list(layout, session=session)))
+        return Reply(200, wire_work.work_list_payload(work.run_work_board(layout, session=session)))
 
     def run() -> Reply:
         return _memo(context, read)

@@ -75,3 +75,13 @@ def test_a_declared_repo_path_still_anchors_on_the_manifests_own_directory(tmp_p
     )
     config = load_workspace_config(layout)
     assert config.repos[0].path == (layout.manifest_path.parent / "../code").resolve()
+
+
+def test_manifest_refuses_the_reserved_workspace_name(tmp_path: Path) -> None:
+    """The legacy `repo_stamps._workspace` key stays unshadowable until migrate-placement has run (own D-002)."""
+    layout = apply_init(plan_init(tmp_path / "ws", today=date(2026, 9, 26), topic="WS")).layout
+    layout.manifest_path.write_text(
+        f"version: 1\nrepositories:\n  _workspace: {{path: {tmp_path}}}\n", encoding="utf-8", newline="\n"
+    )
+    with pytest.raises(WorkspaceConfigError, match="_workspace"):
+        load_workspace_config(layout)

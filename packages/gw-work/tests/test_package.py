@@ -12,7 +12,7 @@ def test_package_shape_and_exports():
     from gw_pipeline.transactions import MutationApplication, apply_mutation
     from gw_work.archive.commands import run_archive
 
-    assert version("gw-work") == "0.1.0"
+    assert version("gw-work") == "0.2.0"
     assert gw_work.__all__ == EXPECTED
     assert gw_work.run_archive is run_archive
     assert gw_work.MutationApplication is MutationApplication

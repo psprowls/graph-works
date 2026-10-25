@@ -408,18 +408,18 @@ test-plugin: preflight
     bash tests/test-dispatch-profile-contract.sh
     echo "--- test-workspace-commit-authority"
     bash tests/test-workspace-commit-authority.sh
-    echo "--- test-workspace-branch-docs"
-    bash tests/test-workspace-branch-docs.sh
+    echo "--- test-placement-docs"
+    bash tests/test-placement-docs.sh
+    echo "--- test-index-reconciliation-docs"
+    bash tests/test-index-reconciliation-docs.sh
     echo "--- test-carried-context-docs"
     bash tests/test-carried-context-docs.sh
-    echo "--- test_launch_placement"
-    uv run python tests/test_launch_placement.py
+    echo "--- test_launch_worker_commands"
+    uv run python tests/test_launch_worker_commands.py
     echo "--- test_attend_cards"
     uv run python tests/test_attend_cards.py
     echo "--- test_classify_lifecycle"
     uv run python tests/test_classify_lifecycle.py
-    echo "--- test_reader_pinning"
-    uv run python tests/test_reader_pinning.py
     uv run python tests/test_finish_receipt.py
     echo "--- test-finish-cleanup-contract"
     bash tests/test-finish-cleanup-contract.sh

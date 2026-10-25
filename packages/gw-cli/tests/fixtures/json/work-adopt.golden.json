@@ -2,10 +2,7 @@
   "path_mapping": {
     "work/bug-fix": "work/release-rel/children/bug-fix"
   },
-  "indexes": [
-    "work/index.md",
-    "work/release-rel/children/index.md"
-  ],
+  "indexes": [],
   "warnings": [],
   "refusals": [],
   "applied": true,

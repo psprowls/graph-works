@@ -5,9 +5,10 @@ import subprocess
 import pytest
 from gw_kernel.workspace.errors import WorkspaceConfigError
 from gw_pipeline.finish import (
+    FinishRefused,
     VerifiedIntegration,
     finish_strategy,
-    plan_finish_cleanup,
+    read_finish_receipt,
     resolve_finish_targets,
     verify_integration,
 )
@@ -171,80 +172,6 @@ def test_invalid_strategy_configuration_is_a_config_error(tmp_path, block):
         finish_strategy(layout, "code")
 
 
-def resolved_after_squash(tmp_path, *, attested=False):
-    repo, source = code_repo(tmp_path)
-    commit_file(repo, "c.txt", "main\n", "main moves")
-    before, result = squash(repo)
-    source_sha = git(source, "rev-parse", "HEAD")
-    layout = workspace(tmp_path, repo, source, phase="done", status="resolved")
-    recorded = (
-        VerifiedIntegration(
-            "code", "feature", source_sha, "main", result, "attested", "accepted", None, "pat", "rebased"
-        )
-        if attested
-        else VerifiedIntegration("code", "feature", source_sha, "main", result, "squash", "verified", before)
-    )
-    write_receipt(layout, [recorded])
-    return layout, repo, source, source_sha
-
-
-def rows(layout, tmp_path):
-    plan = plan_finish_cleanup(layout, OWNER, runner_cwd=tmp_path)
-    assert plan.refusal is None
-    return plan.rows
-
-
-def test_verified_squash_branch_is_removed_by_compare_and_delete(tmp_path):
-    layout, _repo, source, source_sha = resolved_after_squash(tmp_path)
-
-    (row,) = rows(layout, tmp_path)
-
-    assert (row.action, row.delete, row.expected, row.worktree) == (
-        "remove",
-        "update-ref",
-        source_sha,
-        str(source.resolve()),
-    )
-
-
-def test_squash_branch_that_moved_is_unmerged(tmp_path):
-    layout, _repo, source, _sha = resolved_after_squash(tmp_path)
-    commit_file(source, "late.txt", "late\n", "late work")
-
-    (row,) = rows(layout, tmp_path)
-
-    assert (row.action, row.reason) == ("skip", "unmerged")
-
-
-def test_accepted_entry_never_makes_a_branch_merged(tmp_path):
-    layout, *_ = resolved_after_squash(tmp_path, attested=True)
-
-    (row,) = rows(layout, tmp_path)
-
-    assert (row.action, row.reason) == ("skip", "unmerged")
-
-
-def test_detached_checkout_at_the_squashed_source_is_merged(tmp_path):
-    layout, _repo, source, _sha = resolved_after_squash(tmp_path)
-    git(source, "checkout", "-q", "--detach")
-
-    (row,) = rows(layout, tmp_path)
-
-    assert (row.action, row.delete) == ("remove", "update-ref")
-
-
-def test_ancestry_rows_keep_branch_d(tmp_path):
-    repo, source = code_repo(tmp_path)
-    git(repo, "merge", "--ff-only", "feature")
-    layout = workspace(tmp_path, repo, source, phase="done", status="resolved")
-    sha = git(source, "rev-parse", "HEAD")
-    write_receipt(layout, [VerifiedIntegration("code", "feature", sha, "main", sha)])
-
-    (row,) = rows(layout, tmp_path)
-
-    assert (row.action, row.delete, row.expected) == ("remove", "branch-d", None)
-
-
 def test_update_ref_compare_and_delete_refuses_a_moved_branch(tmp_path):
     """Pins the git contract finish-cleanup.md relies on."""
     repo, source = code_repo(tmp_path)
@@ -260,3 +187,26 @@ def test_update_ref_compare_and_delete_refuses_a_moved_branch(tmp_path):
     )
 
     assert refused.returncode != 0 and git(repo, "rev-parse", "refs/heads/feature") != stale
+
+
+def test_finish_refused_carries_its_code_detail_and_conflicts():
+    refusal = FinishRefused("conflict", "resolve it", ("a.txt",))
+
+    assert (refusal.refusal, refusal.detail, refusal.conflicts) == ("conflict", "resolve it", ("a.txt",))
+    assert str(refusal) == "conflict: resolve it"
+
+
+def test_receipt_naming_a_repository_twice_is_malformed(tmp_path):
+    repo, source = code_repo(tmp_path)
+    layout = workspace(tmp_path, repo, source)
+    sha = git(source, "rev-parse", "HEAD")
+    write_receipt(layout, [VerifiedIntegration("code", "feature", sha, "main", sha)] * 2)
+
+    assert read_finish_receipt(layout, OWNER)[2] == "duplicate finish receipt repository"
+
+
+def test_finish_block_without_a_strategy_defaults_to_squash(tmp_path):
+    repo, source = code_repo(tmp_path)
+    layout = workspace(tmp_path, repo, source, finish_config="    finish: {}\n")
+
+    assert finish_strategy(layout, "code") == ("squash", "default")

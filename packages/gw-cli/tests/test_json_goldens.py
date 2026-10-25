@@ -99,6 +99,7 @@ def items(ctx: Ctx) -> None:
     ctx.gw("work", "file", "--title", "Fix", "--kind", "Bug", "--summary", "d", "--effort", "small", "--json")
     ctx.gw("work", "file", "--title", "Epic", "--kind", "Epic", "--summary", "d", "--json")
     ctx.gw("work", "file", "--title", "Rel", "--kind", "Release", "--summary", "d", "--json")
+    ctx.gw("work", "regen-index", "--json")
 
 
 def items_advanced(ctx: Ctx) -> None:
@@ -167,11 +168,6 @@ def configured_repo(ctx: Ctx) -> None:
     with manifest.open("w", encoding="utf-8", newline="") as handle:
         yaml.dump(data, handle)
     ctx.mp.setattr(ingest_module, "state_gate_adapter", lambda config: object())
-
-
-def reader_item(ctx: Ctx) -> None:
-    configured_repo(ctx)
-    items_advanced(ctx)
 
 
 def ingest_brief(ctx: Ctx) -> None:
@@ -352,52 +348,6 @@ CASES: tuple[Case, ...] = (
     Case("next-alias", _w("next", "work/feature-alpha", "--json"), items),
     Case("work-advance-dry-run", _w("work", "advance", "work/bug-fix", "--dry-run", "--json"), items),
     Case("work-advance", _w("work", "advance", "work/bug-fix", "--json"), items),
-    Case(
-        "work-record-placement",
-        lambda ctx: [
-            "work",
-            "record-placement",
-            "work/bug-fix",
-            "--root",
-            "work/bug-fix",
-            "--phase",
-            "design",
-            "--worktree",
-            str(ctx.tmp / "wt"),
-            "--branch",
-            "b/observed",
-            "--json",
-            *ctx.ws,
-        ],
-        items_advanced,
-    ),
-    Case(
-        "work-record-reader",
-        lambda ctx: [
-            "work",
-            "record-reader",
-            "work/bug-fix",
-            "--root",
-            "work/bug-fix",
-            "--phase",
-            "design",
-            "--task-id",
-            "task_reader",
-            "--dispatch-id",
-            "ctx_reader",
-            "--dispatch-key",
-            "reader-key",
-            "--repo",
-            "repo-1",
-            "--worktree",
-            str(ctx.tmp / "wt"),
-            "--start-sha",
-            "a" * 40,
-            "--json",
-            *ctx.ws,
-        ],
-        reader_item,
-    ),
     Case("work-touch-active-work", _w("work", "touch-active-work", "work/bug-fix", "--json"), items_advanced),
     Case("work-status", _w("work", "status", "--json"), items),
     Case("work-ingest-queue", _w("work", "ingest-queue", "--json"), ingest_queue_item),
@@ -529,7 +479,11 @@ def test_no_orphan_golden() -> None:
     assert on_disk <= {case.id for case in CASES}
 
 
-@pytest.mark.parametrize("case", CASES, ids=lambda case: case.id)
+@pytest.mark.parametrize(
+    "case",
+    CASES,
+    ids=lambda case: case.id,
+)
 def test_json_output_is_byte_identical(case: Case, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     root = tmp_path / "works"
     boot = runner.invoke(app, ["bootstrap", "--topic", "Demo", "--workspace", str(root)])

@@ -26,6 +26,7 @@ MANIFEST = {
 
 
 def units_env(env: GateEnv, *, mutation: str = "none") -> None:
+    env.branch_off()
     env.state["start_sha"] = git(env.repo, "rev-parse", "HEAD")
     env._write_page()
     env.page_text = env.page_text.replace("owner: someone", f"owner: someone\nstart_sha: {env.state['start_sha']}")

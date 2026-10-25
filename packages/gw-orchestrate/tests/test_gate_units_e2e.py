@@ -45,7 +45,7 @@ def _setup(env: GateEnv, tmp_path: Path) -> Path:
     worktree = tmp_path / "feature-wt"
     git(env.repo, "worktree", "add", "-q", "-b", "feature", str(worktree))
     env.state["start_sha"] = git(env.repo, "rev-parse", "HEAD")
-    env.set_worktree(worktree)
+    env.set_worktree(worktree, "feature")
     env.page_text = env.page_text.replace("owner: someone", f"owner: someone\nstart_sha: {env.state['start_sha']}")
     (env.layout.bundle_dir / f"{env.path}.md").write_text(env.page_text, encoding="utf-8", newline="\n")
     return worktree

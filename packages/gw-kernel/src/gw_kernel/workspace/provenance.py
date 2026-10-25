@@ -208,15 +208,21 @@ def gate_git(layout: WorkspaceLayout, *, environ: Mapping[str, str] | None = Non
     return resolve_git(configured, environ=env)
 
 
-def strict_git(cwd: Path, *args: str, git: GitExecutable, preserve_output: bool = False) -> str | GitFailure:
+def strict_git(
+    cwd: Path,
+    *args: str,
+    git: GitExecutable,
+    preserve_output: bool = False,
+    timeout: float = _GIT_TIMEOUT_SECONDS,
+) -> str | GitFailure:
     outcome = (
-        probe_git(cwd, *args, executable=git.path, preserve_output=True)
+        probe_git(cwd, *args, executable=git.path, preserve_output=True, timeout=timeout)
         if preserve_output
-        else probe_git(cwd, *args, executable=git.path)
+        else probe_git(cwd, *args, executable=git.path, timeout=timeout)
     )
     label = f"`git {' '.join(args[:2])}` in {cwd}"
     if outcome.cause == "timeout":
-        return GitFailure("timeout", f"{label} timed out")
+        return GitFailure("timeout", f"{label} timed out after {timeout:g}s")
     if outcome.cause != "ok":
         return GitFailure("missing" if outcome.cause == "missing" else "error", f"{label} could not run")
     if outcome.returncode != 0:
@@ -294,9 +300,16 @@ def _porcelain_z(out: str) -> tuple[str, ...]:
     return tuple(dirty)
 
 
-def strict_dirty_paths(repo: Path, paths: Sequence[Path | str], *, git: GitExecutable) -> tuple[str, ...] | GitFailure:
-    """`dirty_paths` for the gate: a failed `git status` is a `GitFailure`, not `None`."""
-    out = strict_git(repo, "status", "--porcelain", "-z", "--", *(str(path) for path in paths), git=git)
+def strict_dirty_paths(
+    repo: Path,
+    paths: Sequence[Path | str],
+    *,
+    git: GitExecutable,
+    optional_locks: bool = True,
+) -> tuple[str, ...] | GitFailure:
+    """Strict status; disable optional locks to preserve the index during a dry run."""
+    prefix = () if optional_locks else ("--no-optional-locks",)
+    out = strict_git(repo, *prefix, "status", "--porcelain", "-z", "--", *(str(path) for path in paths), git=git)
     return out if isinstance(out, GitFailure) else _porcelain_z(out)
 
 
@@ -324,6 +337,40 @@ def strict_range(
         return log
     return GateRange(
         start_sha,
+        end,
+        tuple(line for line in log.splitlines() if line.strip()),
+        tuple(line.split("\t")[-1] for line in diff.splitlines() if line.strip()),
+        scope,
+    )
+
+
+def strict_branch_range(
+    repo: Path, *, base_ref: str, paths: Sequence[Path | str], git: GitExecutable
+) -> GateRange | GitFailure:
+    """The item's own commits: HEAD against its parent branch *base_ref*, merges and parent-side files excluded.
+
+    *base_ref* is a branch name resolved to its local tip; a missing tip is a failure. `start_sha` holds the
+    merge-base. Commits come from the non-merge log of `<base_ref>..HEAD`; files from the three-dot diff, so a
+    refresh merge of the parent contributes nothing.
+    """
+    tip = strict_commit(repo, f"refs/heads/{base_ref}", git=git)
+    if isinstance(tip, GitFailure):
+        return tip
+    end = strict_commit(repo, "HEAD", git=git)
+    if isinstance(end, GitFailure):
+        return end
+    base = strict_merge_base(repo, tip, end, git=git)
+    if isinstance(base, GitFailure):
+        return base
+    scope = tuple(str(path) for path in paths)
+    log = strict_git(repo, "log", "--oneline", "--no-merges", f"{tip}..{end}", "--", *scope, git=git)
+    if isinstance(log, GitFailure):
+        return log
+    diff = strict_git(repo, "diff", "--name-status", f"{tip}...{end}", "--", *scope, git=git)
+    if isinstance(diff, GitFailure):
+        return diff
+    return GateRange(
+        base,
         end,
         tuple(line for line in log.splitlines() if line.strip()),
         tuple(line.split("\t")[-1] for line in diff.splitlines() if line.strip()),
@@ -425,7 +472,7 @@ def head_sha(repo: Path) -> str | None:
 FALLBACK_BASE = "main"
 
 
-def default_base(repo: Path | None) -> str:
+def default_base(repo: Path | None, *, git: GitExecutable | None = None) -> str:
     """*repo*'s default branch, best-effort; `FALLBACK_BASE` on any failure.
 
     Lives here rather than in `orchestrate` because it runs git and this is the
@@ -434,7 +481,11 @@ def default_base(repo: Path | None) -> str:
     """
     if repo is None:
         return FALLBACK_BASE
-    out = run_git(repo, "symbolic-ref", "refs/remotes/origin/HEAD")
+    if git is None:
+        out = run_git(repo, "symbolic-ref", "refs/remotes/origin/HEAD")
+    else:
+        symbolic = probe_git(repo, "symbolic-ref", "refs/remotes/origin/HEAD", executable=git.path)
+        out = symbolic.stdout if symbolic.returncode == 0 else None
     if out is None or not out.strip():
         return FALLBACK_BASE
     return out.strip().rsplit("/", 1)[-1]

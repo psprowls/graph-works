@@ -10,19 +10,15 @@ from __future__ import annotations
 from dataclasses import MISSING, fields, is_dataclass
 
 import pytest
-from subagents_io.dispatch import DISPATCH_MODES, WORKTREE_ACTIONS, PlannedDispatch, WorktreeAction
+from subagents_io.dispatch import DISPATCH_MODES, PlannedDispatch, WorktreePlacement
 
 # (name, annotation) in declaration order. Annotations are compared as the
 # strings PEP 563 leaves them as, which is exact enough to catch a widened
 # `str | None` and cheap enough to need no typing introspection.
-WORKTREE_ACTION_FIELDS = [
-    ("action", "str"),
-    ("path", "str | None"),
+WORKTREE_PLACEMENT_FIELDS = [
+    ("path", "str"),
     ("branch", "str | None"),
-    ("base_branch", "str | None"),
-    ("exists", "bool | None"),
     ("parent_path", "str | None"),
-    ("start_sha", "str | None"),
 ]
 
 PLANNED_DISPATCH_FIELDS = [
@@ -36,7 +32,7 @@ PLANNED_DISPATCH_FIELDS = [
     ("agent", "str"),
     ("model", "str | None"),
     ("reasoning_effort", "str | None"),
-    ("worktree", "WorktreeAction"),
+    ("worktree", "WorktreePlacement"),
     ("merge_target", "str"),
     ("prompt", "str"),
     ("auto_merge", "bool"),
@@ -45,20 +41,20 @@ PLANNED_DISPATCH_FIELDS = [
 
 @pytest.mark.parametrize(
     ("cls", "expected"),
-    [(WorktreeAction, WORKTREE_ACTION_FIELDS), (PlannedDispatch, PLANNED_DISPATCH_FIELDS)],
-    ids=["WorktreeAction", "PlannedDispatch"],
+    [(WorktreePlacement, WORKTREE_PLACEMENT_FIELDS), (PlannedDispatch, PLANNED_DISPATCH_FIELDS)],
+    ids=["WorktreePlacement", "PlannedDispatch"],
 )
 def test_field_names_annotations_and_order(cls, expected):
     assert is_dataclass(cls)
     assert [(f.name, f.type) for f in fields(cls)] == expected
 
 
-@pytest.mark.parametrize("cls", [WorktreeAction, PlannedDispatch], ids=["WorktreeAction", "PlannedDispatch"])
+@pytest.mark.parametrize("cls", [WorktreePlacement, PlannedDispatch], ids=["WorktreePlacement", "PlannedDispatch"])
 def test_is_frozen(cls):
     assert cls.__dataclass_params__.frozen is True
 
 
-@pytest.mark.parametrize("cls", [WorktreeAction, PlannedDispatch], ids=["WorktreeAction", "PlannedDispatch"])
+@pytest.mark.parametrize("cls", [WorktreePlacement, PlannedDispatch], ids=["WorktreePlacement", "PlannedDispatch"])
 def test_no_field_carries_a_default(cls):
     # A default here would let a caller construct a half-populated dispatch and
     # have it look complete.
@@ -68,60 +64,31 @@ def test_no_field_carries_a_default(cls):
 
 
 def test_instances_are_frozen_at_runtime():
-    action = WorktreeAction(
-        action="reuse", path="/tmp/wt", branch="b", base_branch=None, exists=True, parent_path=None, start_sha=None
-    )
+    placement = WorktreePlacement(path="/tmp/wt", branch="b", parent_path=None)
     with pytest.raises(AttributeError):
-        action.branch = "other"  # type: ignore[misc]
+        placement.branch = "other"  # type: ignore[misc]
 
 
 def test_value_equality():
-    def make():
-        return WorktreeAction(
-            action="reuse",
-            path="/tmp/wt",
-            branch="b",
-            base_branch=None,
-            exists=True,
-            parent_path=None,
-            start_sha=None,
-        )
+    assert WorktreePlacement("/tmp/wt", "b", None) == WorktreePlacement("/tmp/wt", "b", None)
 
-    assert make() == make()
+
+def test_worktree_placement_fields():
+    assert tuple(f.name for f in fields(WorktreePlacement)) == ("path", "branch", "parent_path")
 
 
 def test_parent_path_round_trips():
-    action = WorktreeAction(
-        action="fork-child",
-        path=None,
-        branch="b",
-        base_branch="epic/x",
-        exists=None,
-        parent_path="/wt/epic",
-        start_sha=None,
-    )
-    assert action.parent_path == "/wt/epic"
-    assert action != WorktreeAction(
-        action="fork-child",
-        path=None,
-        branch="b",
-        base_branch="epic/x",
-        exists=None,
-        parent_path=None,
-        start_sha=None,
-    )
+    placement = WorktreePlacement(path="/wt/child", branch="b", parent_path="/wt/epic")
+    assert placement.parent_path == "/wt/epic"
+    assert placement != WorktreePlacement(path="/wt/child", branch="b", parent_path=None)
 
 
-def test_planned_dispatch_composes_a_worktree_action():
-    worktree = WorktreeAction(
-        action="fork-child",
-        path=None,
-        branch="b",
-        base_branch="main",
-        exists=None,
-        parent_path=None,
-        start_sha=None,
-    )
+def test_detached_placement_has_no_branch():
+    assert WorktreePlacement("/wt/reader", None, None).branch is None
+
+
+def test_planned_dispatch_composes_a_worktree_placement():
+    worktree = WorktreePlacement(path="/wt/x", branch="b", parent_path=None)
     dispatch = PlannedDispatch(
         agent="arbitrary-inert-agent",
         key="slug#plan",
@@ -141,18 +108,7 @@ def test_planned_dispatch_composes_a_worktree_action():
     assert dispatch.agent == "arbitrary-inert-agent"
     assert dispatch.worktree is worktree
     assert dispatch.mode in DISPATCH_MODES
-    assert dispatch.worktree.action in WORKTREE_ACTIONS
-
-
-def test_worktree_actions_membership():
-    assert frozenset({"reuse", "fork-child", "create-top-level", "main", "pin-detached"}) == WORKTREE_ACTIONS
 
 
 def test_dispatch_modes_membership():
     assert frozenset({"autonomous", "attend", "relay"}) == DISPATCH_MODES
-
-
-def test_pin_detached_is_a_worktree_action_with_no_branch():
-    assert "pin-detached" in WORKTREE_ACTIONS
-    action = WorktreeAction("pin-detached", None, None, "epic/x", None, "/epic", "a" * 40)
-    assert action.branch is None and action.start_sha == "a" * 40

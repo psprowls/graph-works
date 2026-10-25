@@ -131,7 +131,6 @@ def test_consumers_read_the_table() -> None:
     assert dependencies.BLOCKS | {"resolved"} == dependencies.NEEDS
     assert dict(paths.PHASE_ORDINALS) == {"design": "01", "plan": "02", "execute": "03", "finish": "04"}
     assert pipeline.code_phases() == placement.CODE_PHASES
-    assert pipeline.read_only_phases() == placement.READER_PHASES
     assert pipeline.hold_phases() == decisions.HOLD_PHASES
     assert typing.get_args(advance.ExpectedPhase) == pipeline.expected_phases()
     assert not hasattr(dependencies, "entry_phase")

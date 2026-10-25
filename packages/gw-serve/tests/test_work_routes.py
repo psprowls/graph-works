@@ -34,7 +34,7 @@ def test_next_is_the_cli_twin_with_null_normalized(client: TestClient, workspace
             "landed_since": {
                 "title": "Landed since your design",
                 "lines": ["No spec baseline recorded; landed-since unavailable."],
-                "data": {"code_baseline": None, "workspace_baseline": None},
+                "data": {"code_baseline": None},
                 "warnings": [],
             },
         },

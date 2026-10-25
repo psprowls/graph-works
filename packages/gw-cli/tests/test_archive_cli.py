@@ -92,6 +92,8 @@ class _Run:
             else None
         )
         self.pointer_cleared = False
+        self.pruned = None
+        self.prune_warnings = ()
         self.logged = None
         self.wiki_commit = None
 

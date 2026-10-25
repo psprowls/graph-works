@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "workflow-orca"
-version = "0.2.1"
+version = "0.3.0"
 description = "The Orca DispatchBackend: launch, enumerate, supervise and resume workers on an Orca Run."
 authors = [
   { name = "Patrick Sprowls", email = "psprowls@gmail.com" },
@@ -16,7 +16,7 @@ requires-python = ">=3.12"
 # through `subprocess` (stdlib) rather than through a client library — there
 # is no Python SDK, and adding a third-party HTTP stack to talk to a local
 # binary would be a dependency bought for nothing.
-dependencies = ["subagents-io>=0.2,<0.3"]
+dependencies = ["subagents-io>=0.3,<0.4"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/workflow_orca"]

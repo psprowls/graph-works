@@ -158,7 +158,6 @@ def test_return_refusals_are_declared_and_cannot_bypass_the_commit_gate() -> Non
         "return-scope-required",
         "return-metadata-invalid",
         "return-pending",
-        "return-destination-unverified",
         "return-evidence-missing",
         "return-evidence-stale",
         "return-evidence-incomplete",

@@ -8,17 +8,83 @@
   "supervise_merges": false,
   "live": [],
   "repo": null,
-  "dispatches": [],
-  "preparations": [],
-  "workspace_preparations": [],
-  "advances": [],
-  "blocked": [
+  "dispatches": [
     {
+      "repo": {
+        "name": null,
+        "path": null,
+        "source": "sole"
+      },
+      "finish_targets": [],
+      "key": "gw-design-epic-27afae30",
       "path": "work/epic-epic",
-      "kind": "worktree-unprovable",
-      "reason": "cannot resolve 'main' to a full commit object ID in the code repository; a reader is never placed in a mutable checkout"
+      "phase": "design",
+      "kind": "Epic",
+      "effort": null,
+      "skill": "gw:epic-design",
+      "mode": "attend",
+      "agent": "claude",
+      "model": null,
+      "provenance": {
+        "skill": {
+          "rule": {
+            "source": "packaged",
+            "index": 2,
+            "name": "design-parent"
+          },
+          "reason": "set"
+        },
+        "mode": {
+          "rule": {
+            "source": "packaged",
+            "index": 2,
+            "name": "design-parent"
+          },
+          "reason": "set"
+        },
+        "prompt_tail": {
+          "rule": {
+            "source": "packaged",
+            "index": 2,
+            "name": "design-parent"
+          },
+          "reason": "set"
+        },
+        "agent": {
+          "rule": {
+            "source": "packaged",
+            "index": 2,
+            "name": "design-parent"
+          },
+          "reason": "set"
+        },
+        "model": {
+          "rule": {
+            "source": "packaged",
+            "index": 2,
+            "name": "design-parent"
+          },
+          "reason": "explicit-null"
+        },
+        "reasoning_effort": {
+          "rule": {
+            "source": "packaged",
+            "index": 2,
+            "name": "design-parent"
+          },
+          "reason": "explicit-null"
+        }
+      },
+      "reasoning_effort": null,
+      "placement": null,
+      "merge_target": "main",
+      "auto_merge": false,
+      "human_checkpoints": null,
+      "prompt": "Run /gw:workflow work/epic-epic.\nGRAPH_WORKS_DIR=<tmp>/works\nDispatch key: gw-design-epic-27afae30\nSend worker_done when the stage artifact is written and the item advanced.\nIf you filed, or found already filed, work items for findings outside this item's scope, name each canonical path in your worker_done --body.\nThis is an attended stage: the human answers its questions in this terminal. Ask them here, the ordinary way, even where your Orca preamble says to use `orca orchestration ask` -- do not route this stage's questions through the coordinator, and do not use `gw work ask`. Before your first question, send exactly one notice: `orca orchestration send --from <your --from> --dispatch-capability <yours> --type escalation --subject \"Needs you at <your --from handle>\" --body \"work/epic-epic design: waiting for the human in this terminal.\" --task-id <yours> --dispatch-id <yours>`.\nNever `git commit` in the graph-works workspace at <tmp>/works; gw verbs commit their own workspace writes.\nDo not use Orca's SUB-DISPATCH: never run `orca orchestration` `run-create`, `run-use`, `task-create` or `worker-start` from this stage. When a skill asks for subagents, use your agent's native in-process subagents (Claude's Agent tool; Codex's `spawn_agent` with `fork_turns: \"none\"` and an explicit `model` and `reasoning_effort`), or do the work inline.\nYour coordinator placed this stage's worktree with `gw work place` and launched you in it. Never create, move or switch a worktree, and run every `gw work advance` without `--worktree`/`--branch`."
     }
   ],
+  "advances": [],
+  "blocked": [],
   "decisions": {
     "owner_path": "work/epic-epic",
     "ledger_path": "<tmp>/works/okf/work/epic-epic/references/00-decisions.md",
@@ -35,7 +101,6 @@
   },
   "holds": [],
   "warnings": [
-    "<tmp>/works/workspace.yaml: declares no repositories, so no code repo was resolved",
-    "<tmp>/works: not the toplevel of its own git repository; workspace placement disabled"
+    "<tmp>/works/workspace.yaml: declares no repositories, so no code repo was resolved"
   ]
 }

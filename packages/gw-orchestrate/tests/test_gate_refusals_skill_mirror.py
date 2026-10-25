@@ -32,11 +32,13 @@ def test_workflow_step_5_names_every_gate_code_and_the_bypass() -> None:
     assert "--skip-gate" in step5 and "never pass" in step5
 
 
-def test_workflow_step_3_records_the_execute_baseline() -> None:
+def test_workflow_starts_execute_through_place() -> None:
     skill = _find("plugins/gw/skills/workflow/SKILL.md")
     if skill is None:
         pytest.skip("workflow SKILL.md is not present in this checkout")
-    assert "gw work record-baseline" in _section(skill.read_text(encoding="utf-8"), 3)
+    text = skill.read_text(encoding="utf-8")
+    assert "gw work place <work-path> --start --json" in _section(text, 2)
+    assert "gw work record-baseline" not in text
 
 
 def test_auto_drive_routes_a_gate_refusal_to_the_human() -> None:

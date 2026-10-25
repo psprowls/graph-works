@@ -251,36 +251,12 @@ On success, the result contains:
   default 1), `supervise_merges`
   (bool, default `false`; display only — §4.3 reads each dispatch's
   `auto_merge`, never this), and `live` (the echoed input list).
-- `repo` — `{"name": "<declared name>", "path": "<code repository>", "source": "frontmatter|flag|sole|fallback"}`,
-  root metadata for the repository `workspace.yaml` declares, or `null` when none resolves.
-  Each dispatch carries its own `repo={name,path,source}`; use that path for placement. A
-  `null` repo never plans a creation: those items arrive in `blocked[]` as
-  `worktree-unprovable`. `source` says why that repository was chosen;
-  `frontmatter` means the item (or an ancestor) sets `repo:`.
-- `dispatches[]` — each entry: `key` (the exact planner session name,
-  `gw-<phase>-<stem>`, at most 64 characters with the path hash retained), `path`, `phase`,
-  `kind`, `effort`, `skill`, `mode` (`autonomous` | `attend` | `relay`),
-  `agent`, `model` (`null` = selected agent default, omit `--model`),
-  `reasoning_effort`, `provenance` (the winning origin and reason for every
-  profile field),
-  `worktree` (`action`: `reuse` | `fork-child` | `create-top-level` | `main` | `pin-detached`,
-  `path`, `branch`, `base_branch`, `exists`, `parent_path` — the existing
-  worktree a created one is linked beneath, `null` when none — and `start_sha`,
-  a full 40- or 64-character lowercase hex commit object ID for `pin-detached`,
-  `null` otherwise; `branch` is `null` for `pin-detached`, never `HEAD` or `""`), `merge_target`,
-  `auto_merge` (bool — core's verdict that §4.3 step 0 may answer this
-  dispatch's finish-relay `merge` question itself; true only for a non-root
-  item at `finish` whose merge target is its owner's integration branch, with
-  `supervise_merges` off), `prompt`.
-- `advances[]` — each: `path`, `reason`, `mode` (`advance`, `return`, or `repair`), `worktree`/`branch` (the epic's
-  already-known worktree, when one exists — `null` otherwise, e.g. before any
-  worker has ever been dispatched for this epic).
-- `workspace_preparations[]` — workspace branch anchors to prepare before
-  launching their owners. Each entry carries `owner_path`, `owner_phase`,
-  `worktree`, `branch`, and `base_branch`.
+- `repo` — `{"name": "<declared name>", "path": "<code repository>", "source": "frontmatter|flag|sole|fallback"}`, root metadata for the repository `workspace.yaml` declares, or `null` when none resolves. Each dispatch carries its own `repo={name,path,source}` and its own computed `placement`; the top-level `repo` is root metadata only. `source` says why that repository was chosen; `frontmatter` means the item (or an ancestor) sets `repo:`.
+- `dispatches[]` — each entry: `key` (the exact planner session name, `gw-<phase>-<stem>`, at most 64 characters with the path hash retained), `path`, `phase`, `kind`, `effort`, `skill`, `mode` (`autonomous` | `attend` | `relay`), `agent`, `model` (`null` = selected agent default, omit `--model`), `reasoning_effort`, `provenance` (the winning origin and reason for every profile field), `placement` (below), `merge_target`, `auto_merge` (bool — core's verdict that §4.3 step 0 may answer this dispatch's finish-relay `merge` question itself; true only for a non-root item at `finish` whose merge target is its owner's integration branch, with `supervise_merges` off), `prompt`. `placement` says where the item's code lives, computed by `placement_for` and stated as a fact, never an action: `{"repo": {"name", "path"}, "branch", "worktree", "parent_branch", "parent_worktree", "owner_path", "slug"}`. `worktree` and `branch` are the item's own deterministic checkout; `parent_worktree` and `parent_branch` are its enclosing owner's (an epic's) in the same repository, or the repository's working checkout and default base for a root; `owner_path` is that owner, `null` for a root. A child's placement therefore names its epic's branch and worktree as parent. `gw work dispatch` makes the placement real before launching; nothing here asks the coordinator to create, adopt or pin a checkout. A dispatch with no code repository (a workspace-only item) carries `placement: null`.
+- `advances[]` — each: `path`, `reason`, `mode` (`advance`, `return`, or `repair`).
 - `blocked[]` — each: `path`, `kind` (one of exactly `deps`, `capacity`,
   `affects-overlap`, `effort-required`, `decisions`, `human`,
-  `relay-untailed`, `worktree-pending`, `workspace-pending`, `worktree-unsupported`,
+  `relay-untailed`, `worktree-pending`,
   `worktree-unprovable`, `worktree-ambiguous`, `cross-repo-child`, `invalid`),
   `reason`. The closed vocabulary is `BLOCKED_KINDS` in
   `gw_orchestrate.commands` — if a `kind` arrives that isn't in
@@ -331,59 +307,6 @@ If any resolution is `attend`, the live worker consumes the attend pool. This
 keeps its slot when it writes a spec or plan while still running. New
 candidates resolve against their actual current attributes.
 
-#### Prepare repository integration anchors before launching
-
-`preparations[]` contains `owner_path`, `owner_phase`, `repo`, `branch`,
-`base_branch`, and `worktree`. It reserves no worker slot. Save the complete
-plan, then process preparations **serially**:
-
-```bash
-uv run --no-project --python 3.12 python "$PLUGIN_ROOT/skills/auto-drive/references/launch-worker.py" prepare \
-  --plan-file <saved-plan.json> --owner <owner_path> --repo-name <repo.name> \
-  --workspace <workspace-path>
-```
-
-The repository name selects the emitted preparation; it never overrides an
-item's assignment. The helper captures an owner/ancestor/configuration guard,
-re-fetches `gw work orchestrate` with the same root/live keys, and refuses a
-changed preparation. It adopts one proven deterministic checkout or creates
-an explicitly repository-selected top-level worktree with setup skipped and
-no agent. A durable Orca comment marker identifies its creation across crashes.
-If Orca prefixes the name, only that marked, clean checkout at the expected
-base tip may be renamed with non-force `git branch -m`. Existing branches are
-never overwritten; ambiguous inventory, marker, or missing checkout requires
-repair. Creation errors trigger observation, never another suffixed create.
-
-The helper uses `record-preparation.py snapshot|record` as a thin adapter to
-core. In the source plugin it selects an absolute source project with
-`uv run --project <source-root> --package gw-orchestrate python`; installed
-plugins discover the `gw` Python interpreter and probe guarded preparation
-capability. An incompatible or undiscoverable runtime refuses explicitly.
-Neither path resolves the runtime from the coordinator's working directory. The record call carries `--root <owner_path> --phase <owner_phase>
---repo <repo.name>` and the captured guard. Core rechecks owner/ancestor and
-repository configuration bytes under the existing decision-owner lock and
-re-reads that set under the bundle mutation lock immediately before effects,
-before recording scalar or foreign `repo_stamps`. Orca runs outside that lock. A
-refused stamp leaves a discoverable checkout and authorizes no child launch.
-
-**Replan after every attempt**, successful or refused, before processing
-another preparation or dispatch. Launch children only from a fresh plan after
-the anchor stamp persists. Failure blocks its dependents; unrelated valid
-fresh dispatches can still consume the shared free slots. Do not manufacture
-a worker/task for preparation. Use `dispatch.repo.path` for both normal and
-retry placement arguments; the top-level plan `repo` is root metadata only.
-
-**Workspace preparations.** `workspace_preparations[]` carries `owner_path`,
-`owner_phase`, `worktree`, `branch` and `base_branch`. It reserves no worker
-slot, and its items are blocked `workspace-pending`. Process the entries
-serially, after the code preparations, with
-`gw work prepare-workspace <owner_path> --apply --json`. gw creates the
-worktree itself, runs no Orca command, and records `repo_stamps[_workspace]`.
-A `note` (workspace placement disabled) means the entry would not have been
-emitted: replan. A refusal (`workspace-unprovable`, `workspace-ambiguous`,
-`stamp-refused`, `not-entitled`) blocks that owner's dependents until a human
-repairs it. **Replan after every attempt**, exactly as for code preparations.
-
 ### 2.3 Terminal?
 
 `terminal: true` → go to Wrap-up (§5), including its fresh launch-proof gate,
@@ -415,14 +338,7 @@ rather than guessing. Compare the planned mode and transition destination to
 this fresh evidence. Do not treat a newly observed phase alone as
 authorization for an entry planned earlier.
 
-For every applicable entry in `advances[]`: `gw work advance <path from entry> --from <expected-phase> --no-infer-worktree`,
-adding `--return` when `mode: return` and forwarding any other planned
-return/mode flags. Add `--worktree <entry.worktree> --branch <entry.branch>` only when the entry
-carries them (non-`null`) and its mode is not `repair`. **`--no-infer-worktree` is what keeps it location-independent**: the advance
-never infers a placement from wherever the coordinator happens to be running.
-Only the orchestration root's entry can carry a
-pair — `plan()` never attaches the epic worktree to a descendant's advance, and
-a descendant's own recorded placement survives an advance that names none.
+For every applicable entry in `advances[]`: `gw work advance <path from entry> --from <expected-phase>`, adding `--return` when `mode: return` and forwarding any other planned return/mode flags. Never add `--worktree`/`--branch`: an advance entry carries no placement, because placement is computed, not relayed. The advance never reads placement from wherever the coordinator happens to be running.
 Preserve the captured expectation across retries, including sizing answers.
 If the planned action is no longer applicable or advance returns phase-mismatch,
 discard the stale action and restart planning at section 2.1. Never remove the
@@ -443,55 +359,11 @@ you know is out of date).
   `expected-phase` from its `phase`, and verify that effort sizing is still
   required with no unrelated blocker before asking. The expectation captured
   before the answer stays fixed. Run
-  `gw work advance <work-path> --from <expected-phase> --effort <value> --no-infer-worktree`, then restart the cycle at §2.1.
+  `gw work advance <work-path> --from <expected-phase> --effort <value>`, then restart the cycle at §2.1.
   If sizing is no longer required or advance returns phase-mismatch, discard
   this action and replan at §2.1 without changing the captured expectation.
   Never add `--worktree`/`--branch` to it: sizing is not a placement.
-- **Every other kind** (`deps`, `capacity`, `affects-overlap`, `decisions`,
-  `human`, `relay-untailed`, `worktree-pending`, `workspace-pending`, `worktree-unsupported`,
-  `worktree-unprovable`, `worktree-ambiguous`, `cross-repo-child`, `invalid`):
-  print one line each (`blocked <work-path> (<kind>): <reason>`) and take no action.
-  `workspace-pending` means the workspace branch is not yet prepared: process
-  `workspace_preparations[]` under §2.2 and replan.
-  Readers at `design`/`plan` require provable repository and committed-ref
-  evidence for `pin-detached`; missing evidence is `worktree-unprovable` and
-  a provisioning capability gap is `worktree-unsupported`. Never fall back to
-  a mutable anchor. A code stage that may have run but whose worktree cannot
-  be found (a lost stamp at `execute`/`finish`) needs a human decision. `capacity` and
-  `worktree-pending` resolve themselves next cycle as slots/worktrees free
-  up. A `capacity` reason names its pool: `no worker slot free` is `max_parallel`,
-  `no attend slot free` is `max_attend`. An attend-pool block is expected while
-  a design session waits on the human; it is not a stall.
-  `deps`, `affects-overlap`, `human`, `cross-repo-child`, and `invalid`
-  need a human decision outside this loop; `decisions` is a third case — it
-  neither self-resolves nor needs a decision outside this loop, it's resolved
-  *inside* this loop by the coordinator's own CLI call, but only once the
-  user tells you to — see §2.5.1. `relay-untailed` and `worktree-unsupported`
-  are a fourth: both are configuration faults that will recur every cycle
-  until someone edits something outside this loop, so report them once and
-  don't wait on them. `cross-repo-child` means a child resolves (via `repo:`)
-  to a different repository than its epic; placing it is not supported yet —
-  report it and move on.
-  `relay-untailed` means a relay-mode variant has no `prompt_tail`, so a
-  dispatched worker would drop into an interactive menu unattended — the fix
-  is a matching rule with `prompt_tail` in the workflow file named
-  by `workflow_config`, or its local sibling (`workflow.local.yaml`
-  for the default path), followed by `gw config sync`. The reason string names
-  the variant. `worktree-unsupported` means the plan
-  needs a worktree provisioned and the target backend can't; `gw work
-  orchestrate` passes `provisions_worktrees=True` today and exposes no flag
-  to change it, so this kind should not reach this skill through the CLI —
-  if one arrives, say so rather than working around it. Note:
-  `affects-overlap` means another live or already-planned dispatch holds an
-  overlapping write claim; the reason names the scope and its holder. Only
-  execute and finish hold `affects` claims, so a design or plan stage is never
-  `affects-overlap` and never causes one (it reads a pinned commit). An item
-  with empty `affects` claims its whole repository (the reason says
-  `<repo> (whole repository)`), and a `gw:workspace` item claims the
-  workspace (`workspace`), so either can serialize behind, or ahead of, its
-  executing or finishing siblings. `decisions` means an open ledger entry is
-  holding the item's re-dispatch; the entry itself is named in `open_decisions[]` below,
-  and answering it clears the block on the next cycle.
+- **Every other kind** (`deps`, `capacity`, `affects-overlap`, `decisions`, `human`, `relay-untailed`, `worktree-pending`, `worktree-unprovable`, `worktree-ambiguous`, `cross-repo-child`, `invalid`): print one line each (`blocked <work-path> (<kind>): <reason>`) and take no action. `worktree-pending` means a worktree in the item's computed owner chain is held by another live or already-planned dispatch (a sibling's finish merging into the epic, say); the reason names the worktree and its holder. `worktree-unprovable` and `worktree-ambiguous` mean the planner could not prove a finish's source or target checkout (a lost or ambiguous stamp at `execute`/`finish`); a code stage that may have run but whose worktree cannot be found needs a human decision. `capacity` and `worktree-pending` resolve themselves next cycle as slots/worktrees free up. A `capacity` reason names its pool: `no worker slot free` is `max_parallel`, `no attend slot free` is `max_attend`. An attend-pool block is expected while a design session waits on the human; it is not a stall. `deps`, `affects-overlap`, `human`, `cross-repo-child`, `worktree-unprovable`, `worktree-ambiguous` and `invalid` need a human decision outside this loop; `decisions` is a third case — it neither self-resolves nor needs a decision outside this loop, it's resolved *inside* this loop by the coordinator's own CLI call, but only once the user tells you to — see §2.5.1. `relay-untailed` is a fourth: a configuration fault that will recur every cycle until someone edits something outside this loop, so report it once and don't wait on it. `cross-repo-child` means a child resolves (via `repo:`) to a different repository than its epic; placing it is not supported yet — report it and move on. `relay-untailed` means a relay-mode variant has no `prompt_tail`, so a dispatched worker would drop into an interactive menu unattended — the fix is a matching rule with `prompt_tail` in the workflow file named by `workflow_config`, or its local sibling (`workflow.local.yaml` for the default path), followed by `gw config sync`. The reason string names the variant. A placement that cannot be realised is never a plan-time blocker: it is a dispatch-time `placement-refused` (§3's hold recipe). Note: `affects-overlap` means another live or already-planned dispatch holds an overlapping write claim; the reason names the scope and its holder. Only execute and finish hold `affects` claims, so a design or plan stage is never `affects-overlap` and never causes one. An item with empty `affects` claims its whole repository (the reason says `<repo> (whole repository)`), and a `gw:workspace` item claims the workspace (`workspace`), so either can serialize behind, or ahead of, its executing or finishing siblings. `decisions` means an open ledger entry is holding the item's re-dispatch; the entry itself is named in `open_decisions[]` below, and answering it clears the block on the next cycle.
 
 - **Decisions**: after the blocker lines, print one line per entry in
   `open_decisions[]`, then one per entry in `assumed_decisions[]` — both from
@@ -675,11 +547,7 @@ Without a complete fresh snapshot, report inspection and move no cards.
 uv run --no-project --python 3.12 python references/launch-worker.py attend-cards --tasks <task-list-json> --classification <classify-restart-json>
 ```
 
-It prints `set_in_review`, `release_candidates` (worktrees used by an attend
-Task in this Run with no live attend dispatch left) and `skipped` (Tasks whose
-frozen envelope does not decode, predates `mode`, or names no `path:`
-worktree — they never move a card). The frozen V2 `mode` and `worktree_path` are the
-source, never the current plan or an inferred path. Then:
+It prints `set_in_review`, `release_candidates` (worktrees used by an attend Task in this Run with no live attend dispatch left) and `skipped` (Tasks whose frozen envelope does not decode or predates `mode` — they never move a card). The frozen V2 `mode` and `worktree_path` are the source, never the current plan or an inferred path. `gw work dispatch` launches every worker into its computed worktree and always freezes that path as `worktree_path`, so the join is total: every attend Task it dispatched maps to a card. Then:
 
 1. For each `set_in_review` path:
    `orca worktree set --worktree path:<p> --workspace-status in-review`
@@ -731,124 +599,40 @@ classification is an ordinary fresh dispatch — run §3 unmodified.
 1. Read the checkpoint §2.1 joined to this key: its frontmatter (`item`,
    `phase`, `dispatch_key`, `decision`, `created`) and its `## Question`
    section.
-2. Find the checkpointed attempt's Task/Dispatch: refresh
-   `task-list --run <run_id> --json`, find the Task whose title equals the
-   checkpoint's `dispatch_key`, and take its latest attempt's Dispatch id
-   (§2.1's definition — the classifier row's `dispatch_id`) and
-   its full untruncated `spec` text — the same lookup the Failure Question's
-   Retry branch (§4.1) already performs, reused here rather than
-   re-implemented. Save that spec text to a temp file; it is step 5's
-   `--spec`.
+2. Find the checkpointed attempt's Task/Dispatch: refresh `task-list --run <run_id> --json`, find the Task whose title equals the checkpoint's `dispatch_key`, and save its full untruncated `spec` text to a temp file (step 6's `--spec`). The checkpointed attempt is the Task's newest Dispatch created before the checkpoint's `created:` instant: every Dispatch on this Task is already in §2.1's worker-list snapshot (rows joined by `taskId`); for each, read `orca orchestration worker-show --dispatch <id> --json` → `result.dispatch.createdAt`. Normalize both to UTC first — Orca renders some of these as `YYYY-MM-DD HH:MM:SS` with no zone suffix, and those are UTC. The parked attempt necessarily started *before* it wrote its own checkpoint, so pick that one, never simply the latest attempt: a resume that already ran is a later Dispatch on the same Task.
 3. Read the decision named by the checkpoint's `decision:` key:
    `gw work decision list <owner-path> --json`. **Still `open` → stop here and
    leave the key alone**; the park is still waiting and §2.5's hold line
    already reports it. `answered` → take the entry's `prose` `**Answer:**`
    block as the answer text and continue.
-4. **Has this checkpoint already been resumed?** Check before launching
-   anything. Nothing writes a "resumed" marker, and `answered` is permanent —
-   a decision is never un-answered — so without this check a resumed attempt
-   that parks again or dies would leave the same answered decision and the
-   same checkpoint on disk and be resumed again every cycle, forever, at
-   `gw work wait` intervals. Derive the answer from the Task's own Dispatch
-   history rather than adding a new write path: every Dispatch on this Task is
-   already in §2.1's worker-list snapshot (rows joined by `taskId`). For each,
-   read `orca orchestration worker-show --dispatch <id> --json` →
-   `result.dispatch.createdAt`, and compare it against the checkpoint's
-   `created:` instant. Normalize both to UTC first — Orca renders some of
-   these as `YYYY-MM-DD HH:MM:SS` with no zone suffix, and those are UTC.
-   The parked attempt necessarily started *before* it wrote its own
-   checkpoint, so **any Dispatch created at or after the checkpoint's
-   `created` instant is a resume that already ran.** If one exists, leave this
-   key alone and print
-   `parked <key>: already resumed as <dispatch_id>, leaving it alone` —
-   ordinary state (live, or blocked again with a *new* checkpoint and a *new*
-   open decision) governs it from here.
-5. Recover the original saved dispatch evidence joined to the Task from step 2:
-   `gw work dispatch` saved the entry at
-   `references/orca-placement/<key>.dispatch.json` and journaled the attempt
-   at its `record_path`. For `pin-detached`, require the original saved reader
-   dispatch input and preparation evidence (that entry and that attempt), and
-   verify that its key/repository match this Task and that its
-   `start_sha` matches the baseline in the frozen Task prompt and the
-   journaled `placement.start_sha`. Missing, malformed or mismatched original
-   evidence refuses resume: leave the Task/checkpoint and checkout evidence
-   intact and surface the refusal for inspection. Never substitute this
-   cycle's planner baseline, even if the source branch has advanced. Use that
-   original dispatch JSON for `prepare-reader` (the legacy recipe's reader
-   preparation in `references/dispatch-checks.md`, step 1), with a fresh preparation identity
-   and fresh output path; never reuse the parked reader's checkout. Preserve
-   the original evidence before saving the new result. Require exit 0 before
-   building the resume spec or launching. For non-reader actions, run `place`
-   for this cycle's own `dispatches[]` entry for this path (its `action` will
-   read `reuse`, like any other re-dispatch of an item with a recorded
-   placement), redirecting stdout as the legacy recipe does:
+4. **Has this checkpoint already been resumed?** Nothing writes a "resumed" marker, and `answered` is permanent — a decision is never un-answered — so without a check a resumed attempt that parks again or dies would leave the same answered decision and the same checkpoint on disk and be resumed again every cycle, forever, at `gw work wait` intervals. That check is now `gw work dispatch --retry-of`'s own precondition, taken under the key's execution owner before anything else (step 5): it relaunches only when the journal's latest attempt for the key is the checkpointed Dispatch from step 2, its Task is not superseded and still current in the Run, and no later attempt exists on that Task. A resume that already ran stops `recovery-inspection` with a `failure.detail` naming the later dispatch (`<dispatch_id> was already retried as <later>; leave it alone`): print `parked <key>: already resumed, leaving it alone (<failure.detail>)` and let ordinary state (live, or blocked again with a *new* checkpoint and a *new* open decision) govern it from here. Step 2's choice of the checkpointed attempt, not the latest one, is what lets the verb see an earlier resume.
+5. Relaunch the **same** Task, not a fresh one, with this cycle's saved plan:
 
    ```
-   uv run --no-project --python 3.12 python references/launch-worker.py place --dispatch <dispatch-json> \
-     --repo-path <dispatch repo.path> --out-placement <placement-json-file> \
-     > <workspace>/okf/<dispatch path>/references/orca-placement/<key>.json
+   gw work dispatch <key> --plan <plan> --run <run> --retry-of <dispatch_id> --json
    ```
 
-   record-placement commits this file with the placement; never commit it yourself.
+   `<dispatch_id>` is step 2's. The verb verifies the item's computed worktree without refreshing it (verify-only: the tree is expected to carry the parked worker's uncommitted edits, so neither the parent refresh nor the dirty-tree refusal applies, and no baseline is recorded), journals a new attempt bound to the same Task with `create` skipped, relaunches with `worker-start --retry-of <dispatch_id>` from the Task's frozen spec (agent, model, effort and prompt unchanged), then settles, records, probes and marks the Task `dispatched` exactly as §3 describes. A journaled path that differs from the computed one (an item placed under the old rules) stops `recovery-inspection`: a human re-points it. Branch on every other failure with §3's table, a `placement-refused` included (§3's hold recipe). On success the payload's `dispatch_id` is the new dispatch.
+6. **Send the resume context to the new dispatch. This step is what actually delivers the answer — without it the resume is a no-op.** `--retry-of` reuses the **original, frozen** Task spec and its original prompt: `worker-start`'s `--task` and `--spec` are mutually exclusive, and a retry takes `--task`, so the resumed worker starts on the unmodified original prompt and, left alone, would re-ask the very question this whole protocol exists to stop it re-asking. Compose the resume text once with `resume-spec`:
 
-   `settle-placement` hard-requires `--placement-result` to exist and parse
-   — even for `reuse`/`main` — so this redirect is not optional here either.
-   `<placement-json-file>` is the successful helper output (for a reader, use
-   its fresh output file), holding `["--worktree", "path:<resolved path>"]` —
-   `launch --recovery-placement` opens its argument **as a path** and will
-   not accept an inline JSON literal. Then build the resume spec:
    ```
    uv run --no-project --python 3.12 python references/launch-worker.py resume-spec \
      --spec <the original spec file from step 2> \
      --checkpoint <the checkpoint file path> \
      --answer "<the answer text from step 3>" \
-     --placement <placement-json-file> \
      > <new-spec-file>
    ```
-6. Launch as a retry of the **same** Task, not a fresh one — skip the legacy
-   recipe's create and encode steps in `references/dispatch-checks.md`
-   (build/encode/create) entirely for this key:
-   ```
-   uv run --no-project --python 3.12 python references/launch-worker.py launch --spec <new-spec-file> \
-     --task <task_id from step 2> --dispatch-key <key> --run <run_id> \
-     --retry-of <dispatch_id from step 2> \
-     --recovery-placement <the same placement-json-file from step 5> > <start-json>
-   ```
-7. **Send the resume context to the new dispatch. This step is what actually
-   delivers the answer — without it the resume is a no-op.** `--retry-of`
-   reuses the **original, frozen** Task spec and its original prompt:
-   `worker-start`'s `--task` and `--spec` are mutually exclusive, and a retry
-   takes `--task`, so nothing in `<new-spec-file>`'s *prompt* half ever
-   reaches the worker. (The file is still required — `launch` reads the
-   frozen `agent`/`model`/`effort` envelope out of it, and `resume-spec`
-   composes the resume text in exactly one place.) The resumed worker
-   therefore starts on the unmodified original prompt and, left alone, would
-   re-ask the very question this whole protocol exists to stop it re-asking.
-   Take the new dispatch id from step 6's `worker-start` JSON, slice the
-   `## Resume after park` section out of `<new-spec-file>` (everything from
-   that heading to end of file), and send it down the dispatch handle — the
-   same mechanism, and the same flag shape, §4.4 already uses to answer an
-   escalation:
+
+   Slice the `## Resume after park` section out of `<new-spec-file>` (everything from that heading to end of file), and send it down the new dispatch handle from step 5's payload — the same mechanism, and the same flag shape, §4.4 already uses to answer an escalation:
+
    ```
    orca orchestration send --to dispatch:<new dispatch_id> --type status \
      --subject "Resume after park: <decision.id>" \
      --body "<the ## Resume after park section from <new-spec-file>>" \
      --run <run_id>
    ```
-   A non-zero exit here is a failed resume, not a cosmetic one: say so and
-   route the dispatch into the failure flow (§4.2) rather than leaving a
-   worker running on a prompt that does not know the answer.
-8. Continue at the legacy recipe's step 4 in `references/dispatch-checks.md`
-   (`settle-placement`, then verify and record observed placement) —
-   everything from there is identical to an ordinary legacy dispatch. For
-   non-readers, use this cycle's dispatch and `place` result with
-   `<start-json>`. For readers, use
-   `settle-placement --dispatch <original-saved-reader-dispatch-json>` (the
-   saved entry) with this resume attempt's successful preparation result and
-   `<start-json>`. Record the reader receipt with the original `start_sha`,
-   the freshly verified path and the actual resumed task/dispatch IDs through
-   `gw work record-reader`; retain that evidence together. Neither settlement nor
-   recording may use this cycle's planner entry.
+
+   A non-zero exit here is a failed resume, not a cosmetic one: say so and route the dispatch into the failure flow (§4.2) rather than leaving a worker running on a prompt that does not know the answer.
 
 ### 2.6.1 Self-park: stop the run when only parked work remains
 
@@ -864,7 +648,7 @@ hold at once:
   entry was consumed above or is `parked`-and-still-`open`, and every
   `blocked[]` kind present is one that cannot clear without a human
   (`decisions`, `deps`, `affects-overlap`, `human`, `invalid`,
-  `relay-untailed`, `worktree-unsupported`) — a `capacity` or
+  `relay-untailed`, `worktree-unprovable`, `worktree-ambiguous`) — a `capacity` or
   `worktree-pending` blocker means slots or worktrees free up on their own, so
   keep looping.
 
@@ -1073,39 +857,7 @@ gw work dispatch <key> --plan <scratch>/plan.json --run <run_id> --json
 Then dispatch as usual. The checkpoints are the plan's intended behaviour, so
 this is a heads-up for the human, not a question; never hold the dispatch on it.
 
-It places, creates the Task (title `<key>`, display name `<work-path> · <phase>`),
-launches from the frozen v2 envelope, reads back and verifies the placement,
-records it on eligible items, sets attend worktrees `in-review`, probes
-submission, and marks the Task `dispatched`. It never re-plans. Re-running it
-with the same key resumes a journaled attempt or reports the existing Task; it
-never creates a second one. Why each check exists: `references/dispatch-checks.md`.
-Permissions come from the selected agent's existing settings; dispatch rules
-do not select or promise a permission mode.
-
-Follow `references/dispatch-checks.md` steps 3–5 for recording and refusal
-handling, including workspace-only no-fork dispatches and Epic/Release readers.
-
-**Readers (`pin-detached`).** A `design`/`plan` dispatch is a reader placed
-on a dedicated checkout detached at the plan's `worktree.start_sha`. The verb
-prepares it before the Task exists: it lists the repository's Orca worktrees
-for a checkout already carrying this attempt's marker comment (a crash between
-creation and the journal write is recovered this way, and an ambiguous or
-unverifiable marked checkout refuses — it is never reset), otherwise creates
-one through `orca worktree create --no-parent --setup skip --comment <marker>`,
-verifies the new checkout is clean, correctly rooted and not an integration
-checkout, detaches only that new checkout at `start_sha`, and verifies
-repository, root, detached HEAD, commit and cleanliness again. Settlement
-verifies the observed path equals the prepared one, no parent was attached,
-and the content check still holds; a branch name is never consulted.
-A `pin-detached` dispatch — root or descendant — records a reader receipt
-under `layout.cache_dir / "reader-receipts"` (the `gw work record-reader`
-contract: attempt-keyed, phase-checked, replay-safe) instead of a placement
-stamp; the item page, its stamps and `updated` are untouched.
-Never call `record-placement` for a `pin-detached` dispatch. A later attempt
-at the same key and SHA gets a new marker, so a launched checkout is never
-shared. A
-preparation refusal is `placement-refused` at step `place` with no Task
-created: handle it under §4.2.1, not the four-option failure question.
+It places the item before any Orca call — the placement engine ensures the owner chain outermost first (the epic's worktree, then the item's forked from the epic tip), refreshes each from its parent, and at `execute` records the baseline — then creates the Task (title `<key>`, display name `<work-path> · <phase>`), launches from the frozen v2 envelope into the computed worktree with `--worktree path:<placement.worktree>`, reads back and verifies that Orca reports that path with the computed branch checked out, records the transitional stamps on the item and each owner in its chain, sets attend worktrees `in-review`, probes submission, and marks the Task `dispatched`. Orca learns the worktree's parent and display name from the placement notifier; the coordinator links and names nothing. It never re-plans. Re-running it with the same key resumes a journaled attempt or reports the existing Task; it never creates a second one. Permissions come from the selected agent's existing settings; dispatch rules do not select or promise a permission mode.
 
 **On success** print the dispatch's agent, model and reasoning effort (`default`
 for null), using the attempt matching `task_id`/`dispatch_id` in the durable
@@ -1119,19 +871,12 @@ only if present; do not substitute the saved plan for unobserved placement.
 Run §2.5.3 once now, refreshing §2.1 after the dispatch mutation, so the card
 moves without waiting a cycle. Preserve §4.3's structured ask and §4.4's
 needs-you notice: the human answers in the worker terminal, not here.
-When placement is present, print `dispatched <key> -> <placement.path> on
-<placement.branch>` and one `note <key>: <text>` per `placement.notes` entry.
-For a reader (`placement.branch` is `null` and `placement.start_sha` is set)
-print the detached commit instead:
-
-```
-dispatched <key> -> <observed path> detached at <start_sha>
-```
+When placement is present, print `dispatched <key> -> <placement.path> on <placement.branch>` and one `note <key>: <text>` per `placement.notes` entry.
 
 `probe: inconclusive` can mean either the heartbeat read or transcript read
 failed. Run the manual probe below; the result alone never authorizes Enter.
 
-`delivery` is separate from `probe`. `verified` means this attempt's worker echoed its receipt line (task, dispatch, key and the token from the end of its frozen brief) in assistant text. `unverified` means no matching receipt was seen in a complete transcript window, including a worker that asked for its brief, a heartbeat-only worker, or a legacy attempt without a token; `inconclusive` means the read could not prove absence (terminal source, clipped window, failed read). A new attempt with `--no-probe` reports `skipped`; an existing dispatch invoked with `--no-probe` skips the transcript re-read and preserves its prior journal observation. None of these authorizes Enter, a re-paste, a replacement dispatch or cleanup: report `delivery unverified for <key> (<dispatch_id>)` and follow the missing-receipt runbook in `references/dispatch-checks.md`. For a completed, previously probed attempt with a persisted token and `unverified` or `inconclusive` delivery, re-running the same `gw work dispatch <key>` with probing enabled reads the transcript once and can upgrade a later matching receipt to `verified` without launching anything. An originally skipped probe, a tokenless legacy attempt, or an already verified observation keeps its recorded facts and is not re-read.
+`delivery` is separate from `probe`. `verified` means this attempt's worker echoed its receipt line (task, dispatch, key and the token from the end of its frozen brief) in assistant text. `unverified` means no matching receipt was seen in a complete transcript window, including a worker that asked for its brief, a heartbeat-only worker, or a legacy attempt without a token; `inconclusive` means the read could not prove absence (terminal source, clipped window, failed read). A new attempt with `--no-probe` reports `skipped`; an existing dispatch invoked with `--no-probe` skips the transcript re-read and preserves its prior journal observation. None of these authorizes Enter, a re-paste, a replacement dispatch or cleanup: report `delivery unverified for <key> (<dispatch_id>)` and follow **Missing delivery receipt** below. For a completed, previously probed attempt with a persisted token and `unverified` or `inconclusive` delivery, re-running the same `gw work dispatch <key>` with probing enabled reads the transcript once and can upgrade a later matching receipt to `verified` without launching anything. An originally skipped probe, a tokenless legacy attempt, or an already verified observation keeps its recorded facts and is not re-read.
 
 ### Manual ordered probe (timeout or inconclusive)
 
@@ -1173,17 +918,25 @@ these checks in order. Stop at the first decisive submitted signal:
    recovered; continue normally. If it is still empty, repeat the entire
    probe once, including the fresh heartbeat check immediately before a
    second Enter. After two failed nudges, use the failure question (§4.2).
-   Never nudge a dispatch that has ever heartbeat. Why these checks exist:
-   `references/dispatch-checks.md`.
+   Never nudge a dispatch that has ever heartbeat.
+
+### Missing delivery receipt
+
+- Read the worker's transcript (`orca orchestration worker-read --dispatch <id> --limit 200 --json`) and inspect actual UserPromptSubmit hook output or its attachment for recovery context (`The submitted Orca dispatch was truncated…`) or a refusal (`Dispatch recovery was not verified: <reason>`), including its `(guard: gw <version> at <root>)` stamp. Actual hook output is positive execution evidence; a stamp quoted in a prompt or echoed by an assistant is not. Absence in a missing, limited or clipped transcript cannot prove the hook did not run, even when the first prompt is truncated. Hook execution alone does not prove the model consumed its context or received the complete brief.
+- Hook registration is separate evidence: confirm the installed `gw` plugin's root and version (Claude Code's plugin listing, `<root>/.claude-plugin/plugin.json`) and that `<root>/hooks/hooks.json` registers `dispatch-prompt-guard` under `UserPromptSubmit`. Registration is not execution or delivery proof; if the plugin or registration is missing, correct installation and decide recovery through the normal question path.
+- Suspected stale plugin: compare the observed stamp's root/version and effective registration with the installed `<root>/hooks/dispatch-prompt-guard.py` source or revision, checking its recognition of the exact observed Orca wrapper sentence. Copies with the same unreleased version may contain different implementations, so version alone cannot establish stale or current code. If installed code lacks wrapper recognition, update the plugin, then decide recovery through the normal question path.
+- Lookup refusal: an actual hook diagnostic `Dispatch recovery was not verified: <reason>` names why; answer the worker's question with the frozen brief from the Task spec (`orca orchestration task-list`/`dispatch-show --task <id> --preamble`) as the coordinator, never by typing into its terminal.
+- Recovered but no receipt: actual recovery output shows the guard emitted the brief, while model consumption remains unproven until the matching receipt appears. Ask the worker through orchestration to emit its receipt line after reading the complete brief. For a completed, previously probed attempt with a persisted token and `unverified` or `inconclusive` delivery, re-run `gw work dispatch <key>` with probing enabled to read the same attempt's transcript once; a later matching receipt can upgrade delivery to `verified` without launching anything. An originally skipped probe, tokenless legacy attempt, or already verified observation keeps its recorded facts and is not re-read.
+- Never nudge, re-paste, reroute or settle on a missing receipt alone. A heartbeat or observed submitted conversation still vetoes Enter.
 
 **On failure** stdout is `{"error": {..., "payload": <envelope>}}`. Branch on
 `error.payload.failure.reason`:
 
 | `reason` | Do |
 |---|---|
-| `placement-refused` | Print `PLACEMENT REFUSED <key>: <detail>`. No Task was created. For a `pin-detached` entry this is a reader preparation refusal: go to §4.2.1 (a checkout may have been allocated; it is left for inspection). Otherwise plan nothing that depends on this item; surface it; the key is re-proposed once the cause is fixed. |
+| `placement-refused` | No Task, no envelope and no journal attempt exists: the engine refused before any Orca call. Follow **The hold recipe for `placement-refused`** below. |
 | `placement-mismatch` | Print `PLACEMENT MISMATCH <key>: <detail>` and go to the failure question (§4.2). |
-| `placement-unrecorded` | Print `PLACEMENT UNRECORDED <key>: <refusal or detail>` and enter inspection: preserve the Task, key and worktree; do not advance, re-record, fork, stop or release. |
+| `placement-unrecorded` | The worker is running in its computed worktree, but a transitional stamp on the item or an owner was not written. Print `PLACEMENT UNRECORDED <key>: <failure.refusal>: <failure.detail>` and enter inspection: preserve the Task, key and worktree; plan nothing that depends on this item; do not call `gw work advance` to stamp it, do not re-record with a new phase, do not start another dispatch, and do not stop or release the worker without the authority §4.1.1 requires. A `null` `failure.refusal` is a failed application or verification, or an owner already stamped on a different checkout (a legacy Orca-named worktree), which a human re-points by hand. Dispatch itself writes no stamp now (the `record` step is a journal no-op), so this row appears only when resuming a Run journaled before computed placement. A lost response is not a refusal: re-run the same `gw work dispatch <key>`, which resumes the journaled `record` step without launching anything. |
 | `launch-failed`, `receipt-mismatch`, `outcome-unknown`, `unsent`, `task-create-failed`, `task-update-failed` | Failure question (§4.2), with `failure.task_id`/`failure.dispatch_id` reported. For `outcome-unknown` and any recovery uncertainty, inspect the full Task spec, ambiguous start response and its `stage`/`failedStage`/`recovery` hints, plus fresh `worker-show` evidence. A missing terminal proves nothing. Retain IDs and resources; the failure question never authorizes blind retry. |
 | `recovery-inspection`, `record-invalid` | Inspection: report every id in `failure`, the `record_path`, and `failure.step`. Never re-run `dispatch` blind. |
 | `plan-invalid`, `key-not-in-plan`, `override-invalid` | The plan or a reroute is wrong: report it and replan next cycle. |
@@ -1191,10 +944,9 @@ these checks in order. Stop at the first decisive submitted signal:
 A payload of `null` means the command failed before dispatching (workspace,
 usage): `error.reason`/`error.message` say why.
 
-The `launch-worker.py` primitives (`place`, `prepare-reader`, `encode`,
-`create`, `launch`, `settle-placement`) remain callable for a coordinator
-resumed on the old recipe, and for the park-resume (§2.6) and retry (§4.1)
-paths, which relaunch an existing Task; new dispatches do not use them.
+**The hold recipe for `placement-refused`.** The coordinator prints `PLACEMENT REFUSED <key>: <refusal.kind>: <refusal.detail>`, then files one open decision on the item with `gw work decision add <item-path> --status open --question "Placement refused (<kind>) for <branch> at <worktree>: <detail>"`, a plain question hold rather than `--hold park` because no Task and no checkpoint exist, and, for `refresh-conflict`, the answer instruction "resolve the merge of `<parent_branch>` into `<branch>` in `<worktree>`, commit, then answer this decision". An item held by an open decision is excluded from dispatch (auto-drive C4), so the next cycle skips it until a human answers (`gw work decision answer <item-path> <D-id> --answer …`); the following dispatch runs place again, which now refreshes cleanly, and the hold is over. No Task exists, so nothing is stopped or released. This is the park-shaped hold the epic names in §4.2.
+
+`<refusal.kind>` is `error.payload.failure.refusal` and `<refusal.detail>` is `error.payload.failure.detail`, both verbatim from the engine; `<branch>`, `<worktree>` and `<parent_branch>` come from the dispatch entry's `placement` block. Carry the `refresh-conflict` answer instruction with `--rationale`. Before filing, read `gw work decision list <item-path> --json` and file nothing when an open decision with the identical question already exists, so a refusal seen again before the next plan is held once. The kind is one of `unknown-item`, `git-unavailable`, `parent-unresolved`, `foreign-checkout`, `occupied`, `dirty-worktree`, `refresh-conflict`, `timeout`, `wrong-phase`, `already-started` or `not-finished`; every kind takes this one shape, with the kind in the question. Plan nothing that depends on this item while it is held.
 
 ### Gates
 
@@ -1225,7 +977,7 @@ It reads `payload` (`taskId`, `dispatchId`, `outcome`) and checks Orca's
   → §4.1.1. Never the failure question by default: retry/skip/stop is wrong
   for work that may already be done.
 
-**Gate refusal.** A `worker_done --outcome failed` whose subject starts with `gate refused: <code>` is the `execute -> finish` gate failing closed, not a crashed worker. Do not re-dispatch the stage blindly. Show the human the code and the body's detail and ask whether to fix the cause (re-dispatch execute) or bypass exactly that code. On a bypass, run `gw work advance <path> --from execute --skip-gate <code> --reason "<the human's reason>" --actor <the human's handle> --no-infer-worktree` yourself — workers never pass `--skip-gate` — then continue the loop from `gw work orchestrate`.
+**Gate refusal.** A `worker_done --outcome failed` whose subject starts with `gate refused: <code>` is the `execute -> finish` gate failing closed, not a crashed worker. Do not re-dispatch the stage blindly. Show the human the code and the body's detail and ask whether to fix the cause (re-dispatch execute) or bypass exactly that code. On a bypass, run `gw work advance <path> --from execute --skip-gate <code> --reason "<the human's reason>" --actor <the human's handle>` yourself — workers never pass `--skip-gate` — then continue the loop from `gw work orchestrate`.
 
 - **Success branch**: refresh the full task-list and worker-list and run
   §2.1's classifier before acknowledging the delivery. Require its `settled`
@@ -1595,7 +1347,7 @@ step is what makes the report worth writing.
    - **Send it back**:
      1. Run `gw work next <path> --json` and require `phase: finish`. If the item is not at `finish`, report that plainly and do not advance.
      2. If the send-back is for work beyond the unchecked coverage lines (for example new plan tasks or review findings), name each piece with `--return-scope "<one line>"`. Otherwise omit it to return the coverage obligations.
-     3. Run `gw work advance <path> --from finish --return [--return-scope …] --no-infer-worktree` and require success. On `return-scope-required`, ask for scope. On `return-pending`, inspect and do not retry with different scope. After success, run `gw work next <path> --json` and read `carried_context.slots.execute_return.data.return_id` for `<return-id>`.
+     3. Run `gw work advance <path> --from finish --return [--return-scope …]` and require success. On `return-scope-required`, ask for scope. On `return-pending`, inspect and do not retry with different scope. After success, run `gw work next <path> --json` and read `carried_context.slots.execute_return.data.return_id` for `<return-id>`.
      4. Read the execute key's attempt state fresh using §2.1. If a settled Task exists for the key, run `gw work reroute <key> --run <run_id> --reason "execute return <return-id>"` with no agent, model or effort overrides and require success. If there is no prior Task, skip the reroute. On a live, outcome-unknown or ambiguous attempt, stop and report.
      5. Replan (§2.2) and dispatch.
 
@@ -1625,8 +1377,8 @@ and report the retained or uncertain terminal for wrap-up's confirmed sweep.
    and execute the plan per
    [finish-cleanup.md](../finishing-relay/references/finish-cleanup.md),
    including the relay's `deferred` row when it now returns `remove`: its
-   terminal is already released. If the coordinator cwd is inside an item worktree, its row comes back `deferred`;
-   leave it for a later sweep from another directory.
+   terminal is already released. Removal runs from the coordinator's own directory through `gw work place <path> --remove`. If the coordinator cwd is inside an item worktree, its row comes back `deferred`;
+   leave it for wrap-up's sweep from another directory.
 3. Print one line per removed or skipped row. A refusal is one line. Nothing
    here changes item state, retries, or holds the delivery.
 
@@ -1636,74 +1388,18 @@ Used from two places: `worker_done --outcome failed` (above) and a dead
 worker discovered outside any `worker_done` message (§2.1 or §2.7's
 wait-timeout `worker-show`) — the design's no-auto-retry policy applies to
 both identically, so it's specified once here, not duplicated.
-This question requires an existing Task. Reader preparation failure before
-task-create goes to §4.2.1 instead; it cannot use this question's Skip branch.
+This question requires an existing Task. A `placement-refused` before any Task exists is §3's hold recipe instead; it cannot use this question's Skip branch.
 
 One `AskUserQuestion` with exactly four options — *retry* / *reroute* /
 *skip this item* / *stop the run*:
 
-- **Retry**: retry only when Orca's failure response and recovery inspection
-  explicitly authorize it. Read the existing task from full
-  `task-list --run <run_id> --json`, save its untruncated `spec`, and validate
-  the envelope. Missing, malformed, truncated, or wrong-key state blocks
-  recovery. Never consult edited dispatch configuration or a fresh plan for
-  this task. Preserve the original requested placement and observed allocated
-  resource evidence. For non-reader actions, follow Orca's recovery verdict
-  so an allocated worktree is reused rather than duplicated.
-
-  For `pin-detached`, reconcile authoritative Orca request/dispatch state
-  before preparing anything. Uncertain launch stays in inspection; neither a
-  timeout nor a missing receipt proves the checkout was unlaunched. A new
-  dispatch attempt requires a fresh preparation identity: never reuse a previously launched reader checkout,
-  even if its worker has settled and the key/SHA are unchanged. Recover the
-  same conclusively unlaunched allocation only with its durably saved identity.
-  In both cases invoke the legacy recipe's `prepare-reader` (step 1 in
-  `references/dispatch-checks.md`) using the saved dispatch entry
-  (`references/orca-placement/<key>.dispatch.json`) and a fresh output path;
-  require exit 0 before launch. Retain the original SHA and profile. As in
-  §2.6's reader resume, require original dispatch/preparation evidence
-  matching the frozen Task prompt's baseline;
-  missing or mismatched evidence refuses rather than using a current plan.
-  Preserve the prior preparation result under
-  its attempt directory before saving the new result at
-  `references/orca-placement/<key>.json`. Use the successful fresh argv file
-  as `<recovery-approved-placement-json>` below. Never `place` a reader or
-  derive authorization from an old output file.
-
-  For an existing Task with an authorized retry, run:
+- **Retry**: retry only when Orca's failure response and recovery inspection explicitly authorize it. Timeout, absent output, missing terminal, or ambiguous start never authorizes retry; preserve task/dispatch identities and follow recovery. Take the failed attempt's Dispatch id (`failure.dispatch_id`, or the latest attempt §2.1 reports for the Task) and run, with this cycle's saved plan:
 
   ```
-  uv run --no-project --python 3.12 python references/launch-worker.py launch --spec <saved-task-spec> \
-    --task <task_id> --dispatch-key <task-title> --run <run_id> \
-    --retry-of <dispatch_id> \
-    --recovery-placement <recovery-approved-placement-json> > <start-json>
+  gw work dispatch <key> --plan <plan> --run <run> --retry-of <dispatch_id> --json
   ```
 
-  `--recovery-placement` opens its argument **as a path** holding a bare JSON
-  argv list — the same shape `place --out-placement` or `prepare-reader`
-  writes, not the keyed object its stdout redirect produces. Readers use only
-  the successful fresh output just prepared. For non-readers, get that argv the sanctioned way: either
-  re-run `place` against the recovery-approved worktree to regenerate it, or
-  lift the `placement_argv` array out of the saved `place` result
-  (`references/orca-placement/<key>.json`) into its own file. Never
-  hand-assemble it (`references/dispatch-checks.md`).
-
-  The frozen envelope retains the originally requested placement; the explicit
-  recovery placement is the argv Orca authorized after accounting for observed
-  allocated resources (for example, `path:<allocated path>` instead of a second
-  creation). The recipe repeats the frozen agent/model/effort and verifies
-  the new requested/effective receipt. `--retry-of` alone does not inherit
-  those values. Timeout, absent output, missing terminal, or ambiguous start never
-  authorizes retry; preserve task/dispatch identities and follow recovery.
-  An explicit reroute is a new deliberate dispatch decision and task identity.
-  Then run `settle-placement` with the saved `place` result for non-readers,
-  or this attempt's successful `prepare-reader` result for readers
-  (`references/orca-placement/<key>.json`), and the retry's `<start-json>`.
-  Readers pass the saved reader dispatch entry to settlement and record the
-  original `start_sha` with the retry's actual task/dispatch IDs through
-  `gw work record-reader`. The allocated worktree still owes its placement
-  checks and, for a code creation, planned lineage. Once
-  the retry's own placement assertion passes, record its observed placement exactly as `references/dispatch-checks.md` describes; never change its frozen envelope.
+  This is the same relaunch as §2.6's park-resume. The verb refuses `recovery-inspection` unless the journal's latest attempt for the key is `<dispatch_id>`, its Task is not superseded and still current, and no later attempt exists; it then verifies the item's computed worktree without refreshing it, journals a new attempt on the same Task with `create` skipped, relaunches with `worker-start --retry-of <dispatch_id>` from the Task's frozen spec, and settles, records, probes and marks it `dispatched` as §3 describes. The frozen spec keeps the original agent, model, effort and prompt: never consult edited dispatch configuration for this Task. Branch on the result with §3's table. Take the new `dispatch_id` from the payload; there is no resume text to send, because unlike a park nothing was answered. An explicit reroute is a new deliberate dispatch decision and task identity.
 - **Reroute**: ask for a reason and optional agent, model, and reasoning effort.
   This deliberately supersedes the settled Task and creates a new Task identity
   on the next cycle. Run:
@@ -1716,8 +1412,7 @@ One `AskUserQuestion` with exactly four options — *retry* / *reroute* /
   On `reroute-live`, explain that the worker must be stopped first through
   the existing Stop path; retain its Task and Dispatch IDs until settlement
   is proven. On success, the next cycle re-proposes the key and `gw work
-  dispatch` applies the journaled override (a rerouted reader gets a fresh
-  checkout under its new attempt marker). An uncertain outcome or
+  dispatch` applies the journaled override. An uncertain outcome or
   `recovery-inspection` requires inspection, never a blind reroute.
 - **Skip**: `orca orchestration task-update --id <task_id> --status blocked
   --run <run_id>`. The durable `blocked` status distinguishes this deliberate
@@ -1735,35 +1430,6 @@ One `AskUserQuestion` with exactly four options — *retry* / *reroute* /
 
 Identical to the `outcome: failed` branch above — run the failure question.
 Triggered from §2.1's live-derivation or §2.7's wait-timeout `worker-show`.
-
-### 4.2.1 Reader preparation failure before Task creation
-
-`gw work dispatch` reports a reader's preparation refusal as
-`placement-refused` at step `place` with `task_id: null`: no Task exists yet,
-so use a separate question with exactly two options — *retry preparation* /
-*stop the run*. Do not offer Skip, and never call `task-update` or invent
-task/dispatch IDs. Save the question and answer in the preparation attempt's
-evidence (the result JSON, `record_path` and
-`references/orca-placement/<key>.json`, which names the attempt marker)
-before acting. Preserve the saved dispatch input, identity and result; leave
-any allocated checkout visible for inspection.
-
-- **Retry preparation**: only after the user chooses it and recovery
-  inspection authorizes it. Re-run the same `gw work dispatch <key>` call with
-  the same saved plan: the verb re-derives this attempt's marker, recovers a
-  conclusively unlaunched allocation only when it is still verified (detached
-  at `start_sha`, clean, correctly rooted) and otherwise refuses again; it
-  never re-detaches, resets or removes a checkout. If launch state is
-  uncertain, reconcile authoritative Orca request/dispatch state first —
-  a missing response or receipt is not proof of no launch. Another refusal
-  returns to this question; uncertainty remains in inspection and authorizes
-  no launch. On the legacy recipe, follow its step 1 reader recovery rules
-  in `references/dispatch-checks.md` instead.
-- **Stop the run**: exit the coordinator loop using the existing Stop branch's
-  reporting and still-live-dispatch handling. Include the refused key, reason
-  and evidence paths. Do not return to planning and automatically re-propose
-  this key. A later explicitly resumed run must inspect the saved preparation
-  evidence before trying this key again.
 
 ### 4.3 `question`
 
@@ -2045,21 +1711,7 @@ reconstructed from conversation memory: a fresh session with zero context
 resumes identically to one that's been running for hours. For a journaled
 dispatch attempt, rerun `gw work dispatch` with the key and a saved current
 plan only when the record permits replay; `recovery-inspection` and
-`record-invalid` require inspection, never a blind retry. A legacy dispatch
-whose placement is unrecorded after a restart re-enters the check procedure in
-`references/dispatch-checks.md`:
-write `{"ok": true, "result": {"dispatchId": "<dispatch_id>"}}` as
-`<start-json>` (the helper then finds the worktree through `worker-show`),
-re-run `settle-placement` against its saved
-`references/orca-placement/<key>.json` (a crash between start and the lineage
-`set` leaves a correctly based child with no parent, which this repairs
-without launching anything), then enter the record block at its step 1.
-For a reader, select the preparation result bound to that actual dispatch —
-the journaled attempt's `placement` (`path`, `start_sha`) for a verb dispatch,
-or the archived legacy preparation output. Recheck its detached SHA and clean
-path, then replay `gw work record-reader` with the same actual IDs, phase,
-path and SHA (an identical receipt returns `replayed: true`); do not prepare a
-new checkout to repair the receipt.
+`record-invalid` require inspection, never a blind retry. A dispatch whose `settle` or `record` step is pending after a restart (a crash between start and the readback, or between the readback and the stamp) is resumed by re-running the same `gw work dispatch <key>` with a saved current plan: the verb's journal resumes the pending step without placing or launching again.
 
 **Wrap-up** (§2.3 reported `terminal: true`):
 
@@ -2166,26 +1818,24 @@ new checkout to repair the receipt.
    unmentioned at the end of the run — "epic finished with assumed decisions
    nobody looked at" is exactly the silent failure the ledger exists to
    prevent. Printing costs nothing; skip only when both lists are empty.
-6. **Dirty-workspace check.** Run `git -C <workspace> status --porcelain -- okf/work`.
+6. **Prune finished placements.** For each root item the run drove, run `gw work place <root> --prune --json`. Print each `kept` row with its `why`, and print refusals as warning lines in the run summary; never force. Branches survive until `gw work archive` (run later by `/gw:archive`) deletes the item's merged branches through the same prune. Then **reconcile work-lane indexes.** Run `gw work regen-index --json`. Print one line per reconciled index; print its refusals or incomplete-apply failures as warning lines in the run summary and continue. The verb commits its own writes; never commit.
+7. **Dirty-workspace check.** Run `git -C <workspace> status --porcelain -- okf/work`.
    Non-empty → print one warning line listing the dirty paths (a verb whose commit
    failed, or a hook that timed out). Never commit them yourself. Dirty reference
    files for the owning item are swept by its next committing same-item gw verb;
    for other dirty paths, retry the owning operation or run a gw verb that writes those exact paths.
-7. Stop. The coordinator performs no merge at wrap-up. A root Epic or Release
-   with a scalar branch or foreign `repo_stamps` owns integration targets, so
-   orchestration emits a finish dispatch. The worker consumes every
+8. Stop. The coordinator performs no merge at wrap-up. A root Epic or Release's
+   computed placement owns the integration targets, so orchestration emits a
+   finish dispatch. The worker consumes every
    `finish_targets` entry, records each successful repository integration and
    inspects the durable receipt before exactly one final advance. Partial
    integration survives restart and keeps the owner at `phase: finish`; `pr`,
-   `hold` and `discard` also leave it there. An owner without any source stamp
-   has nothing to merge and may use a planned advance. Report target-by-target
+   `hold` and `discard` also leave it there. An owner without a code
+   placement has nothing to merge and may use a planned advance. Report target-by-target
    integration from the settled worker evidence; `resolved_in` prefers the
    owner's own repository when present, otherwise the first verified repository
    in deterministic order. The receipt holds the complete multi-repository
    evidence. Never merge these targets again at wrap-up.
-
-For disposable native validation and recorded limits, see
-[Multi-repository acceptance](references/multi-repo-acceptance.md).
 
 **User stop** (mid-run, on explicit instruction): exit the loop between
 cycles — never mid-dispatch. Live workers keep running independently; offer
@@ -2199,11 +1849,7 @@ reconcile §2.5.3 before exiting, and report any unresolved or live-and-muted wo
 
 - Any dispatch-decision logic — readiness, worktree choice, model, prompt
   assembly, parallelism caps, `affects` serialization — all owned by
-  `gw work orchestrate`, whose engine is
-  `gw_orchestrate.commands` (`plan()` and the `_resolve_worktree`
-  ladder it calls). A wrong-looking plan (bad worktree action, a missing
-  blocker kind, a bad prompt) gets fixed there or filed as a work item;
-  never patched around in this skill's prose.
+  `gw work orchestrate`, whose engine is `gw_orchestrate.commands` (`plan()`, which computes each item's placement with `placement_for`), and `gw work dispatch`, which makes that placement real through the placement engine (`gw_pipeline.place`). A wrong-looking plan (a bad placement, a missing blocker kind, a bad prompt) gets fixed there or filed as a work item; never patched around in this skill's prose.
 - Finish-stage relay behavior *inside* the worker — deciding what the
   merge/PR/hold/discard options mean and sending the `ask` — belongs to
   `gw:finishing-relay`. What this skill owns is only *who answers* the

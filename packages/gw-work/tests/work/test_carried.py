@@ -5,15 +5,15 @@ from __future__ import annotations
 import re
 import subprocess
 from dataclasses import replace
+from datetime import date
 from pathlib import Path
 from types import SimpleNamespace
 from typing import cast, get_args
 
 import pytest
-from gw_kernel.testing.transactions import git as _git
-from gw_kernel.testing.transactions import init_git as _init_git
 from gw_kernel.workspace import provenance
 from gw_pipeline.landed import stale_spec_for
+from gw_pipeline.placement import NullNotifier
 from gw_work import carried
 from gw_work import commands as work
 from gw_work.carried import (
@@ -25,6 +25,7 @@ from gw_work.carried import (
     _finish_obligations,
     assemble_carried,
 )
+from gw_work.place import run_place
 from okf_io import load, load_bundle
 from test_dispatch_reporting import _init_git_repo
 from test_run_next_carried import CHILD, _layout, _write
@@ -158,8 +159,7 @@ def test_execute_return_carries_scope_canonical_plan_and_destination(tmp_path: P
         f"Return `{RETURN_ID}` sent this item back from finish. Execute is not done until every row below is reported.",
         "- [ ] R1: Implement Task 4 in the canonical plan",
         "- [ ] R2: Verify the new acceptance",
-        f"Canonical plan: {RETURN_PLAN} (sha256 `aaaaaaaaaaaa`), read it in the main workspace "
-        f"({plan_path}) even if your content root's copy is older.",
+        f"Canonical plan: {RETURN_PLAN} (sha256 `aaaaaaaaaaaa`), read it in the main workspace ({plan_path}).",
         f"Design: {RETURN_DESIGN}",
         f"Report in: {coverage_path} under `## Returned scope {RETURN_ID}`; "
         "keep the row ids and set `Report state: reported`.",
@@ -173,70 +173,38 @@ def test_execute_return_carries_scope_canonical_plan_and_destination(tmp_path: P
         "plan": RETURN_PLAN,
         "plan_sha256": RETURN_SHA,
         "design": RETURN_DESIGN,
-        "coverage": {"resource": RETURN_COVERAGE, "path": str(coverage_path), "worktree": None, "branch": None},
+        "coverage": {"resource": RETURN_COVERAGE, "path": str(coverage_path)},
     }
     assert fill.warnings == ()
 
 
-@pytest.fixture
-def execute_return_checkout(tmp_path: Path) -> tuple[SlotInput, Path]:
+def test_execute_return_slot_reads_primary_coverage(tmp_path: Path) -> None:
     inp = _execute_return_input(tmp_path)
-    plan_path = inp.layout.bundle_dir / RETURN_PLAN.lstrip("/")
-    plan_path.parent.mkdir(parents=True, exist_ok=True)
-    plan_path.write_text("# Older plan\n", encoding="utf-8", newline="\n")
-    _init_git(inp.layout.root)
-    content = tmp_path / "content"
-    _git(inp.layout.root, "worktree", "add", "-b", "returned-execute", str(content))
-    plan_path.write_text("# New canonical plan\n", encoding="utf-8", newline="\n")
+    retired = tmp_path / "retired-worktree"
+    retired.mkdir()
     doc = load(inp.layout.bundle_dir / f"{CHILD}.md")
-    doc.set("repo_stamps", {"_workspace": {"worktree": str(content), "branch": "returned-execute"}})
+    doc.set("repo_stamps", {"_workspace": {"worktree": str(retired), "branch": "returned-execute"}})
     doc.save()
-    _git(inp.layout.root, "add", ".")
-    _git(inp.layout.root, "commit", "-m", "canonical plan and placement")
     bundle = load_bundle(inp.layout.bundle_dir)
     (item,) = load_items(bundle)
-    return replace(inp, bundle=bundle, items=(item,), item=item), content
-
-
-def test_execute_return_uses_verified_checkout_for_report_and_main_bundle_for_plan(execute_return_checkout) -> None:
-    inp, content = execute_return_checkout
-    before = tuple(_git(root, "rev-parse", "HEAD") for root in (inp.layout.root, content))
-    fill = _execute_return_fill(inp)
-    coverage_path = content / "okf" / RETURN_COVERAGE.lstrip("/")
-    assert fill.data["coverage"] == {
-        "resource": RETURN_COVERAGE,
-        "path": str(coverage_path),
-        "worktree": str(content),
-        "branch": "returned-execute",
-    }
-    assert fill.lines[3].find(str(inp.layout.bundle_dir / RETURN_PLAN.lstrip("/"))) > 0
-    assert str(content) not in fill.lines[3]
+    fill = _execute_return_fill(replace(inp, bundle=bundle, items=(item,), item=item))
+    coverage_path = inp.layout.bundle_dir / RETURN_COVERAGE.lstrip("/")
+    assert fill.data["coverage"] == {"resource": RETURN_COVERAGE, "path": str(coverage_path)}
     assert fill.lines[-1].startswith(f"Report in: {coverage_path} under `## Returned scope {RETURN_ID}`")
+    assert str(retired) not in "".join(fill.lines)
     assert fill.warnings == ()
-    assert tuple(_git(root, "rev-parse", "HEAD") for root in (inp.layout.root, content)) == before
-    assert all(not _git(root, "status", "--porcelain").strip() for root in (inp.layout.root, content))
 
 
-@pytest.mark.parametrize("damage", ["dirty", "missing"])
-def test_execute_return_keeps_scope_when_destination_is_unverified(execute_return_checkout, damage: str) -> None:
-    inp, content = execute_return_checkout
-    if damage == "dirty":
-        (content / "untracked").write_text("dirty\n", encoding="utf-8", newline="\n")
-    else:
-        doc = load(inp.layout.bundle_dir / f"{CHILD}.md")
-        doc.set("repo_stamps", {"_workspace": {"worktree": str(content / "missing"), "branch": "returned-execute"}})
-        doc.save()
-        bundle = load_bundle(inp.layout.bundle_dir)
-        (item,) = load_items(bundle)
-        inp = replace(inp, bundle=bundle, items=(item,), item=item)
-    fill = _execute_return_fill(inp)
+def test_execute_return_keeps_scope_when_coverage_escapes_the_bundle(tmp_path: Path) -> None:
+    inp = _execute_return_input(tmp_path)
+    escaping = replace(inp.item.execute_return, coverage="/../outside.md")
+    fill = _execute_return_fill(replace(inp, item=replace(inp.item, execute_return=escaping)))
     assert fill.lines[1:3] == (
         "- [ ] R1: Implement Task 4 in the canonical plan",
         "- [ ] R2: Verify the new acceptance",
     )
-    assert fill.data["return_id"] == RETURN_ID
-    assert fill.data["coverage"] == {"resource": RETURN_COVERAGE, "path": None, "worktree": None, "branch": None}
-    assert fill.warnings and "execute_return" in fill.warnings[0]
+    assert fill.data["coverage"] == {"resource": "/../outside.md", "path": None}
+    assert fill.warnings and "destination unavailable" in fill.warnings[0]
     assert not any(line.startswith("Report in:") for line in fill.lines)
 
 
@@ -346,6 +314,16 @@ def test_run_next_finish_obligations_slot_contains_recorded_entry(tmp_path: Path
         newline="\n",
     )
     _init_git_repo(layout)
+    placed = run_place(
+        layout,
+        CHILD,
+        mode="ensure",
+        dry_run=False,
+        repo_name=None,
+        today=date(2026, 10, 22),
+        notifier=NullNotifier(),
+    )
+    assert placed.refusal is None, placed
     result = work.run_next(layout, CHILD)
     assert result.route.dispatch is not None, result
     assert result.dispatch_resolution is not None, result
@@ -404,7 +382,7 @@ def landed_input(tmp_path: Path):
     code = _landed_git(layout.root, "rev-parse", "HEAD")
     bundle = load_bundle(layout.bundle_dir)
     (item,) = load_items(bundle)
-    item = replace(item, spec_baseline=SpecBaseline(code=code, workspace=code))
+    item = replace(item, spec_baseline=SpecBaseline(code=code))
     sibling = replace(item, path=SIBLING, work_status="resolved", resolved_in=code)
     return SlotInput(layout, bundle, (item, sibling), item, "plan"), code
 
@@ -425,7 +403,7 @@ def test_no_baseline_is_one_line(landed_input, monkeypatch) -> None:
 def test_no_entries(landed_input) -> None:
     inp, code = landed_input
     fill = carried._landed_since(inp)
-    assert fill.lines[0] == f"Spec baseline: code `{code[:12]}`, workspace `{code[:12]}`."
+    assert fill.lines[0] == f"Spec baseline: code `{code[:12]}`."
     assert "No sibling has landed since the baseline." in fill.lines
 
 
@@ -437,7 +415,7 @@ def test_entries_commits_and_diff_command(landed_input) -> None:
     fill = carried._landed_since(replace(inp, items=(inp.item, sibling)))
     assert f"- `{SIBLING}` resolved in `{c1[:12]}` — affects overlap: yes" in fill.lines
     assert "Commits since baseline touching affects: 2" in fill.lines
-    assert fill.lines[-2] == f"Diff: `git diff {code}..HEAD -- packages/a`"
+    assert fill.lines[-1] == f"Diff: `git diff {code}..HEAD -- packages/a`"
     assert fill.data["diff_command"] == f"git diff {code}..HEAD -- packages/a"
     assert fill.data["siblings"] == [{"path": SIBLING, "resolved_in": c1, "overlaps": True}]
     assert fill.data["commits"] == [{"sha": c2, "subject": "third"}, {"sha": c1, "subject": "second"}]
@@ -453,12 +431,12 @@ def test_commit_list_caps_at_twenty(landed_input) -> None:
     assert len(fill.data["commits"]) == 23
 
 
-def test_workspace_drift_is_reported_and_never_stale(landed_input) -> None:
+def test_carried_has_no_workspace_line(landed_input) -> None:
     inp, _ = landed_input
     _landed_commit(inp.layout.root.parent, "workspace1")
-    _landed_commit(inp.layout.root.parent, "workspace2")
     fill = carried._landed_since(inp)
-    assert any(line.startswith("Workspace: 2 commits since") for line in fill.lines)
+    assert not any(line.startswith("Workspace:") for line in fill.lines)
+    assert "workspace_baseline" not in fill.data and "workspace_commits" not in fill.data
     assert stale_spec_for(inp.layout, inp.items, inp.item) == ()
 
 

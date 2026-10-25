@@ -3,9 +3,7 @@
     "work/feature-alpha": "work/epic-epic/children/feature-alpha"
   },
   "indexes": [
-    "work/epic-epic/children/feature-alpha/children/index.md",
-    "work/epic-epic/children/index.md",
-    "work/index.md"
+    "work/epic-epic/children/feature-alpha/children/index.md"
   ],
   "warnings": [],
   "refusals": [],

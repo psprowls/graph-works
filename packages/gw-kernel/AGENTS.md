@@ -24,8 +24,8 @@ package importing its own top-level `gw_kernel`, which would let one
 vertical pull in every other vertical through the front door).
 
 Shared pipeline services now live in `gw-pipeline`: transactions, finish,
-execute_return, landed, gate_config, decision_owner, workspace_branch,
-workspace_placement, repo_context, guidance assembly/render and transcript_capture.
+execute_return, landed, gate_config, decision_owner, repo_context, members,
+guidance assembly/render and transcript_capture.
 Kernel retains bundle_lock/pending commits, anchors, commits, provenance, discovery,
 hooks/hatch build, pipeline definitions, dispatch configuration and work schemas.
 Kernel source, tests and dependency groups must never import an application slice;

@@ -11,7 +11,6 @@ import pytest
 from gw_cli.cli import app
 from gw_cli.work_cli import main as work_cli
 from gw_kernel.workspace.layout import WorkspaceLayout
-from gw_orchestrate.stage_advance import run_stage_advance
 from gw_serve import mutations
 from httpx import Response
 from mutation_helpers import make_client, seed_plan_doc, serve_workspace, snapshot, write_item
@@ -159,9 +158,6 @@ def test_advance_never_infers_a_worktree_from_cwd(env: Env, tmp_path: Path, monk
     worktree = tmp_path / "linked"
     subprocess.run(["git", "-C", str(repo), "worktree", "add", "-qb", "test-placement", str(worktree)], check=True)
     monkeypatch.chdir(worktree)
-    # Positive control: this cwd really can supply placement when inference is enabled.
-    inferred = run_stage_advance(layout, ITEM, today=AT.date(), infer_worktree=True)
-    assert "worktree" in {change.key for change in inferred.outcome.plan.changes}
     planned = client.post(PLAN, json={"path": ITEM}, headers=headers).json()
     assert "worktree" not in planned["plan"]["changes"]
     assert "branch" not in planned["plan"]["changes"]
@@ -172,12 +168,10 @@ def test_advance_never_infers_a_worktree_from_cwd(env: Env, tmp_path: Path, monk
     assert Path.cwd() == worktree
 
 
-def test_explicit_placement_and_metadata_survive_apply(env: Env, tmp_path: Path) -> None:
+def test_metadata_survives_apply(env: Env) -> None:
     layout, client, headers = env
     params = {
         "path": ITEM,
-        "worktree": str(tmp_path / "explicit"),
-        "branch": "feature/explicit",
         "owner": "pat",
         "effort": "small",
         "released_at": "2026-09-17",
@@ -185,8 +179,8 @@ def test_explicit_placement_and_metadata_survive_apply(env: Env, tmp_path: Path)
     planned = client.post(PLAN, json=params, headers=headers)
     assert planned.status_code == 200, planned.text
     changes = planned.json()["plan"]["changes"]
-    assert changes["worktree"][1] == params["worktree"]
-    assert changes["branch"][1] == params["branch"]
+    assert "worktree" not in changes
+    assert "branch" not in changes
     before = snapshot(layout)
     applied = _apply(client, headers, params, planned.json())
     assert applied.status_code == 200, applied.text
@@ -206,7 +200,7 @@ def test_tampered_digest_writes_nothing(env: Env) -> None:
     assert snapshot(layout) == before
 
 
-def test_multi_repository_public_lifecycle(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_orchestrate_route_matches_cli_placement(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Real Git evidence survives planning, placement, partial receipt and restart."""
     from gw_kernel import apply_init, plan_init
     from gw_orchestrate.finish_receipt import run_record_finish
@@ -268,40 +262,36 @@ def test_multi_repository_public_lifecycle(tmp_path: Path, monkeypatch: pytest.M
         assert public["repo"]["name"] == "code"
         return public
 
-    initial = plan()
-    assert initial["preparations"], json.dumps(initial)
-    [preparation] = initial["preparations"]
-    assert preparation["owner_path"] == owner
-    assert preparation["owner_phase"] == "execute"
-    assert preparation["repo"]["name"] == "ui"
-    assert preparation["worktree"]["action"] == "create-top-level"
-    foreign_anchor = tmp_path / "ui-anchor"
-    branch = preparation["worktree"]["branch"]
-    git(repos["ui"], "worktree", "add", "-b", branch, str(foreign_anchor), preparation["base_branch"])
-    recorded = cli(
-        "work",
-        "record-placement",
-        owner,
-        "--root",
-        owner,
-        "--phase",
-        preparation["owner_phase"],
-        "--repo",
-        "ui",
-        "--worktree",
-        str(foreign_anchor),
-        "--branch",
-        branch,
-    )
-    assert recorded["written"]
+    from gw_pipeline.placement import branch_name
+
     ready = plan()
-    assert ready["preparations"] == []
+    assert "preparations" not in ready
     [dispatch] = ready["dispatches"]
     assert dispatch["repo"]["name"] == "ui"
-    assert dispatch["worktree"]["action"] == "fork-child"
-    assert dispatch["worktree"]["parent_path"] == str(foreign_anchor)
-    assert dispatch["worktree"]["base_branch"] == dispatch["merge_target"] == branch
+    placement = dispatch["placement"]
+    assert placement["repo"]["name"] == "ui"
+    assert placement["owner_path"] == owner
+    assert placement["parent_branch"] == branch_name(owner, "Epic")
+    assert placement["branch"] != placement["parent_branch"]
+    assert "worktree" not in dispatch
+    foreign_anchor = Path(placement["parent_worktree"])
+    git(repos["ui"], "worktree", "add", "-b", placement["parent_branch"], str(foreign_anchor))
+    # The legacy stamp pins the owner's ui anchor; the resolved child's receipt makes ui a finish target.
+    document = load(owner_page)
+    document.set("repo_stamps", {"ui": {"worktree": str(foreign_anchor), "branch": placement["parent_branch"]}})
+    document.save()
     git(foreign_anchor, "commit", "--allow-empty", "-m", "child integrated")
+    tip = git(foreign_anchor, "rev-parse", "HEAD")
+    child_receipt = layout.bundle_dir / child / "references" / "04-finish-receipt.md"
+    child_receipt.parent.mkdir(parents=True, exist_ok=True)
+    child_receipt.write_text(
+        f"---\ntype: Explanation\nreceipt_version: 2\nowner: {child}\nintegrations:\n"
+        f"  - repo: ui\n    source_branch: {placement['branch']}\n    source_commit: {tip}\n"
+        f"    target_branch: {placement['parent_branch']}\n    result_commit: {tip}\n"
+        "    strategy: attested\n    evidence: accepted\n    accepted_by: Reviewer\n    reason: Reviewed\n---\n",
+        encoding="utf-8",
+        newline="\n",
+    )
     document = load(child_page)
     document.set("phase", "done")
     document.set("work_status", "resolved")
@@ -331,7 +321,7 @@ def test_multi_repository_public_lifecycle(tmp_path: Path, monkeypatch: pytest.M
     # A new client represents a resumed controller; proof lives in the workspace.
     client.close()
     client, headers = make_client(layout)
-    git(repos["ui"], "merge", branch)
+    git(repos["ui"], "merge", placement["parent_branch"])
     assert run_record_finish(layout, owner, repo_name="ui", today=AT.date()).changed
     complete = client.post(PLAN, json=params, headers=headers).json()
     assert complete["plan"]["refusal"] is None
@@ -341,3 +331,15 @@ def test_multi_repository_public_lifecycle(tmp_path: Path, monkeypatch: pytest.M
     repeated = client.post(PLAN, json=params, headers=headers).json()
     assert repeated["plan"]["changed"] is False
     client.close()
+
+
+def test_advance_spec_rejects_worktree(env: Env) -> None:
+    _layout, client, headers = env
+    response = client.post(PLAN, json={"path": ITEM, "worktree": "/x"}, headers=headers)
+    assert response.status_code == 400, response.text
+
+
+def test_advance_spec_rejects_start_sha(env: Env) -> None:
+    _layout, client, headers = env
+    response = client.post(PLAN, json={"path": ITEM, "start_sha": "a" * 40}, headers=headers)
+    assert response.status_code == 400, response.text

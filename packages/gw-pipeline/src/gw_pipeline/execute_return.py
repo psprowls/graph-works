@@ -16,7 +16,7 @@ import re
 import tempfile
 from collections.abc import Iterator
 from contextlib import contextmanager
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
@@ -68,54 +68,23 @@ class LocalPublication:
 class ReturnOperation:
     path: str
     return_id: str = ""
-    fingerprint: str = ""
-    page_sha256: str = ""
     plan_sha256: str | None = None
-    worktree: str = ""
-    branch: str = ""
-    identity: str = ""
-    coverage_member: str = ""
-    coverage_before_sha256: str | None = None
-    coverage_after_sha256: str = ""
-    content_commit: str | None = None
-    state: Literal["intent", "content-committed"] = "intent"
     record: ExecuteReturn | None = None
     plan_member: str = ""
-    content_before_head: str = ""
-    canonical_after_sha256: str | None = None
     malformed: bool = False
     local: LocalPublication | None = None
+    retired_worktree: str | None = None
 
     def to_data(self) -> dict[str, object]:
-        if self.local is not None:
-            return {
-                "version": 2,
-                "path": self.path,
-                "record": self.record.to_data() if self.record else None,
-                "worktree": self.worktree,
-                "branch": self.branch,
-                "identity": self.identity,
-                "plan_member": self.plan_member,
-                "plan_sha256": self.plan_sha256,
-                "publication": self.local.to_data(),
-            }
+        if self.local is None:
+            raise ValueError("only a local publication is journaled")
         return {
-            "version": 1,
+            "version": 2,
             "path": self.path,
-            "return_id": self.return_id,
-            "fingerprint": self.fingerprint,
-            "page_sha256": self.page_sha256,
-            "plan_sha256": self.plan_sha256,
-            "destination": {"worktree": self.worktree, "branch": self.branch, "identity": self.identity},
-            "coverage_member": self.coverage_member,
-            "coverage_before_sha256": self.coverage_before_sha256,
-            "coverage_after_sha256": self.coverage_after_sha256,
-            "content_commit": self.content_commit,
-            "state": self.state,
             "record": self.record.to_data() if self.record else None,
             "plan_member": self.plan_member,
-            "content_before_head": self.content_before_head,
-            "canonical_after_sha256": self.canonical_after_sha256,
+            "plan_sha256": self.plan_sha256,
+            "publication": self.local.to_data(),
         }
 
 
@@ -142,6 +111,9 @@ def _member(value: object) -> bool:
     )
 
 
+_RETIRED_KEYS = ("worktree", "branch", "identity")
+
+
 def pending_return(layout: WorkspaceLayout, path: str) -> ReturnOperation | None:
     try:
         raw = json.loads(journal_path(layout, path).read_text(encoding="utf-8"))
@@ -150,83 +122,39 @@ def pending_return(layout: WorkspaceLayout, path: str) -> ReturnOperation | None
     except (OSError, ValueError):
         return ReturnOperation(path, malformed=True)
     malformed = ReturnOperation(path, malformed=True)
-    if isinstance(raw, dict) and type(raw.get("version")) is int and raw["version"] == 2:
-        return _local_operation(path, raw)
-    if not isinstance(raw, dict) or set(raw) != set(malformed.to_data()):
+    if not isinstance(raw, dict):
         return malformed
-    destination = raw["destination"]
-    record, invalid = parse_execute_return(raw["record"])
-    if (
-        type(raw["version"]) is not int
-        or raw["version"] != 1
-        or raw["path"] != path
-        or invalid
-        or record is None
-        or not record.active
-        or record.id != raw["return_id"]
-        or not isinstance(destination, dict)
-        or set(destination) != {"worktree", "branch", "identity"}
-        or any(not isinstance(destination[k], str) or not destination[k] for k in destination)
-        or not Path(destination["worktree"]).is_absolute()
-        or not Path(destination["identity"]).is_absolute()
-        or not all(_sha(raw[k]) for k in ("fingerprint", "page_sha256", "coverage_after_sha256"))
-        or not all(
-            _sha(raw[k], optional=True) for k in ("plan_sha256", "coverage_before_sha256", "canonical_after_sha256")
-        )
-        or not _sha(raw["content_before_head"], git=True)
-        or not _sha(raw["content_commit"], optional=True, git=True)
-        or not _member(raw["coverage_member"])
-        or not _member(raw["plan_member"])
-        or raw["state"] not in ("intent", "content-committed")
-        or (raw["state"] == "content-committed") != (raw["content_commit"] is not None)
-        or record.coverage != "/" + raw["coverage_member"]
-        or record.plan_sha256 != raw["plan_sha256"]
-        or (record.plan is not None and record.plan != "/" + raw["plan_member"])
-    ):
-        return malformed
-    return ReturnOperation(
-        path,
-        raw["return_id"],
-        raw["fingerprint"],
-        raw["page_sha256"],
-        raw["plan_sha256"],
-        destination["worktree"],
-        destination["branch"],
-        destination["identity"],
-        raw["coverage_member"],
-        raw["coverage_before_sha256"],
-        raw["coverage_after_sha256"],
-        raw["content_commit"],
-        raw["state"],
-        record,
-        raw["plan_member"],
-        raw["content_before_head"],
-        raw["canonical_after_sha256"],
-    )
+    # Journals written before placement was computed named a workspace worktree.
+    # One naming the primary checkout itself is still an ordinary local fence.
+    retired = _retired_worktree(layout, raw)
+    if retired is not None:
+        return ReturnOperation(path, malformed=True, retired_worktree=retired)
+    if type(raw.get("version")) is int and raw["version"] == 2:
+        return _local_operation(path, {k: v for k, v in raw.items() if k not in _RETIRED_KEYS})
+    return malformed
+
+
+def _retired_worktree(layout: WorkspaceLayout, raw: dict[str, object]) -> str | None:
+    destination = raw.get("destination")
+    worktree = destination.get("worktree") if isinstance(destination, dict) else raw.get("worktree")
+    if isinstance(worktree, str) and worktree and worktree != str(layout.root.resolve()):
+        return worktree
+    if raw.get("version") == 1 and isinstance(destination, dict):
+        return worktree if isinstance(worktree, str) else ""
+    return None
 
 
 def _local_operation(path: str, raw: dict[str, object]) -> ReturnOperation:
     malformed = ReturnOperation(path, malformed=True)
-    if (
-        set(raw)
-        != {"version", "path", "record", "worktree", "branch", "identity", "plan_member", "plan_sha256", "publication"}
-        or raw["path"] != path
-    ):
+    if set(raw) != {"version", "path", "record", "plan_member", "plan_sha256", "publication"} or raw["path"] != path:
         return malformed
     record, invalid = parse_execute_return(raw["record"])
     publication = raw["publication"]
-    worktree, branch, identity = raw["worktree"], raw["branch"], raw["identity"]
     plan_member, plan_sha = raw["plan_member"], raw["plan_sha256"]
     if (
         invalid
         or record is None
         or not record.active
-        or not isinstance(worktree, str)
-        or not Path(worktree).is_absolute()
-        or not isinstance(identity, str)
-        or not Path(identity).is_absolute()
-        or not isinstance(branch, str)
-        or not branch
         or not isinstance(plan_member, str)
         or not _member(plan_member)
         or not (plan_sha is None or (isinstance(plan_sha, str) and _sha(plan_sha)))
@@ -260,9 +188,6 @@ def _local_operation(path: str, raw: dict[str, object]) -> ReturnOperation:
         path,
         return_id=record.id,
         record=record,
-        worktree=worktree,
-        branch=branch,
-        identity=identity,
         plan_member=plan_member,
         plan_sha256=plan_sha,
         local=LocalPublication(kind, head, subject, pairs),
@@ -293,12 +218,6 @@ def write_operation(layout: WorkspaceLayout, op: ReturnOperation) -> None:
         _sync_dir(target.parent)
     finally:
         Path(name).unlink(missing_ok=True)
-
-
-def mark_publication(layout: WorkspaceLayout, op: ReturnOperation, after: bytes) -> ReturnOperation:
-    updated = replace(op, canonical_after_sha256=digest(after))
-    write_operation(layout, updated)
-    return updated
 
 
 def finish_return(layout: WorkspaceLayout, op: ReturnOperation) -> None:

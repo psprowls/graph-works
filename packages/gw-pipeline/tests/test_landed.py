@@ -180,3 +180,11 @@ def test_a_dangling_resolved_in_is_an_unreachable_warning_not_an_entry(evidence)
         f"landed-since: {SIBLING} resolved_in {orphan!r} is not reachable from any ref in {repo} "
         "(history rewritten or branch deleted); skipped",
     )
+
+
+def test_landed_since_has_no_workspace_baseline():
+    from dataclasses import fields
+
+    from gw_pipeline.landed import LandedSince
+
+    assert "workspace_baseline" not in {f.name for f in fields(LandedSince)}

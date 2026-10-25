@@ -9,20 +9,25 @@ and the slice boundary forbids the kernel from importing orchestration.
 from __future__ import annotations
 
 import hashlib
-from collections.abc import Collection, Iterator, Sequence
+from collections.abc import Callable, Collection, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
+from types import MappingProxyType
+from typing import Literal
 
 from gw_kernel.workspace.bundle import load_workspace_bundle
 from gw_kernel.workspace.layout import WorkspaceLayout
 from okf_ext.locking import locked as _locked_file
-from okf_io import Bundle
+from okf_io import Bundle, Document, parse
 from work_tracker_okf import decisions as _decisions
 from work_tracker_okf.decisions import HoldFact
 from work_tracker_okf.hierarchy import decision_owner
 from work_tracker_okf.items import IGNORE, WorkItem, load_items
+from work_tracker_okf.mutation import DirectoryPrecondition, PlannedWrite, WorkMutationPlan
+from work_tracker_okf.paths import item_page
 from work_tracker_okf.snapshot import WorkSnapshot
+from work_tracker_okf.sources import upsert
 
 #: A real reparent settles within one retry; a third consecutive owner change
 #: is concurrent reparenting a human should look at.
@@ -55,6 +60,99 @@ class HoldReport:
     owner_path: str
     ledger_path: str
     decision: _decisions.Decision
+
+
+def _digest(content: bytes) -> str:
+    return hashlib.sha256(content).hexdigest()
+
+
+def planned_write(
+    member: str,
+    before: bytes | None,
+    after: bytes,
+    *,
+    source_member: str | None = None,
+) -> PlannedWrite:
+    """Retain the planner's preimage instead of resnapshotting live state."""
+    return PlannedWrite(member, _digest(before) if before is not None else None, after, source_member)
+
+
+def write_plan(
+    root: Path,
+    operation: Literal["file", "indexes"],
+    writes: Sequence[PlannedWrite],
+    *,
+    mkdirs: Sequence[str] = (),
+    validate_paths: Sequence[str] = (),
+    warnings: Sequence[str] = (),
+    directory_preconditions: Sequence[DirectoryPrecondition] = (),
+) -> WorkMutationPlan:
+    planned = tuple(sorted(writes, key=lambda write: write.member))
+    directories = tuple(
+        sorted(set(mkdirs) | {Path(write.member).parent.as_posix() for write in planned if "/" in write.member})
+    )
+    return WorkMutationPlan(
+        root=root,
+        operation=operation,
+        path_mapping=MappingProxyType({}),
+        move_plan=None,
+        moves=(),
+        writes=planned,
+        deletes=(),
+        mkdirs=directories,
+        warnings=tuple(warnings),
+        refusals=(),
+        validate_paths=tuple(sorted(set(validate_paths))),
+        directory_preconditions=tuple(sorted(directory_preconditions, key=lambda condition: condition.member)),
+    )
+
+
+def decision_mutation(
+    context: DecisionContext,
+    plan: _decisions.DecisionPlan,
+    ledger_before: bytes | None,
+    extra_writes: Sequence[PlannedWrite] = (),
+    *,
+    page_edits: Mapping[str, Callable[[Document], None]] = MappingProxyType({}),
+    validate_paths: Sequence[str] = (),
+    directory_preconditions: Sequence[DirectoryPrecondition] = (),
+) -> WorkMutationPlan:
+    """The ledger write, the owner page's ledger link and any further page edits as one plan.
+
+    The owner page gets the ledger `upsert`, then its `page_edits` entry; every
+    other `page_edits` key is read from the bundle, edited and written. Writes
+    whose bytes are unchanged are dropped.
+    """
+    owner_path = context.owner.owner_path
+    root = context.bundle.root
+    ledger_member = context.owner.ledger.relative_to(root).as_posix()
+    ledger_text = _decisions.render(_decisions.parse(plan.snapshot.text).preamble, plan.after)
+    candidates: list[tuple[str, bytes | None, bytes]] = [(ledger_member, ledger_before, ledger_text.encode("utf-8"))]
+    for member_path in dict.fromkeys((owner_path, *page_edits)):
+        page = item_page(member_path)
+        before = (
+            page.path(root).read_bytes()
+            if member_path == owner_path
+            else context.bundle.concepts[member_path].serialize().encode("utf-8")
+        )
+        document = parse(before.decode("utf-8"), path=page.path(root))
+        if member_path == owner_path:
+            upsert(document, _decisions.ledger_ref(owner_path), title="Decisions")
+        edit = page_edits.get(member_path)
+        if edit is not None:
+            edit(document)
+        candidates.append((page.rel, before, document.serialize().encode("utf-8")))
+    writes = tuple(
+        planned_write(member, before, after) for member, before, after in candidates if before != after
+    ) + tuple(extra_writes)
+    return write_plan(
+        root,
+        "file",
+        writes,
+        validate_paths=validate_paths or (owner_path,),
+        warnings=plan.warnings,
+        directory_preconditions=directory_preconditions,
+    )
 
 
 def decision_lock_path(layout: WorkspaceLayout, owner_path: str) -> Path:
@@ -152,9 +250,12 @@ __all__ = [
     "HoldReport",
     "decision_context",
     "decision_lock_path",
+    "decision_mutation",
     "hold_for",
     "hold_in",
     "holds_by_path",
     "locked_decision_owner",
     "open_holds",
+    "planned_write",
+    "write_plan",
 ]

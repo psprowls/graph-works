@@ -200,13 +200,16 @@ def test_file_refusal_emits_the_envelope(workspace: Path) -> None:
 
 @pytest.mark.parametrize("json_mode", [False, True])
 def test_file_incomplete_apply_names_the_blocking_member_not_the_item(workspace: Path, json_mode: bool) -> None:
-    """§1/D-095: a CRLF-flipped `work/index.md` makes filing refuse, and the
-    top-level error must name `work/index.md` -- the file actually in the way
-    -- not the item being filed.
+    """§1/D-095: a `log.md` swapped for an escaping symlink makes the filing
+    apply fail its preflight, and the top-level error must name `log.md` --
+    the file actually in the way -- not the item being filed.
     """
     file_item(workspace, "Baseline item")
-    index = resolve_workspace(str(workspace)).bundle_dir / "work" / "index.md"
-    index.write_bytes(index.read_bytes().replace(b"\n", b"\r\n"))
+    log = resolve_workspace(str(workspace)).bundle_dir / "log.md"
+    elsewhere = workspace / "elsewhere.md"
+    elsewhere.write_bytes(log.read_bytes())
+    log.unlink()
+    log.symlink_to(elsewhere.resolve())
 
     result = runner.invoke(
         app,
@@ -227,7 +230,7 @@ def test_file_incomplete_apply_names_the_blocking_member_not_the_item(workspace:
 
     assert result.exit_code != 0
     last_line = [line for line in result.stderr.splitlines() if line.strip()][-1]
-    assert "work/index.md" in last_line
+    assert "log.md" in last_line
     assert "feature-second-item" not in last_line
 
     assert "[ok] filed" not in result.stdout
@@ -347,7 +350,7 @@ def test_invalid_date_emits_a_usage_envelope(workspace: Path) -> None:
     assert "expected YYYY-MM-DD" in result.stderr
 
 
-def test_reparent_live_apply_updates_lane_indexes(workspace: Path) -> None:
+def test_reparent_live_apply_leaves_lane_indexes_untouched(workspace: Path) -> None:
     parent = file_item(workspace, "Parent", kind="Epic")
     source = file_item(workspace, "Child")
     result = runner.invoke(
@@ -360,7 +363,8 @@ def test_reparent_live_apply_updates_lane_indexes(workspace: Path) -> None:
     assert payload["applied"] is True and payload["rolled_back"] is False
     layout = resolve_workspace(str(workspace))
     assert layout.bundle_dir.joinpath(f"{payload['path_mapping'][source]}.md").is_file()
-    assert "work/index.md" in payload["indexes"]
+    assert "work/index.md" not in payload["indexes"]
+    assert layout.bundle_dir.joinpath("work/index.md").exists() is False
 
 
 def _init_workspace_git(workspace: Path) -> str:
@@ -502,7 +506,7 @@ def test_incomplete_path_apply_emits_the_envelope(workspace: Path, monkeypatch: 
     assert "stale snapshot" in result.stderr
 
 
-def test_adopt_live_apply_updates_lane_indexes(workspace: Path) -> None:
+def test_adopt_live_apply_leaves_lane_indexes_untouched(workspace: Path) -> None:
     release = file_item(workspace, "R1", kind="Release")
     source = file_item(workspace, "Epic", kind="Epic")
     result = runner.invoke(
@@ -515,10 +519,11 @@ def test_adopt_live_apply_updates_lane_indexes(workspace: Path) -> None:
     assert payload["applied"] is True and payload["rolled_back"] is False
     layout = resolve_workspace(str(workspace))
     assert layout.bundle_dir.joinpath(f"{payload['path_mapping'][source]}.md").is_file()
-    assert "work/index.md" in payload["indexes"]
+    assert "work/index.md" not in payload["indexes"]
+    assert layout.bundle_dir.joinpath("work/index.md").exists() is False
 
 
-def test_archive_live_apply_updates_lane_indexes(workspace: Path) -> None:
+def test_archive_live_apply_leaves_lane_indexes_untouched(workspace: Path) -> None:
     path = file_item(workspace, "Done", kind="Bug")
     layout = resolve_workspace(str(workspace))
     page = layout.bundle_dir / f"{path}.md"
@@ -531,7 +536,8 @@ def test_archive_live_apply_updates_lane_indexes(workspace: Path) -> None:
     assert payload["path_mapping"][path] == "work/_archive/bug-done"
     assert payload["applied"] is True and payload["rolled_back"] is False
     assert layout.bundle_dir.joinpath("work/_archive/bug-done.md").is_file()
-    assert "work/index.md" in payload["indexes"]
+    assert "work/index.md" not in payload["indexes"]
+    assert layout.bundle_dir.joinpath("work/index.md").exists() is False
 
 
 def test_archive_refusal_names_each_refusal_on_stderr(workspace: Path) -> None:
@@ -790,357 +796,25 @@ def _abs(*parts: str) -> str:
     return str(Path(Path.cwd().anchor, *parts))
 
 
-def test_record_placement_writes_the_pair_and_never_advances(workspace: Path) -> None:
-    path = file_item(workspace, "Placed")
-    assert runner.invoke(app, ["work", "advance", path, "--workspace", str(workspace), "--json"]).exit_code == 0
-    phase = _fm(workspace, path)["phase"]
-    placed = _abs("wt", "placed")
-
-    result = runner.invoke(
-        app,
-        [
-            "work",
-            "record-placement",
-            path,
-            "--root",
-            path,
-            "--phase",
-            str(phase),
-            "--worktree",
-            placed,
-            "--branch",
-            "psprowls/placed-1a2b3c4d",
-            "--workspace",
-            str(workspace),
-            "--json",
-        ],
-    )
-
-    assert result.exit_code == 0, result.output
-    payload = json.loads(result.stdout)
-    assert payload["refusal"] is None and payload["written"] is True and payload["changed"] is True
-    assert payload["after"] == {"worktree": placed, "branch": "psprowls/placed-1a2b3c4d", "start_sha": None}
-    fm = _fm(workspace, path)
-    assert (fm["worktree"], fm["branch"], fm["phase"]) == (placed, "psprowls/placed-1a2b3c4d", phase)
-
-
-@pytest.mark.parametrize("json_output", [False, True], ids=["text", "json"])
-def test_record_placement_refusal_is_an_envelope_and_writes_nothing(workspace: Path, json_output: bool) -> None:
-    path = file_item(workspace, "Stale")
-    assert runner.invoke(app, ["work", "advance", path, "--workspace", str(workspace), "--json"]).exit_code == 0
-    page = workspace / "okf" / f"{path}.md"
-    before = page.read_bytes()
-
-    result = runner.invoke(
-        app,
-        [
-            "work",
-            "record-placement",
-            path,
-            "--root",
-            path,
-            "--phase",
-            "finish",
-            "--worktree",
-            _abs("wt", "x"),
-            "--branch",
-            "b/x",
-            "--workspace",
-            str(workspace),
-            *(["--json"] if json_output else []),
-        ],
-    )
-
-    assert result.exit_code != 0
-    assert "phase-mismatch" in result.stderr
-    if json_output:
-        doc = json.loads(result.stdout)
-        assert doc["error"]["reason"] == "refused"
-        assert doc["error"]["payload"]["refusal"]["reason"] == "phase-mismatch"
-    else:
-        assert result.stdout == ""
-    assert page.read_bytes() == before
-
-
-def test_record_placement_dry_run_writes_nothing(workspace: Path) -> None:
-    path = file_item(workspace, "Dry")
-    assert runner.invoke(app, ["work", "advance", path, "--workspace", str(workspace), "--json"]).exit_code == 0
-    page = workspace / "okf" / f"{path}.md"
-    before = page.read_bytes()
-    phase = str(_fm(workspace, path)["phase"])
-
-    result = runner.invoke(
-        app,
-        [
-            "work",
-            "record-placement",
-            path,
-            "--root",
-            path,
-            "--phase",
-            phase,
-            "--worktree",
-            _abs("wt", "d"),
-            "--branch",
-            "b/d",
-            "--dry-run",
-            "--workspace",
-            str(workspace),
-        ],
-    )
-
-    assert result.exit_code == 0, result.output
-    assert "would record" in result.stdout
-    assert page.read_bytes() == before
-
-
-@pytest.mark.parametrize("no_infer", [False, True], ids=["default", "opt-out"])
-def test_advance_forwards_the_inference_opt_out(workspace: Path, monkeypatch, no_infer: bool) -> None:
-    seen: dict[str, object] = {}
-    real = work_main.run_stage_advance
-
-    def spy(*args, **kwargs):
-        seen.update(kwargs)
-        return real(*args, **kwargs)
-
-    monkeypatch.setattr(work_main, "run_stage_advance", spy)
+def test_no_infer_worktree_is_accepted_and_warns(workspace: Path) -> None:
     path = file_item(workspace, "Opt out")
     result = runner.invoke(
-        app,
-        [
-            "work",
-            "advance",
-            path,
-            *(["--no-infer-worktree"] if no_infer else []),
-            "--workspace",
-            str(workspace),
-            "--json",
-        ],
+        app, ["work", "advance", path, "--no-infer-worktree", "--workspace", str(workspace), "--json"]
     )
     assert result.exit_code == 0, result.output
-    assert seen["infer_worktree"] is (not no_infer)
+    assert "--no-infer-worktree is retired and ignored" in result.output
 
 
-def _placement_args(workspace: Path, path: str, *extra: str) -> list[str]:
-    return [
-        "work",
-        "record-placement",
-        path,
-        "--root",
-        path,
-        "--phase",
-        str(_fm(workspace, path)["phase"]),
-        "--worktree",
-        _abs("wt", "observed"),
-        "--branch",
-        "b/observed",
-        "--workspace",
-        str(workspace),
-        *extra,
-    ]
+def test_advance_rejects_worktree_flag(workspace: Path) -> None:
+    path = file_item(workspace, "Flag gone")
+    result = runner.invoke(app, ["work", "advance", path, "--worktree", "/x", "--workspace", str(workspace)])
+    assert result.exit_code == 2
 
 
-@pytest.mark.parametrize("json_output", [False, True], ids=["text", "json"])
-@pytest.mark.parametrize("mode", ["recorded", "unchanged", "would record"])
-def test_record_placement_distinguishes_write_replay_and_preview(workspace: Path, mode: str, json_output: bool) -> None:
-    path = file_item(workspace, "Placement modes")
-    assert runner.invoke(app, ["work", "advance", path, "--workspace", str(workspace)]).exit_code == 0
-    page = workspace / "okf" / f"{path}.md"
-    if mode == "unchanged":
-        first = runner.invoke(app, _placement_args(workspace, path))
-        assert first.exit_code == 0, first.output
-    before = page.read_bytes()
-    fm_before = _fm(workspace, path)
-    extra = (["--dry-run"] if mode == "would record" else []) + (["--json"] if json_output else [])
-    result = runner.invoke(app, _placement_args(workspace, path, *extra))
-    assert result.exit_code == 0, result.output
-    if json_output:
-        payload = json.loads(result.stdout)
-        assert set(payload) == {
-            "path",
-            "root",
-            "expected_phase",
-            "current_phase",
-            "before",
-            "after",
-            "repo",
-            "changed",
-            "applied",
-            "written",
-            "rolled_back",
-            "failures",
-            "warnings",
-            "refusal",
-            "repo_note",
-            "commit",
-        }
-        assert payload["path"] == payload["root"] == path
-        assert payload["expected_phase"] == payload["current_phase"] == fm_before["phase"]
-        assert payload["after"] == {"worktree": _abs("wt", "observed"), "branch": "b/observed", "start_sha": None}
-        assert payload["changed"] is (mode != "unchanged")
-        assert payload["applied"] is (mode == "recorded")
-        assert payload["written"] is (mode == "recorded")
-        assert payload["rolled_back"] is False
-        assert payload["refusal"] is None and payload["failures"] == [] and payload["warnings"] == []
-        if mode == "unchanged":
-            assert payload["before"] == payload["after"]
-        else:
-            assert payload["before"] == {"worktree": None, "branch": None, "start_sha": None}
-        if payload["repo_note"]:
-            assert payload["repo_note"] in result.stderr
-    else:
-        assert f": {mode} worktree={_abs('wt', 'observed')} branch=b/observed" in result.stdout
-        assert f"phase={fm_before['phase']}, root={path}" in result.stdout
-    if mode == "recorded":
-        assert page.read_bytes() != before
-        fm_after = _fm(workspace, path)
-        for field in ("worktree", "branch", "updated"):
-            fm_before.pop(field, None)
-            fm_after.pop(field, None)
-        assert fm_before == fm_after
-    else:
-        assert page.read_bytes() == before
-
-
-def test_record_placement_text_replacement_names_the_previous_pair(workspace: Path) -> None:
-    path = file_item(workspace, "Replace placement")
-    assert runner.invoke(app, ["work", "advance", path, "--workspace", str(workspace)]).exit_code == 0
-    first = runner.invoke(app, _placement_args(workspace, path))
-    assert first.exit_code == 0, first.output
-    args = _placement_args(workspace, path)
-    args[args.index("--branch") + 1] = "b/replaced"
-    result = runner.invoke(app, args)
-    assert result.exit_code == 0, result.output
-    assert ": recorded " in result.stdout and "branch=b/replaced" in result.stdout
-    assert f"was: worktree={_abs('wt', 'observed')} branch=b/observed" in result.stdout
-
-
-@pytest.mark.parametrize("json_output", [False, True], ids=["text", "json"])
-def test_record_placement_stale_preimage_is_incomplete_apply(
-    workspace: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    json_output: bool,
-) -> None:
-    from gw_orchestrate import placement
-
-    path = file_item(workspace, "Stale preimage")
-    assert runner.invoke(app, ["work", "advance", path, "--workspace", str(workspace)]).exit_code == 0
-    page = workspace / "okf" / f"{path}.md"
-    external = page.read_bytes() + b"\nExternal edit.\n"
-    real_apply = placement.apply_mutation
-
-    def race(*args, **kwargs):
-        page.write_bytes(external)
-        return real_apply(*args, **kwargs)
-
-    monkeypatch.setattr(placement, "apply_mutation", race)
-    result = runner.invoke(app, _placement_args(workspace, path, *(["--json"] if json_output else [])))
-    assert result.exit_code == exit_codes.GENERIC
-    assert "apply was incomplete" in result.stderr and "changed since planning" in result.stderr
-    assert "[ok]" not in result.stdout and "would record" not in result.stdout
-    if json_output:
-        doc = json.loads(result.stdout)
-        assert set(doc) == {"error"}
-        assert doc["error"]["command"] == "work record-placement"
-        assert doc["error"]["reason"] == "incomplete-apply"
-        payload = doc["error"]["payload"]
-        assert payload["refusal"] is None
-        assert payload["applied"] is True and payload["changed"] is True and payload["written"] is False
-        assert payload["rolled_back"] is False
-        assert any("changed since planning" in failure for failure in payload["failures"])
-    else:
-        assert result.stdout == ""
-    assert page.read_bytes() == external
-
-
-@pytest.mark.parametrize("json_output", [False, True], ids=["text", "json"])
-@pytest.mark.parametrize("rolled_back", [False, True], ids=["warning", "rollback"])
-def test_record_placement_projects_application_warnings_and_rollback(
-    workspace: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    json_output: bool,
-    rolled_back: bool,
-) -> None:
-    from dataclasses import replace
-
-    from gw_orchestrate.placement import run_record_placement
-    from gw_pipeline.transactions import MutationApplication
-
-    path = file_item(workspace, "Application projection")
-    assert runner.invoke(app, ["work", "advance", path, "--workspace", str(workspace)]).exit_code == 0
-
-    def application_result(*args, **kwargs):
-        # Keep the real plan; supply transaction outcomes that are rare at the CLI boundary.
-        result = run_record_placement(*args, **{**kwargs, "dry_run": True})
-        application = MutationApplication(
-            transaction_id="projection",
-            journal=workspace / "journal.json",
-            moved=(),
-            written=() if rolled_back else (f"{path}.md",),
-            created_directories=(),
-            warnings=("transaction warning",),
-            failures=(),
-            rolled_back=rolled_back,
-        )
-        return replace(result, application=application, repo_note="repository note")
-
-    monkeypatch.setattr(work_main, "run_record_placement", application_result, raising=False)
-    result = runner.invoke(app, _placement_args(workspace, path, *(["--json"] if json_output else [])))
-    if rolled_back:
-        assert result.exit_code == exit_codes.GENERIC
-        assert "apply was incomplete" in result.stderr
-        assert "[ok]" not in result.stdout and "would record" not in result.stdout
-        if json_output:
-            doc = json.loads(result.stdout)
-            assert doc["error"]["reason"] == "incomplete-apply"
-            payload = doc["error"]["payload"]
-            assert payload["refusal"] is None and payload["failures"] == []
-            assert payload["rolled_back"] is True and payload["written"] is False
-    else:
-        assert result.exit_code == 0, result.output
-        assert "transaction warning" in result.stderr and "repository note" in result.stderr
-        if json_output:
-            payload = json.loads(result.stdout)
-            assert payload["warnings"] == ["transaction warning"]
-            assert payload["repo_note"] == "repository note"
-        else:
-            assert ": recorded " in result.stdout
-
-
-@pytest.mark.parametrize("json_output", [False, True], ids=["text", "json"])
-@pytest.mark.parametrize(
-    ("exception", "reason", "code"),
-    [
-        (work_main.WorkspaceError("bad workspace"), "workspace", exit_codes.SCHEMA_MISMATCH),
-        (ValueError("unresolved path"), "unresolved", exit_codes.AMBIGUOUS),
-        (OSError("disk failure"), "io", exit_codes.GENERIC),
-    ],
-)
-def test_record_placement_maps_core_exceptions(
-    workspace: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    json_output: bool,
-    exception: Exception,
-    reason: str,
-    code: int,
-) -> None:
-    path = file_item(workspace, "Exception projection")
-    assert runner.invoke(app, ["work", "advance", path, "--workspace", str(workspace)]).exit_code == 0
-
-    def fail(*_args, **_kwargs):
-        raise exception
-
-    monkeypatch.setattr(work_main, "run_record_placement", fail, raising=False)
-    result = runner.invoke(app, _placement_args(workspace, path, *(["--json"] if json_output else [])))
-    assert result.exit_code == code
-    assert str(exception) in result.stderr
-    if json_output:
-        doc = json.loads(result.stdout)
-        assert doc["error"]["command"] == "work record-placement"
-        assert doc["error"]["reason"] == reason and doc["error"]["exit_code"] == code
-        assert doc["error"]["payload"] is None
-    else:
-        assert result.stdout == ""
+def test_no_infer_worktree_hidden_from_help() -> None:
+    result = runner.invoke(app, ["work", "advance", "--help"])
+    assert "--no-infer-worktree" not in result.output
+    assert "--worktree" not in result.output
 
 
 def test_a_release_only_field_on_another_kind_is_refused(workspace: Path) -> None:
@@ -1229,262 +903,6 @@ def test_touch_active_work_human_mode_degraded_write_omits_the_phase_line(
     assert "->" not in result.stdout
 
 
-def _reader_args(workspace: Path, path: str, *extra: str) -> list[str]:
-    return [
-        "work",
-        "record-reader",
-        path,
-        "--root",
-        path,
-        "--phase",
-        "design",
-        "--task-id",
-        "task_reader",
-        "--dispatch-id",
-        "ctx_reader",
-        "--dispatch-key",
-        "reader-key",
-        "--repo",
-        "code",
-        "--worktree",
-        _abs("wt", "reader"),
-        "--start-sha",
-        "a" * 40,
-        "--workspace",
-        str(workspace),
-        *extra,
-    ]
-
-
-@pytest.fixture
-def reader_item(workspace: Path) -> str:
-    path = file_item(workspace, "Reader")
-    manifest = workspace / "workspace.yaml"
-    manifest.write_text(
-        "version: 1\nworkflow_config: workflow.yaml\n"
-        f"repositories:\n  code:\n    path: {json.dumps(str(workspace.parent / 'code'))}\n",
-        encoding="utf-8",
-        newline="\n",
-    )
-    document = load(workspace / "okf" / f"{path}.md")
-    document.set("phase", "design")
-    document.save()
-    return path
-
-
-@pytest.mark.parametrize("json_output", [False, True], ids=["text", "json"])
-@pytest.mark.parametrize("mode", ["recorded", "replayed", "would record"])
-def test_record_reader_writes_replays_and_previews_only_receipts(
-    workspace: Path, reader_item: str, mode: str, json_output: bool
-) -> None:
-    page = workspace / "okf" / f"{reader_item}.md"
-    before = page.read_bytes()
-    receipt_before = None
-    if mode == "replayed":
-        first = runner.invoke(app, _reader_args(workspace, reader_item, "--json"))
-        assert first.exit_code == 0, first.output
-        receipt_before = Path(json.loads(first.stdout)["receipt_path"]).read_bytes()
-    extra = (["--dry-run"] if mode == "would record" else []) + (["--json"] if json_output else [])
-    result = runner.invoke(app, _reader_args(workspace, reader_item, *extra))
-    assert result.exit_code == 0, result.output
-    if json_output:
-        payload = json.loads(result.stdout)
-        assert payload["written"] is (mode == "recorded")
-        assert payload["replayed"] is (mode == "replayed")
-        assert payload["conflict"] is None and payload["refusal"] is None
-        assert payload["observation"] == {
-            "task_id": "task_reader",
-            "dispatch_id": "ctx_reader",
-            "dispatch_key": "reader-key",
-            "repo": "code",
-            "worktree": _abs("wt", "reader"),
-            "start_sha": "a" * 40,
-        }
-        receipt = Path(payload["receipt_path"])
-        assert receipt.is_relative_to(resolve_workspace(str(workspace)).cache_dir)
-        assert receipt.exists() is (mode != "would record")
-        if mode != "would record":
-            assert json.loads(receipt.read_text(encoding="utf-8"))["start_sha"] == "a" * 40
-        if receipt_before is not None:
-            assert receipt.read_bytes() == receipt_before
-    else:
-        assert f": {mode} " in result.stdout
-        assert "a" * 40 in result.stdout
-    assert page.read_bytes() == before
-
-
-@pytest.mark.parametrize("json_output", [False, True], ids=["text", "json"])
-def test_record_reader_mismatch_preserves_original_receipt(
-    workspace: Path, reader_item: str, json_output: bool
-) -> None:
-    first = runner.invoke(app, _reader_args(workspace, reader_item, "--json"))
-    assert first.exit_code == 0, first.output
-    receipt = Path(json.loads(first.stdout)["receipt_path"])
-    before = receipt.read_bytes()
-    result = runner.invoke(
-        app, _reader_args(workspace, reader_item, "--start-sha", "b" * 40, *(["--json"] if json_output else []))
-    )
-    assert result.exit_code != 0
-    assert "attempt-mismatch" in result.stderr
-    if json_output:
-        error = json.loads(result.stdout)["error"]
-        assert error["reason"] == "attempt-mismatch"
-        assert error["payload"]["conflict"] == "attempt-mismatch"
-        assert error["payload"]["written"] is False
-    else:
-        assert result.stdout == ""
-    assert receipt.read_bytes() == before
-
-
-@pytest.mark.parametrize("unknown", [False, True])
-def test_record_reader_refusal_projects_prospective_or_null_receipt_path(
-    workspace: Path, reader_item: str, unknown: bool
-) -> None:
-    path = "work/feature-missing" if unknown else reader_item
-    before = (workspace / "okf" / f"{reader_item}.md").read_bytes()
-    result = runner.invoke(app, _reader_args(workspace, path, "--phase", "execute", "--json"))
-    assert result.exit_code != 0
-    error = json.loads(result.stdout)["error"]
-    assert error["reason"] == "refused"
-    payload = error["payload"]
-    assert payload["refusal"]["reason"] == ("unknown-path" if unknown else "code-phase")
-    assert (payload["receipt_path"] is None) is unknown
-    assert payload["written"] is False and payload["replayed"] is False
-    assert not list(resolve_workspace(str(workspace)).cache_dir.glob("reader-receipts/**/*.json"))
-    assert (workspace / "okf" / f"{reader_item}.md").read_bytes() == before
-
-
-@pytest.mark.parametrize("json_output", [False, True], ids=["text", "json"])
-@pytest.mark.parametrize(
-    ("exception", "reason", "code"),
-    [
-        (work_main.WorkspaceError("bad workspace"), "workspace", exit_codes.SCHEMA_MISMATCH),
-        (ValueError("unresolved path"), "unresolved", exit_codes.AMBIGUOUS),
-        (OSError("disk failure"), "io", exit_codes.GENERIC),
-    ],
-)
-def test_record_reader_maps_core_exceptions(
-    workspace: Path,
-    reader_item: str,
-    monkeypatch: pytest.MonkeyPatch,
-    json_output: bool,
-    exception: Exception,
-    reason: str,
-    code: int,
-) -> None:
-    def fail(*_args, **_kwargs):
-        raise exception
-
-    monkeypatch.setattr(work_main, "run_record_reader", fail, raising=False)
-    result = runner.invoke(app, _reader_args(workspace, reader_item, *(["--json"] if json_output else [])))
-    assert result.exit_code == code
-    assert str(exception) in result.stderr
-    if json_output:
-        error = json.loads(result.stdout)["error"]
-        assert error["command"] == "work record-reader"
-        assert error["reason"] == reason and error["payload"] is None
-    else:
-        assert result.stdout == ""
-
-
-def test_prepare_workspace_plans_applies_replays_and_refuses(workspace: Path) -> None:
-    epic = file_item(workspace, "Prepare epic", kind="Epic")
-    child = file_item(workspace, "Prepare child", parent=epic)
-    for path in (epic, child):
-        page = workspace / "okf" / f"{path}.md"
-        doc = load(page)
-        doc.set("phase", "execute")
-        doc.set("work_status", "in-progress")
-        doc.set("owner", "pat")
-        page.write_text(doc.serialize(), encoding="utf-8", newline="")
-    for args in (
-        ("init", "-b", "main"),
-        ("config", "user.name", "Test"),
-        ("config", "user.email", "test@example.com"),
-        ("add", "."),
-        ("commit", "-m", "Initial"),
-    ):
-        subprocess.run(["git", "-C", str(workspace), *args], check=True, capture_output=True)
-    args = ["work", "prepare-workspace", child, "--workspace", str(workspace), "--json"]
-    plan = runner.invoke(app, args)
-    assert plan.exit_code == 0, plan.output
-    assert json.loads(plan.stdout)["applied"] is False
-    applied = runner.invoke(app, [*args, "--apply"])
-    assert applied.exit_code == 0, applied.output
-    payload = json.loads(applied.stdout)
-    assert payload["applied"] and len(payload["steps"]) == 2
-    assert all(step["recorded"] for step in payload["steps"])
-    replay = runner.invoke(app, [*args, "--apply"])
-    assert replay.exit_code == 0, replay.output
-    assert json.loads(replay.stdout)["applied"] is False
-    page = workspace / "okf" / f"{child}.md"
-    page.write_text(
-        page.read_text(encoding="utf-8").replace("phase: execute", "phase: design"), encoding="utf-8", newline=""
-    )
-    refused = runner.invoke(app, args)
-    assert refused.exit_code != 0
-    assert json.loads(refused.stdout)["error"]["reason"] == "refused"
-
-
-def test_prepare_workspace_disabled_note_and_human_output(workspace: Path) -> None:
-    result = runner.invoke(app, ["work", "prepare-workspace", "work/missing", "--workspace", str(workspace)])
-    assert result.exit_code == 0, result.output
-    assert "workspace placement disabled" in result.stderr
-
-
-@pytest.mark.parametrize(
-    "error, reason", [(OSError("read failed"), "io"), (work_main.WorkspaceError("invalid config"), "workspace")]
-)
-def test_prepare_workspace_errors_use_json_envelope(workspace, monkeypatch, error, reason):
-    def fail(*args, **kwargs):
-        raise error
-
-    monkeypatch.setattr(work_main, "run_prepare_workspace", fail)
-    result = runner.invoke(app, ["work", "prepare-workspace", "work/a", "--workspace", str(workspace), "--json"])
-    assert result.exit_code != 0
-    assert json.loads(result.stdout)["error"]["reason"] == reason
-
-
-@pytest.mark.parametrize("applied", [False, True])
-def test_prepare_workspace_human_steps(workspace, monkeypatch, applied):
-    from gw_orchestrate.workspace_prepare import WorkspacePrepareResult, WorkspaceStep
-
-    result = WorkspacePrepareResult(
-        "work/a",
-        (WorkspaceStep("work/a", "execute", "/wt/a", "feature/a", "main", "create", applied),),
-        None,
-        "",
-        None,
-        applied,
-    )
-    monkeypatch.setattr(work_main, "run_prepare_workspace", lambda *a, **kw: result)
-    actual = runner.invoke(app, ["work", "prepare-workspace", "work/a", "--workspace", str(workspace)])
-    assert actual.exit_code == 0, actual.output
-    assert ("would create" if not applied else ": create") in actual.stdout
-    assert "(from main)" in actual.stdout
-
-
-def test_prepare_workspace_partial_failure_retains_effects_in_envelope(workspace, monkeypatch):
-    from gw_orchestrate.workspace_prepare import WorkspacePrepareResult, WorkspaceStep
-
-    result = WorkspacePrepareResult(
-        "work/a/children/b",
-        (WorkspaceStep("work/a", "execute", "/wt/a", "epic/a", "main", "create", True),),
-        "stamp-refused",
-        "commit failed",
-        None,
-        True,
-    )
-    monkeypatch.setattr(work_main, "run_prepare_workspace", lambda *a, **kw: result)
-    actual = runner.invoke(
-        app, ["work", "prepare-workspace", "work/a/children/b", "--workspace", str(workspace), "--apply", "--json"]
-    )
-    assert actual.exit_code != 0
-    payload = json.loads(actual.stdout)["error"]["payload"]
-    assert payload["applied"] and payload["placement"] is None
-    assert payload["refusal"]["detail"] == "commit failed"
-
-
 def _execute_item_without_baseline(workspace: Path) -> str:
     """A filed item moved to `execute` with code `affects`, over a clean declared repo and no `start_sha`."""
     code = workspace.parent / "code-bypass"
@@ -1561,13 +979,13 @@ def _execute_item_without_baseline(workspace: Path) -> str:
 def test_advance_skip_gate_bypasses_one_refusal_and_reports_it(workspace: Path) -> None:
     path = _execute_item_without_baseline(workspace)
     base = ["work", "advance", path, "--workspace", str(workspace), "--json"]
-    refused = runner.invoke(app, [*base, "--skip-gate", "no-start-sha"])
+    refused = runner.invoke(app, [*base, "--skip-gate", "worktree-missing"])
     assert refused.exit_code != 0
     assert "gate-bypass-invalid" in refused.stderr
-    bypassed = runner.invoke(app, [*base, "--skip-gate", "no-start-sha", "--reason", "r", "--actor", "pat"])
+    bypassed = runner.invoke(app, [*base, "--skip-gate", "worktree-missing", "--reason", "r", "--actor", "pat"])
     assert bypassed.exit_code == 0, bypassed.output
     payload = json.loads(bypassed.stdout)
-    assert payload["gate_bypass"]["code"] == "no-start-sha"
+    assert payload["gate_bypass"]["code"] == "worktree-missing"
     assert payload["gate_bypass"]["actor"] == "pat" and payload["gate_bypass"]["decision_id"]
 
 
@@ -1600,89 +1018,9 @@ def _executing_item_in_a_declared_repo(workspace: Path, tmp_path: Path) -> tuple
     return path, repo, head
 
 
-def test_record_baseline_records_head_of_cwd(workspace: Path, tmp_path: Path) -> None:
-    path, repo, head = _executing_item_in_a_declared_repo(workspace, tmp_path)
-    result = runner.invoke(
-        app, ["work", "record-baseline", path, "--cwd", str(repo), "--workspace", str(workspace), "--json"]
-    )
-    assert result.exit_code == 0, result.output
-    payload = json.loads(result.stdout)
-    assert payload["after"] == head and payload["written"] is True
-    assert _fm(workspace, path)["start_sha"] == head
-
-
-def test_record_baseline_refusal_is_an_envelope(workspace: Path, tmp_path: Path) -> None:
-    path, _repo, _head = _executing_item_in_a_declared_repo(workspace, tmp_path)
-    outside = tmp_path / "elsewhere"
-    outside.mkdir()
-    result = runner.invoke(
-        app, ["work", "record-baseline", path, "--cwd", str(outside), "--workspace", str(workspace), "--json"]
-    )
-    assert result.exit_code != 0
-    doc = json.loads(result.stdout)
-    assert doc["error"]["reason"] == "refused"
-    assert doc["error"]["payload"]["refusal"]["reason"] == "outside-repository"
-
-
 def _with_frontmatter(workspace: Path, path: str, lines: str) -> None:
     page = workspace / "okf" / f"{path}.md"
     text = page.read_text(encoding="utf-8")
     page.write_text(
         text.replace("phase: execute", "phase: execute\n" + lines.rstrip("\n")), encoding="utf-8", newline=""
     )
-
-
-def test_record_baseline_wrong_checkout_is_an_envelope(workspace: Path, tmp_path: Path) -> None:
-    path, repo, _head = _executing_item_in_a_declared_repo(workspace, tmp_path)
-    mine = tmp_path / "mine"
-    subprocess.run(["git", "worktree", "add", "-q", "-b", "mine", str(mine)], cwd=repo, check=True, capture_output=True)
-    _with_frontmatter(workspace, path, f"worktree: {mine.as_posix()}\nbranch: mine\n")
-    result = runner.invoke(
-        app, ["work", "record-baseline", path, "--cwd", str(repo), "--workspace", str(workspace), "--json"]
-    )
-    assert result.exit_code != 0
-    assert json.loads(result.stdout)["error"]["payload"]["refusal"]["reason"] == "wrong-checkout"
-
-
-def test_record_baseline_already_started_is_an_envelope(workspace: Path, tmp_path: Path) -> None:
-    path, repo, _head = _executing_item_in_a_declared_repo(workspace, tmp_path)
-    subprocess.run(["git", "checkout", "-q", "-b", "work"], cwd=repo, check=True, capture_output=True)
-    subprocess.run(
-        ["git", "-c", "user.name=T", "-c", "user.email=t@example.com", "commit", "-q", "--allow-empty", "-m", "w"],
-        cwd=repo,
-        check=True,
-        capture_output=True,
-    )
-    result = runner.invoke(
-        app, ["work", "record-baseline", path, "--cwd", str(repo), "--workspace", str(workspace), "--json"]
-    )
-    assert result.exit_code != 0
-    assert json.loads(result.stdout)["error"]["payload"]["refusal"]["reason"] == "already-started"
-
-
-def test_record_placement_unprovable_ancestry_is_an_envelope(workspace: Path, tmp_path: Path) -> None:
-    path, _repo, head = _executing_item_in_a_declared_repo(workspace, tmp_path)
-    _with_frontmatter(workspace, path, f"worktree: {(tmp_path / 'old').as_posix()}\nbranch: old\nstart_sha: {head}\n")
-    before = _fm(workspace, path)
-    result = runner.invoke(
-        app,
-        [
-            "work",
-            "record-placement",
-            path,
-            "--root",
-            path,
-            "--phase",
-            "execute",
-            "--worktree",
-            str(tmp_path / "gone"),
-            "--branch",
-            "new",
-            "--workspace",
-            str(workspace),
-            "--json",
-        ],
-    )
-    assert result.exit_code != 0
-    assert json.loads(result.stdout)["error"]["payload"]["refusal"]["reason"] == "git-unavailable"
-    assert _fm(workspace, path) == before

@@ -240,6 +240,7 @@ def test_attempt_replace_append_and_step_update() -> None:
     assert record.attempts[0].steps["create"] == dr.StepState("done", at="t")
     assert record.attempts[0].dispatch_id == "ctx_1"
     assert len(record.with_attempt(dr.Attempt("task_2", None, "d", {}, None, {})).attempts) == 2
+    assert len(record.with_retry(dr.Attempt("task_1", None, "d", {}, None, {})).attempts) == 2
 
 
 def test_attempt_complete_and_pending() -> None:

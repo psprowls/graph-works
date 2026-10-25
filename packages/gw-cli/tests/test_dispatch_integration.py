@@ -3,13 +3,13 @@
 import json
 import runpy
 import subprocess
-from dataclasses import fields, replace
+from dataclasses import fields
 from pathlib import Path
 
 import pytest
 from gw_cli.cli import app
 from okf_io import load
-from subagents_io.dispatch import PlannedDispatch, WorktreeAction
+from subagents_io.dispatch import PlannedDispatch, WorktreePlacement
 from typer.testing import CliRunner
 from workflow_orca import OrcaBackend
 from workflow_orca._launch import decode_launch_spec
@@ -138,71 +138,28 @@ def test_synced_workspace_cli_profile_reaches_orca_and_durable_receipt(workspace
     assert (planned["agent"], planned["model"], planned["reasoning_effort"]) == (agent, model, effort)
     assert planned["provenance"] == next_payload["dispatch"]["provenance"]
     assert planned["mode"] == ("attend" if stage == "design" else "autonomous")
-    raw = {field.name: planned["path" if field.name == "slug" else field.name] for field in fields(PlannedDispatch)}
-    raw["worktree"] = WorktreeAction(**raw["worktree"])
+    raw = {
+        field.name: planned["path" if field.name == "slug" else field.name]
+        for field in fields(PlannedDispatch)
+        if field.name != "worktree"
+    }
+    placed = planned["placement"]
+    raw["worktree"] = WorktreePlacement(
+        path=placed["worktree"] if placed else str(workspace),
+        branch=placed["branch"] if placed else None,
+        parent_path=placed["parent_worktree"] if placed else None,
+    )
+    assert "worktree" not in planned
     dispatch = PlannedDispatch(**raw)
-    if stage == "design":
-        code = workspace.parent / "code"
-        sha = subprocess.run(
-            ["git", "-C", str(code), "rev-parse", "main^{commit}"],
-            check=True,
-            capture_output=True,
-            text=True,
-        ).stdout.strip()
-        assert len(sha) == 40
-        assert planned["worktree"] == {
-            "action": "pin-detached",
-            "path": None,
-            "branch": None,
-            "base_branch": "main",
-            "exists": None,
-            "parent_path": None,
-            "start_sha": sha,
-        }
-        # The backend consumes a prepared checkout; preserve this test's launch
-        # profile/effective-receipt subject by preparing the pin with real Git.
-        reader = workspace / "reader"
-        subprocess.run(
-            ["git", "-C", str(code), "worktree", "add", "--detach", str(reader), sha],
-            check=True,
-            capture_output=True,
-        )
-        observed = subprocess.run(
-            ["git", "-C", str(reader), "rev-parse", "HEAD"],
-            check=True,
-            capture_output=True,
-            text=True,
-        ).stdout.strip()
-        assert observed == sha
-        assert (
-            subprocess.run(
-                ["git", "-C", str(reader), "symbolic-ref", "-q", "HEAD"],
-                capture_output=True,
-            ).returncode
-            == 1
-        )
-        dispatch = replace(
-            dispatch,
-            worktree=replace(
-                dispatch.worktree,
-                action="reuse",
-                path=str(reader),
-                exists=True,
-            ),
-        )
     cli = FakeOrcaCLI()
-    session = OrcaBackend(run=cli, repo_selector="path:" + str(workspace)).open_session("integration-" + stage)
+    session = OrcaBackend(run=cli).open_session("integration-" + stage)
     record = session.launch(dispatch)
     task = next(iter(cli._tasks.values()))
     request = decode_launch_spec(task["spec"])
     assert request["agent"] == agent and request["model"] == model
     assert request["reasoning_effort"] == effort
     assert task["spec"].split("\n", 1)[1] == planned["prompt"]
-    restored = (
-        OrcaBackend(run=cli, repo_selector="path:" + str(workspace))
-        .open_session("integration-" + stage)
-        .describe(dispatch.key)
-    )
+    restored = OrcaBackend(run=cli).open_session("integration-" + stage).describe(dispatch.key)
     assert restored.handle == record.handle
     assert "unverified" not in (restored.detail or "")
     # Durable effective evidence, rather than the initial start result, controls accounting.

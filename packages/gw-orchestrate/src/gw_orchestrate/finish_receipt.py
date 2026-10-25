@@ -31,6 +31,7 @@ from work_tracker_okf.items import IGNORE, load_items
 from work_tracker_okf.mutation import DirectoryPrecondition, PlannedWrite, WorkMutationPlan
 from work_tracker_okf.paths import MANAGED_ARTIFACTS, ArtifactRef, artifact_ref, item_page
 from work_tracker_okf.sources import upsert
+from work_tracker_okf.vocabulary import TERMINAL_STATUSES
 
 
 @dataclass(frozen=True, slots=True)
@@ -137,7 +138,7 @@ def record_finish_in(
     """
     guard = finish_read_guard(layout, path, bundle=context.bundle)
     item = next((i for i in context.items if i.path == path), None)
-    if item is None or item.phase != "finish" or item.work_status in {"resolved", "wontfix", "superseded"}:
+    if item is None or item.phase != "finish" or item.work_status in TERMINAL_STATUSES:
         return FinishReceiptResult("owner must be active at finish", False, None)
     plan = resolve_finish_targets(layout, context.items, path)
     if plan.blockers:

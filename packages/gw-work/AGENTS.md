@@ -11,6 +11,7 @@ Application slice over resolved kernel primitives. May import the declared `gw_p
 ## Modules
 
 - `commands`: work filing, routing, display reads, lint, indexes, decision ledgers and path mutations.
+- `place`: `run_place`, item and repository resolution for `gw work place` over the gw-pipeline engine.
 - `carried`, `epic_brief`: inherited epic guidance.
 - `reconcile`, `obligations`: artifact and obligation operations.
 - `path_report`, `affecting`, `artifact_bodies`: path, target and body projections.

@@ -2748,26 +2748,27 @@ def _validate_postconditions(
 
     notes.extend(intentional_notes)
 
-    for member in _affected_index_members(plan):
-        lane = PurePosixPath(member).parent.as_posix()
-        try:
-            current = _read_bytes_at(root, member).decode("utf-8")
-        except (OSError, UnicodeDecodeError) as exc:
-            failures.append(f"{member}: postcondition read failed: {exc}")
-            continue
-        direct = tuple(
-            sorted(
-                (
-                    item
-                    for item in items
-                    if (location := parse_item_path(item.path)) is not None and location.lane == lane
-                ),
-                key=lambda item: item.basename,
+    if plan.operation == "indexes":
+        for member in _affected_index_members(plan):
+            lane = PurePosixPath(member).parent.as_posix()
+            try:
+                current = _read_bytes_at(root, member).decode("utf-8")
+            except (OSError, UnicodeDecodeError) as exc:
+                failures.append(f"{member}: postcondition read failed: {exc}")
+                continue
+            direct = tuple(
+                sorted(
+                    (
+                        item
+                        for item in items
+                        if (location := parse_item_path(item.path)) is not None and location.lane == lane
+                    ),
+                    key=lambda item: item.basename,
+                )
             )
-        )
-        expected = reconcile_entries(current, tuple(render_entry(item) for item in direct))
-        if current != expected:
-            failures.append(f"{member}: {STALE_INVENTORY_DETAIL}")
+            expected = reconcile_entries(current, tuple(render_entry(item) for item in direct))
+            if current != expected:
+                failures.append(f"{member}: {STALE_INVENTORY_DETAIL}")
     try:
         _assert_root_identity(validation_root, root)
     except (OSError, ValueError) as exc:

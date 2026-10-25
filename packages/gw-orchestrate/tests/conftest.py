@@ -91,6 +91,7 @@ class GateEnv:
         ]
         if self.state["worktree"] is not None:
             lines.append(f"worktree: {self.state['worktree']}")
+            lines.append(f"branch: {self.state.get('branch', 'main')}")
         lines.append("affects:")
         lines.extend(f"  - {entry}" for entry in self.state["affects"])  # type: ignore[attr-defined]
         self.page_text = "---\n" + "\n".join(lines) + "\n---\n\nBody.\n"
@@ -100,9 +101,15 @@ class GateEnv:
         self.state["affects"] = affects
         self._write_page()
 
-    def set_worktree(self, worktree: Path | None) -> None:
+    def set_worktree(self, worktree: Path | None, branch: str = "main") -> None:
         self.state["worktree"] = None if worktree is None else str(worktree)
+        self.state["branch"] = branch
         self._write_page()
+
+    def branch_off(self, branch: str = "feat") -> None:
+        """Check the item's branch out in the declared repo, so its commits lie beyond the parent `main`."""
+        git(self.repo, "checkout", "-qb", branch)
+        self.set_worktree(self.repo, branch)
 
     def set_status(self, status: str) -> None:
         self.state["work_status"] = status

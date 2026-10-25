@@ -34,6 +34,7 @@ ALL_MODULES = (
     "_progress.py",
     "backend.py",
     "port.py",
+    "placement.py",
 )
 
 #: The one workspace package this may import. There is no third-party

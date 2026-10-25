@@ -22,6 +22,31 @@ def test_repo_list_projects_ids_and_paths():
     assert runner.calls == [("orca", "repo", "list", "--json")]
 
 
+@pytest.mark.parametrize("repo", [{"worktreeBasePath": "/worktrees"}, {}, None, {"worktreeBasePath": 42}])
+def test_port_repo_show_reads_base_path(repo):
+    calls = []
+
+    def runner(argv):
+        calls.append(tuple(argv))
+        return OrcaResult(0, json.dumps({"ok": True, "result": {"repo": repo}}), "")
+
+    assert OrcaCliPort(run=runner).repo_show("path:/repo") == (
+        "/worktrees" if repo == {"worktreeBasePath": "/worktrees"} else None
+    )
+    assert calls == [("orca", "repo", "show", "--repo", "path:/repo", "--json")]
+
+
+@pytest.mark.parametrize("parent", [None, "path:/parent"])
+def test_port_worktree_set_argv(parent):
+    p, runner = port([(("worktree", "set"), "terminal_send")])
+    p.worktree_set("path:/child", display_name="feature-placement-verb", parent=parent)
+    expected = ["orca", "worktree", "set", "--worktree", "path:/child"]
+    if parent is not None:
+        expected.extend(("--parent-worktree", "path:/parent"))
+    expected.extend(("--display-name", "feature-placement-verb", "--json"))
+    assert runner.calls == [tuple(expected)]
+
+
 def test_worktree_show_strips_refs_heads():
     p, runner = port([(("worktree", "show"), "worktree_show_renamed")])
     row = p.worktree_show("id:x")
@@ -116,48 +141,10 @@ def test_worktree_list_show_fallback_that_finds_nothing_is_an_error():
         OrcaCliPort(run=runner).worktree_list("r")
 
 
-def test_worktree_create_is_independent_setup_skipped_and_marked():
-    p, runner = port([(("worktree", "create"), "worktree_create")])
-    row = p.worktree_create(name="gw-reader-3c9f2e1d", repo_id="repo_1", base_branch="epic/x", comment="gw-reader:m")
-    assert runner.calls == [
-        (
-            "orca",
-            "worktree",
-            "create",
-            "--name",
-            "gw-reader-3c9f2e1d",
-            "--repo",
-            "id:repo_1",
-            "--base-branch",
-            "epic/x",
-            "--no-parent",
-            "--setup",
-            "skip",
-            "--comment",
-            "gw-reader:m",
-            "--json",
-        )
-    ]
-    assert row["path"] == "/Users/pat/orca/workspaces/gw/gw-reader-3c9f2e1d"
-    assert row["branch"] == "psprowls/gw-reader-3c9f2e1d"
-    assert row["is_main"] is False and row["parent_id"] is None
-    assert row["comment"] == "gw-reader:3c9f2e1d5b7a4c6e8d0f1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d"
-
-
-def test_worktree_create_without_a_worktree_row_is_an_error():
-    def runner(argv):
-        return OrcaResult(0, json.dumps({"ok": True, "result": {"worktree": {}}}), "")
-
-    with pytest.raises(OrcaCliError, match="returned no worktree"):
-        OrcaCliPort(run=runner).worktree_create(name="n", repo_id="r", base_branch="b", comment="c")
-
-
-def test_worktree_set_methods_use_id_selectors():
+def test_worktree_set_status_uses_an_id_selector():
     p, runner = port([(("worktree", "set"), "terminal_send")])
-    p.worktree_set_parent("child", "parent")
     p.worktree_set_status("child", "done")
     assert runner.calls == [
-        ("orca", "worktree", "set", "--worktree", "id:child", "--parent-worktree", "id:parent", "--json"),
         ("orca", "worktree", "set", "--worktree", "id:child", "--workspace-status", "done", "--json"),
     ]
 
@@ -299,6 +286,25 @@ def test_worker_start_adds_model_and_effort_together():
         "run_1", "task_1", request={"agent": "claude", "model": "m", "reasoning_effort": "high"}, placement_argv=[]
     )
     assert runner.calls[-1][-5:] == ("--model", "m", "--effort", "high", "--json")
+
+
+@pytest.mark.parametrize("retry_of", [None, "d-1"])
+def test_worker_start_passes_retry_of(retry_of):
+    p, runner = port([(("worker-start",), "worker_start_effects")])
+    kwargs = {} if retry_of is None else {"retry_of": retry_of}
+    p.worker_start(
+        "run_1",
+        "task_1",
+        request={"agent": "claude", "model": "m", "reasoning_effort": None},
+        placement_argv=["--worktree", "path:/w"],
+        **kwargs,
+    )
+    argv = runner.calls[-1]
+    if retry_of is None:
+        assert "--retry-of" not in argv
+    else:
+        assert argv[-3:] == ("--retry-of", "d-1", "--json")
+        assert argv.index("--retry-of") > argv.index("path:/w")
 
 
 def test_failed_start_preserves_receipt_and_known_ids():

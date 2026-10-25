@@ -31,7 +31,6 @@ from subagents_io.backend import (
     WorkerEvent,
     WorkerQuestion,
     WorkerRecord,
-    WorktreeNotProvisioned,
 )
 from subagents_io.dispatch import PlannedDispatch
 
@@ -63,8 +62,6 @@ class FakeSession:
     def launch(self, dispatch: PlannedDispatch) -> WorkerRecord:
         if dispatch.mode not in self._backend.supported_modes:
             raise UnsupportedMode(f"{dispatch.key}: mode {dispatch.mode!r} is not in {self._backend.supported_modes}")
-        if dispatch.worktree.path is None:
-            raise WorktreeNotProvisioned(f"{dispatch.key}: worktree.path is None")
         if dispatch.key in self._workers:
             raise BackendError(f"{dispatch.key}: already has a worker in this session")
         state = _WorkerState(dispatch.key, f"fake-{len(self._workers)}", dispatch.prompt.split())
@@ -164,7 +161,6 @@ class FakeBackend:
     def __init__(self) -> None:
         self.name = "fake"
         self.supported_modes = frozenset({"autonomous"})
-        self.provisions_worktrees = False
         self._sessions: dict[str, FakeSession] = {}
 
     def open_session(self, name: str) -> FakeSession:

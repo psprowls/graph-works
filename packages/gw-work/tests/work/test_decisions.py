@@ -15,6 +15,7 @@ from gw_kernel import apply_init, plan_init
 from gw_kernel.testing.transactions import assert_workspace_commit
 from gw_kernel.testing.transactions import init_git as _init_git
 from gw_kernel.workspace.errors import WorkspaceError
+from gw_pipeline import decision_owner as decision_owner_module
 from gw_work import commands as work
 from okf_io import load
 
@@ -475,7 +476,7 @@ def test_decision_refuses_an_owner_page_changed_after_its_snapshot(tmp_path: Pat
     layout = _workspace(tmp_path)
     owner_page = layout.bundle_dir / f"{OWNER}.md"
     external = owner_page.read_bytes() + b"\nExternal owner edit.\n"
-    original = work.upsert
+    original = decision_owner_module.upsert
     injected = False
 
     def inject_after_snapshot(*args, **kwargs):
@@ -485,7 +486,7 @@ def test_decision_refuses_an_owner_page_changed_after_its_snapshot(tmp_path: Pat
             injected = True
         return original(*args, **kwargs)
 
-    monkeypatch.setattr(work, "upsert", inject_after_snapshot)
+    monkeypatch.setattr(decision_owner_module, "upsert", inject_after_snapshot)
     result = work.run_decision_add(
         layout,
         LEAF,

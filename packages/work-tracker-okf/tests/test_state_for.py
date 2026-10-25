@@ -155,32 +155,20 @@ _PARENT_AT_FINISH = "type: Epic\nwork_status: in-progress\nphase: finish\n"
 
 
 @pytest.mark.parametrize(
-    ("stamp", "expected"),
+    ("affects", "expected"),
     [
-        ("branch: epic/integration-1a2b3c4d\nworktree: /wt/integration\n", True),
-        ("branch: epic/integration-1a2b3c4d\n", True),
-        ("worktree: /wt/integration\n", False),
+        ("affects: [packages/x]\n", True),
+        ("affects: [packages/x, 'gw:workspace']\n", True),
+        ("affects: ['gw:workspace']\n", False),
+        ("affects: []\n", False),
         ("", False),
-        ("branch:\n", False),
-        ('branch: ""\n', False),
-        ("branch: 42\n", False),
-        ('branch: "   "\n', True),
+        ("branch: epic/integration-1a2b3c4d\nworktree: /wt/integration\n", False),
     ],
-    ids=[
-        "branch-and-worktree",
-        "branch-only",
-        "worktree-only",
-        "absent",
-        "null",
-        "empty",
-        "non-string",
-        "whitespace",
-    ],
+    ids=["code", "code-and-workspace", "workspace-only", "empty", "absent", "stamp-without-affects"],
 )
-def test_state_for_carries_branch_ownership_from_frontmatter(tmp_path: Path, stamp: str, expected: bool) -> None:
-    """Only `branch:` establishes ownership, by the existing tolerant projection:
-    a worktree alone does not, and whitespace is still a (projected) stamp."""
-    write_item(tmp_path, "parent", _PARENT_AT_FINISH + stamp)
+def test_state_for_carries_branch_ownership_from_code_affects(tmp_path: Path, affects: str, expected: bool) -> None:
+    """Branch ownership follows code `affects`; a retired stamp no longer establishes it."""
+    write_item(tmp_path, "parent", _PARENT_AT_FINISH + affects)
     state = state_for(load_written_items(tmp_path), "work/parent")
     assert state is not None
     assert state.has_branch is expected
@@ -188,10 +176,10 @@ def test_state_for_carries_branch_ownership_from_frontmatter(tmp_path: Path, sta
 
 def test_state_for_carries_branch_ownership_for_every_type() -> None:
     for type_name in ("Epic", "Release", "Feature", "Bug"):
-        stamped = state_for([make_item("item", type=type_name, branch="b/x-1")], "work/item")
-        unstamped = state_for([make_item("item", type=type_name)], "work/item")
-        assert stamped is not None and stamped.has_branch is True
-        assert unstamped is not None and unstamped.has_branch is False
+        owning = state_for([make_item("item", type=type_name, affects=("packages/x",))], "work/item")
+        unowning = state_for([make_item("item", type=type_name)], "work/item")
+        assert owning is not None and owning.has_branch is True
+        assert unowning is not None and unowning.has_branch is False
 
 
 def test_stale_spec_is_a_caller_supplied_fact() -> None:

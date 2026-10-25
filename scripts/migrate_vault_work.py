@@ -44,6 +44,7 @@ from work_tracker_okf.mutation import (
     WorkMutationPlan,
     _opaque_members,
     _plan_path_mutation,
+    _digest,
     _plan_with_domain_reserved,
     _prepare_reference_markdown,
     _reference_owners,
@@ -651,6 +652,8 @@ def _projected_refusals(
             target = root / member
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_bytes(content)
+        for directory in plan.mkdirs:
+            (root / directory).mkdir(parents=True, exist_ok=True)
         try:
             bundle = load_bundle(root, ignore=IGNORE)
             bundle = _with_ignored_work_documents(bundle)
@@ -809,6 +812,13 @@ def plan_migration(bundle: Bundle) -> MigrationPlan:
     for member, after in sorted(effects.writes.items()):
         if member in index_members:
             continue
+        if PurePosixPath(member).name == "index.md":
+            # The domain planner no longer reconciles lane indexes (`gw work regen-index` owns
+            # them), so a link repair inside one is carried through as-is against its on-disk bytes.
+            index_path = bundle.root / member
+            if index_path.is_file():
+                writes.append(PlannedWrite(member, _digest(index_path.read_bytes()), after, None))
+                continue
         item_node = node_by_destination.get(member)
         converted, refusal = _convert_document(
             after,
@@ -848,6 +858,9 @@ def plan_migration(bundle: Bundle) -> MigrationPlan:
     mkdirs = tuple(
         sorted(
             set(base.mkdirs)
+            # Lane indexes used to create these incidentally; nothing reconciles them now, so
+            # a parent-capable item's owned directory is scaffolded here (structure.owned-directory-missing).
+            | {targets[node.old_path] for node in nodes if node.type in PARENT_TYPES and not node.archived}
             | {
                 parent
                 for member in (*[write.member for write in writes], *[move.dest for move in effects.renames])

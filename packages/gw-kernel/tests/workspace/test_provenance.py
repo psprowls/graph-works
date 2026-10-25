@@ -46,6 +46,36 @@ def test_probe_git_reports_returncode_and_cause(tmp_path):
     assert (missing.returncode, missing.cause) == (None, "missing")
 
 
+@pytest.mark.parametrize("preserve_output", [False, True])
+def test_strict_git_passes_timeout_to_probe(tmp_path, monkeypatch, preserve_output):
+    g = provenance.resolve_git(None, environ=os.environ)
+    assert isinstance(g, provenance.GitExecutable)
+    recorded = {}
+
+    def _probe(*args, **kwargs):
+        recorded.update(kwargs)
+        return provenance.GitOutcome(0, "status output", "ok")
+
+    monkeypatch.setattr(provenance, "probe_git", _probe)
+    result = provenance.strict_git(tmp_path, "status", git=g, timeout=120, preserve_output=preserve_output)
+    assert result == "status output"
+    assert recorded["timeout"] == 120
+
+
+def test_strict_git_timeout_detail_names_seconds(tmp_path, monkeypatch):
+    g = provenance.resolve_git(None, environ=os.environ)
+    assert isinstance(g, provenance.GitExecutable)
+
+    def _probe(*args, **kwargs):
+        return provenance.GitOutcome(None, "", "timeout")
+
+    monkeypatch.setattr(provenance, "probe_git", _probe)
+    result = provenance.strict_git(tmp_path, "status", git=g, timeout=120)
+    assert isinstance(result, provenance.GitFailure)
+    assert result.cause == "timeout"
+    assert "after 120s" in result.detail
+
+
 @pytest.mark.parametrize(
     ("failure", "cause"),
     [
@@ -445,6 +475,19 @@ def test_default_base_reads_the_origin_head_symref(repo, tmp_path):
     assert provenance.default_base(repo) == "trunk"
 
 
+def test_default_base_uses_supplied_git(repo, monkeypatch):
+    executable = provenance.GitExecutable("configured-git", "config", "git version test")
+
+    def probe(cwd, *args, **kwargs):
+        assert cwd == repo
+        assert args == ("symbolic-ref", "refs/remotes/origin/HEAD")
+        assert kwargs["executable"] == "configured-git"
+        return provenance.GitOutcome(0, "refs/remotes/origin/trunk\n", "ok")
+
+    monkeypatch.setattr(provenance, "probe_git", probe)
+    assert provenance.default_base(repo, git=executable) == "trunk"
+
+
 def test_dirty_paths_reports_an_untracked_file_in_scope(repo):
     (repo / "b.txt").write_text("new\n", encoding="utf-8")
     assert provenance.dirty_paths(repo, ["b.txt"]) == ("b.txt",)
@@ -586,6 +629,30 @@ def test_strict_dirty_paths_reports_dirt(repo):
     assert provenance.strict_dirty_paths(repo, ["a.txt"], git=_system_git()) == ("a.txt",)
 
 
+@pytest.mark.parametrize("optional_locks", [True, False])
+def test_strict_dirty_paths_controls_optional_index_writes(repo, monkeypatch, optional_locks):
+    git = _system_git()
+    (repo / "a.txt").write_text("changed\n", encoding="utf-8")
+    original = provenance.probe_git
+    calls = []
+
+    def probe(cwd, *args, **kwargs):
+        calls.append((args, kwargs))
+        return original(cwd, *args, **kwargs)
+
+    monkeypatch.setattr(provenance, "probe_git", probe)
+    assert provenance.strict_dirty_paths(repo, ["a.txt"], git=git, optional_locks=optional_locks) == ("a.txt",)
+    assert calls[0][0] == (
+        *(("--no-optional-locks",) if not optional_locks else ()),
+        "status",
+        "--porcelain",
+        "-z",
+        "--",
+        "a.txt",
+    )
+    assert calls[0][1]["executable"] == git.path
+
+
 def test_strict_commit_rejects_an_unknown_sha(repo):
     failure = provenance.strict_commit(repo, "0" * 40, git=_system_git())
     assert isinstance(failure, provenance.GitFailure)
@@ -600,6 +667,30 @@ def test_strict_range_reads_commits_and_files(repo):
     facts = provenance.strict_range(repo, start_sha=start, paths=["a.txt"], git=git)
     assert isinstance(facts, provenance.GateRange)
     assert len(facts.commits) == 1 and facts.files == ("a.txt",)
+
+
+def test_branch_range_excludes_merges_and_parent_side_files(repo):
+    git = _system_git()
+    _git(repo, "checkout", "-b", "item")
+    (repo / "a.py").write_text("a\n", encoding="utf-8")
+    _git(repo, "add", "a.py")
+    _git(repo, "commit", "-m", "item work")
+    _git(repo, "checkout", "main")
+    (repo / "b.py").write_text("b\n", encoding="utf-8")
+    _git(repo, "add", "b.py")
+    _git(repo, "commit", "-m", "parent work")
+    _git(repo, "checkout", "item")
+    _git(repo, "merge", "--no-ff", "-m", "refresh", "main")
+    facts = provenance.strict_branch_range(repo, base_ref="main", paths=[".", "a.py", "b.py"], git=git)
+    assert isinstance(facts, provenance.GateRange)
+    assert len(facts.commits) == 1 and "item work" in facts.commits[0]
+    assert facts.files == ("a.py",)
+    assert facts.start_sha == provenance.strict_commit(repo, "main", git=git)
+
+
+def test_branch_range_missing_parent_tip_is_a_failure(repo):
+    failure = provenance.strict_branch_range(repo, base_ref="nope", paths=["a.txt"], git=_system_git())
+    assert isinstance(failure, provenance.GitFailure)
 
 
 def test_strict_is_ancestor(repo):

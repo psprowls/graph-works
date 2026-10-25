@@ -4,12 +4,19 @@ from __future__ import annotations
 
 import dataclasses
 import itertools
-from unittest import mock
 
 import pytest
 from gw_orchestrate import commands as orchestrate
 from gw_orchestrate.rank import dependent_counts
-from test_orchestrate_plan import _GONE_STAMP, _RESERVE_ROOT, _blocked_kinds, _item, _overlapping_children, _plan
+from test_orchestrate_plan import (
+    _RESERVE_ROOT,
+    _blocked_kinds,
+    _code_plan,
+    _item,
+    _overlapping_children,
+    _plan,
+    _refusing_first,
+)
 from work_tracker_okf.decisions import HoldFact
 from work_tracker_okf.dependencies import DependencyEdge
 from work_tracker_okf.items import WorkItem
@@ -18,10 +25,7 @@ ROOT = "work/epic-probe"
 CONTRACT = f"{ROOT}/children/feature-z-contract"
 RIVAL = f"{ROOT}/children/feature-a-execute"
 DEPENDENTS = tuple(f"{ROOT}/children/feature-dependent-{i}" for i in range(4))
-_PLACEMENT: dict[str, object] = {
-    "worktree_inventory": {"epic/root": "/wt/root", "feature/other": "/wt/other"},
-    "worktree_exists": {"/wt/root": True, "/wt/other": True},
-}
+_PLACEMENT: dict[str, object] = {}
 
 
 def _needs_contract(path: str, **overrides: object) -> WorkItem:
@@ -66,7 +70,7 @@ def test_regression_the_upstream_contract_wins_the_only_slot() -> None:
     items = _contract_run(*(_needs_contract(path) for path in DEPENDENTS))
     result = _plan(items, ROOT, max_parallel=1, **_PLACEMENT)
     assert [dispatch.slug for dispatch in result.dispatches] == [CONTRACT]
-    assert result.dispatches[0].worktree.action == orchestrate.READER_ACTION
+    assert result.dispatches[0].phase == "design"
     assert _blocked_kinds(result) == {(RIVAL, "capacity"), *((path, "deps") for path in DEPENDENTS)}
 
 
@@ -80,7 +84,7 @@ def test_regression_the_contract_design_dispatches_beside_a_live_overlapping_exe
     live = (orchestrate.session_name(RIVAL, "Feature", "execute"),)
     result = _plan(items, ROOT, max_parallel=2, live=live, **_PLACEMENT)
     assert [dispatch.slug for dispatch in result.dispatches] == [CONTRACT]
-    assert result.dispatches[0].worktree.action == orchestrate.READER_ACTION
+    assert result.dispatches[0].phase == "design"
     assert result.blocked == ()
 
 
@@ -190,20 +194,10 @@ def test_ranking_never_displaces_live_work() -> None:
 
 
 def test_a_refused_high_rank_candidate_reserves_nothing_and_lets_the_next_through() -> None:
-    items, (upstream, rival, dependent) = _overlapping_children(
-        "feature-z-up", "feature-a-rival", "feature-m-dep", first=_GONE_STAMP
-    )
+    items, (upstream, rival, dependent) = _overlapping_children("feature-z-up", "feature-a-rival", "feature-m-dep")
     edge = DependencyEdge(upstream, blocks="execute", needs="resolved")
     items = (*items[:3], dataclasses.replace(items[3], dependency_edges=(edge,)))
-    real = orchestrate._resolve_worktree
-    considered: list[str] = []
-
-    def resolve(item: WorkItem, **kwargs: object) -> object:
-        considered.append(item.path)
-        return real(item, **kwargs)  # type: ignore[arg-type]
-
-    with mock.patch.object(orchestrate, "_resolve_worktree", side_effect=resolve):
-        result = _plan(items, _RESERVE_ROOT, max_parallel=1, worktree_exists={"/wt/gone": False, "/wt/epic": True})
-    assert considered[:2] == [upstream, rival]
+    items, extra = _refusing_first(items, upstream)
+    result = _code_plan(items, _RESERVE_ROOT, max_parallel=2, **extra)
     assert [dispatch.slug for dispatch in result.dispatches] == [rival]
-    assert _blocked_kinds(result) == {(upstream, "worktree-unprovable"), (dependent, "deps")}
+    assert _blocked_kinds(result) == {(upstream, "worktree-pending"), (dependent, "deps")}

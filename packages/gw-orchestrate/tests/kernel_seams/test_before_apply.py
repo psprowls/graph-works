@@ -27,9 +27,7 @@ def test_before_apply_can_abort_and_is_not_called_for_dry_runs(tmp_path: Path, o
     )
 
     def run(dry_run: bool, callback: Callable[[object], None]) -> object:
-        return run_stage_advance(
-            layout, path, today=AT.date(), infer_worktree=False, dry_run=dry_run, before_apply=callback
-        )
+        return run_stage_advance(layout, path, today=AT.date(), dry_run=dry_run, before_apply=callback)
 
     class Rejected(Exception):
         pass

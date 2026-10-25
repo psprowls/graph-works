@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
+import json
 import typing
 
 from gw_cli.work_cli.orca import orca_port
 from gw_orchestrate import dispatch as core_dispatch
 from gw_orchestrate import orca_port as core
-from subagents_io.dispatch import PlannedDispatch, WorktreeAction
+from subagents_io.dispatch import PlannedDispatch, WorktreePlacement
 from workflow_orca import port as vendor
 from workflow_orca._launch import encode_launch_spec
 
@@ -63,10 +64,14 @@ def test_the_pending_questions_surface_is_on_both_sides() -> None:
     assert _hints(core.OrcaPort.pending_questions) == _hints(vendor.OrcaCliPort.pending_questions)
 
 
+def test_worker_start_agrees_on_retry_of() -> None:
+    core_hints = _hints(core.OrcaPort.worker_start)
+    assert core_hints == _hints(vendor.OrcaCliPort.worker_start)
+    assert core_hints["retry_of"] == _shape(str | None)
+
+
 def test_core_and_vendor_encode_the_same_envelope() -> None:
-    worktree = WorktreeAction(
-        action="reuse", path="/w", branch="b", base_branch=None, exists=True, parent_path=None, start_sha=None
-    )
+    worktree = WorktreePlacement(path="/w", branch="b", parent_path=None)
     planned = PlannedDispatch(
         key="k",
         slug="work/x",
@@ -94,3 +99,48 @@ def test_core_and_vendor_encode_the_same_envelope() -> None:
         worktree_path="/w",
         prompt="go\n",
     ) == encode_launch_spec(planned, placement_argv=argv)
+
+
+def test_port_has_no_worktree_mutators() -> None:
+    """Placement is the engine's: neither port copy creates or links a worktree."""
+    for name in ("worktree_create", "worktree_set_parent"):
+        assert not hasattr(core.OrcaPort, name), name
+        assert not hasattr(vendor.OrcaCliPort, name), name
+    for name in ("worktree_show", "worktree_list", "worktree_set_status", "repo_list"):
+        assert name in core.OrcaPort.__dict__, name
+        assert _hints(getattr(core.OrcaPort, name)) == _hints(getattr(vendor.OrcaCliPort, name)), name
+    worktree = WorktreePlacement(path="/w/x", branch="x", parent_path="/w/epic")
+    planned = PlannedDispatch(
+        key="k",
+        slug="work/x",
+        phase="execute",
+        kind="Feature",
+        effort="small",
+        skill="s",
+        mode="autonomous",
+        agent="claude",
+        model=None,
+        reasoning_effort=None,
+        worktree=worktree,
+        merge_target="main",
+        prompt="go\n",
+        auto_merge=False,
+    )
+    argv = ["--worktree", "path:/w/x"]
+    vendor_envelope = json.loads(encode_launch_spec(planned, placement_argv=argv).split("\n", 1)[0].split(" ", 1)[1])
+    core_envelope = json.loads(
+        core_dispatch.encode_launch_envelope(
+            key="k",
+            agent="claude",
+            model=None,
+            reasoning_effort=None,
+            placement_argv=argv,
+            mode="autonomous",
+            worktree_path="/w/x",
+            prompt="go\n",
+        )
+        .split("\n", 1)[0]
+        .split(" ", 1)[1]
+    )
+    assert set(vendor_envelope) == set(core_envelope)
+    assert vendor_envelope["worktree_path"] == core_envelope["worktree_path"] == "/w/x"

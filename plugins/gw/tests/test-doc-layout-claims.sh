@@ -225,15 +225,13 @@ assert_contains "skills/auto-drive/references/grace-period-protocol.md" "orca or
     "grace-period-protocol.md must document the --resume re-arm call"
 
 # Repository selection is owned by item metadata and the planner. Keep the
-# prerequisite and placement preview behavior visible to auto-drive readers.
+# prerequisite behavior visible to auto-drive readers.
 assert_contains "skills/auto-drive/SKILL.md" 'repo: graph-works' \
     "auto-drive illustrates declared repository metadata"
 assert_contains "skills/auto-drive/SKILL.md" 'Never launch workers from an error envelope.' \
     "auto-drive stops on repository resolution errors"
 assert_contains "skills/auto-drive/SKILL.md" 'For a prelaunch refusal, use a coordinator `AskUserQuestion`' \
     "auto-drive asks for a repository choice before any worker exists"
-assert_contains "skills/auto-drive/references/dispatch-checks.md" 'A placement preview validates repository selection too.' \
-    "auto-drive explains placement preview parity"
 
 # Only executable examples are forbidden from passing a manual repository
 # selector. Prose can name the bad workaround while explaining the rule.
@@ -244,8 +242,8 @@ from pathlib import Path
 
 content = Path(sys.argv[1]).read_text(encoding="utf-8")
 logical_lines = re.sub(r"\\\r?\n[ \t]*", " ", content).splitlines()
-command = re.compile(r"^`?gw work (?:orchestrate|record-placement)\b")
-inline = re.compile(r"`(gw work (?:orchestrate|record-placement)\b[^`]*)`")
+command = re.compile(r"^`?gw work (?:orchestrate)\b")
+inline = re.compile(r"`(gw work (?:orchestrate)\b[^`]*)`")
 
 for number, line in enumerate(logical_lines, 1):
     candidates = [line.strip(), *(match.group(1) for match in inline.finditer(line))]
@@ -274,9 +272,9 @@ grep -q "grace-period-protocol.md" "$PLUGIN_ROOT/skills/finishing-relay/SKILL.md
 # living somewhere else, and a silent edit to either side breaks resume with no
 # test failure anywhere.
 
-# `launch --retry-of` reuses the ORIGINAL frozen Task spec -- `worker-start`'s
-# --task and --spec are mutually exclusive -- so `resume-spec`'s augmented
-# prompt never reaches the resumed worker. The `send --to dispatch:<new id>`
+# `gw work dispatch --retry-of` reuses the ORIGINAL frozen Task spec -- `worker-start`'s
+# --task and --spec are mutually exclusive -- so `resume-spec`'s composed
+# resume text never reaches the resumed worker on its own. The `send --to dispatch:<new id>`
 # follow-up is the only thing that actually delivers the answer; without it the
 # resumed worker re-asks the question this feature exists to stop it re-asking.
 assert_contains "skills/auto-drive/SKILL.md" "orca orchestration send --to dispatch:<new dispatch_id>" \
@@ -420,11 +418,8 @@ assert_contains "skills/graph-works/references/page-formats.md" \
     "page-formats §8 points hand overrides at the editing guide"
 
 assert_contains "skills/auto-drive/SKILL.md" \
-    "references/multi-repo-acceptance.md" \
-    "auto-drive links the disposable multi-repository acceptance procedure"
-assert_contains "skills/auto-drive/references/multi-repo-acceptance.md" \
-    "installed-package adapter runtime" \
-    "acceptance separates installed runtime evidence from source checks"
+    "gw work place <root> --prune --json" \
+    "auto-drive wrap-up prunes finished placements through gw work place"
 
 # The execute-coverage report has one producer (core's EXECUTE_TAIL, which
 # names the file through {execute_artifact}) and two readers: auto-drive
@@ -441,7 +436,7 @@ assert_contains "skills/workflow/SKILL.md" 'A `null` tail adds nothing.' \
 assert_not_matches "skills/workflow/SKILL.md" 'same text `EXECUTE_TAIL` gives|\*\*Execute-stage (gate|deferrals) \(step 3\)\.\*\*' \
     "workflow no longer copies EXECUTE_TAIL's bullets"
 assert_contains "skills/finishing-relay/SKILL.md" "gw work gate check <work-path>" "relay R1 checks for a receipt first"
-assert_contains "skills/finishing-relay/SKILL.md" "gw work gate check <work-path> --worktree <target worktree>" "relay R4 checks the merged tree"
+assert_contains "skills/finishing-relay/SKILL.md" 'On a successful integrate:** run `gw work gate check <work-path>`' "relay R4 checks the merged tree"
 assert_contains "skills/finishing-relay/SKILL.md" 'git log <target_branch>..<source_branch>' "relay R2 settles an empty range without gating"
 assert_contains "skills/workflow/references/brief-riders.md" "gw work gate check <work-path>" "attended finish rider checks for a receipt"
 assert_contains "skills/finishing-relay/SKILL.md" "except a target R2's already-contained rule settles" "relay R1 exempts already-contained targets"
@@ -463,7 +458,7 @@ assert_contains "skills/auto-drive/SKILL.md" \
     'any line is `- [ ]`' \
     "auto-drive's Coverage read scans for unchecked items"
 assert_contains "skills/auto-drive/SKILL.md" \
-    "--from finish --return [--return-scope …] --no-infer-worktree" \
+    "--from finish --return [--return-scope …]" \
     "auto-drive's Coverage read sends an item back with a guarded return"
 assert_contains "skills/auto-drive/SKILL.md" \
     "run the coverage read" \
@@ -666,29 +661,14 @@ assert_not_matches "skills/finishing-relay/SKILL.md" '--options "<merge,pr,hold,
 assert_contains "skills/finishing-relay/SKILL.md" 'A reply that is not JSON, including a bare option token, is treated as `hold`.' \
     "finishing-relay holds on every non-JSON typed reply"
 
-# Reader preparation and evidence use distinct durable artifacts, not an epic
-# stamp. The legacy recipe carries the helper contract; the skill carries the
-# verb's.
-for contract in \
-    'launch-worker.py prepare-reader --dispatch <dispatch-json>' \
-    '--attempt-id <preparation-attempt-id> --out-placement <fresh-placement-json>' \
-    'Require exit 0 before encode, task-create or launch' \
-    'File existence alone never authorizes launch' \
-    'gw work record-reader <slug> --root <work-path> --phase <dispatch phase>' \
-    'dispatched <key> -> <observed path> detached at <start_sha>' \
-    'layout.cache_dir / "reader-receipts"'; do
-    assert_contains "skills/auto-drive/references/dispatch-checks.md" "$contract" "dispatch checks document reader contract: $contract"
-done
-for contract in \
-    'dispatched <key> -> <observed path> detached at <start_sha>' \
-    'layout.cache_dir / "reader-receipts"' \
-    'references/orca-placement/<key>.dispatch.json' \
-    '### 4.2.1 Reader preparation failure before Task creation'; do
-    assert_contains "skills/auto-drive/SKILL.md" "$contract" "auto-drive documents reader contract: $contract"
-done
+# Computed placement retired detached readers, their receipts and the saved
+# dispatch entry a park-resume once re-placed from; every stage launches into
+# its computed worktree.
 assert_not_matches "skills/auto-drive/SKILL.md" \
-    'reads from the shared epic worktree|read-only descendant that records nothing' \
-    "auto-drive retires shared-reader placement and receipt skipping"
+    'detached at <start_sha>|reader-receipts|<key>\.dispatch\.json|Reader preparation failure|reads from the shared epic worktree|read-only descendant that records nothing' \
+    "auto-drive retires reader placement, receipts and the saved re-placement entry"
+assert_contains "skills/auto-drive/SKILL.md" 'gw work dispatch <key> --plan <plan> --run <run> --retry-of <dispatch_id> --json' \
+    "auto-drive relaunches a retry or park-resume through gw work dispatch --retry-of"
 
 # tech-debt-auto-drive-skill-orca-edge-cases: §2.7 waits through the tested
 # `gw work wait` verb; no raw `check --wait` / `check --ack` survives anywhere
@@ -831,6 +811,18 @@ for contract in 'structure.source-escape' 'owned stage artifacts' '## Notes / lo
 done
 assert_contains "skills/graph-works/references/page-formats.md" 'target_type' \
     "page formats records the proposal destination type"
+
+# Package docs describe computed placement (WorktreePlacement, launch into a path), not the
+# retired worktree action vocabulary (work/feature-planner-computed-placement, Task 10).
+REPO_ROOT="$(cd "$PLUGIN_ROOT/../.." && pwd)"
+RETIRED_ACTION_VOCABULARY='pin-detached|fork-child|create-top-level|provisions_worktrees|WorktreeNotProvisioned|record-reader'
+action_hits="$(grep -nE -- "$RETIRED_ACTION_VOCABULARY" "$REPO_ROOT"/packages/*/AGENTS.md "$REPO_ROOT"/packages/*/README.md || true)"
+if [[ -n "$action_hits" ]]; then
+    fail "package docs carry the retired worktree action vocabulary"
+    echo "$action_hits" | sed 's/^/      /'
+else
+    pass "package docs carry no retired worktree action vocabulary"
+fi
 
 if [[ "$FAILURES" -gt 0 ]]; then
     echo "STATUS: FAILED ($FAILURES failure(s))"

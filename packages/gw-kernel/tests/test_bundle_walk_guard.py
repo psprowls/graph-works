@@ -41,6 +41,11 @@ ALLOWLIST = {
         "read_index",
         "glob",
     ): "Caller-supplied receipt subtree pattern",
+    (
+        "packages/gw-orchestrate/src/gw_orchestrate/dispatch.py",
+        "_occupied.holder",
+        "glob",
+    ): "Dispatch journals of a Run",
     ("packages/gw-wiki/src/gw_wiki/scan/commands.py", "emit_scan_worklist", "glob"): "Owned scan briefs",
     ("packages/gw-wiki/src/gw_wiki/scan/commands.py", "load_results_dir", "glob"): "Scan result artifacts",
     (

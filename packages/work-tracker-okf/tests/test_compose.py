@@ -315,38 +315,50 @@ def test_artifact_symlink_uses_resolved_file_type(root: Path) -> None:
     assert present.plan.refusal is None
 
 
-def test_composed_filing_preflights_page_indexes_and_log_without_writing(root: Path, section_set) -> None:
+def test_composed_filing_preflights_page_and_log_without_writing(root: Path, section_set) -> None:
     bundle = load_bundle(root, ignore=IGNORE)
     seed = FilingSeed(type="Epic", title="Migration", description="d", on=TODAY)
     outcome = plan_file_and_reconcile(bundle, load_items(bundle), seed, section_set)
     assert outcome.plan.refusal is None
     assert outcome.plan.filing.path == "work/epic-migration"
-    assert {index.lane for index in outcome.plan.indexes} == {
-        "work",
-        "work/epic-migration/children",
-    }
-    assert any(index.lane == "work" and index.changed for index in outcome.plan.indexes)
+    assert not hasattr(outcome.plan, "indexes")
     assert outcome.plan.log is not None and outcome.plan.log.changed
     assert outcome.application == FilingApplication()
     assert not outcome.plan.filing.target.exists()
 
 
-def test_leaf_filing_does_not_plan_or_overwrite_unrelated_lane_indexes(root: Path, section_set) -> None:
-    unrelated = root / "work" / "_archive" / "index.md"
-    before = "human-owned concurrent bytes\n"
-    unrelated.parent.mkdir(parents=True)
-    unrelated.write_text(before, encoding="utf-8")
+def test_filing_plans_no_lane_index(root: Path, section_set) -> None:
+    parent_index = root / "work" / "epic-parent" / "children" / "index.md"
+    parent_index.parent.mkdir(parents=True)
+    parent_index.write_text("human-owned bytes\n", encoding="utf-8")
+    write_item(root, "work/epic-parent", "type: Epic\nwork_status: open\nphase: design\ntags: []\n")
+    lane_index = root / "work" / "index.md"
+    lane_before = lane_index.read_bytes() if lane_index.exists() else None
     bundle = load_bundle(root, ignore=IGNORE)
     outcome = plan_file_and_reconcile(
         bundle,
         load_items(bundle),
-        FilingSeed(type="Bug", title="Narrow", description="d", on=TODAY),
+        FilingSeed(type="Bug", title="Narrow", description="d", on=TODAY, parent_path="work/epic-parent"),
         section_set,
     )
+    assert outcome.plan.refusal is None
+    assert not hasattr(outcome.plan, "indexes")
+    application = apply_file_and_reconcile(outcome.plan)
+    assert not hasattr(application, "indexes")
+    assert parent_index.read_bytes() == b"human-owned bytes\n"
+    assert (lane_index.read_bytes() if lane_index.exists() else None) == lane_before
 
-    assert [index.lane for index in outcome.plan.indexes] == ["work"]
+
+def test_filing_a_parent_type_creates_empty_child_index(root: Path, section_set) -> None:
+    bundle = load_bundle(root, ignore=IGNORE)
+    outcome = plan_file_and_reconcile(
+        bundle,
+        load_items(bundle),
+        FilingSeed(type="Epic", title="Migration", description="d", on=TODAY),
+        section_set,
+    )
     apply_file_and_reconcile(outcome.plan)
-    assert unrelated.read_text(encoding="utf-8") == before
+    assert (root / "work" / "epic-migration" / "children" / "index.md").is_file()
 
 
 def test_composed_filing_applies_page_required_indexes_and_log(root: Path, section_set) -> None:
@@ -355,7 +367,6 @@ def test_composed_filing_applies_page_required_indexes_and_log(root: Path, secti
     outcome = plan_file_and_reconcile(bundle, load_items(bundle), seed, section_set)
     application = apply_file_and_reconcile(outcome.plan)
     assert application.written and application.page == outcome.plan.filing.target
-    assert (root / "work" / "index.md").read_text(encoding="utf-8").count("epic-migration.md") == 1
     assert (root / "work" / "epic-migration" / "children" / "index.md").is_file()
     assert "filed work/epic-migration (Epic)" in (root / "log.md").read_text(encoding="utf-8")
 
@@ -406,7 +417,6 @@ def test_stale_log_preserves_concurrent_bytes_and_reports_partial_application(ro
 
     assert isinstance(raised.value, compose.FilingPlanStaleError)
     assert raised.value.application.page == outcome.plan.filing.target
-    assert raised.value.application.indexes == outcome.plan.indexes
     assert raised.value.application.log is None
     assert not raised.value.application.written
     assert raised.value.expected == outcome.plan.log.before.encode("utf-8")

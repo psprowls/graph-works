@@ -86,9 +86,20 @@ def test_the_golden_pins_every_verb_this_item_shipped() -> None:
         ("work", "ask"),
         ("work", "ask-answer"),
         ("work", "ingest-queue"),
+        ("work", "place"),
         ("work", "reparent"),
-        ("work", "record-baseline"),
-        ("work", "record-placement"),
-        ("work", "record-reader"),
         ("work", "wait"),
     } <= paths
+
+
+def test_record_reader_is_gone() -> None:
+    """Reader checkouts are gone with computed placement; nothing records a reader receipt."""
+    live = {tuple(entry["path"]) for entry in _payload()["commands"]}
+    frozen = {tuple(entry["path"]) for entry in json.loads(GOLDEN.read_text(encoding="utf-8"))["commands"]}
+    assert ("work", "record-reader") not in live | frozen
+
+
+def test_record_placement_and_baseline_are_gone() -> None:
+    live = {tuple(entry["path"]) for entry in _payload()["commands"]}
+    frozen = {tuple(entry["path"]) for entry in json.loads(GOLDEN.read_text(encoding="utf-8"))["commands"]}
+    assert not {("work", "record-placement"), ("work", "record-baseline")} & (live | frozen)

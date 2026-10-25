@@ -61,26 +61,24 @@ def test_next_projects_shared_targets_and_nonfinish_is_empty(tmp_path, monkeypat
     from gw_wire.work import next_payload
     from gw_work.commands import run_next
 
-    layout, items, path = setup(tmp_path, monkeypatch)
+    layout, items, path = setup(tmp_path, monkeypatch, base_checkout=True)
     expected = resolve_finish_targets(layout, items, path).targets
     result = run_next(layout, path)
     assert result.finish_targets == expected
     payload = next_payload(result, bundle_root=layout.bundle_dir)
-    assert [t["repo"]["name"] for t in payload["finish_targets"]] == ["core", "ui"]
+    assert [t["repo"]["name"] for t in payload["finish_targets"]] == ["core"]
     page = layout.bundle_dir / f"{path}.md"
     page.write_text(page.read_text().replace("phase: finish", "phase: design"), encoding="utf-8")
     assert run_next(layout, path).finish_targets == ()
 
 
-def test_next_blocks_entire_finish_when_one_target_is_unverified(tmp_path, monkeypatch):
+def test_next_blocks_finish_when_the_declared_checkout_does_not_hold_the_target(tmp_path, monkeypatch):
     from gw_wire.work import next_payload
     from gw_work.commands import run_next
 
-    layout, _items, path = setup(tmp_path, monkeypatch)
-    page = layout.bundle_dir / f"{path}.md"
-    page.write_text(page.read_text().replace("branch: epic/a}", "branch: missing}"), encoding="utf-8")
+    layout, _items, path = setup(tmp_path, monkeypatch, base_checkout=False)
     result = run_next(layout, path)
     payload = next_payload(result, bundle_root=layout.bundle_dir)
     assert payload["action"] is None
     assert payload["blockers"]
-    assert [t.repo.name for t in result.finish_targets] == ["core"]
+    assert result.finish_targets == ()

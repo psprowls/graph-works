@@ -82,51 +82,11 @@ enforced here via a live Orca query rather than a local set.
   Agent/model/effort are per-dispatch, never session defaults. `_launch.py`
   implements pure argv/envelope/receipt helpers; see README for the exact shared
   `GW_LAUNCH_V1 ` schema and `reasoning_effort` → receipt `effort` mapping.
-  `_worktree_flags` builds the four Orca worktree modes
-  (`reuse`/`main` → `path:<path>`; `fork-child` and `create-top-level` →
-  `new-top-level` + `--repo`, with a planned `parent_path` linked afterwards by
-  `orca worktree set --parent-worktree path:<parent_path>` — Orca's child mode
-  is never used because it takes repository and parent from the calling
-  terminal), which is why
-  `OrcaBackend.provisions_worktrees = True`: Orca itself creates the
-  worktree, this backend does not.
+  `_worktree_flags` always returns `--worktree path:<dispatch.worktree.path>`: the worker is launched into the existing, already-placed checkout, and this backend creates, forks, links and names nothing (no `--repo`, no `--name`, no `orca worktree set`). Placement is computed and realized before the dispatch is built, by the placement engine in `gw-pipeline` driven from `gw-orchestrate`.
 
-  **Orca's `--name` is a worktree display name, not a branch name.** There is
-  no branch flag anywhere on the CLI; Orca derives the branch as
-  `<host git user slug>/slugify(name)`, unconditionally — not on collision,
-  not only for slash-containing names. So a `fork-child` or `create-top-level`
-  launch costs **two more calls today** (`worker-show --dispatch <ctx>` for the
-  worker's `worktree_id`, then the top-level `orca worktree show --worktree
-  id:<id>`) — one, if the `worker-start` payload ever carries the id itself —
-  to record the real `worktree_path` / `worktree_branch` on the
-  returned `WorkerRecord`. `reuse`/`main` pay neither call: they report the
-  path they were handed and leave the branch `None`. A creation with a
-  `parent_path` costs one more (`worktree set`); a failed link is reported in
-  `WorkerRecord.detail`, never raised.
+  `launch` pays no Orca call to learn where the worker runs. `_resolve_worktree` returns the planned path and leaves the branch `None` rather than trusting the plan, and `WorkerRecord.worktree_path` / `worktree_branch` are read-back fields only.
 
-  This is **read-back only** — `_resolve_worktree` never compares the result
-  against the plan, never warns, and degrades every failure to `None`,
-  because `launch()` has already started a real worker by then. Comparing
-  actual against planned is a caller's business and is tracked separately.
-- **enumerate** (`workers()`): costs `1 + P + W` CLI calls (`task-list`,
-  all `P` worker-list pages, plus one `worker-show` per worker with a handle) — read
-  `WorkerRecord.last_heartbeat_at`'s and `workers()`'s docstrings in
-  `backend.py` before "optimizing" this away; the per-live-worker call is
-  deliberate because a nudge decision (below) treats "has ever heartbeat" as
-  a hard veto and a lazily-`None` heartbeat would silently defeat it. Rows are
-  newest first; the first attempt for each task wins across all pages. Failed
-  later pages or malformed/repeated continuations raise rather than returning
-  a partial inventory. Historical responses without page metadata remain valid.
-- **wait**: one blocking `check --wait --types
-  worker_done,escalation,question,heartbeat --timeout-ms <ms>` call,
-  translated by the pure `_map.py` (`event_from_message`) into the protocol's
-  closed `WorkerEvent` union. Never raises on quiet — timeout and an empty
-  batch are the same `[]` to the caller.
-- **resume after a crash**: nothing to do beyond calling `open_session` again
-  with the same name. A settled task's `result` field carries the entire
-  `worker_done` payload (`parse_task_result` in `_map.py`), so a session
-  reconstructs lifecycle from durable task/worker data with no live process;
-  launch verification additionally reads full specs and worker-show evidence.
+  The read-back never compares the result against the plan and never raises, because `launch()` has already started a real worker by then.
 
 ### Completion, release, and terminal-free workers
 
@@ -216,16 +176,7 @@ are public package exports; the protocol remains unchanged.
   is reached only via `subprocess` inside `_cli.py`. Don't add a dependency
   here without expecting that test to fail on purpose.
 
-`pin-detached` is deliberately refused with `WorktreeNotProvisioned`, even
-with a supplied path, before task creation or worker launch: this backend
-cannot prepare and verify a detached checkout at `start_sha`.
-`provisions_worktrees=True` covers the branch-creation actions, not reader
-pinning. Graph Works auto-drive prepares and verifies each reader itself —
-`gw work dispatch` in process through this package's `OrcaCliPort`
-(`worktree_list` finds an attempt's marked checkout, `worktree_create` makes
-an independent, setup-skipped one; core detaches and verifies it), or the
-legacy `launch-worker.py prepare-reader` — then starts it at that exact path. Creation actions
-require a non-None branch before assembling CLI flags.
+`gw work dispatch` launches every stage, in process through this package's `OrcaCliPort`, into the worktree the placement engine already made. The `OrcaPort` surface reads (`worktree_show`, `worktree_list`, `repo_list`) and sets status, and never creates a worktree; names and parent links are `OrcaPlacementNotifier`'s, through `worktree_set`.
 
 `port.py` is the structural `OrcaPort` implementation for core's coordinator
 logic. Its `check_wait` builds one blocking `check --wait` call with optional
@@ -235,3 +186,5 @@ the Run's consumer. The port adds `OrcaTask.result`,
 normalized rows so core can inspect duplicate completions without losing
 malformed payload evidence. Unlike `OrcaSession`, the port rebinds only when
 the caller's core logic asks it to.
+
+`placement.py` adds `OrcaPlacementNotifier`, a best-effort adapter for plain-git placement events through a local read-only structural protocol. It checks the repository's worktree base once per notifier instance and repository, waits for automatic discovery, then sets the display name and parent link. Missing parents still receive a display name; CLI and OS failures become notes and never fail placement. It imports no application package.

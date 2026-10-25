@@ -142,9 +142,16 @@ def test_fixed_nested_move_has_exact_equal_counts_at_both_sizes(corpus_for, batc
 
 
 @pytest.mark.parametrize("items", SIZES)
+# Budgets after Task 3 (was (1, 11, 5, 15, 4) and (3, 17, 11, 24, 7)). The planning count is
+# unchanged. Three parse sites vanished: `_index_effects` no longer runs `plan_indexes` /
+# `reconcile_entries` (which parsed and re-rendered every affected lane index), the plan no
+# longer carries index writes for the transaction postcondition to re-parse, and the
+# `_affected_index_members` postcondition block runs only for `operation == "indexes"`.
+# Post-apply parses fall 5->2 and 11->6, document markdown parses 15->13 and 24->23, and
+# index renders 4->2 and 7->6. The remainder is the moved pages themselves.
 @pytest.mark.parametrize(
     "batch, planning_count, post_count, document_md, render_md",
-    ((1, 11, 5, 15, 4), (3, 17, 11, 24, 7)),
+    ((1, 11, 2, 13, 2), (3, 17, 6, 23, 6)),
 )
 def test_cold_live_move_has_one_plan_apply_and_locked_reload_with_exact_profiles(
     corpus_for, tmp_path, monkeypatch, items, batch, planning_count, post_count, document_md, render_md

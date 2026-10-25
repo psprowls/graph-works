@@ -47,7 +47,7 @@ class Pages:
 def observe(transport, observer):
     if observer == "port":
         return [row["handle"] for row in OrcaCliPort(run=transport).liveness("run_test", now=NOW)]
-    session = OrcaSession(name="test", run_id="run_test", run=transport, repo_selector=None)
+    session = OrcaSession(name="test", run_id="run_test", run=transport)
     if observer == "workers":
         return [row.handle for row in session.workers() if row.state in {"pending", "running"}]
     return [row.handle for row in session.liveness(now=NOW)]

@@ -101,9 +101,7 @@ def test_unchanged_lane_index_retains_digest_without_naming_itself_as_source(tmp
 
     plan = plan_reparent(bundle, load_items(bundle), epic, release)
 
-    write = next(write for write in plan.writes if write.member == "work/index.md")
-    assert write.before_digest is not None
-    assert write.source_member is None
+    assert all(write.member != "work/index.md" for write in plan.writes)
 
 
 def test_reparent_preserves_opaque_bytes_and_warns_only_for_old_paths(tmp_path: Path) -> None:
@@ -577,22 +575,25 @@ def test_release_adoption_refuses_non_release_and_non_root_sources(tmp_path: Pat
 
 
 def test_reparent_merges_source_destination_and_owned_lane_indexes(tmp_path: Path) -> None:
-    """The moved lane's own index gains a freshly-rendered entry for the item
-    that now lives directly in it (bare and relative to the index's new
-    directory), while its incidental prose link follows the moved item: the
-    reconciliation pre-image takes non-entry lines from the okf-ext rewrite
-    and only direct-entry lines from the raw on-disk bytes."""
+    """The moved lane's own index keeps its direct-entry line byte for byte (no
+    re-rendering) while its incidental prose link follows the moved item: the
+    pre-image takes non-entry lines from the okf-ext rewrite and only
+    direct-entry lines from the raw on-disk bytes. Source and destination
+    lane indexes are not written at all."""
     release, epic, feature = _tree(tmp_path)
     old_index = tmp_path / epic / "children" / "index.md"
-    old_index.write_text(f"# Children\n\nSee [feature](/{feature}.md).\n", encoding="utf-8")
+    old_index.write_text(
+        f"# Children\n\nSee [feature](/{feature}.md).\n\n# Items\n\n- [Feature: T](feature-import.md)\n",
+        encoding="utf-8",
+    )
     bundle = load_bundle(tmp_path)
 
     plan = plan_reparent(bundle, load_items(bundle), epic, release)
 
     destination = f"{release}/children/epic-migration"
     by_member = {write.member: write for write in plan.writes}
-    assert "work/index.md" in by_member
-    assert f"{release}/children/index.md" in by_member
+    assert "work/index.md" not in by_member
+    assert f"{release}/children/index.md" not in by_member
     assert f"{destination}/children/index.md" in by_member
     moved_index = by_member[f"{destination}/children/index.md"].after
     assert f"See [feature](/{destination}/children/feature-import.md).".encode() in moved_index

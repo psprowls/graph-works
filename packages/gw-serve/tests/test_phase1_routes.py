@@ -30,8 +30,9 @@ def test_work_list_is_the_projection(client: TestClient, workspace: WorkspaceLay
     response = client.get("/v1/work/list")
 
     assert response.status_code == 200
-    assert response.json() == wire_work.work_list_payload(work.run_work_list(workspace))
+    assert response.json() == wire_work.work_list_payload(work.run_work_board(workspace))
     assert [row["path"] for row in response.json()["items"]] == ["work/feature-a", "work/feature-b"]
+    assert all("placement" in row for row in response.json()["items"])
 
 
 def _file_proposal(workspace: WorkspaceLayout) -> str:

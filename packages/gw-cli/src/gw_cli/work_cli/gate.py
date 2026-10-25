@@ -16,7 +16,6 @@ import os
 import secrets
 import time
 from datetime import UTC, datetime
-from pathlib import Path
 from typing import Any, Literal, NoReturn
 
 import typer
@@ -47,10 +46,6 @@ def _refuse(path: str, payload: dict[str, Any]) -> NoReturn:
     )
 
 
-def _worktree(value: str) -> Path | None:
-    return Path(value) if value else None
-
-
 @gate_app.command("run")
 def gate_run(
     path: str = _PATH,
@@ -63,7 +58,6 @@ def gate_run(
         help="Register this terminal (ORCA_TERMINAL_HANDLE) to be woken with a resume line when the run finishes.",
     ),
     scope: str = typer.Option("full", "--scope", help="Gate scope: full or scoped."),
-    worktree: str = typer.Option("", "--worktree", help="Worktree path; default is the item's recorded worktree."),
     workspace: str = typer.Option("", "--workspace", help="Workspace path."),
     json_output: bool = rendering.json_option("Emit the run result as JSON."),
 ) -> None:
@@ -78,7 +72,6 @@ def gate_run(
             path,
             scope=chosen,
             fresh=fresh,
-            worktree=_worktree(worktree),
             now=datetime.now(UTC),
             token=secrets.token_hex(4),
             spawn=spawn_runner,
@@ -148,14 +141,13 @@ def gate_wait(
 @gate_app.command("check")
 def gate_check(
     path: str = _PATH,
-    worktree: str = typer.Option("", "--worktree", help="Worktree path; default is the item's recorded worktree."),
     workspace: str = typer.Option("", "--workspace", help="Workspace path."),
     json_output: bool = rendering.json_option("Emit the check result as JSON."),
 ) -> None:
     """Whether PATH's worktree tree already has a satisfying gate receipt. Writes nothing."""
     layout = resolve_workspace(workspace)
     try:
-        result = run_gate_check(layout, path, worktree=_worktree(worktree))
+        result = run_gate_check(layout, path)
     except WorkspaceError as exc:
         rendering.fail(str(exc), reason="workspace", code=exit_codes.SCHEMA_MISMATCH, cause=exc)
     except OSError as exc:

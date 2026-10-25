@@ -23,7 +23,6 @@ from types import MappingProxyType
 from typing import Final
 
 from code_graph_io.tokens import count_tokens
-from gw_kernel.workspace import provenance
 from gw_kernel.workspace.errors import WorkspaceError
 from gw_kernel.workspace.layout import WorkspaceLayout
 from gw_kernel.workspace.repos import resolve_item_repo
@@ -211,14 +210,6 @@ def epic_brief(layout: WorkspaceLayout, items: Sequence[WorkItem], item: WorkIte
     if flagged:
         flags.append(f"overlapping landed sibling(s): {', '.join(flagged)}")
 
-    workspace = baseline.workspace if baseline is not None else None
-    watched = [str(root / r.lstrip("/")) for r in (design, ledger.resource) if r]
-    if workspace is not None:
-        out = provenance.run_git(layout.root, "rev-list", "--count", f"{workspace}..HEAD", "--", *watched)
-        if out is None or not out.strip().isdigit():
-            warnings.append(f"epic_brief: could not count workspace commits since {_short(workspace)}")
-        elif (count := int(out.strip())) > 0:
-            flags.append(f"{count} workspace commit(s) touched the epic design or ledger since {_short(workspace)}")
     if row is None:
         flags.append("own index row not found")
     lines.append(FLAG_PREFIX + "; ".join(flags) + "." if flags else NO_FLAGS_LINE)

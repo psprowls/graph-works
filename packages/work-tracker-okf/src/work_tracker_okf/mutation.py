@@ -16,7 +16,7 @@ from okf_io import Bundle, Document
 from okf_io.bundle import INDEX_NAME, LOG_NAME, canonical_id
 from okf_io.links import resolve_reference
 
-from work_tracker_okf.indexes import is_direct_entry_target, parse_entry, plan_indexes, reconcile_entries
+from work_tracker_okf.indexes import is_direct_entry_target, parse_entry
 from work_tracker_okf.items import WorkItem
 from work_tracker_okf.paths import MANAGED_ARTIFACTS, child_lane, parse_item_path
 from work_tracker_okf.vocabulary import PARENT_TYPES
@@ -413,27 +413,6 @@ def _lane(path: str) -> str:
     return path.rsplit("/", 1)[0]
 
 
-def _future_items(items: Sequence[WorkItem], path_mapping: Mapping[str, str]) -> tuple[WorkItem, ...]:
-    remapped: list[WorkItem] = []
-    for item in items:
-        path = path_mapping.get(item.path, item.path)
-        parent = path_mapping.get(item.parent_path, item.parent_path) if item.parent_path is not None else None
-        ancestors = tuple(path_mapping.get(ancestor, ancestor) for ancestor in item.ancestor_paths)
-        remapped.append(
-            replace(
-                item,
-                path=path,
-                page_path=f"{path}.md",
-                basename=path.rsplit("/", 1)[-1],
-                archived="/_archive/" in f"/{path}/",
-                parent_path=parent,
-                ancestor_paths=ancestors,
-                child_paths=tuple(path_mapping.get(child, child) for child in item.child_paths),
-            )
-        )
-    return tuple(remapped)
-
-
 def _lane_mapping(items: Sequence[WorkItem], path_mapping: Mapping[str, str]) -> dict[str, str]:
     mapping: dict[str, str] = {}
     for item in items:
@@ -449,7 +428,7 @@ def _is_direct_entry_line(line: str) -> bool:
     return target is not None and is_direct_entry_target(target)
 
 
-def _reconciliation_preimage(before_bytes: bytes | None, rewritten: bytes | None) -> bytes | None:
+def _reconciliation_preimage(before_bytes: bytes, rewritten: bytes | None) -> bytes:
     """The text `reconcile_entries` reconciles one lane index from, merged line by line.
 
     Two sources, each right for a different kind of line:
@@ -470,7 +449,7 @@ def _reconciliation_preimage(before_bytes: bytes | None, rewritten: bytes | None
     (or either side is not UTF-8), the raw bytes are used whole rather than
     risk pairing the wrong lines.
     """
-    if before_bytes is None or rewritten is None or rewritten == before_bytes:
+    if rewritten is None or rewritten == before_bytes:
         return before_bytes
     try:
         raw_lines = before_bytes.decode("utf-8").split("\n")
@@ -513,7 +492,6 @@ def _index_effects(
             )
         inverse[destination] = source
 
-    final_items = _future_items(items, path_mapping)
     writes: list[PlannedWrite] = []
     deletes: list[str] = []
     index_members: set[str] = set()
@@ -536,28 +514,18 @@ def _index_effects(
         except OSError as exc:
             refusals.append(MutationRefusal(source_member, "index-read", str(exc)))
             continue
-        content_bytes = _reconciliation_preimage(before_bytes, rendered.get(source_member))
+        if before_bytes is None:
+            continue
+        after = _reconciliation_preimage(before_bytes, rendered.get(source_member))
         try:
-            before = content_bytes.decode("utf-8") if content_bytes is not None else None
+            after.decode("utf-8")
         except UnicodeDecodeError as exc:
             refusals.append(MutationRefusal(source_member, "parse-error", f"index is not UTF-8: {exc}"))
             continue
-        try:
-            lane_plan = plan_indexes(root, final_items, lanes=(destination_lane,))[0]
-        except UnicodeDecodeError as exc:
-            refusals.append(MutationRefusal(destination_member, "parse-error", f"index is not UTF-8: {exc}"))
-            continue
-        except OSError as exc:
-            refusals.append(MutationRefusal(destination_member, "index-read", str(exc)))
-            continue
-        after = reconcile_entries(before, lane_plan.entries).encode("utf-8")
-        if moved or before_bytes != after:
-            before_digest = _digest(before_bytes) if before_bytes is not None else None
-            preimage_source = (
-                source_member if before_bytes is not None and source_member != destination_member else None
-            )
-            writes.append(PlannedWrite(destination_member, before_digest, after, preimage_source))
-        if before_bytes is not None and moved:
+        if moved or after != before_bytes:
+            preimage_source = source_member if moved else None
+            writes.append(PlannedWrite(destination_member, _digest(before_bytes), after, preimage_source))
+        if moved:
             deletes.append(source_member)
     return (
         tuple(sorted(writes, key=lambda write: write.member)),

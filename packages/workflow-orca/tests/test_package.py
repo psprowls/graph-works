@@ -27,7 +27,7 @@ def test_declares_one_dependency_and_no_extras():
     # this package implements; there is no second edge and no extra, because
     # the `orca` CLI is a process, not a library.
     meta = _metadata()
-    assert meta["project"]["dependencies"] == ["subagents-io>=0.2,<0.3"]
+    assert meta["project"]["dependencies"] == ["subagents-io>=0.3,<0.4"]
     assert "optional-dependencies" not in meta["project"]
 
 

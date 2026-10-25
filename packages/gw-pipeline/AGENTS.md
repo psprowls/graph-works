@@ -15,14 +15,16 @@ The package root exports no APIs; import each defining module.
 
 ## Module ownership
 
+- `placement`: the pure branch/worktree/parent function and owner chain, plus the PlacementNotifier seam; `place`: the git engine behind `gw work place`.
+- `placement_resolve`: an item's placement in one repository, for finish, the gate and cleanup.
+
 - `transactions`: journaled engine, executor lock, differential counted-multiset
   validation, same-lock baseline capture and anchored delegators. Preserve C3:
   tier/capability wrappers resolve transaction-global names at call time so
   monkeypatches of transactions._TIERS/os/platform continue to control the engine.
-- `finish`, `execute_return`, `landed`: finish evidence/cleanup and return journals.
+- `finish`, `execute_return`, `landed`: finish evidence and return journals. Cleanup is not here: it runs through `gw work place --remove` against the computed placement.
 - `gate_config`, `decision_owner`: repository gate settings and owner locks.
-- `workspace_branch`, `workspace_placement`, `repo_context`: resolved placement,
-  branch and repository observations.
+- `repo_context`: repository observations; `members`: bundle-member confinement.
 - `guidance/assembly`, `guidance/render`: guidance assembly and rendering;
   affecting overlap remains `gw_kernel.guidance.closure`.
 - `transcript_capture`: the only production discovery exemption. It delegates to

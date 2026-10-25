@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 from _gate_helpers import NOW, mint_receipt, raise_, set_max_concurrent, snapshot_dirs
-from conftest import git, make_repo
+from conftest import git
 from gw_kernel.workspace.errors import WorkspaceError
 from gw_kernel.workspace.layout import layout_for
 from gw_orchestrate import gate
@@ -76,19 +76,64 @@ def test_scoped_without_config_refuses(env):
     assert result.refusal == "no-scoped-gate"
 
 
-def test_no_worktree_refuses(env):
+def _computed(env):
+    """Clear the legacy stamp so the item's computed placement applies; return (worktree, branch)."""
+    from gw_pipeline.placement import active_path, branch_name
+
     env.set_worktree(None)
-    assert run_gate_run(env.layout, env.path, now=NOW, token="a1b2c3d4", spawn=env.spawn).refusal == "no-worktree"
+    branch = branch_name(active_path(env.path), "Feature")
+    return env.layout.worktrees_dir / "code" / branch, branch
+
+
+def test_gate_worktree_missing_when_absent(env):
+    computed, branch = _computed(env)
+    computed.parent.mkdir(parents=True, exist_ok=True)
+    git(env.repo, "worktree", "add", "-b", branch, str(computed))
+    git(env.repo, "worktree", "remove", str(computed))
+    result = run_gate_run(env.layout, env.path, now=NOW, token="a1b2c3d4", spawn=env.spawn)
+    assert result.refusal == "worktree-missing"
+    assert result.detail == (
+        f"{env.path}: {computed} is not a checkout of code on {branch}; run gw work place {env.path}"
+    )
+    assert env.spawned == []
+
+
+def test_gate_worktree_missing_on_other_branch(env):
+    computed, branch = _computed(env)
+    computed.parent.mkdir(parents=True, exist_ok=True)
+    git(env.repo, "worktree", "add", "-b", branch, str(computed))
+    git(computed, "switch", "-c", "elsewhere")
+    result = run_gate_run(env.layout, env.path, now=NOW, token="a1b2c3d4", spawn=env.spawn)
+    assert result.refusal == "worktree-missing"
+    assert run_gate_check(env.layout, env.path).refusal == "worktree-missing"
+
+
+def test_gate_measures_computed_worktree(env):
+    from gw_kernel.workspace.bundle import load_work_bundle
+    from gw_pipeline.placement_resolve import item_placement
+    from work_tracker_okf.items import load_items
+
+    computed, branch = _computed(env)
+    computed.parent.mkdir(parents=True, exist_ok=True)
+    git(env.repo, "worktree", "add", "-b", branch, str(computed))
+    items = load_items(load_work_bundle(env.layout))
+    by_path = {i.path: i for i in items}
+    expected = item_placement(env.layout, by_path[env.path], by_path).worktree.resolve()
+    target = gate.resolve_target(env.layout, env.path)
+    assert isinstance(target, gate.GateTarget) and target.worktree == expected
+
+
+def test_workspace_only_item_keeps_no_gate_configured(env):
+    env.set_affects(["gw:workspace"])
+    page = env.layout.bundle_dir / f"{env.path}.md"
+    page.write_text(page.read_text(encoding="utf-8").replace("repo: code\n", ""), encoding="utf-8", newline="\n")
+    env.set_manifest(gate="")
+    result = run_gate_run(env.layout, env.path, now=NOW, token="a1b2c3d4", spawn=env.spawn)
+    assert result.refusal == "no-gate-configured"
 
 
 def test_unknown_item_refuses(env):
     assert run_gate_run(env.layout, "work/nope", now=NOW, token="a1b2c3d4", spawn=env.spawn).refusal == "unknown-item"
-
-
-def test_foreign_worktree_flag_refuses(env, tmp_path):
-    other = make_repo(tmp_path / "other")
-    result = run_gate_run(env.layout, env.path, worktree=other, now=NOW, token="a1b2c3d4", spawn=env.spawn)
-    assert result.refusal == "foreign-worktree"
 
 
 def test_git_failure_refuses_git_unavailable(env, monkeypatch):
@@ -138,8 +183,8 @@ def test_check_reports_satisfied_and_each_unsatisfied_reason(env):
 def test_check_refusals_pass_through(env):
     env.set_manifest(gate="")
     assert run_gate_check(env.layout, env.path).refusal == "no-gate-configured"
-    env.set_worktree(None)
-    assert run_gate_check(env.layout, env.path).refusal == "no-worktree"
+    _computed(env)
+    assert run_gate_check(env.layout, env.path).refusal == "worktree-missing"
 
 
 def test_check_writes_nothing(env):
@@ -149,7 +194,7 @@ def test_check_writes_nothing(env):
 
 
 def test_resolve_target_returns_the_target_for_a_clean_tree(env):
-    target = gate.resolve_target(env.layout, env.path, worktree=None)
+    target = gate.resolve_target(env.layout, env.path)
     assert isinstance(target, gate.GateTarget) and target.repo == "code" and target.tree == env.tree
 
 
@@ -215,3 +260,15 @@ def test_max_concurrent_refusal_names_the_workflow_file(tmp_path: Path) -> None:
         WorkspaceError, match=r"workflow\.yaml: workflow\.gate\.max_concurrent: expects a positive integer, got 0"
     ):
         gate_max_concurrent(layout_for(tmp_path))
+
+
+def test_gate_check_resolves_worktree_via_accessor(env):
+    from gw_pipeline.placement import active_path, branch_name
+
+    env.set_worktree(None)
+    branch = branch_name(active_path(env.path), "Feature")
+    computed = env.layout.worktrees_dir / "code" / branch
+    computed.parent.mkdir(parents=True, exist_ok=True)
+    git(env.repo, "worktree", "add", "-b", branch, str(computed))
+    result = run_gate_check(env.layout, env.path)
+    assert result.refusal != "worktree-missing"

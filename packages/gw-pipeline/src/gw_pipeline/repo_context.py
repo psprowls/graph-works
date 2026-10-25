@@ -11,7 +11,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from types import MappingProxyType
 
-from gw_kernel.workspace.provenance import default_base, probe_git
+from gw_kernel.workspace.provenance import GitExecutable, default_base, probe_git
 
 
 @dataclass(frozen=True, slots=True)
@@ -50,24 +50,32 @@ def _exists(path: str) -> bool | None:
         return None
 
 
-def repository_identity(repo: Path) -> str | None:
+def repository_identity(repo: Path, *, git: GitExecutable | None = None) -> str | None:
     """Canonical common directory, or `None` when Git cannot prove one."""
-    common = probe_git(repo, "rev-parse", "--path-format=absolute", "--git-common-dir")
+    common = probe_git(
+        repo, "rev-parse", "--path-format=absolute", "--git-common-dir", executable=git.path if git else "git"
+    )
     if common.returncode == 0 and common.stdout.strip():
         return _canonical(Path(common.stdout.strip()))
     return None
 
 
-def observe_branch_tips(repo: Path) -> Mapping[str, str] | None:
+def observe_branch_tips(repo: Path, *, git: GitExecutable | None = None) -> Mapping[str, str] | None:
     """Return local branch names and committed object IDs, or `None` when Git cannot answer."""
-    refs = probe_git(repo, "for-each-ref", "--format=%(refname:short)%00%(objectname)", "refs/heads/")
+    refs = probe_git(
+        repo,
+        "for-each-ref",
+        "--format=%(refname)%00%(objectname)",
+        "refs/heads/",
+        executable=git.path if git else "git",
+    )
     if refs.returncode != 0:
         return None
     tips: dict[str, str] = {}
     for line in refs.stdout.splitlines():
         name, _, oid = line.partition("\0")
         if name and oid:
-            tips[name] = oid
+            tips[name.removeprefix("refs/heads/")] = oid
     return MappingProxyType(tips)
 
 
@@ -99,30 +107,46 @@ def _inventory(output: str) -> Mapping[str, tuple[str, ...]]:
     return MappingProxyType({name: tuple(paths) for name, paths in branches.items()})
 
 
+def observe_inventory(repo: Path, *, git: GitExecutable | None = None) -> Mapping[str, tuple[str, ...]] | None:
+    """Read branch holders without inspecting checkout status, or `None` if unavailable."""
+    listed = probe_git(repo, "worktree", "list", "--porcelain", executable=git.path if git else "git")
+    return _inventory(listed.stdout) if listed.returncode == 0 else None
+
+
 def observe_repository(
-    repo: Path, *, paths: Iterable[Path] = (), checkouts: Iterable[Path] = (), identity: str | None = None
+    repo: Path,
+    *,
+    paths: Iterable[Path] = (),
+    checkouts: Iterable[Path] = (),
+    identity: str | None = None,
+    git: GitExecutable | None = None,
+    optional_locks: bool = True,
 ) -> RepositoryContext:
     """Observe identity, checkout safety, worktrees and selected stamp paths."""
     canonical = _canonical(repo)
-    proven_identity = identity if identity is not None else repository_identity(repo)
+    proven_identity = identity if identity is not None else repository_identity(repo, git=git)
     selected_checkouts = {canonical, *(_canonical(path) for path in checkouts)}
-    listed = probe_git(repo, "worktree", "list", "--porcelain")
-    known = listed.returncode == 0
-    inventory = _inventory(listed.stdout) if known else MappingProxyType({})
-    tips = observe_branch_tips(repo)
+    observed_inventory = observe_inventory(repo, git=git)
+    known = observed_inventory is not None
+    inventory = observed_inventory if observed_inventory is not None else MappingProxyType({})
+    tips = observe_branch_tips(repo, git=git)
     candidates = selected_checkouts | {_canonical(path) for path in paths}
     for members in inventory.values():
         candidates.update(members)
     eligibility: dict[str, bool] = {}
     inventoried_checkouts = selected_checkouts | {path for members in inventory.values() for path in members}
+    status_prefix = () if optional_locks else ("--no-optional-locks",)
     for checkout in inventoried_checkouts:
-        status = probe_git(Path(checkout), "status", "--porcelain")
+        status = probe_git(
+            Path(checkout), *status_prefix, "status", "--porcelain", executable=git.path if git else "git"
+        )
         eligibility[checkout] = status.returncode == 0 and not status.stdout.strip() and _exists(checkout) is True
     observed = MappingProxyType({path: _exists(path) for path in candidates})
+    base = default_base(repo) if git is None else default_base(repo, git=git)
     return RepositoryContext(
         identity=proven_identity or canonical,
         path=canonical,
-        default_base=default_base(repo),
+        default_base=base,
         checkout_usable=eligibility[canonical],
         inventory=inventory,
         path_exists=observed,

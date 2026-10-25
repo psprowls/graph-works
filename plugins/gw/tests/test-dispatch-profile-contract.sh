@@ -5,7 +5,6 @@ PLUGIN_ROOT=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
 REPO_ROOT=$(CDPATH='' cd -- "$PLUGIN_ROOT/../.." && pwd)
 RECIPE="$PLUGIN_ROOT/skills/auto-drive/references/launch-worker.py"
 AUTO_DRIVE="$PLUGIN_ROOT/skills/auto-drive/SKILL.md"
-DISPATCH_CHECKS="$PLUGIN_ROOT/skills/auto-drive/references/dispatch-checks.md"
 WORKFLOW="$PLUGIN_ROOT/skills/workflow/SKILL.md"
 FIXTURE=$(mktemp -d)
 trap 'rm -rf "$FIXTURE"' EXIT
@@ -61,8 +60,6 @@ assert 'Run §2.5.3 once more' in text.split('**Wrap-up**', 1)[1]
 PY_CONTRACT
 
 grep -F 'references/launch-worker.py' "$AUTO_DRIVE" >/dev/null || fail "auto-drive uses the shipped launch recipe"
-grep -F 'launch.requested' "$DISPATCH_CHECKS" >/dev/null || fail "dispatch checks preserve requested launch proof rationale"
-grep -F 'launch.effective' "$DISPATCH_CHECKS" >/dev/null || fail "dispatch checks preserve effective launch proof rationale"
 grep -F 'task-list --run <run_id> --json' "$AUTO_DRIVE" >/dev/null || fail "retry reads full task specs"
 grep -F 'classify-restart' "$AUTO_DRIVE" >/dev/null || fail "restart uses the shipped classifier"
 grep -F 'task-update --id <task_id> --status blocked' "$AUTO_DRIVE" >/dev/null || fail "deliberate skip is durable"
@@ -72,8 +69,9 @@ grep -F -- '--dispatch-record <file>' "$AUTO_DRIVE" >/dev/null || fail "restart 
 grep -F 'rerouted-but-live' "$AUTO_DRIVE" >/dev/null || fail "rerouted live workers enter inspection"
 grep -F 'gw work reroute <key> --run <run_id> --reason "<reason>"' "$AUTO_DRIVE" >/dev/null || fail "failure question offers durable reroute"
 grep -F 'superseded Task' "$AUTO_DRIVE" >/dev/null || fail "reroutes appear separately in summary"
-grep -F 'references/dispatch-checks.md' "$AUTO_DRIVE" >/dev/null || fail "dispatch skill links check rationale"
-grep -F '# Dispatch checks — why each one exists' "$DISPATCH_CHECKS" >/dev/null || fail "dispatch rationale sidecar exists"
+if grep -F 'dispatch-checks.md' "$AUTO_DRIVE" >/dev/null; then fail "the legacy dispatch-checks recipe is gone"; fi
+grep -F 'gw work dispatch <key> --plan <plan> --run <run> --retry-of <dispatch_id> --json' "$AUTO_DRIVE" >/dev/null || fail "retry and park-resume relaunch through the dispatch verb"
+grep -F '**The hold recipe for `placement-refused`.**' "$AUTO_DRIVE" >/dev/null || fail "a placement refusal holds the item"
 section_three=$(sed -n '/^## 3\. Dispatch mechanics$/,/^## 4\. Delivery processing$/p' "$AUTO_DRIVE")
 grep -F 'gw work dispatch <key>' <<<"$section_three" >/dev/null || fail "section three uses dispatch verb"
 grep -F '### Manual ordered probe (timeout or inconclusive)' <<<"$section_three" >/dev/null || fail "timeout and inconclusive use an executable probe"
@@ -100,8 +98,8 @@ grep -F 'For non-finish stages and satisfied gates, run `gw work advance <work-p
 grep -F '| Attended finish | `merge` (a successful `gw work integrate` by any strategy, tests green on the merged result) | `gw work advance <work-path> --from finish --resolved-in <merge commit SHA>` |' "$WORKFLOW" >/dev/null || fail "attended merge must be guarded"
 grep -F '| Attended finish | `confirm` (commits already on the merge target) | `gw work advance <work-path> --from finish --resolved-in <HEAD SHA>` |' "$WORKFLOW" >/dev/null || fail "attended confirm must be guarded"
 grep -F 'Revalidate the planned gate, return, or repair condition against the fresh next result before acting.' "$AUTO_DRIVE" >/dev/null || fail "fresh phase is not authorization for a stale action"
-grep -F 'gw work advance <path from entry> --from <expected-phase> --no-infer-worktree' "$AUTO_DRIVE" >/dev/null || fail "coordinator gate must be guarded"
-grep -F 'gw work advance <work-path> --from <expected-phase> --effort <value> --no-infer-worktree' "$AUTO_DRIVE" >/dev/null || fail "coordinator sizing must be guarded"
+grep -F 'gw work advance <path from entry> --from <expected-phase>' "$AUTO_DRIVE" >/dev/null || fail "coordinator gate must be guarded"
+grep -F 'gw work advance <work-path> --from <expected-phase> --effort <value>' "$AUTO_DRIVE" >/dev/null || fail "coordinator sizing must be guarded"
 # Finish outcomes must not resolve unintegrated work or double-advance relay.
 RIDERS="$PLUGIN_ROOT/skills/workflow/references/brief-riders.md"
 RELAY="$PLUGIN_ROOT/skills/finishing-relay/SKILL.md"
@@ -136,11 +134,9 @@ state = Path(sys.argv[1]).read_text(encoding="utf-8").split("## R2 — Detect st
 state = " ".join(state.split())
 for requirement in (
     "A `null` target_worktree means the target is not checked out; hold at R2 without merging.",
-    "`git worktree list --porcelain` for the block whose `branch` line reads `refs/heads/<merge target>`.",
-    "The supplied `target_worktree` must be non-null and equal the unique path found by this scan.",
-    "The R4 merge executes there, not in this worker's own worktree.",
-    "No worktree has the merge target checked out, or more than one does: enter the **Escalation path**.",
-    "A missing or mismatched supplied path also enters the **Escalation path**.",
+    "The target checkout is the entry's supplied `target_worktree`, which gw computed from placement.",
+    "the R4 merge executes there, not in this worker's own worktree.",
+    "A missing `target_worktree` enters the **Escalation path**.",
     "Never check the target out yourself and never merge from this worker's worktree.",
 ):
     assert requirement in state, requirement
@@ -149,8 +145,8 @@ grep -F 'Never invent a release date' "$RELAY" >/dev/null || fail "relay obtains
 grep -F -- '--released-at <date>' "$RELAY" >/dev/null || fail "relay passes the release date to the resolving advance"
 if grep -Fq 'Forked-child case' "$RELAY"; then fail "relay must not limit merging to forked children"; fi
 grep -F 'The coordinator performs no merge at wrap-up.' "$AUTO_DRIVE" >/dev/null || fail "wrap-up never merges the epic branch"
-grep -F 'with a scalar branch or foreign `repo_stamps` owns integration targets' "$AUTO_DRIVE" >/dev/null || fail "stamped root finish owns integration"
-grep -F 'An owner without any source stamp' "$AUTO_DRIVE" >/dev/null || fail "unstamped root keeps its direct finish"
+grep -F "computed placement owns the integration targets" "$AUTO_DRIVE" >/dev/null || fail "placed root finish owns integration"
+grep -F 'An owner without a code' "$AUTO_DRIVE" >/dev/null || fail "unplaced root keeps its direct finish"
 if grep -Fq 'epic branch to `develop`' "$AUTO_DRIVE"; then fail "wrap-up must not hardcode a merge target"; fi
 if grep -Fq -- '--agent claude' "$AUTO_DRIVE"; then fail "auto-drive must use the planned agent"; fi
 if grep -Fq 'permission_mode' "$AUTO_DRIVE"; then fail "auto-drive must not promise permission-mode control"; fi
@@ -196,29 +192,11 @@ grep -F "A lost mutation response is recovered with Orca's request-show / \`--re
 grep -F 'historical caller-identity cause remains unverified' "$AUTO_DRIVE" >/dev/null || fail "auto-drive keeps the evidence limit explicit"
 
 WORKFLOW="$PLUGIN_ROOT/skills/workflow/SKILL.md"
-grep -F 'gw work record-placement <slug> --root <work-path> --phase <dispatch phase>' "$DISPATCH_CHECKS" >/dev/null || fail "dispatch checks preserve observed placement contract"
-grep -F 'git -C <observed path> branch --show-current' "$DISPATCH_CHECKS" >/dev/null || fail "dispatch checks preserve observed branch verification"
-grep -F 'Never record the planned `worktree.branch` in its place.' "$DISPATCH_CHECKS" >/dev/null || fail "dispatch checks preserve observed, not requested, branches"
-grep -F 'A descendant dispatched at `design` or `plan` is never recorded as a' "$DISPATCH_CHECKS" >/dev/null || fail "dispatch checks preserve read-only descendant rule"
-grep -F 'binds to this `task_id`/`dispatch_id`' "$DISPATCH_CHECKS" >/dev/null || fail "dispatch checks preserve attempt identity rationale"
-grep -F 'gw work record-reader <slug> --root <work-path> --phase <dispatch phase>' "$DISPATCH_CHECKS" >/dev/null || fail "dispatch checks record every detached reader"
-grep -F 'A `pin-detached` dispatch — root or descendant — records a reader receipt' "$AUTO_DRIVE" >/dev/null || fail "auto-drive records every detached reader"
-grep -F 'Never call `record-placement` for a `pin-detached` dispatch' "$AUTO_DRIVE" >/dev/null || fail "auto-drive keeps readers out of scalar placement"
+if grep -F 'pin-detached' "$AUTO_DRIVE" >/dev/null; then fail "auto-drive dispatches no detached readers"; fi
 grep -F 'PLACEMENT UNRECORDED <key>' "$AUTO_DRIVE" >/dev/null || fail "auto-drive reports an unrecorded placement"
-grep -F 'Do not call `gw work advance` to stamp it' "$DISPATCH_CHECKS" >/dev/null || fail "phase mismatch never advances to stamp"
-grep -F 'do not start another fork' "$DISPATCH_CHECKS" >/dev/null || fail "phase mismatch never relaunches"
-grep -F 'A lost response is not a refusal' "$DISPATCH_CHECKS" >/dev/null || fail "lost record responses are inspected first"
-grep -F 'record its observed placement exactly as `references/dispatch-checks.md` describes' "$AUTO_DRIVE" >/dev/null || fail "legacy retries record placement"
-grep -F -- '--no-infer-worktree' "$AUTO_DRIVE" >/dev/null || fail "coordinator advances never infer"
+if grep -Fq -- '--no-infer-worktree' "$AUTO_DRIVE"; then fail "auto-drive advances carry no retired placement flag"; fi
 
 # Placement never depends on where the coordinator runs.
-grep -F 'launch-worker.py place --dispatch <dispatch-json>' "$DISPATCH_CHECKS" >/dev/null || fail "dispatch checks preserve legacy placement recipe"
-grep -F 'launch-worker.py settle-placement --dispatch <dispatch-json>' "$DISPATCH_CHECKS" >/dev/null || fail "dispatch checks preserve legacy lineage recipe"
-grep -F "No launch reads the coordinator's location." "$DISPATCH_CHECKS" >/dev/null || fail "dispatch checks preserve location independence"
-grep -F 'references/orca-placement/<key>.json' "$DISPATCH_CHECKS" >/dev/null || fail "dispatch checks preserve durable placement rationale"
-grep -F '> <workspace>/okf/<dispatch path>/references/orca-placement/<key>.json' "$DISPATCH_CHECKS" >/dev/null \
-  || fail "dispatch checks preserve legacy stdout redirect"
-grep -F '`parent_path`' "$DISPATCH_CHECKS" >/dev/null || fail "dispatch checks preserve planned parent rationale"
 if grep -Fq 'new-child' "$AUTO_DRIVE"; then fail "auto-drive must never launch Orca's caller-context child mode"; fi
 if grep -Fq "coordinator's own worktree context" "$AUTO_DRIVE"; then fail "auto-drive must not infer parentage from the coordinator"; fi
 if grep -Fq 'find the entry whose path matches the' "$AUTO_DRIVE"; then fail "the repo selector comes from the plan, not §0"; fi
@@ -226,145 +204,48 @@ if grep -Fq 'find the entry whose path matches the' "$AUTO_DRIVE"; then fail "th
 if grep -Fq 'Do not substitute the observed values downstream' "$AUTO_DRIVE"; then fail "observed placement is recorded now"; fi
 if grep -Fq 'explicitly on its own' "$AUTO_DRIVE"; then fail "no worker is told to state its own placement"; fi
 grep -F 'Dispatch key:' "$WORKFLOW" >/dev/null || fail "workflow detects a supervised dispatch"
-grep -F -- '`--no-infer-worktree`' "$WORKFLOW" >/dev/null || fail "supervised workflow advances never infer"
-# Each worker transition must independently opt out; a flag elsewhere is insufficient.
-for step in 2 5; do
-  sed -n "/^### $step\. /,/^### $((step + 1))\. /p" "$WORKFLOW" | grep -F -- '`--no-infer-worktree`' >/dev/null || fail "supervised workflow step $step advances never infer"
-done
+if grep -Fq -- '--no-infer-worktree' "$WORKFLOW"; then fail "workflow carries no retired placement flag"; fi
+sed -n '/^### 2\. /,/^### 3\. /p' "$WORKFLOW" | grep -F 'gw work place <work-path> --ensure --json' >/dev/null || fail "workflow step 2 places through gw work place"
 
 # Scope the opt-out to R5's resolving command, retaining both integration arguments.
-sed -n '/^## R5 — /,/^## /p' "$RELAY" | grep -F 'gw work advance <work-path> --from finish --no-infer-worktree --resolved-in <resolved_in from receipt inspection> [--released-at <date>]' >/dev/null || fail "relay R5 resolving advance guards finish and preserves integration arguments"
+sed -n '/^## R5 — /,/^## /p' "$RELAY" | grep -F 'gw work advance <work-path> --from finish --resolved-in <resolved_in from receipt inspection> [--released-at <date>]' >/dev/null || fail "relay R5 resolving advance guards finish and preserves integration arguments"
 grep -F 'On phase-mismatch, enter the **Escalation path**' "$RELAY" >/dev/null || fail "relay must escalate stale settlement"
 grep -F 'include the merge SHA in the' "$RELAY" >/dev/null || fail "relay escalation must preserve merge evidence"
 grep -F 'escalation body (or say the commits were already on the target in the trunk case)' "$RELAY" >/dev/null || fail "relay escalation must cover trunk integration"
 grep -F 'Do not claim settlement or send `worker_done` while escalating' "$RELAY" >/dev/null || fail "relay must not report false settlement"
 
 
-cat >"$FIXTURE/dispatch.json" <<'JSON'
-{"key":"work/example#execute","agent":"codex","model":"provider model/id","reasoning_effort":"high","mode":"autonomous","worktree":{"path":null},"prompt":"Do the work.\r\nKeep this line.\r\n\r\n"}
-JSON
-printf '%s\n' '["--worktree","new-top-level","--name","feature example","--base-branch","develop","--repo","repo-1"]' >"$FIXTURE/placement.json"
-
-python3 "$RECIPE" encode \
-  --dispatch "$FIXTURE/dispatch.json" \
-  --placement "$FIXTURE/placement.json" >"$FIXTURE/spec"
-
+# `gw work dispatch` encodes and launches; the plugin only decodes a saved spec.
 python3 - "$FIXTURE/spec" <<'PY'
 import json, sys
-with open(sys.argv[1], encoding="utf-8", newline="") as stream:
-    text = stream.read()
-line, prompt = text.split("\n", 1)
-assert line.startswith("GW_LAUNCH_V1 ")
-assert json.loads(line.removeprefix("GW_LAUNCH_V1 ")) == {
+envelope = {
     "version": 2,
     "dispatch_key": "work/example#execute",
     "agent": "codex",
     "model": "provider model/id",
     "reasoning_effort": "high",
-    "placement_argv": ["--worktree", "new-top-level", "--name", "feature example",
-                       "--base-branch", "develop", "--repo", "repo-1"],
+    "placement_argv": ["--worktree", "path:/tmp/allocated example"],
     "mode": "autonomous",
-    "worktree_path": None,
+    "worktree_path": "/tmp/allocated example",
 }
-assert prompt == "Do the work.\r\nKeep this line.\r\n\r\n"
+with open(sys.argv[1], "w", encoding="utf-8", newline="") as stream:
+    stream.write("GW_LAUNCH_V1 " + json.dumps(envelope, ensure_ascii=False, separators=(",", ":"))
+                 + "\nDo the work.\r\nKeep this line.\r\n\r\n")
 PY
-
-cat >"$FIXTURE/fake-create-orca" <<'PY'
-#!/usr/bin/env python3
-import json, os, sys
-with open(os.environ["ARGV_JSON"], "w", encoding="utf-8") as stream:
-    json.dump(sys.argv[1:], stream)
-print('{"result":{"task":{"id":"task-1"}}}')
-PY
-chmod +x "$FIXTURE/fake-create-orca"
-ARGV_JSON="$FIXTURE/create.argv.json" python3 "$RECIPE" create \
-  --orca "$FIXTURE/fake-create-orca" --spec "$FIXTURE/spec" \
-  --run run-1 --task-title work/example#execute \
-  --display-name 'Example · execute' >"$FIXTURE/create.out"
-python3 - "$FIXTURE/create.argv.json" "$FIXTURE/spec" <<'PY'
+python3 "$RECIPE" decode --spec "$FIXTURE/spec" >"$FIXTURE/decoded.json"
+python3 - "$FIXTURE/decoded.json" <<'PY'
 import json, sys
-argv = json.load(open(sys.argv[1], encoding="utf-8"))
-with open(sys.argv[2], encoding="utf-8", newline="") as stream:
-    spec = stream.read()
-assert argv == ["orchestration", "task-create", "--run", "run-1", "--spec", spec,
-                "--task-title", "work/example#execute", "--display-name",
-                "Example · execute", "--json"]
+decoded = json.load(open(sys.argv[1], encoding="utf-8"))
+assert decoded["envelope"]["placement_argv"] == ["--worktree", "path:/tmp/allocated example"]
+assert decoded["envelope"]["worktree_path"] == "/tmp/allocated example"
+assert decoded["envelope"]["agent"] == "codex" and decoded["envelope"]["reasoning_effort"] == "high"
+assert decoded["prompt"] == "Do the work.\r\nKeep this line.\r\n\r\n"
 PY
-
-cat >"$FIXTURE/fake-orca" <<'SH'
-#!/usr/bin/env bash
-set -euo pipefail
-: >"$ARGV_LOG"
-for arg in "$@"; do printf '%s\n' "$arg" >>"$ARGV_LOG"; done
-printf '%s\n' '{"result":{"dispatchId":"dispatch-new","launch":{"requested":{"agent":"codex","model":"provider model/id","effort":"high"},"effective":{"agent":"codex","model":"provider model/id","effort":"high"}}}}'
-SH
-chmod +x "$FIXTURE/fake-orca"
-
-ARGV_LOG="$FIXTURE/initial.argv" python3 "$RECIPE" launch \
-  --orca "$FIXTURE/fake-orca" --spec "$FIXTURE/spec" \
-  --task task-1 --dispatch-key work/example#execute --run run-1 >"$FIXTURE/initial.out"
-
-cat >"$FIXTURE/expected-initial.argv" <<'EOF'
-orchestration
-worker-start
---task
-task-1
---agent
-codex
---run
-run-1
---worktree
-new-top-level
---name
-feature example
---base-branch
-develop
---repo
-repo-1
---model
-provider model/id
---effort
-high
---json
-EOF
-diff -u "$FIXTURE/expected-initial.argv" "$FIXTURE/initial.argv"
-
-# Editing the current dispatch rules/plan between attempts cannot affect retry:
-# retry consumes the full original task spec and its frozen placement.
-cat >"$FIXTURE/dispatch.json" <<'JSON'
-{"key":"work/example#execute","agent":"claude","model":"changed","reasoning_effort":"low","prompt":"changed"}
-JSON
-if ARGV_LOG="$FIXTURE/retry-without-recovery.argv" python3 "$RECIPE" launch \
-  --orca "$FIXTURE/fake-orca" --spec "$FIXTURE/spec" \
-  --task task-1 --dispatch-key work/example#execute --run run-1 \
-  --retry-of dispatch-old >"$FIXTURE/retry-without-recovery.out" 2>"$FIXTURE/error"; then
-  fail "retry without recovery-approved placement must be blocked"
-fi
-printf '%s\n' '["--worktree","path:/tmp/allocated-example"]' >"$FIXTURE/recovery-placement.json"
-ARGV_LOG="$FIXTURE/retry.argv" python3 "$RECIPE" launch \
-  --orca "$FIXTURE/fake-orca" --spec "$FIXTURE/spec" \
-  --task task-1 --dispatch-key work/example#execute --run run-1 --retry-of dispatch-old \
-  --recovery-placement "$FIXTURE/recovery-placement.json" >"$FIXTURE/retry.out"
-cat >"$FIXTURE/expected-retry.argv" <<'EOF'
-orchestration
-worker-start
---task
-task-1
---agent
-codex
---run
-run-1
---worktree
-path:/tmp/allocated-example
---model
-provider model/id
---effort
-high
---retry-of
-dispatch-old
---json
-EOF
-diff -u "$FIXTURE/expected-retry.argv" "$FIXTURE/retry.argv"
+for removed in encode create launch place prepare prepare-reader settle-placement; do
+  if python3 "$RECIPE" "$removed" --help >/dev/null 2>&1; then
+    fail "launch-worker.py keeps no $removed command"
+  fi
+done
 
 python3 "$RECIPE" classify-restart \
   --tasks "$REPO_ROOT/packages/workflow-orca/tests/fixtures/task_list.json" \
@@ -426,34 +307,23 @@ assert rows["task-unknown-blocked"] == {
 }
 PY
 
-cat >"$FIXTURE/effort-only.json" <<'JSON'
-{"key":"work/example#execute","agent":"codex","model":null,"reasoning_effort":"high","mode":"autonomous","worktree":{"path":null},"prompt":"Do the work."}
-JSON
-if python3 "$RECIPE" encode --dispatch "$FIXTURE/effort-only.json" \
-    --placement "$FIXTURE/placement.json" >"$FIXTURE/bad-spec" 2>"$FIXTURE/error"; then
+printf '%s\n%s\n' 'GW_LAUNCH_V1 {"version":2,"dispatch_key":"work/example#execute","agent":"codex","model":null,"reasoning_effort":"high","placement_argv":[],"mode":"autonomous","worktree_path":"/tmp/w"}' 'Do the work.' >"$FIXTURE/effort-only.spec"
+if python3 "$RECIPE" decode --spec "$FIXTURE/effort-only.spec" >"$FIXTURE/bad-spec" 2>"$FIXTURE/error"; then
   echo "expected effort without model to be refused" >&2
   exit 1
 fi
 grep -F "Set a model or clear reasoning_effort." "$FIXTURE/error" >/dev/null
 
-if python3 "$RECIPE" launch --orca "$FIXTURE/fake-orca" --spec "$FIXTURE/spec" \
-    --task task-1 --dispatch-key work/wrong#execute --run run-1 >"$FIXTURE/wrong-key.out" 2>"$FIXTURE/error"; then
+python3 - "$FIXTURE/spec" "$FIXTURE/wrong-key-tasks.json" <<'PY'
+import json, sys
+spec = open(sys.argv[1], encoding="utf-8", newline="").read()
+tasks = {"ok": True, "result": {"tasks": [{"id": "task-1", "task_title": "work/wrong#execute", "spec": spec}]}}
+json.dump(tasks, open(sys.argv[2], "w", encoding="utf-8"))
+PY
+if python3 "$RECIPE" spec-hash --tasks "$FIXTURE/wrong-key-tasks.json" --task task-1 >"$FIXTURE/wrong-key.out" 2>"$FIXTURE/error"; then
   fail "a task title that disagrees with the saved dispatch key must be blocked"
 fi
 grep -F "does not match the task title" "$FIXTURE/error" >/dev/null || fail "wrong-key recovery reason is actionable"
-
-cat >"$FIXTURE/bad-receipt-orca" <<'SH'
-#!/usr/bin/env bash
-printf '%s\n' '{"result":{"dispatchId":"dispatch-new","launch":{"requested":{"agent":"codex","model":"provider model/id","effort":"high"},"effective":{"agent":"claude","model":"provider model/id","effort":"high"}}}}'
-SH
-chmod +x "$FIXTURE/bad-receipt-orca"
-if python3 "$RECIPE" launch --orca "$FIXTURE/bad-receipt-orca" \
-    --spec "$FIXTURE/spec" --task task-1 --dispatch-key work/example#execute \
-    --run run-1 >"$FIXTURE/bad.out" 2>"$FIXTURE/error"; then
-  echo "expected mismatched launch receipt to be refused" >&2
-  exit 1
-fi
-grep -F "effective agent" "$FIXTURE/error" >/dev/null
 
 python3 - "$REPO_ROOT" <<'PY'
 """Exercise restart settlement against captured Orca payload shapes."""

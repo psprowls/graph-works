@@ -1,5 +1,7 @@
 """Spec baselines are resolved before the advance's workspace commit."""
 
+import json
+import re
 import subprocess
 from pathlib import Path
 
@@ -7,9 +9,25 @@ import pytest
 from gw_orchestrate.stage_advance import run_stage_advance
 from gw_work.commands import run_next
 from okf_io import load
-from test_orchestrate_shell import TODAY, _ready, _write
-from test_record_baseline import PATH, _head
-from test_record_baseline import _setup as _repos
+from test_orchestrate_shell import TODAY, _code_repo, _initialized_workspace, _ready, _write
+
+PATH = "work/feature-a"
+
+
+def _head(repo: Path) -> str:
+    return subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=repo, capture_output=True, text=True, check=True
+    ).stdout.strip()
+
+
+def _repos(tmp_path: Path):
+    layout = _initialized_workspace(tmp_path)
+    repo, fork = _code_repo(tmp_path / "c")
+    kept = re.sub(r"(?m)^repositories:.*\n(?:[ \t]+.*\n)*", "", layout.manifest_path.read_text(encoding="utf-8"))
+    layout.manifest_path.write_text(
+        kept + f"repositories:\n  code:\n    path: {json.dumps(str(repo))}\n", encoding="utf-8", newline="\n"
+    )
+    return layout, repo, fork
 
 
 def _git(root: Path, *args: str) -> None:
@@ -31,9 +49,7 @@ def _setup(tmp_path: Path, *, phase: str = "design", baseline: str = "", spec: s
 
 
 def _advance(layout, cwd: Path, *, phase: str = "design", dry_run: bool = False):
-    return run_stage_advance(
-        layout, PATH, today=TODAY, expected_phase=phase, cwd=cwd, infer_worktree=False, dry_run=dry_run
-    )
+    return run_stage_advance(layout, PATH, today=TODAY, expected_phase=phase, cwd=cwd, dry_run=dry_run)
 
 
 def _page(layout):
@@ -69,18 +85,16 @@ def test_stamp_falls_back_to_the_cwd_checkout_of_the_items_repo(tmp_path: Path) 
 
 def test_stamp_omits_code_and_warns_when_nothing_resolves(tmp_path: Path) -> None:
     layout, _, _ = _setup(tmp_path)
-    before = _head(layout.root)
     result = _advance(layout, tmp_path)
-    assert _page(layout).fm_raw["spec_baseline"] == {"workspace": before}
+    assert "spec_baseline" not in _page(layout).fm_raw
     assert "spec baseline: no code sha resolvable; landed-since will be unavailable" in result.warnings
     assert result.outcome.written
 
 
-def test_workspace_sha_is_the_head_before_the_advance_commit(tmp_path: Path) -> None:
+def test_spec_stamp_writes_code_only(tmp_path: Path) -> None:
     layout, repo, _ = _setup(tmp_path)
-    before = _head(layout.root)
     _advance(layout, repo)
-    assert _page(layout).fm_raw["spec_baseline"]["workspace"] == before != _head(layout.root)
+    assert dict(_page(layout).fm_raw["spec_baseline"]) == {"code": _head(repo)}
 
 
 def _planning(tmp_path: Path, *, stale: bool):
@@ -109,7 +123,7 @@ def test_a_plan_stage_reconcile_completion_keeps_plan_and_overwrites_both_keys(t
     assert _page(layout).fm_raw["phase"] == "plan"
     stamped = _page(layout).fm_raw["spec_baseline"]
     assert stamped["code"] == _head(repo) != previous["code"]
-    assert stamped["workspace"] != previous["workspace"]
+    assert dict(stamped) == {"code": _head(repo)}
 
 
 def test_a_plan_stage_completion_without_staleness_goes_to_execute(tmp_path: Path) -> None:

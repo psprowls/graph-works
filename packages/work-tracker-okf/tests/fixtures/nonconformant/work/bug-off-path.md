@@ -6,6 +6,7 @@ status: stable
 work_status: open
 phase: plan
 effort: small
+branch: legacy/stamp
 opened: 2026-07-12
 updated: 2026-08-01
 affects:

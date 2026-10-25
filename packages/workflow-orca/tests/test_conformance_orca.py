@@ -75,20 +75,3 @@ def session(case: BackendCase, tmp_path: Path):
 # functions, `drain`, `saw_done`, ...) is used by pytest's own collection, not
 # by name from this module.
 from test_conformance import *  # imported, not copied
-
-
-def test_provisions_worktrees_is_declared(case: BackendCase, tmp_path: Path) -> None:
-    # Overrides the sibling's copy (test_conformance.py), which hardcodes
-    # `is False` with a comment noting every case *it* knows obtains no
-    # worktree of its own, and that a backend which does is what "inherits
-    # this scenario by adding a third BackendCase" — i.e. this file. The
-    # shared suite has not generalized that assertion to read the expectation
-    # off `case` yet, so importing it verbatim would report a real capability
-    # (`OrcaBackend.provisions_worktrees is True`, via `worker-start
-    # --worktree new-top-level --repo id:<repo>`) as a failure. This is a gap
-    # in the shared test's generality, not in `OrcaBackend` or in the Protocol
-    # (`provisions_worktrees` already exists on `DispatchBackend` for exactly
-    # this), so it is fixed locally rather than carried to the README as
-    # Protocol friction.
-    backend = case.make(tmp_path / "root")
-    assert backend.provisions_worktrees is True

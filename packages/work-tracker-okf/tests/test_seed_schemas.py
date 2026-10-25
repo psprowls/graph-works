@@ -1,4 +1,5 @@
 import importlib.resources
+import json
 from datetime import date
 from pathlib import Path
 from typing import Any
@@ -245,3 +246,15 @@ def test_seeded_work_types_accept_valid_finish_obligations(tmp_path: Path, type_
 )
 def test_seeded_schema_rejects_malformed_finish_obligations(tmp_path: Path, obligations: str) -> None:
     assert _findings(tmp_path, _COMPLETE + "status: draft\n" + obligations) != []
+
+
+def test_retired_keys_deprecated() -> None:
+    base = json.loads(
+        (importlib.resources.files("work_tracker_okf") / "assets" / "schema" / "_base.schema.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    for key in ("worktree", "branch", "repo_stamps"):
+        prop = base["properties"][key]
+        assert prop["deprecated"] is True
+        assert "gw work migrate-placement" in prop["description"]

@@ -41,7 +41,7 @@ def setup(tmp_path):
     page.write_text(
         "---\ntype: Feature\ntitle: Example feature\ndescription: d\nstatus: stable\nwork_status: in-progress\n"
         "phase: finish\neffort: medium\nopened: 2026-09-28\nupdated: 2026-09-28\n"
-        f"repo: code\nworktree: {source}\nbranch: feature\naffects: []\n---\n",
+        f"repo: code\nworktree: {source}\nbranch: feature\naffects: [b.txt]\n---\n",
         encoding="utf-8",
         newline="\n",
     )
@@ -81,7 +81,7 @@ def test_integrate_plan_apply_replay_and_refusals(tmp_path):
     )
     assert refused.exit_code != 0
     error = json.loads(refused.stdout)["error"]
-    assert (error["reason"], error["payload"]["refusal"]["reason"]) == ("refused", "workspace-target")
+    assert (error["reason"], error["payload"]["refusal"]["reason"]) == ("refused", "no-target")
 
 
 def test_integrate_reports_workspace_and_io_errors(tmp_path, monkeypatch):

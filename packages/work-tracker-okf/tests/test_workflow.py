@@ -633,7 +633,7 @@ def test_foreign_stamp_owns_finish_branch(tmp_path):
 
     (tmp_path / "work").mkdir()
     (tmp_path / "work/epic-a.md").write_text(
-        "---\ntype: Epic\nwork_status: in-progress\nphase: finish\n"
+        "---\ntype: Epic\nwork_status: in-progress\nphase: finish\naffects: [packages/x]\n"
         "repo_stamps:\n  ui: {worktree: /ui/epic, branch: epic/a}\n---\n",
         encoding="utf-8",
     )
@@ -817,3 +817,21 @@ def test_dependencies_attached_to_a_skipped_stage_do_not_gate(phase):
         definition=definition,
     )
     assert kept.blockers[0].kind == "dependencies"
+
+
+def test_has_branch_follows_code_affects(tmp_path):
+    from work_helpers import load_written_items, write_item
+    from work_tracker_okf.workflow import state_for
+
+    write_item(tmp_path, "work/epic-a", "type: Epic\nwork_status: in-progress\nphase: finish\naffects: [packages/x]\n")
+    write_item(
+        tmp_path,
+        "work/epic-b",
+        'type: Epic\nwork_status: in-progress\nphase: finish\naffects: ["gw:workspace"]\nworktree: /w\nbranch: b\n',
+    )
+    items = load_written_items(tmp_path)
+    by_path = {item.path: item for item in items}
+    state_a = state_for(items, by_path["work/epic-a"].path)
+    state_b = state_for(items, by_path["work/epic-b"].path)
+    assert state_a is not None and state_a.has_branch is True
+    assert state_b is not None and state_b.has_branch is False

@@ -162,46 +162,17 @@ package's to know.
 This is the main extension point and the one future work will most often
 touch from the outside. `subagents-io` defines the seam; it ships **zero
 implementations** — `workflow-local` and `workflow-orca` (sibling packages)
-each implement it, because vendor/system coupling (subprocess management,
-worktree provisioning, whatever transport a real backend needs) is exactly
-what band 1 is not allowed to carry.
+each implement it, because vendor/system coupling (subprocess management, whatever transport a real backend needs) is exactly what band 1 is not allowed to carry.
 
 Two halves:
 
-- `dispatch.py` is what a **planner** hands a runner: `PlannedDispatch` (a
-  frozen, method-free dataclass — `key`, `slug`, `phase`, `kind`, `effort`,
-  `skill`, `mode`, `model`, `reasoning_effort`, `worktree`, `merge_target`,
-  `prompt`) and its nested `WorktreeAction`. The field names spell work-item
-  concepts on purpose, but this package only stores those strings — it never
-  decides what a `phase` or `kind` *means*. Two closed vocabularies live here:
-  `WORKTREE_ACTIONS` (`"reuse" | "fork-child" | "create-top-level" | "main" | "pin-detached"`)
-  and `DISPATCH_MODES` (`"autonomous" | "attend" | "relay"`). Note
-  `WorktreeAction.action == "main"` still carries a concrete `path`/`branch`
-  like `"reuse"` does, because a worker running in the shared main checkout
-  cannot infer its own provenance from git (`--git-dir` and
-  `--git-common-dir` agree there, so every "am I a worktree" detector answers
-  no) — a planner emitting `"main"` owes the worker its path/branch
-  explicitly rather than leaving it to self-discovery.
+- `dispatch.py` is what a **planner** hands a runner: `PlannedDispatch` (a frozen, method-free dataclass — `key`, `slug`, `phase`, `kind`, `effort`, `skill`, `mode`, `model`, `reasoning_effort`, `worktree`, `merge_target`, `prompt`) and its nested `WorktreePlacement`. The field names spell work-item concepts on purpose, but this package only stores those strings — it never decides what a `phase` or `kind` *means*. One closed vocabulary lives here: `DISPATCH_MODES` (`"autonomous" | "attend" | "relay"`).
 
-  `WorktreeAction.parent_path` is the other placement fact a planner owes a
-  backend: the existing worktree a created one is linked beneath, or `None`.
-  It is data precisely so no backend derives lineage from the terminal or
-  directory its caller runs in.
-
-  `pin-detached` carries a required full lowercase 40- or 64-hex commit ID in `start_sha`,
-  `path=None`, `branch=None`, `exists=None`, `base_branch=<source branch>`, and
-  `parent_path=<source anchor worktree or None>`. Exactly this action has a
-  non-None `start_sha`; every other action has `start_sha=None` and a non-None
-  `branch`. The launcher must prepare and verify a dedicated detached checkout
-  for each reader dispatch before starting the worker; the source anchor is
-  provenance, not a shared checkout or requested parent linkage. Never encode
-  detached state as a branch named `HEAD` or an empty string. A backend unable
-  to prepare and verify it must refuse even if a caller supplies a path. These
-  are planner/backend invariants, not validation in the inert value type.
+  `WorktreePlacement(path, branch, parent_path)` is where the worker runs, decided before launch: `path` is an existing absolute directory and is always set; `branch` is the branch checked out there, or `None` for a detached or unknown checkout; `parent_path` is the worktree it lives beneath, or `None`. It is data precisely so no backend derives lineage from the terminal or directory its caller runs in, and a worker in the shared main checkout still gets an explicit path and branch because git cannot tell it where it is. A backend only launches into `path`: it never creates, forks, links or pins a worktree. Computing and realizing the placement is the planner's job (`gw-orchestrate`), done before the dispatch is built. These are planner/backend invariants, not validation in the inert value type.
 
 - `backend.py` is what a **backend** *is*: two `runtime_checkable` Protocols,
   `DispatchBackend` (`name`, `supported_modes: frozenset[str]`,
-  `provisions_worktrees: bool`, `open_session(name) -> DispatchSession`) and
+  `open_session(name) -> DispatchSession`) and
   `DispatchSession` (`launch`, `workers`, `describe`, `wait`, `ack`, `reply`,
   `stop`, `close`) — both sync, deliberately, because every real backend's
   actual wait is one multiplexed blocking call and async would buy no
@@ -234,21 +205,9 @@ contract, not code:
   a backend reports when it holds a record but cannot presently corroborate
   the process behind it (the resume case: a recorded pid no longer answers).
   Collapsing it into `"failed"` makes a recoverable worker unrecoverable.
-- `provisions_worktrees` is `False` on every backend this package ships (i.e.
-  none — this is documentation for implementers). It exists so a backend that
-  obtains its **own** worktrees (Orca's `worker-start --worktree
-  new-top-level --repo id:<repo>`, per `workflow-orca`) can declare that
-  capability on the shared Protocol
-  instead of growing a new method — a coordinator checks the flag before
-  planning, rather than discovering the gap when a `PlannedDispatch` that
-  worked against one backend raises `WorktreeNotProvisioned` against another.
+- No backend provisions a worktree. Every backend launches into the existing `dispatch.worktree.path`; the Protocol has no capability flag for creating one.
 
-`WorkerRecord.worktree_path` / `.worktree_branch` are read-back fields: what
-the worker *actually* runs on, as the backend learned it after launching —
-never what a planner asked for. Both default to `None`, which means "this
-backend did not learn it" and nothing else. Only `workflow-orca` populates
-them (Orca provisions worktrees and renames the branch as it does so);
-`workflow-local` provisions nothing and leaves both absent.
+`WorkerRecord.worktree_path` / `.worktree_branch` are read-back fields: what the worker *actually* runs on, as the backend learned it after launching — never what a planner asked for. Both default to `None`, which means "this backend did not learn it" and nothing else. A backend that launches into the planned path fills them from what it launched; one that learns nothing leaves both absent.
 
 Do not add an implementation of `DispatchBackend`/`DispatchSession` inside
 this package. If you find yourself importing `subprocess`, a worktree

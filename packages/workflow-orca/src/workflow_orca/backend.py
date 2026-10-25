@@ -36,9 +36,8 @@ from subagents_io.backend import (
     WorkerDone,
     WorkerEvent,
     WorkerRecord,
-    WorktreeNotProvisioned,
 )
-from subagents_io.dispatch import DISPATCH_MODES, PlannedDispatch, WorktreeAction
+from subagents_io.dispatch import DISPATCH_MODES, PlannedDispatch, WorktreePlacement
 
 from workflow_orca import _liveness as live
 from workflow_orca._cli import OrcaCliError, OrcaResult, _subprocess_run, unwrap
@@ -54,15 +53,6 @@ _ORCA = ("orca", "orchestration")
 #: on a page that already held the answer.
 _RUN_PAGE = 50
 
-#: Orca reports a fully-qualified ref; every consumer of a branch name here
-#: wants the short form.
-_REF_PREFIX = "refs/heads/"
-
-
-def _short_branch(ref: str) -> str:
-    """`refs/heads/psprowls/x` -> `psprowls/x`; anything else, verbatim."""
-    return ref[len(_REF_PREFIX) :] if ref.startswith(_REF_PREFIX) else ref
-
 
 class OrcaBackend:
     """The Orca implementation of `subagents_io.backend.DispatchBackend`."""
@@ -71,21 +61,13 @@ class OrcaBackend:
     #: All three, genuinely rather than declared: question/reply carries
     #: `relay`, and a human joining the agent terminal carries `attend`.
     supported_modes = DISPATCH_MODES
-    #: Orca's `worker-start --worktree new-top-level` creates the worktree
-    #: itself, and `main`/`reuse` point at one that already exists, so this
-    #: backend provisions branch worktrees; pin-detached is refused.
-    provisions_worktrees = True
 
     def __init__(
         self,
         *,
         run: Callable[[Sequence[str]], OrcaResult] = _subprocess_run,
-        repo_selector: str | None = None,
     ) -> None:
         self._run = run
-        #: Required by every worktree creation (`fork-child`,
-        #: `create-top-level`); `reuse`/`main` never read it.
-        self._repo_selector = repo_selector
 
     def open_session(self, name: str) -> OrcaSession:
         run_id = self._find_run(name)
@@ -102,7 +84,6 @@ class OrcaBackend:
             name=name,
             run_id=run_id,
             run=self._run,
-            repo_selector=self._repo_selector,
         )
 
     def _find_run(self, objective: str) -> str | None:
@@ -134,12 +115,10 @@ class OrcaSession:
         name: str,
         run_id: str,
         run: Callable[[Sequence[str]], OrcaResult],
-        repo_selector: str | None,
     ) -> None:
         self.name = name
         self.run_id = run_id
         self._run = run
-        self._repo_selector = repo_selector
         #: task id -> dispatch key, refreshed from `task-list`. `wait()` uses
         #: it to attribute a message to a key without a second walk.
         self._keys_by_task: dict[str, str] = {}
@@ -247,16 +226,8 @@ class OrcaSession:
         launch = started.get("launch")
         reason = check_launch_receipt(request, launch if isinstance(launch, dict) else {})
         self._unreleased.add(handle)
-        # Resolved once and threaded through both calls below: `_link_parent`
-        # and `_resolve_worktree` both need the created worktree's id, and a
-        # second `worker-show` just to ask the same question twice is a call
-        # this dispatch does not owe Orca.
-        worktree_id = (
-            self._worktree_id(started, handle) if dispatch.worktree.action in self._PROVISIONING_ACTIONS else None
-        )
-        lineage = self._link_parent(dispatch.worktree, worktree_id, handle)
-        worktree_path, worktree_branch = self._resolve_worktree(dispatch.worktree, worktree_id)
-        notes = "; ".join(part for part in (reason, lineage) if part)
+        worktree_path, worktree_branch = self._resolve_worktree(dispatch.worktree)
+        notes = reason or ""
         return WorkerRecord(
             key=dispatch.key,
             handle=handle,
@@ -622,127 +593,18 @@ class OrcaSession:
         receipt = options.get("launch") if isinstance(options, dict) else None
         return check_launch_receipt(request, receipt if isinstance(receipt, dict) else {})
 
-    def _worktree_flags(self, worktree: WorktreeAction) -> list[str]:
-        if worktree.action in ("reuse", "main"):
-            if worktree.path is None:
-                raise WorktreeNotProvisioned(
-                    f"{self.name}: a {worktree.action} dispatch needs a concrete worktree path"
-                )
-            # Creation flags are rejected by Orca for an existing worktree, so
-            # this branch passes the selector and nothing else. "main" is the
-            # repository's own checkout: on disk already, never created here.
-            return ["--worktree", f"path:{worktree.path}"]
-        if worktree.action in self._PROVISIONING_ACTIONS:
-            if worktree.branch is None:
-                raise BackendError(f"{self.name}: a {worktree.action} dispatch needs a branch")
-            if worktree.base_branch is None:
-                raise BackendError(f"{self.name}: a {worktree.action} dispatch needs a base_branch")
-            if self._repo_selector is None:
-                raise BackendError(f"{self.name}: a {worktree.action} dispatch needs repo_selector on the backend")
-            # Both creations are top-level. Orca's child mode takes the
-            # repository and the parent from the calling terminal's worktree,
-            # so a planned parent is linked explicitly after start instead.
-            return [
-                "--worktree",
-                "new-top-level",
-                "--name",
-                worktree.branch,
-                "--base-branch",
-                worktree.base_branch,
-                "--repo",
-                self._repo_selector,
-            ]
-        if worktree.action == "pin-detached":
-            raise WorktreeNotProvisioned(
-                f"{self.name}: a pin-detached reader needs a prepared detached checkout at {worktree.start_sha}; "
-                "this backend cannot prepare one -- launch it through the auto-drive helper"
-            )
-        raise BackendError(f"{self.name}: unknown worktree action {worktree.action!r}")
+    def _worktree_flags(self, worktree: WorktreePlacement) -> list[str]:
+        # The planner resolved an existing worktree; Orca is only told where.
+        return ["--worktree", f"path:{worktree.path}"]
 
-    #: The two actions where Orca provisions the worktree, and so the only
-    #: ones with anything to read back. `reuse`/`main` point at a checkout
-    #: that already existed before this dispatch.
-    _PROVISIONING_ACTIONS = frozenset({"fork-child", "create-top-level"})
+    def _resolve_worktree(self, worktree: WorktreePlacement) -> tuple[str | None, str | None]:
+        """What the worker was launched into: `(path, branch)`.
 
-    def _resolve_worktree(self, worktree: WorktreeAction, worktree_id: str | None) -> tuple[str | None, str | None]:
-        """What Orca actually provisioned: `(path, short branch)`.
-
-        Read-back only. Orca's `--name` is a worktree display name and Orca
-        derives the branch from it by its own rule, so the planned and actual
-        names differ routinely — that divergence is data here, never an error,
-        and nothing in this method compares, warns, or corrects.
-
-        Every failure degrades to `None`. `launch()` has already started a
-        real worker by the time this runs, and a read that could undo a write
-        would be the worse bug: `None` means "not learned", which is exactly
-        what happened. `worktree_id` is resolved once by the caller (`launch()`)
-        and shared with `_link_parent`, rather than re-derived here.
+        The path is the existing one the launch just selected; the branch stays
+        unknown rather than being copied from the plan, since the plan is the
+        thing this field exists not to trust. Nothing here asks Orca anything.
         """
-        if worktree.action not in self._PROVISIONING_ACTIONS:
-            # Nothing was created, so there is nothing to ask Orca about. The
-            # path is the concrete one `_worktree_flags` just validated; the
-            # branch stays unknown rather than being copied from the plan,
-            # since the plan is the thing this field exists not to trust.
-            return worktree.path, None
-        if worktree_id is None:
-            return None, None
-        try:
-            shown = self._call_top_level(["worktree", "show", "--worktree", f"id:{worktree_id}"])
-        except OrcaCliError:
-            return None, None
-        row = shown.get("worktree") or {}
-        path = row.get("path")
-        branch = row.get("branch")
-        return (
-            str(path) if path else None,
-            _short_branch(str(branch)) if branch else None,
-        )
-
-    def _worktree_id(self, started: dict[str, Any], handle: str) -> str | None:
-        """The `<repoId>::<path>` id of the worktree this dispatch got.
-
-        The captured `worker-start` response does not carry it and
-        `worker-show`'s `worker` block does, so the start payload is checked
-        first purely so the extra call disappears on the day Orca adds the
-        field — not because any response is known to carry it today.
-        """
-        direct = started.get("worktreeId") or (started.get("worker") or {}).get("worktree_id")
-        if direct:
-            return str(direct)
-        try:
-            shown = self._call_unscoped(["worker-show", "--dispatch", handle])
-        except OrcaCliError:
-            return None
-        worker = shown.get("worker") or {}
-        found = worker.get("worktreeId") or worker.get("worktree_id")
-        return str(found) if found else None
-
-    def _link_parent(self, worktree: WorktreeAction, worktree_id: str | None, handle: str) -> str | None:
-        """Link a created worktree beneath its planned parent; why it could not be, or None.
-
-        A write after `worker-start`, so it never raises: the worker is already
-        running and its record must survive. The reason lands in `detail`.
-        `worktree_id` is resolved once by the caller (`launch()`) and shared
-        with `_resolve_worktree`, rather than re-derived here.
-        """
-        if worktree.action not in self._PROVISIONING_ACTIONS or worktree.parent_path is None:
-            return None
-        if worktree_id is None:
-            return f"lineage unset: no worktree id for {handle}"
-        try:
-            self._call_top_level(
-                [
-                    "worktree",
-                    "set",
-                    "--worktree",
-                    f"id:{worktree_id}",
-                    "--parent-worktree",
-                    f"path:{worktree.parent_path}",
-                ]
-            )
-        except OrcaCliError as exc:
-            return f"lineage unset: {exc}"
-        return None
+        return worktree.path, None
 
     def ack(self, event: WorkerEvent) -> None:
         """Acknowledge a delivery and release a proven settled worker.

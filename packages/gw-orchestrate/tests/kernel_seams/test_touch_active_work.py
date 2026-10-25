@@ -29,14 +29,22 @@ def _layout(tmp_path: Path):
     return layout
 
 
-def _write(layout, path: str, *, type: str = "Bug", phase: str | None = "plan", work_status: str = "open") -> None:
+def _write(
+    layout,
+    path: str,
+    *,
+    type: str = "Bug",
+    phase: str | None = "plan",
+    work_status: str = "open",
+    affects: str = "packages/a",
+) -> None:
     page = layout.bundle_dir / f"{path}.md"
     page.parent.mkdir(parents=True, exist_ok=True)
     phase_line = f"phase: {phase}\n" if phase is not None else ""
     page.write_text(
         f"---\ntype: {type}\ntitle: {path}\ndescription: d\nstatus: stable\n"
         f"work_status: {work_status}\n{phase_line}effort: medium\nopened: 2026-09-01\n"
-        "updated: 2026-09-01\naffects:\n- packages/a\n---\n\n## Summary\nd\n\n## Plan\n\n"
+        f"updated: 2026-09-01\naffects:\n- {affects}\n---\n\n## Summary\nd\n\n## Plan\n\n"
         "| Action | Done when | Rationale |\n| --- | --- | --- |\n",
         encoding="utf-8",
         newline="\n",
@@ -79,7 +87,7 @@ def test_each_session_ends_labelled_with_the_phase_it_ran(tmp_path: Path) -> Non
 def test_finish_session_keeps_its_own_label_through_done(tmp_path: Path) -> None:
     layout = _layout(tmp_path)
     path = "work/bug-a"
-    _write(layout, path, phase="finish", work_status="in-progress")
+    _write(layout, path, phase="finish", work_status="in-progress", affects="gw:workspace")
     assert work.run_regen_indexes(layout, dry_run=False).application.ok
 
     work.run_touch_active_work(layout, path, today=TODAY)

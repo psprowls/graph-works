@@ -75,10 +75,28 @@ def setup(tmp_path, seed):
     page = layout.bundle_dir / (OWNER + ".md")
     page.parent.mkdir(parents=True, exist_ok=True)
     page.write_text(
-        "---\ntype: Epic\ntitle: Example\nwork_status: in-progress\nphase: finish\nrepo: code\n"
+        "---\ntype: Epic\ntitle: Example\nwork_status: in-progress\nphase: finish\nrepo: code\naffects: [packages]\n"
         f"worktree: {repos['code'][1]}\nbranch: feature\nrepo_stamps:\n"
         f"  ui: {{worktree: {repos['ui'][1]}, branch: feature}}\n---\n\nAuthored content.\n",
         encoding="utf-8",
+    )
+    # A resolved child that finished into ui makes ui a finish target of the epic (design section 5).
+    child = layout.bundle_dir / OWNER / "children" / "feature-ui.md"
+    child.parent.mkdir(parents=True, exist_ok=True)
+    child.write_text(
+        "---\ntype: Feature\ntitle: UI\nwork_status: resolved\nphase: done\nrepo: ui\naffects: [packages]\n---\n",
+        encoding="utf-8",
+    )
+    tip = git(repos["ui"][1], "rev-parse", "HEAD")
+    receipt = child.parent / "feature-ui" / "references" / "04-finish-receipt.md"
+    receipt.parent.mkdir(parents=True, exist_ok=True)
+    receipt.write_text(
+        f"---\ntype: Explanation\nreceipt_version: 2\nowner: {OWNER}/children/feature-ui\nintegrations:\n"
+        f"  - repo: ui\n    source_branch: feature\n    source_commit: {tip}\n    target_branch: main\n"
+        f"    result_commit: {tip}\n    strategy: attested\n    evidence: accepted\n"
+        "    accepted_by: Reviewer\n    reason: Reviewed\n---\n",
+        encoding="utf-8",
+        newline="\n",
     )
     return layout, repos
 
@@ -118,7 +136,7 @@ def test_failed_workspace_commit_preserves_receipt_and_warning(tmp_path, receipt
 
 
 def advance(layout, sha, **kwargs):
-    return run_stage_advance(layout, OWNER, today=TODAY, resolved_in=sha, infer_worktree=False, **kwargs)
+    return run_stage_advance(layout, OWNER, today=TODAY, resolved_in=sha, **kwargs)
 
 
 def test_partial_retry_and_final_advance(tmp_path, receipt_seed):
@@ -291,7 +309,7 @@ def test_advance_rechecks_evidence_at_transaction_boundary(tmp_path, receipt_see
 def test_foreign_only_owner_resolves_to_first_verified_entry(tmp_path, receipt_seed):
     layout, repos = setup(tmp_path, receipt_seed)
     page = layout.bundle_dir / (OWNER + ".md")
-    page.write_bytes(page.read_bytes().replace(f"worktree: {repos['code'][1]}\nbranch: feature\n".encode(), b""))
+    page.write_bytes(page.read_bytes().replace(b"affects: [packages]\n", b"affects: [gw:workspace]\n", 1))
     git(repos["ui"][0], "merge", "feature")
     assert record(layout, "code").refusal
     assert advance(layout, "false-claim", dry_run=True).outcome.plan.refusal == "finish-incomplete"

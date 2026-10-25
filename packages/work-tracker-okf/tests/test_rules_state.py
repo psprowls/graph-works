@@ -172,16 +172,51 @@ def test_an_unstamped_release_is_exempt_from_resolved_without_ref(tmp_path: Path
     assert "state.resolved-without-ref" not in codes
 
 
-@pytest.mark.parametrize(
-    "stamps",
-    [
-        "branch: epic/x\nworktree: /tmp/x\n",
-        "repo_stamps:\n  code:\n    branch: epic/x\n    worktree: /tmp/x\n",
-    ],
-)
-def test_a_stamped_epic_resolved_without_ref_warns(tmp_path: Path, stamps: str) -> None:
-    codes = codes_for(tmp_path, "type: Epic\nwork_status: resolved\nphase: done\n" + stamps, slug="epic-x")
-    assert "state.resolved-without-ref" in codes
+def test_owner_exemption_follows_code_affects(tmp_path: Path) -> None:
+    head = "type: Epic\nwork_status: resolved\nphase: done\n"
+    write_item(tmp_path, "epic-code", head + "affects: [packages/x]\n")
+    write_item(tmp_path, "epic-ws", head + 'affects: ["gw:workspace"]\n')
+    findings = lane_report(tmp_path, today=TODAY).by_code("state.resolved-without-ref")
+    assert [f.path for f in findings] == ["work/epic-code.md"]
+
+
+_RETIRED = "type: Bug\nwork_status: open\n"
+
+
+def test_retired_placement_per_key(tmp_path: Path) -> None:
+    write_item(
+        tmp_path,
+        "bug-x",
+        _RETIRED + "worktree: /w\nbranch: b\nrepo_stamps:\n  code:\n    worktree: /c\n    branch: cb\n",
+    )
+    findings = lane_report(tmp_path, today=TODAY).by_code("state.retired-placement")
+    assert sorted(f.message for f in findings) == [
+        "retired placement field branch; run gw work migrate-placement",
+        "retired placement field repo_stamps; run gw work migrate-placement",
+        "retired placement field worktree; run gw work migrate-placement",
+    ]
+    assert all(f.severity == "warn" for f in findings)
+
+
+def test_retired_placement_spec_baseline_workspace(tmp_path: Path) -> None:
+    write_item(tmp_path, "bug-x", _RETIRED + f"spec_baseline:\n  code: {'a' * 40}\n  workspace: {'b' * 40}\n")
+    report = lane_report(tmp_path, today=TODAY)
+    findings = report.by_code("state.retired-placement")
+    assert [f.message for f in findings] == [
+        "retired placement field spec_baseline.workspace; run gw work migrate-placement"
+    ]
+    assert report.by_code("state.spec-baseline-malformed") == ()
+
+
+def test_retired_placement_reports_workspace_stamp(tmp_path: Path) -> None:
+    write_item(tmp_path, "bug-x", _RETIRED + "repo_stamps:\n  _workspace:\n    worktree: /w\n    branch: b\n")
+    findings = lane_report(tmp_path, today=TODAY).by_code("state.retired-placement")
+    assert [f.message for f in findings] == ["retired placement field repo_stamps; run gw work migrate-placement"]
+
+
+def test_retired_placement_silent_on_archived(tmp_path: Path) -> None:
+    write_item(tmp_path, "work/_archive/bug-x", _RETIRED + "worktree: /w\nbranch: b\n")
+    assert lane_report(tmp_path, today=TODAY).by_code("state.retired-placement") == ()
 
 
 def test_superseded_without_link_is_an_error(tmp_path: Path) -> None:
@@ -310,10 +345,10 @@ def test_archive_eligible_is_silent_for_a_terminal_root_with_an_open_descendant(
 # --- the module's shape -----------------------------------------------------
 
 
-def test_the_module_declares_eleven_codes_all_prefixed_state() -> None:
+def test_the_module_declares_twelve_codes_all_prefixed_state() -> None:
     from work_tracker_okf._rules import state
 
-    assert len(state.CODES) == 11
+    assert len(state.CODES) == 12
     assert all(code.startswith("state.") for code in state.CODES)
 
 

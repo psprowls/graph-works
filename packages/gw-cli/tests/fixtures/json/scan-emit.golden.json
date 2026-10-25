@@ -18,5 +18,23 @@
   "mirror_declined": 0,
   "mirror_stranded": 0,
   "mirror_skipped_repos": [],
-  "mirror_errors": []
+  "mirror_errors": [],
+  "work_indexes": {
+    "indexes": [
+      "<tmp>/works/okf/work/index.md",
+      "<tmp>/works/okf/work/_archive/index.md"
+    ],
+    "warnings": [],
+    "refusals": [],
+    "applied": true,
+    "rolled_back": false,
+    "failures": [],
+    "commit": {
+      "status": "skipped",
+      "sha": null,
+      "subject": "workspace: regenerate work indexes",
+      "paths": [],
+      "reason": "not-a-repo"
+    }
+  }
 }

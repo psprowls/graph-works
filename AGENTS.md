@@ -356,4 +356,4 @@ Work items are driven stage-by-stage with `/gw:workflow <path>` (one stage per
 session, fresh context between stages). `scripts/` is repo tooling, excluded
 from ruff and not part of any package.
 
-Feature work runs in git worktrees under `.claude/worktrees/` (gitignored).
+Each work item that touches code runs in one worktree under the workspace's `.gw/worktrees/`, computed from its path and created, refreshed and removed only by `gw work place`.

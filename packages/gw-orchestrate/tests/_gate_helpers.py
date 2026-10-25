@@ -105,21 +105,69 @@ def mint_receipt(env, *, tree, owner=None, exit=0, scope="full", command="true")
     )
 
 
+def declare_code(layout, declared: Path) -> None:
+    """Declare *declared* as repository `code` with a full gate."""
+    text = layout.manifest_path.read_text(encoding="utf-8")
+    block = f"repositories:\n  code:\n    path: {json.dumps(str(declared))}\n    gate:\n      full: 'true'\n"
+    if re.search(r"^repositories:", text, flags=re.MULTILINE):
+        text = re.sub(r"^repositories:.*(?:\n[ ].*)*\n", block, text, count=1, flags=re.MULTILINE)
+    else:
+        text = text.rstrip("\n") + "\n" + block
+    layout.manifest_path.write_text(text, encoding="utf-8", newline="\n")
+
+
 def gate_ready(layout, declared: Path, item: str, *, tree_of: Path | None = None) -> None:
     """Declare *declared* as repository `code` with a full gate, and mint a green receipt for
     the current tree of *tree_of* (default: *declared*) -- for tests that advance a clean item
     past execute -> finish and are not about the gate."""
     import subprocess
 
-    text = layout.manifest_path.read_text(encoding="utf-8")
-    block = f"repositories:\n  code:\n    path: {json.dumps(str(declared))}\n    gate:\n      full: 'true'\n"
-    text = re.sub(r"^repositories:.*(?:\n[ ].*)*\n", block, text, count=1, flags=re.MULTILINE)
-    layout.manifest_path.write_text(text, encoding="utf-8", newline="\n")
+    declare_code(layout, declared)
     root = tree_of or declared
     tree = subprocess.run(
         ["git", "rev-parse", "HEAD^{tree}"], cwd=root, capture_output=True, text=True, check=True
     ).stdout.strip()
     write_receipt(layout.bundle_dir, item, worktree=root, tree=tree)
+
+
+def place_item(layout, declared: Path, item: str, *, commit: bool = True) -> Path:
+    """Declare *declared* as `code`, then create the item's computed worktree on its computed branch
+    (forked from the parent branch). With *commit*, the item leaves one commit under `packages/a`."""
+    import subprocess
+
+    from gw_pipeline.placement_resolve import item_placement
+    from okf_io import load_bundle
+    from work_tracker_okf.items import IGNORE, load_items
+
+    declare_code(layout, declared)
+    items = {i.path: i for i in load_items(load_bundle(layout.bundle_dir, ignore=IGNORE))}
+    placement = item_placement(layout, items[item], items, repo_name="code")
+    assert placement is not None
+    if placement.owner_path is not None and (
+        subprocess.run(
+            ["git", "rev-parse", "--verify", "-q", f"refs/heads/{placement.parent_branch}"],
+            cwd=declared,
+            capture_output=True,
+        ).returncode
+        != 0
+    ):
+        place_item(layout, declared, placement.owner_path, commit=False)
+    placement.worktree.parent.mkdir(parents=True, exist_ok=True)
+    subprocess.run(
+        ["git", "worktree", "add", "-b", placement.branch, str(placement.worktree), placement.parent_branch],
+        cwd=declared,
+        check=True,
+        capture_output=True,
+    )
+    for key, value in (("user.email", "t@example.com"), ("user.name", "T")):
+        subprocess.run(["git", "config", key, value], cwd=placement.worktree, check=True, capture_output=True)
+    if commit:
+        target = placement.worktree / "packages/a/x.py"
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text("item work\n", encoding="utf-8")
+        subprocess.run(["git", "add", "-A"], cwd=placement.worktree, check=True, capture_output=True)
+        subprocess.run(["git", "commit", "-m", "item work"], cwd=placement.worktree, check=True, capture_output=True)
+    return placement.worktree
 
 
 def start(env) -> Path:
@@ -141,7 +189,7 @@ def add_item(env, path: str = "work/feature-b", *, status: str = "in-progress") 
     """A second execute-phase item on the same worktree as *env*'s item."""
     page = (
         f"---\ntype: Feature\ntitle: B\nwork_status: {status}\nphase: execute\nowner: someone\nrepo: code\n"
-        f"worktree: {env.repo}\naffects:\n  - packages/a\n---\n\nBody.\n"
+        f"worktree: {env.repo}\nbranch: main\naffects:\n  - packages/a\n---\n\nBody.\n"
     )
     (env.layout.bundle_dir / f"{path}.md").write_text(page, encoding="utf-8", newline="\n")
     return path

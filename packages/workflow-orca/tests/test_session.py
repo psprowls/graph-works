@@ -6,8 +6,8 @@ import json
 
 import pytest
 from orca_fakes import FakeRunner, fixture
-from subagents_io.backend import BackendError, DispatchBackend, UnsupportedMode, WorktreeNotProvisioned
-from subagents_io.dispatch import DISPATCH_MODES, PlannedDispatch, WorktreeAction
+from subagents_io.backend import BackendError, DispatchBackend, UnsupportedMode
+from subagents_io.dispatch import DISPATCH_MODES, PlannedDispatch, WorktreePlacement
 from workflow_orca import OrcaBackend
 from workflow_orca._cli import OrcaResult
 
@@ -29,7 +29,7 @@ def test_the_backend_declares_its_capabilities():
     backend = OrcaBackend(run=FakeRunner([]))
     assert backend.name == "orca"
     assert backend.supported_modes == DISPATCH_MODES
-    assert backend.provisions_worktrees is True
+    assert not hasattr(backend, "provisions_worktrees")
 
 
 def test_the_backend_satisfies_the_runtime_checkable_protocol():
@@ -114,15 +114,7 @@ def planned(**overrides):
         mode="autonomous",
         model=None,
         reasoning_effort=None,
-        worktree=WorktreeAction(
-            action="reuse",
-            path="/tmp/wt",
-            branch="psprowls/my-slug",
-            base_branch=None,
-            exists=True,
-            parent_path=None,
-            start_sha=None,
-        ),
+        worktree=WorktreePlacement(path="/tmp/wt", branch="psprowls/my-slug", parent_path=None),
         merge_target="main",
         auto_merge=False,
         prompt=PROMPT,
@@ -131,114 +123,30 @@ def planned(**overrides):
     return PlannedDispatch(**fields)
 
 
-def session(routes=LAUNCH, **backend_kwargs):
+def session(routes=LAUNCH):
     runner = FakeRunner([*FOUND, *routes])
-    return OrcaBackend(run=runner, **backend_kwargs).open_session(TARGET), runner
+    return OrcaBackend(run=runner).open_session(TARGET), runner
 
 
-def test_reuse_passes_a_path_selector_and_no_creation_flags():
+def test_launch_passes_path_selector_only():
     # `worker-start --help`: creation flags are rejected for existing
-    # worktrees, so passing --name here would be an error from Orca, not a
-    # harmless extra.
+    # worktrees. The planner resolved an existing path; the backend never
+    # creates, forks or links a worktree.
     sess, runner = session()
     sess.launch(planned())
     start = runner.calls_matching("worker-start")[0]
     assert runner.argv_after("--worktree", start) == "path:/tmp/wt"
-    assert "--name" not in start
-    assert "--base-branch" not in start
-    assert "--repo" not in start
+    for flag in ("--name", "--base-branch", "--repo", "new-top-level", "new-child"):
+        assert flag not in start
+    assert not runner.calls_matching("worktree", "set")
+    assert not runner.calls_matching("worktree", "show")
 
 
-def test_main_passes_a_path_selector_exactly_like_reuse():
-    # "main" is the repo's own checkout: already on disk, never created by
-    # Orca, so it takes the path selector and none of the creation flags.
+def test_a_detached_placement_launches_like_any_other_path():
     sess, runner = session()
-    action = WorktreeAction(
-        action="main", path="/repo", branch="main", base_branch=None, exists=True, parent_path=None, start_sha=None
-    )
-    sess.launch(planned(worktree=action))
+    sess.launch(planned(worktree=WorktreePlacement(path="/ws/.gw/worktrees/demo/main", branch=None, parent_path=None)))
     start = runner.calls_matching("worker-start")[0]
-    assert runner.argv_after("--worktree", start) == "path:/repo"
-    assert "--name" not in start
-    assert "--base-branch" not in start
-    assert "--repo" not in start
-
-
-def test_main_at_an_in_bundle_repositorys_checkout_launches_there():
-    # The in-bundle repository's main names its working checkout, not its clone.
-    sess, runner = session()
-    checkout = "/ws/.gw/worktrees/demo/main"
-    action = WorktreeAction(
-        action="main", path=checkout, branch="main", base_branch=None, exists=True, parent_path=None, start_sha=None
-    )
-    sess.launch(planned(worktree=action))
-    start = runner.calls_matching("worker-start")[0]
-    assert runner.argv_after("--worktree", start) == f"path:{checkout}"
-
-
-def test_main_without_a_path_is_refused():
-    # The same guard `reuse` carries. A pathless "main" is a planner bug, and
-    # launching it would silently start the worker in the coordinator's cwd.
-    sess, _ = session()
-    action = WorktreeAction(
-        action="main", path=None, branch="main", base_branch=None, exists=None, parent_path=None, start_sha=None
-    )
-    with pytest.raises(WorktreeNotProvisioned):
-        sess.launch(planned(worktree=action))
-
-
-def test_fork_child_creates_a_top_level_worktree_in_the_named_repo():
-    # Orca's child mode takes repository and parent from the calling terminal;
-    # the planner's parent is linked explicitly after start instead.
-    sess, runner = session(repo_selector="name:agent-workspace")
-    action = WorktreeAction(
-        action="fork-child",
-        path=None,
-        branch="psprowls/child",
-        base_branch="epic/x",
-        exists=None,
-        parent_path=None,
-        start_sha=None,
-    )
-    sess.launch(planned(worktree=action))
-    start = runner.calls_matching("worker-start")[0]
-    assert runner.argv_after("--worktree", start) == "new-top-level"
-    assert runner.argv_after("--name", start) == "psprowls/child"
-    assert runner.argv_after("--base-branch", start) == "epic/x"
-    assert runner.argv_after("--repo", start) == "name:agent-workspace"
-    assert "new-child" not in start
-
-
-def test_fork_child_without_a_repo_selector_is_refused():
-    sess, _ = session()
-    action = WorktreeAction(
-        action="fork-child",
-        path=None,
-        branch="psprowls/child",
-        base_branch="epic/x",
-        exists=None,
-        parent_path=None,
-        start_sha=None,
-    )
-    with pytest.raises(BackendError, match="repo_selector"):
-        sess.launch(planned(worktree=action))
-
-
-def test_create_top_level_adds_the_repo_selector():
-    sess, runner = session(repo_selector="name:agent-workspace")
-    action = WorktreeAction(
-        action="create-top-level",
-        path=None,
-        branch="psprowls/top",
-        base_branch="main",
-        exists=None,
-        parent_path=None,
-        start_sha=None,
-    )
-    sess.launch(planned(worktree=action))
-    start = runner.calls_matching("worker-start")[0]
-    assert runner.argv_after("--worktree", start) == "new-top-level"
-    assert runner.argv_after("--repo", start) == "name:agent-workspace"
+    assert runner.argv_after("--worktree", start) == "path:/ws/.gw/worktrees/demo/main"
 
 
 def test_the_prompt_reaches_spec_unedited():
@@ -309,80 +217,12 @@ def test_a_mode_outside_the_set_is_refused():
         sess.launch(planned(mode="telepathy"))
 
 
-def test_reuse_with_no_path_is_refused():
-    sess, _ = session()
-    action = WorktreeAction(
-        action="reuse", path=None, branch="b", base_branch=None, exists=None, parent_path=None, start_sha=None
-    )
-    with pytest.raises(WorktreeNotProvisioned):
-        sess.launch(planned(worktree=action))
-
-
 def test_a_duplicate_key_is_refused():
     # The session is the ledger. Silently returning the existing record would
     # make a re-dispatch after a failure read as a success.
     sess, _ = session()
     with pytest.raises(BackendError, match="already"):
         sess.launch(planned(key="2026-08-13-test-gap-code-wiki-smoke-script#execute"))
-
-
-def test_create_top_level_without_a_repo_selector_is_refused():
-    sess, _ = session()
-    action = WorktreeAction(
-        action="create-top-level",
-        path=None,
-        branch="b",
-        base_branch="main",
-        exists=None,
-        parent_path=None,
-        start_sha=None,
-    )
-    with pytest.raises(BackendError, match="repo_selector"):
-        sess.launch(planned(worktree=action))
-
-
-def test_fork_child_with_no_base_branch_is_refused():
-    # `WorktreeAction.base_branch` is `str | None` at the protocol level; a
-    # `None` here must not silently become `--base-branch ""` on the CLI.
-    sess, _ = session()
-    action = WorktreeAction(
-        action="fork-child",
-        path=None,
-        branch="psprowls/child",
-        base_branch=None,
-        exists=None,
-        parent_path=None,
-        start_sha=None,
-    )
-    with pytest.raises(BackendError, match="base_branch"):
-        sess.launch(planned(worktree=action))
-
-
-def test_create_top_level_with_no_base_branch_is_refused():
-    sess, _ = session(repo_selector="name:agent-workspace")
-    action = WorktreeAction(
-        action="create-top-level",
-        path=None,
-        branch="b",
-        base_branch=None,
-        exists=None,
-        parent_path=None,
-        start_sha=None,
-    )
-    with pytest.raises(BackendError, match="base_branch"):
-        sess.launch(planned(worktree=action))
-
-
-def test_an_unknown_worktree_action_is_refused():
-    # `WorktreeAction.action` is closed at the protocol level, but this
-    # backend does not trust that at runtime — an action outside the three
-    # it knows must fail loudly rather than build a flag it invented.
-    sess, _ = session()
-    action = WorktreeAction(
-        action="teleport", path=None, branch="b", base_branch=None, exists=None, parent_path=None, start_sha=None
-    )
-    with pytest.raises(BackendError, match="unknown worktree action"):
-        sess.launch(planned(worktree=action))
 
 
 def test_task_create_with_no_id_is_refused():
@@ -438,20 +278,3 @@ def test_worker_start_with_no_dispatch_id_is_refused():
     sess = OrcaBackend(run=runner).open_session(TARGET)
     with pytest.raises(BackendError, match="no dispatchId"):
         sess.launch(planned())
-
-
-def test_pin_detached_fails_closed():
-    sess, runner = session()
-    action = WorktreeAction("pin-detached", None, None, "epic/x", None, None, "a" * 40)
-    before = list(runner.calls)
-    with pytest.raises(WorktreeNotProvisioned, match="prepared detached checkout"):
-        sess._worktree_flags(action)
-    assert runner.calls == before
-
-
-@pytest.mark.parametrize("action_name", ["fork-child", "create-top-level"])
-def test_creation_without_branch_is_refused(action_name):
-    sess, _ = session(repo_selector="name:agent-workspace")
-    action = WorktreeAction(action_name, None, None, "main", None, None, None)
-    with pytest.raises(BackendError, match="needs a branch"):
-        sess._worktree_flags(action)

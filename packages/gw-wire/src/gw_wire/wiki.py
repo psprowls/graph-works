@@ -8,6 +8,7 @@ from __future__ import annotations
 from collections import Counter
 from collections.abc import Sequence
 from pathlib import Path
+from typing import Any
 
 from doc_wiki_okf.ingest import DocumentBrief
 from gw_kernel.guidance.claims import ClaimRow, ClaimsRefresh
@@ -154,8 +155,12 @@ def _mirror_keys(structural: StructuralSummary) -> dict[str, object]:
     }
 
 
-def scan_normal_payload(result: ScanResult) -> dict[str, object]:
-    """Render a local, complete scan result."""
+def scan_normal_payload(result: ScanResult, *, work_indexes: dict[str, Any] | None = None) -> dict[str, object]:
+    """Render a local, complete scan result.
+
+    `work_indexes` is the work-lane index reconciliation a successful full scan
+    ran (`work.regen_index_payload`); `None` when the scan did not reconcile.
+    """
     return {
         "ok": result.ok,
         "short_head": result.worklist.short_head,
@@ -169,6 +174,7 @@ def scan_normal_payload(result: ScanResult) -> dict[str, object]:
         "entity_errors": list(result.errors),
         "warnings": list(result.structural.warnings),
         **_mirror_keys(result.structural),
+        "work_indexes": work_indexes,
     }
 
 
@@ -179,6 +185,7 @@ def scan_emit_payload(
     results_dir: Path,
     short_head: str,
     structural: StructuralSummary,
+    work_indexes: dict[str, Any] | None = None,
 ) -> dict[str, object]:
     """Render the artifact locations produced by an emitted scan."""
     return {
@@ -193,6 +200,7 @@ def scan_emit_payload(
         "entity_errors": list(structural.errors),
         "warnings": list(structural.warnings),
         **_mirror_keys(structural),
+        "work_indexes": work_indexes,
     }
 
 

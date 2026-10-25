@@ -6,6 +6,7 @@ import subprocess
 from pathlib import Path
 
 import pytest
+from gw_pipeline import repo_context
 from gw_pipeline.repo_context import _inventory, observe_branch_tips, observe_repository
 
 
@@ -51,7 +52,8 @@ def test_missing_git_evidence_is_marked_unknown(tmp_path: Path) -> None:
     assert context.inventory == {}
 
 
-def test_branch_tips_are_committed_refs_not_worktree_state(tmp_path: Path) -> None:
+@pytest.mark.parametrize("shadow_tag", [False, True])
+def test_branch_tips_are_committed_refs_not_worktree_state(tmp_path: Path, shadow_tag: bool) -> None:
     repo = tmp_path / "repo"
     repo.mkdir()
     _git(repo, "init", "-b", "main")
@@ -59,6 +61,8 @@ def test_branch_tips_are_committed_refs_not_worktree_state(tmp_path: Path) -> No
     _git(repo, "add", "f")
     _git(repo, "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-m", "a")
     tip = _git(repo, "rev-parse", "HEAD")
+    if shadow_tag:
+        _git(repo, "tag", "main", tip)
     (repo / "f").write_text("dirty", encoding="utf-8", newline="\n")
     context = observe_repository(repo)
     assert context.branch_tips == {"main": tip}
@@ -100,3 +104,29 @@ def test_duplicate_branch_observations_remain_visible_to_the_planner(tmp_path: P
         f"worktree {first}\nbranch refs/heads/feature/a\n\nworktree {second}\nbranch refs/heads/feature/a\n\n"
     )
     assert observed["feature/a"] == (str(first.resolve()), str(second.resolve()))
+
+
+def test_inventory_observation_uses_resolved_git_without_status_scans(place_env, monkeypatch):
+    env = place_env
+    linked = env.repo.parent / "linked"
+    env.git("worktree", "add", "-b", "feature/linked", str(linked), "main")
+    original = repo_context.probe_git
+    commands = []
+    git = env.ctx().git
+
+    def probe(cwd, *args, **kwargs):
+        commands.append((args, kwargs))
+        return original(cwd, *args, **kwargs)
+
+    monkeypatch.setattr(repo_context, "probe_git", probe)
+
+    inventory = repo_context.observe_inventory(env.repo, git=git)
+
+    assert inventory == {"main": (str(env.repo.resolve()),), "feature/linked": (str(linked.resolve()),)}
+    assert commands == [(("worktree", "list", "--porcelain"), {"executable": git.path})]
+    with pytest.raises(TypeError):
+        inventory["main"] = ()
+
+
+def test_inventory_observation_unknown_outside_git(tmp_path):
+    assert repo_context.observe_inventory(tmp_path) is None

@@ -45,6 +45,8 @@ from gw_kernel.workspace.bundle_lock import commit_pending
 from gw_kernel.workspace.commits import COMMIT_FAILED_PREFIX, CommitOutcome, WorkspaceCommit, item_stem
 from gw_kernel.workspace.layout import WorkspaceLayout
 from gw_kernel.workspace.repos import resolve_repos
+from gw_pipeline.place import PruneKept, PruneReport
+from gw_pipeline.placement import NullNotifier
 from gw_pipeline.transactions import MutationApplication, apply_mutation
 from okf_ext.bundle import SCHEMA_DIRNAME
 from okf_ext.moves import MovePlan, stranded_warning
@@ -54,6 +56,8 @@ from okf_io import parse as parse_document
 from work_tracker_okf.archive import plan_archive
 from work_tracker_okf.items import ARCHIVE_IGNORE, load_items
 from work_tracker_okf.mutation import PlannedWrite, WorkMutationPlan
+
+from gw_work.place import run_place
 
 
 def _touched_members(plan: MovePlan) -> frozenset[str]:
@@ -101,6 +105,8 @@ class ArchiveRun:
     pointer_cleared: bool = False
     logged: str | None = None
     wiki_commit: CommitOutcome | None = None
+    pruned: PruneReport | None = None
+    prune_warnings: tuple[str, ...] = ()
 
     @property
     def ok(self) -> bool:
@@ -123,6 +129,41 @@ def stranded_warnings(run: ArchiveRun) -> tuple[str, ...]:
     if run.wiki_commit is not None and run.wiki_commit.status == "failed":
         warnings.append(f"{COMMIT_FAILED_PREFIX}{run.wiki_commit.reason}")
     return tuple(warnings)
+
+
+def _prune_roots(
+    layout: WorkspaceLayout, roots: Sequence[str], *, today: date, dry_run: bool
+) -> tuple[PruneReport | None, tuple[str, ...]]:
+    """Prune each archived root's worktrees and merged branches, folding the
+    per-root reports into one. A refusal or exception is a warning line: the
+    archive has already succeeded (or, dry run, is only being previewed)."""
+    if not roots:
+        return None, ()
+    removed: list[str] = []
+    deleted: list[str] = []
+    kept: list[PruneKept] = []
+    warnings: list[str] = []
+    for root in roots:
+        try:
+            result = run_place(
+                layout,
+                root,
+                mode="prune",
+                dry_run=dry_run,
+                repo_name=None,
+                today=today,
+                notifier=NullNotifier(),
+            )
+        except Exception as exc:
+            warnings.append(f"prune {root}: {type(exc).__name__}: {exc}")
+            continue
+        if result.refusal is not None:
+            warnings.append(f"prune {root}: {result.refusal.kind}: {result.refusal.detail}")
+        if result.pruned is not None:
+            removed.extend(result.pruned.removed_worktrees)
+            deleted.extend(result.pruned.deleted_branches)
+            kept.extend(result.pruned.kept)
+    return PruneReport(tuple(removed), tuple(deleted), tuple(kept)), tuple(warnings)
 
 
 def _plan_with_log_entry(plan: WorkMutationPlan, bundle_root: Path, today: date, logged: str) -> WorkMutationPlan:
@@ -232,6 +273,12 @@ def run_archive(
     if logged is not None and not defer_log:
         plan = _plan_with_log_entry(plan, bundle.root, today, logged)
     candidate = ArchiveRun(plan=plan, wiki_plan=wiki_plan, conflict=conflict, logged=logged)
+    if plan.ok and wiki_plan.ok and not conflict and (dry_run or before_apply is not None):
+        # Nothing has moved yet, so the preview prunes the items where they are. The
+        # candidate handed to `before_apply` carries it too, so an applier's re-plan
+        # projects the same plan the dry run showed.
+        pruned, prune_warnings = _prune_roots(layout, work_roots, today=today, dry_run=True)
+        candidate = replace(candidate, pruned=pruned, prune_warnings=prune_warnings)
     if not dry_run and before_apply is not None:
         before_apply(candidate)
     if dry_run or not plan.ok or not wiki_plan.ok or conflict:
@@ -277,6 +324,9 @@ def run_archive(
     # clear_active_work; a wiki-only archive must not have that side effect.
     cleared = provenance.clear_active_work(layout, set(work_roots)) if work_roots else False
 
+    pruned, prune_warnings = _prune_roots(
+        layout, tuple(plan.path_mapping[root] for root in work_roots), today=today, dry_run=False
+    )
     return ArchiveRun(
         plan=plan,
         wiki_plan=wiki_plan,
@@ -285,6 +335,8 @@ def run_archive(
         pointer_cleared=cleared,
         logged=logged,
         wiki_commit=wiki_commit,
+        pruned=pruned,
+        prune_warnings=prune_warnings,
     )
 
 

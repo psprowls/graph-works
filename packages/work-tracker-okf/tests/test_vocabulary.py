@@ -115,7 +115,8 @@ def test_the_two_conditional_requirement_keys_are_declared() -> None:
     absent: `sources[]` is the lane's pointer surface now."""
     properties = _base_schema()["properties"]
     for key in ("mitigation", "rationale"):
-        assert properties[key] == {"type": "string", "minLength": 1}, key
+        assert properties[key]["type"] == "string", key
+        assert properties[key]["minLength"] == 1, key
     assert "related_prs" not in properties
 
 
@@ -129,12 +130,13 @@ def test_the_four_conditional_requirements_stay_rules_not_schema_if_then() -> No
 
 
 def test_the_two_provenance_keys_are_declared() -> None:
-    """`worktree` and `branch` sit in the same category as `owner` and
-    `resolved_in`: caller-supplied provenance, optional, never enumerated."""
+    """`worktree` and `branch` are optional and never enumerated; both are now
+    deprecated (retired placement stamps, cleaned up by `gw work migrate-placement`)."""
     properties = _base_schema()["properties"]
     required = _base_schema()["required"]
     for key in ("worktree", "branch"):
-        assert properties[key] == {"type": "string", "minLength": 1}, key
+        assert properties[key]["type"] == "string", key
+        assert properties[key]["minLength"] == 1, key
         assert key not in required
 
 

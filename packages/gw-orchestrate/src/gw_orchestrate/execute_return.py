@@ -8,7 +8,6 @@ page, plan and committed coverage; a phase alone never proves publication.
 from __future__ import annotations
 
 import hashlib
-import json
 import stat
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
@@ -20,15 +19,13 @@ from types import MappingProxyType
 from gw_kernel.workspace import provenance
 from gw_kernel.workspace.bundle import load_workspace_bundle
 from gw_kernel.workspace.commits import (
-    COMMIT_FAILED_PREFIX,
     WorkspaceCommit,
     commit_candidates,
     commit_target,
-    item_stem,
     plan_paths,
 )
 from gw_kernel.workspace.errors import WorkspaceError
-from gw_kernel.workspace.layout import WorkspaceLayout, layout_for
+from gw_kernel.workspace.layout import WorkspaceLayout
 from gw_pipeline.execute_return import (
     LocalPublication,
     write_operation,
@@ -43,27 +40,14 @@ from gw_pipeline.execute_return import (
     finish_return as finish_return,
 )
 from gw_pipeline.execute_return import (
-    mark_publication as mark_publication,
-)
-from gw_pipeline.execute_return import (
     pending_return as pending_return,
 )
+from gw_pipeline.members import confined_member
 from gw_pipeline.transactions import MutationApplication, apply_mutation, held_bundle_lock
-from gw_pipeline.workspace_placement import (
-    ReturnDestination as ReturnDestination,
-)
-from gw_pipeline.workspace_placement import (
-    confined_member,
-)
-from gw_pipeline.workspace_placement import (
-    resolve_destination as resolve_destination,
-)
-from okf_io import Bundle
 from work_tracker_okf.advance import RefusalReason
 from work_tracker_okf.compose import stage_artifact_ref
 from work_tracker_okf.items import IGNORE, WorkItem, is_commit_oid, load_items
 from work_tracker_okf.mutation import DirectoryPrecondition, PlannedWrite, WorkMutationPlan
-from work_tracker_okf.paths import item_page
 from work_tracker_okf.pipeline import PipelineDefinition
 from work_tracker_okf.returns import ExecuteReturn, new_record, plan_scope, render_reopened, verify_report
 
@@ -71,16 +55,12 @@ from work_tracker_okf.returns import ExecuteReturn, new_record, plan_scope, rend
 @dataclass(frozen=True, slots=True)
 class ReturnPlan:
     record: ExecuteReturn
-    destination: ReturnDestination
     coverage_member: str
     coverage_before: bytes | None
     coverage_after: bytes
     plan_sha256: str | None
-    resume: ReturnOperation | None
     path: str
-    page_sha256: str
     plan_member: str
-    fingerprint: str
 
 
 def read_member(root: Path, member: str) -> bytes | None:
@@ -92,8 +72,6 @@ def read_member(root: Path, member: str) -> bytes | None:
 
 def plan_return(
     layout: WorkspaceLayout,
-    bundle: Bundle,
-    items: Mapping[str, WorkItem],
     item: WorkItem,
     *,
     scope: Sequence[str],
@@ -102,75 +80,42 @@ def plan_return(
     new_id: Callable[[], str],
 ) -> ReturnPlan | tuple[RefusalReason, str]:
     pending = pending_return(layout, item.path)
-    if pending is not None and (pending.malformed or pending.local is not None):
+    if pending is not None and pending.retired_worktree is not None:
+        return (
+            "return-pending",
+            f"return journal names a retired workspace worktree {pending.retired_worktree!r}; inspect",
+        )
+    if pending is not None:
         return "return-pending", "malformed return journal; inspect before retrying"
     selected = plan_scope(
         scope, item.finish_obligations, obligations_malformed="finish_obligations" in item.invalid_optional_fields
     )
     if selected.refusal:
         return selected.refusal, selected.detail
-    destination = resolve_destination(layout, items, item)
-    if isinstance(destination, tuple):
-        return (
-            ("return-pending", f"pending return destination is unverified; inspect: {destination[1]}")
-            if pending
-            else destination
-        )
     coverage = stage_artifact_ref(item.path, definition.artifacts["execute"])
     plan = stage_artifact_ref(item.path, definition.artifacts["plan"])
     try:
         plan_sha = digest(read_member(layout.bundle_dir, plan.rel))
-        before = read_member(destination.bundle_root, coverage.rel)
+        before = read_member(layout.bundle_dir, coverage.rel)
         text = before.decode("utf-8") if before is not None else None
     except (OSError, ValueError) as exc:
-        return "return-destination-unverified", str(exc)
-    page_sha = hashlib.sha256(bundle.concepts[item.path].serialize().encode("utf-8")).hexdigest()
-    fingerprint = hashlib.sha256(
-        json.dumps(
-            {
-                "scope": selected.scope,
-                "plan": plan.rel,
-                "plan_sha256": plan_sha,
-                "coverage": coverage.rel,
-                "worktree": destination.worktree,
-                "branch": destination.branch,
-                "identity": destination.identity,
-            },
-            sort_keys=True,
-        ).encode("utf-8")
-    ).hexdigest()
-    if pending is not None and (
-        pending.fingerprint != fingerprint
-        or pending.page_sha256 != page_sha
-        or digest(before) not in (pending.coverage_before_sha256, pending.coverage_after_sha256)
-    ):
-        return "return-pending", "return intent or evidence changed; inspect the pending operation"
-    record = (
-        pending.record
-        if pending
-        else new_record(
-            new_id(),
-            selected.scope,
-            on=today,
-            coverage=coverage.resource,
-            plan=plan.resource if plan_sha else None,
-            plan_sha256=plan_sha,
-        )
+        return "return-evidence-missing", str(exc)
+    record = new_record(
+        new_id(),
+        selected.scope,
+        on=today,
+        coverage=coverage.resource,
+        plan=plan.resource if plan_sha else None,
+        plan_sha256=plan_sha,
     )
-    if record is None:
-        return "return-pending", "return journal has no record; inspect"
     after = render_reopened(text, record).encode("utf-8")
-    if pending is not None and digest(after) != pending.coverage_after_sha256:
-        return "return-pending", "return coverage changed; inspect"
-    return ReturnPlan(
-        record, destination, coverage.rel, before, after, plan_sha, pending, item.path, page_sha, plan.rel, fingerprint
-    )
+    return ReturnPlan(record, coverage.rel, before, after, plan_sha, item.path, plan.rel)
 
 
-def coverage_mutation(plan: ReturnPlan) -> WorkMutationPlan:
+def coverage_mutation(layout: WorkspaceLayout, plan: ReturnPlan) -> WorkMutationPlan:
     parent = Path(plan.coverage_member).parent.as_posix()
     return WorkMutationPlan(
-        root=plan.destination.bundle_root,
+        root=layout.bundle_dir,
         operation="file",
         path_mapping=MappingProxyType({}),
         move_plan=None,
@@ -181,9 +126,7 @@ def coverage_mutation(plan: ReturnPlan) -> WorkMutationPlan:
         warnings=(),
         refusals=(),
         validate_paths=(),
-        directory_preconditions=()
-        if (plan.destination.bundle_root / parent).exists()
-        else (DirectoryPrecondition(parent, None),),
+        directory_preconditions=() if (layout.bundle_dir / parent).exists() else (DirectoryPrecondition(parent, None),),
     )
 
 
@@ -219,130 +162,21 @@ def _committed_member(layout: WorkspaceLayout, member: str, expected: str | None
     )
 
 
-def _fresh_destination(layout: WorkspaceLayout, path: str) -> ReturnDestination:
-    items = {i.path: i for i in load_items(load_workspace_bundle(layout, ignore=IGNORE))}
-    if path not in items:
-        raise WorkspaceError("return item disappeared; inspect")
-    destination = resolve_destination(layout, items, items[path])
-    if isinstance(destination, tuple):
-        raise WorkspaceError(destination[1])
-    return destination
-
-
-def _same_destination(destination: ReturnDestination, op: ReturnOperation) -> bool:
-    return (destination.worktree, destination.branch, destination.identity) == (op.worktree, op.branch, op.identity)
-
-
-def _check_source(layout: WorkspaceLayout, op: ReturnOperation, *, published: bool = False) -> None:
-    expected = op.canonical_after_sha256 if published else op.page_sha256
-    if (
-        expected is None
-        or digest(read_member(layout.bundle_dir, item_page(op.path).rel)) != expected
-        or digest(read_member(layout.bundle_dir, op.plan_member)) != op.plan_sha256
-    ):
-        raise WorkspaceError("return evidence changed; inspect and retry")
-
-
-def _check_committed(destination: ReturnDestination, op: ReturnOperation) -> None:
-    if op.content_commit is None or not _same_destination(destination, op):
-        raise WorkspaceError("return destination changed; inspect and retry")
-    root = destination.layout.root
-    _git(root, "merge-base", "--is-ancestor", op.content_commit, "HEAD")
-    if (
-        digest(read_member(destination.bundle_root, op.coverage_member)) != op.coverage_after_sha256
-        or not _committed_member(destination.layout, op.coverage_member, op.coverage_after_sha256)
-        or not _committed_member(destination.layout, op.coverage_member, op.coverage_after_sha256, op.content_commit)
-    ):
-        raise WorkspaceError("return evidence changed; inspect and retry")
-
-
-def apply_content(layout: WorkspaceLayout, plan: ReturnPlan) -> ReturnOperation:
-    destination = plan.destination
-    with held_bundle_lock(destination.layout):
-        fresh = _fresh_destination(layout, plan.path)
-        if fresh != destination:
-            raise WorkspaceError("return destination changed; inspect and retry")
-        head = _head(destination.layout.root)
-        op = plan.resume or ReturnOperation(
-            path=plan.path,
-            return_id=plan.record.id,
-            fingerprint=plan.fingerprint,
-            page_sha256=plan.page_sha256,
-            plan_sha256=plan.plan_sha256,
-            worktree=destination.worktree or "",
-            branch=destination.branch or "",
-            identity=destination.identity or "",
-            coverage_member=plan.coverage_member,
-            coverage_before_sha256=digest(plan.coverage_before),
-            coverage_after_sha256=hashlib.sha256(plan.coverage_after).hexdigest(),
-            record=plan.record,
-            plan_member=plan.plan_member,
-            content_before_head=head,
+def local_published(layout: WorkspaceLayout, op: ReturnOperation) -> bool:
+    """Positive exact commit proof; failed/unknown transport is not authority."""
+    local = op.local
+    if local is None:
+        return False
+    try:
+        return (
+            pending_return(layout, op.path) == op
+            and _git(layout.root, "rev-parse", "HEAD^").strip() == local.head
+            and _git(layout.root, "log", "-1", "--format=%s").strip() == local.subject
+            and digest(read_member(layout.bundle_dir, op.plan_member)) == op.plan_sha256
+            and all(_committed_member(layout, member, sha) for member, sha in local.members)
         )
-        _check_source(layout, op)
-        if plan.resume is None:
-            if pending_return(layout, plan.path) is not None:
-                raise WorkspaceError("return operation appeared; inspect")
-            write_operation(layout, op)
-        elif pending_return(layout, plan.path) != op:
-            raise WorkspaceError("return journal changed; inspect")
-        if op.state == "content-committed":
-            _check_committed(fresh, op)
-            return op
-        if digest(read_member(destination.bundle_root, op.coverage_member)) != op.coverage_before_sha256:
-            # Crash between the successful Git commit and journal update. Exact
-            # parent, subject and blob prove this operation, not just equal bytes.
-            subject = _git(destination.layout.root, "log", "-1", "--format=%s").strip()
-            parent = _git(destination.layout.root, "rev-parse", "HEAD^").strip()
-            if parent != op.content_before_head or subject != _subject(op):
-                raise WorkspaceError("return commit outcome unknown; inspect")
-            proven = replace(op, content_commit=head, state="content-committed")
-            _check_committed(fresh, proven)
-            write_operation(layout, proven)
-            return proven
-        if head != op.content_before_head:
-            raise WorkspaceError("return content HEAD changed; inspect")
-
-        def guard() -> None:
-            if _fresh_destination(layout, plan.path) != destination:
-                raise WorkspaceError("return destination changed; inspect")
-            _check_source(layout, op)
-
-        application = apply_mutation(
-            destination.layout,
-            coverage_mutation(plan),
-            commit=WorkspaceCommit(_subject(op), extra_paths=(plan.coverage_member,)),
-            validate_read_set=guard,
-        )
-        commit = application.commit
-        if (
-            not application.ok
-            or commit is None
-            or commit.status != "committed"
-            or commit.sha is None
-            or any(w.startswith(COMMIT_FAILED_PREFIX) for w in application.warnings)
-            or commit.sha == head
-            or _head(destination.layout.root) != commit.sha
-        ):
-            raise WorkspaceError(f"execute return {op.return_id} content commit unproven; inspect pending journal")
-        committed = replace(op, content_commit=commit.sha, state="content-committed")
-        _check_committed(_fresh_destination(layout, plan.path), committed)
-        write_operation(layout, committed)
-        return committed
-
-
-def _subject(op: ReturnOperation) -> str:
-    return f"workspace: reopen {item_stem(op.path)} execute coverage for {op.return_id}"
-
-
-def publish_guard(layout: WorkspaceLayout, op: ReturnOperation) -> Callable[[], None]:
-    def guard() -> None:
-        if pending_return(layout, op.path) != op:
-            raise WorkspaceError("return journal changed; inspect")
-        _check_source(layout, op)
-        _check_committed(_fresh_destination(layout, op.path), op)
-
-    return guard
+    except (OSError, ValueError):
+        return False
 
 
 def published(layout: WorkspaceLayout, op: ReturnOperation, item: WorkItem, *, scope: Sequence[str]) -> bool:
@@ -354,165 +188,21 @@ def published(layout: WorkspaceLayout, op: ReturnOperation, item: WorkItem, *, s
     )
     if selected.refusal or selected.scope != tuple(row.text for row in op.record.scope):
         return False
-    if op.local is not None:
-        return op.local.kind == "same-root-return" and local_published(layout, op)
-    try:
-        _check_source(layout, op, published=True)
-        if not _committed_member(layout, item_page(op.path).rel, op.canonical_after_sha256):
-            return False
-        _check_committed(_fresh_destination(layout, op.path), op)
-    except (OSError, ValueError):
-        return False
-    return True
-
-
-@contextmanager
-def publication_locks(layout: WorkspaceLayout, op: ReturnOperation) -> Iterator[None]:
-    """Inside admission/decision ownership, always lock content then canonical.
-
-    Reacquisition after content preparation is intentional: the publication read
-    guard proves fresh identity/content after both locks are held. Retain both
-    through proof and journal removal so cooperating writers cannot split them.
-    """
-    content = layout_for(
-        op.worktree,
-        bundle_dir=layout.bundle_dir.relative_to(layout.root).as_posix(),
-        config_dir=layout.config_dir.relative_to(layout.root).as_posix(),
-    )
-    with held_bundle_lock(content), held_bundle_lock(layout):
-        yield
+    return op.local is not None and op.local.kind == "same-root-return" and local_published(layout, op)
 
 
 def recover_publication(layout: WorkspaceLayout, op: ReturnOperation, *, scope: Sequence[str]) -> bool:
-    """Prove and clear an exact replay with the same locks as normal publish."""
+    """Prove and clear an exact replay under the bundle lock."""
     if op.malformed:
         return False
     try:
-        with publication_locks(layout, op):
+        with held_bundle_lock(layout):
             items = {i.path: i for i in load_items(load_workspace_bundle(layout, ignore=IGNORE))}
             item = items.get(op.path)
             if item is None or pending_return(layout, op.path) != op or not published(layout, op, item, scope=scope):
                 return False
             finish_return(layout, op)
             return True
-    except (OSError, ValueError):
-        return False
-
-
-def apply_publication(
-    layout: WorkspaceLayout,
-    op: ReturnOperation,
-    before: bytes,
-    apply: Callable[[], MutationApplication],
-) -> MutationApplication:
-    """Keep known failed publication at finish; fence unknown Git outcomes.
-
-    Only this operation's exact page postimage may be restored, under the same
-    bundle lock, with an unchanged HEAD. A landed commit is never rolled back.
-    Other paths and index entries are never reset.
-    """
-    member = item_page(op.path).rel
-    relative = (layout.bundle_dir / member).relative_to(layout.root).as_posix()
-    with publication_locks(layout, op):
-        head_before = _head(layout.root)
-        index_before = _git(layout.root, "ls-files", "--stage", "--", relative)
-        expected_mode = _stage_mode(
-            layout.root,
-            relative,
-            index_before,
-            filemode=_git(layout.root, "config", "--bool", "--default", "true", "core.filemode").strip() == "true",
-        )
-        application = apply()
-        if not application.ok:
-            return application
-        items = {i.path: i for i in load_items(load_workspace_bundle(layout, ignore=IGNORE))}
-        item = items.get(op.path)
-        if (
-            item is not None
-            and op.record is not None
-            and published(layout, op, item, scope=tuple(row.text for row in op.record.scope))
-        ):
-            finish_return(layout, op)
-            return application
-        # A failed/unknown commit is never reported as a successful return.
-        failures = (*application.failures, "canonical return commit unproven; inspect pending return")
-        restored = False
-        try:
-            if (
-                _head(layout.root) == head_before
-                and digest(read_member(layout.bundle_dir, member)) == op.canonical_after_sha256
-            ):
-                restore = WorkMutationPlan(
-                    root=layout.bundle_dir,
-                    operation="file",
-                    path_mapping=MappingProxyType({}),
-                    move_plan=None,
-                    moves=(),
-                    writes=(PlannedWrite(member, op.canonical_after_sha256, before),),
-                    deletes=(),
-                    mkdirs=(),
-                    warnings=(),
-                    refusals=(),
-                    validate_paths=(op.path,),
-                    directory_preconditions=(),
-                )
-
-                def unchanged() -> None:
-                    if _head(layout.root) != head_before:
-                        raise WorkspaceError("canonical HEAD changed; inspect")
-
-                index_after = _git(layout.root, "ls-files", "--stage", "--", relative)
-                expected_entry = _staged_postimage(
-                    layout.root, relative, expected_mode, read_member(layout.bundle_dir, member)
-                )
-                staged_matches = index_after == index_before or (
-                    expected_entry is not None
-                    and _index_entries(layout.root, (relative,)).get(relative, "") == expected_entry
-                )
-                if not staged_matches:
-                    raise WorkspaceError("canonical index changed; inspect")
-                rollback = apply_mutation(layout, restore, commit=None, validate_read_set=unchanged)
-                restored = rollback.ok
-                if restored and index_after != index_before:
-                    # Restore only the Git representation of our exact postimage.
-                    if (
-                        not staged_matches
-                        or "\n" in index_before.rstrip("\n")
-                        or _git(layout.root, "ls-files", "--stage", "--", relative) != index_after
-                    ):
-                        raise WorkspaceError("canonical index changed; inspect")
-                    metadata, _, name = index_before.rstrip("\n").partition("\t")
-                    mode, oid, stage = metadata.split(" ")
-                    if stage != "0" or name != relative:
-                        raise WorkspaceError("canonical index was unmerged; inspect")
-                    _git(layout.root, "update-index", "--cacheinfo", mode, oid, relative)
-        except (OSError, ValueError):
-            failures = (*failures, "canonical restoration incomplete; inspect page and index")
-        return replace(application, failures=failures, rolled_back=restored)
-
-
-def _repository_identity(layout: WorkspaceLayout) -> tuple[str, str]:
-    return (
-        _git(layout.root, "symbolic-ref", "--short", "HEAD").strip(),
-        _git(layout.root, "rev-parse", "--path-format=absolute", "--git-common-dir").strip(),
-    )
-
-
-def local_published(layout: WorkspaceLayout, op: ReturnOperation) -> bool:
-    """Positive exact commit proof; failed/unknown transport is not authority."""
-    local = op.local
-    if local is None:
-        return False
-    try:
-        return (
-            pending_return(layout, op.path) == op
-            and str(layout.root.resolve()) == op.worktree
-            and _repository_identity(layout) == (op.branch, op.identity)
-            and _git(layout.root, "rev-parse", "HEAD^").strip() == local.head
-            and _git(layout.root, "log", "-1", "--format=%s").strip() == local.subject
-            and digest(read_member(layout.bundle_dir, op.plan_member)) == op.plan_sha256
-            and all(_committed_member(layout, member, sha) for member, sha in local.members)
-        )
     except (OSError, ValueError):
         return False
 
@@ -630,14 +320,10 @@ def apply_local_publication(
         if candidate_error is not None:
             raise WorkspaceError(candidate_error)
         index = _capture_index(repository, candidates, tuple(relatives.values()))
-        branch, identity = _repository_identity(layout)
         op = ReturnOperation(
             path,
             return_id=record.id,
             record=record,
-            worktree=str(layout.root.resolve()),
-            branch=branch,
-            identity=identity,
             plan_member=plan_member,
             plan_sha256=digest(read_member(layout.bundle_dir, plan_member)),
             local=LocalPublication(
@@ -689,7 +375,6 @@ def _restore_local(
         if (
             pending_return(layout, op.path) != op
             or _head(layout.root) != local.head
-            or _repository_identity(layout) != (op.branch, op.identity)
             or any(_working_bytes(repository, path) != value for path, value in current_working.items())
             or _index_entries(repository, index.candidates) != current_index
         ):
@@ -738,33 +423,26 @@ def _restore_local(
 
 
 @contextmanager
-def completion_locks(
-    layout: WorkspaceLayout, items: Mapping[str, WorkItem], item: WorkItem
-) -> Iterator[ReturnDestination | None]:
-    """Hold content then canonical locks through returned completion's commit.
+def completion_locks(layout: WorkspaceLayout, item: WorkItem) -> Iterator[bool]:
+    """Hold the bundle lock through returned completion's commit.
 
-    Invoked inside decision ownership, only on live execute advances. Invalid
-    destinations are left for verify_completion to report as refusal data.
+    Invoked inside decision ownership, only on live execute advances. Yields
+    whether a return is active for the item.
     """
     record = item.execute_return
     if item.phase != "execute" or record is None or not record.active:
-        yield None
+        yield False
         return
-    destination = resolve_destination(layout, items, item)
-    if isinstance(destination, tuple):
-        yield None
-        return
-    with held_bundle_lock(destination.layout), held_bundle_lock(layout):
-        yield destination
+    with held_bundle_lock(layout):
+        yield True
 
 
 def verify_completion(
     layout: WorkspaceLayout,
-    items: Mapping[str, WorkItem],
     item: WorkItem,
     definition: PipelineDefinition,
 ) -> tuple[str | None, RefusalReason | None, str]:
-    """Read the current return's report from its verified content destination.
+    """Read the current return's report from the primary bundle.
 
     Raw UTF-8 decoding preserves authored line endings; canonical plan hashes
     use exact bytes. Absence/unreadability never falls back to old coverage.
@@ -778,11 +456,8 @@ def verify_completion(
     plan = stage_artifact_ref(item.path, definition.artifacts["plan"])
     if record.coverage != coverage.resource or (record.plan is not None and record.plan != plan.resource):
         return None, "return-metadata-invalid", "execute_return artifacts differ from the configured pipeline"
-    destination = resolve_destination(layout, items, item)
-    if isinstance(destination, tuple):
-        return None, *destination
     try:
-        raw = read_member(destination.bundle_root, coverage.rel)
+        raw = read_member(layout.bundle_dir, coverage.rel)
         text = raw.decode("utf-8") if raw is not None else None
     except (OSError, ValueError) as exc:
         return None, "return-evidence-missing", f"return {record.id} coverage unreadable: {exc}"

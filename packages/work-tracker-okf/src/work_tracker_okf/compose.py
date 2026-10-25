@@ -24,7 +24,6 @@ from dataclasses import dataclass, replace
 from datetime import date
 from pathlib import Path
 from stat import S_ISREG
-from types import MappingProxyType
 from typing import Literal
 
 from okf_ext.logs import append_entry, atomic_replace, locked_log
@@ -42,17 +41,15 @@ from okf_io import (
     Rule,
     append_log_entry,
     load,
-    parse,
 )
 
 from work_tracker_okf.advance import AdvancePlan, ExpectedPhase, advance
 from work_tracker_okf.advance import apply as apply_advance
 from work_tracker_okf.decisions import DecisionApplication, DecisionPlan, HoldFact, apply_plan, ledger_ref
-from work_tracker_okf.filing import FilingPlan, FilingRefusal, FilingSeed, _materialize_frontmatter, plan_filing
+from work_tracker_okf.filing import FilingPlan, FilingRefusal, FilingSeed, plan_filing
 from work_tracker_okf.filing import apply as apply_filing
-from work_tracker_okf.indexes import LaneIndexPlan, plan_indexes
 from work_tracker_okf.items import WorkItem, load_items, placement_directories
-from work_tracker_okf.paths import ArtifactRef, item_page, parse_item_path, references_dir
+from work_tracker_okf.paths import ArtifactRef, item_page, references_dir
 from work_tracker_okf.pipeline import PACKAGED_DEFINITION, ArtifactSpec, PipelineDefinition
 from work_tracker_okf.rules import PLAN_TABLE_SPEC, lane_rules
 from work_tracker_okf.sources import upsert
@@ -386,8 +383,6 @@ def advance_and_stamp(
     owner: str | None = None,
     resolved_in: str | None = None,
     released_at: date | None = None,
-    worktree: str | None = None,
-    branch: str | None = None,
     return_: bool = False,
     dry_run: bool = True,
     hold: HoldFact | None = None,
@@ -435,8 +430,6 @@ def advance_and_stamp(
         owner=owner,
         resolved_in=resolved_in,
         released_at=released_at,
-        worktree=worktree,
-        branch=branch,
         return_=return_,
         unreadable=bundle.unreadable,
         hold=hold,
@@ -507,18 +500,16 @@ def advance_and_stamp(
 @dataclass(frozen=True, slots=True)
 class FilingApplication:
     page: Path | None = None
-    indexes: tuple[LaneIndexPlan, ...] = ()
     log: LogAppend | None = None
     written: bool = False
 
 
-FilingCompositionRefusal = FilingRefusal | Literal["index-refused", "log-refused"]
+FilingCompositionRefusal = FilingRefusal | Literal["log-refused"]
 
 
 @dataclass(frozen=True, slots=True)
 class FilingCompositionPlan:
     filing: FilingPlan
-    indexes: tuple[LaneIndexPlan, ...]
     log: LogAppend | None
     refusal: FilingCompositionRefusal | None = None
     warnings: tuple[str, ...] = ()
@@ -552,69 +543,24 @@ class FilingPlanStaleError(FilingApplyError):
         self.actual = actual
 
 
-def _planned_document(filing: FilingPlan) -> Document:
-    document = parse("", path=filing.target)
-    for key, value in _materialize_frontmatter(filing.frontmatter).items():
-        document.set(key, value)
-    document.set_body(filing.body)
-    return document
-
-
-def _filing_lanes(filing: FilingPlan) -> tuple[str, ...]:
-    location = parse_item_path(filing.path)
-    if location is None:
-        return ()
-    owned = (Path(path).parent.as_posix() for path in filing.required_indexes)
-    return tuple(sorted({location.lane, *owned}))
-
-
-def _unchanged_indexes(root: Path, items: Sequence[WorkItem], lanes: Sequence[str] = ()) -> tuple[LaneIndexPlan, ...]:
-    return tuple(replace(plan, after=plan.before or "") for plan in plan_indexes(root, items, lanes=lanes))
-
-
 def plan_file_and_reconcile(
     bundle: Bundle,
     items: Sequence[WorkItem],
     seed: FilingSeed,
     section_set: SectionSet,
 ) -> FilingOutcome:
-    """Plan the page, lane index, and root log without writing any of them.
+    """Plan the page and root log without writing either.
 
-    *lane_dir* is `plan_filing`'s, passed through, and it also names the index
-    reconciled here: the lane index belongs beside the pages it lists, so a
-    page filed somewhere else would otherwise be added to an index it does not
-    live under. `None` keeps `WORK_DIR` on both, which is every caller holding
-    no `SchemaSet`.
+    No lane index is planned: `gw work regen-index` owns those.
     """
     filing = plan_filing(bundle.root, items, seed, section_set)
     if filing.refusal is not None:
         return FilingOutcome(
             plan=FilingCompositionPlan(
                 filing=filing,
-                indexes=(),
                 log=None,
                 refusal=filing.refusal,
                 warnings=filing.warnings,
-            )
-        )
-
-    document = _planned_document(filing)
-    planned_id = filing.path
-    lanes = _filing_lanes(filing)
-    synthetic = replace(
-        bundle,
-        concepts=MappingProxyType({**bundle.concepts, planned_id: document}),
-    )
-    try:
-        indexes = plan_indexes(bundle.root, load_items(synthetic), lanes=lanes)
-    except ValueError as exc:
-        return FilingOutcome(
-            plan=FilingCompositionPlan(
-                filing=filing,
-                indexes=_unchanged_indexes(bundle.root, items, lanes),
-                log=None,
-                refusal="index-refused",
-                warnings=(*filing.warnings, str(exc)),
             )
         )
 
@@ -624,7 +570,6 @@ def plan_file_and_reconcile(
         return FilingOutcome(
             plan=FilingCompositionPlan(
                 filing=filing,
-                indexes=indexes,
                 log=None,
                 refusal="log-refused",
                 warnings=(*filing.warnings, detail),
@@ -641,7 +586,6 @@ def plan_file_and_reconcile(
         return FilingOutcome(
             plan=FilingCompositionPlan(
                 filing=filing,
-                indexes=indexes,
                 log=None,
                 refusal="log-refused",
                 warnings=(*filing.warnings, str(exc)),
@@ -650,7 +594,6 @@ def plan_file_and_reconcile(
     return FilingOutcome(
         plan=FilingCompositionPlan(
             filing=filing,
-            indexes=indexes,
             log=log,
             warnings=filing.warnings,
         )
@@ -661,8 +604,7 @@ def apply_file_and_reconcile(plan: FilingCompositionPlan) -> FilingApplication:
     """Apply a fully preflighted filing composition.
 
     The lane comes off `plan.filing.target` rather than from a second argument
-    -- the canonical item page under `<root>/<lane>`, so the indexes written
-    here are exactly those `plan_file_and_reconcile` planned at every depth.
+    -- the canonical item page under `<root>/<lane>`.
     """
     if plan.refusal is not None:
         return FilingApplication()
@@ -679,12 +621,6 @@ def apply_file_and_reconcile(plan: FilingCompositionPlan) -> FilingApplication:
 
         page = apply_filing(plan.filing)
         application = FilingApplication(page=page)
-
-        for index in plan.indexes:
-            index.path.parent.mkdir(parents=True, exist_ok=True)
-            index.path.write_text(index.after, encoding="utf-8", newline="")
-        indexes = plan.indexes
-        application = FilingApplication(page=page, indexes=indexes)
 
         if plan.log is not None:
             log_path = Path(plan.log.path) if plan.log.path is not None else root / "log.md"
@@ -707,7 +643,7 @@ def apply_file_and_reconcile(plan: FilingCompositionPlan) -> FilingApplication:
                         actual=actual,
                     )
                 atomic_replace(log_path, plan.log.after.encode("utf-8"))
-            application = FilingApplication(page=page, indexes=indexes, log=plan.log)
+            application = FilingApplication(page=page, log=plan.log)
     except FilingPlanStaleError:
         raise
     except OSError as exc:
@@ -715,7 +651,6 @@ def apply_file_and_reconcile(plan: FilingCompositionPlan) -> FilingApplication:
 
     return FilingApplication(
         page=application.page,
-        indexes=application.indexes,
         log=application.log,
         written=True,
     )

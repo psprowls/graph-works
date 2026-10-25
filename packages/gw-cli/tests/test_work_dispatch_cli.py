@@ -13,7 +13,9 @@ import pytest
 from gw_cli.cli import app
 from gw_cli.work_cli import main
 from gw_kernel import apply_init, plan_init
+from gw_orchestrate import placing
 from gw_orchestrate.dispatch import encode_launch_envelope
+from gw_pipeline.placement import NullNotifier
 from subagents_io.backend import BackendError
 from typer.testing import CliRunner
 from workflow_orca._launch import decode_launch_spec
@@ -28,16 +30,13 @@ runner = CliRunner()
 
 @pytest.fixture
 def dispatch_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Path, Path, object]:
-    repo, wt = tmp_path / "repo", tmp_path / "wt"
+    repo = tmp_path / "repo"
     repo.mkdir()
     for args in (
         ("init", "-b", "main"),
         ("-c", "user.name=T", "-c", "user.email=t@e.com", "commit", "--allow-empty", "-m", "base"),
     ):
         subprocess.run(["git", "-C", str(repo), *args], check=True, capture_output=True)
-    subprocess.run(
-        ["git", "-C", str(repo), "worktree", "add", "-b", "feature/x", str(wt)], check=True, capture_output=True
-    )
     layout = apply_init(plan_init(tmp_path / ".works", today=main._today(), topic="Dispatch")).layout
     manifest = layout.manifest_path
     manifest.write_text(
@@ -56,6 +55,9 @@ def dispatch_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Path,
         encoding="utf-8",
         newline="\n",
     )
+    placed = placing.resolve(layout, "work/x")
+    assert not isinstance(placed, placing.Refused) and placed.placement is not None
+    computed = placed.placement
     plan = {
         "path": "work/x",
         "dispatches": [
@@ -68,14 +70,16 @@ def dispatch_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Path,
                 "model": "opus",
                 "reasoning_effort": None,
                 "prompt": "Run /gw:workflow work/x.\n",
-                "worktree": {
-                    "action": "create-top-level",
-                    "path": None,
-                    "branch": "feature/x",
-                    "base_branch": "main",
-                    "exists": False,
-                    "parent_path": None,
+                "placement": {
+                    "repo": {"name": computed.repo_name, "path": str(computed.repo_root)},
+                    "branch": computed.branch,
+                    "worktree": str(computed.worktree),
+                    "parent_branch": computed.parent_branch,
+                    "parent_worktree": str(computed.parent_worktree),
+                    "owner_path": computed.owner_path,
+                    "slug": computed.slug,
                 },
+                "workspace": None,
                 "repo": {"name": "graph-works", "path": str(repo), "source": "manifest"},
             }
         ],
@@ -86,13 +90,14 @@ def dispatch_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Path,
     port.worktrees["id:wt1"] = {
         "id": "wt1",
         "repo_id": "repo1",
-        "path": str(wt),
-        "branch": "feature/x",
-        "display_name": "feature/x",
+        "path": str(computed.worktree),
+        "branch": computed.branch,
+        "display_name": computed.branch,
         "is_main": False,
         "parent_id": None,
     }
     monkeypatch.setattr(main, "orca_port", lambda: port)
+    monkeypatch.setattr(main, "placement_notifier", NullNotifier)
     return layout.root, plan_path, port
 
 
@@ -117,6 +122,51 @@ def test_dispatch_happy_path_emits_the_envelope(dispatch_env) -> None:
     doc = json.loads(result.stdout)
     assert doc["status"] == "dispatched" and "error" not in doc and doc["failure"] is None
     assert doc["delivery"] == "skipped"
+
+
+def test_dispatch_cli_passes_notifier(dispatch_env, monkeypatch: pytest.MonkeyPatch) -> None:
+    root, plan, _port = dispatch_env
+    notifier = NullNotifier()
+    seen = []
+    original = main.run_dispatch
+
+    def recording(*args, **kwargs):
+        seen.append(kwargs["notifier"])
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(main, "placement_notifier", lambda: notifier)
+    monkeypatch.setattr(main, "run_dispatch", recording)
+    result = invoke(root, "dispatch", KEY, "--plan", str(plan), "--run", "run_1", "--no-probe")
+    assert result.exit_code == 0, result.output
+    assert seen == [notifier]
+
+
+def test_dispatch_cli_passes_retry_of(dispatch_env, monkeypatch: pytest.MonkeyPatch) -> None:
+    root, plan, port = dispatch_env
+    first = invoke(root, "dispatch", KEY, "--plan", str(plan), "--run", "run_1", "--no-probe")
+    assert first.exit_code == 0, first.output
+    seen = []
+    original = main.run_dispatch
+
+    def recording(*args, **kwargs):
+        seen.append(kwargs["retry_of"])
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(main, "run_dispatch", recording)
+    dispatch_id = json.loads(first.stdout)["dispatch_id"]
+    port.start["dispatch_id"] = "ctx_retry"
+    result = invoke(
+        root, "dispatch", KEY, "--plan", str(plan), "--run", "run_1", "--no-probe", "--retry-of", dispatch_id
+    )
+    assert result.exit_code == 0, result.output
+    doc = json.loads(result.stdout)
+    assert (doc["status"], doc["dispatch_id"]) == ("dispatched", "ctx_retry")
+    assert [k["retry_of"] for n, _, k in port.calls if n == "worker_start"] == [None, dispatch_id]
+    refused(
+        invoke(root, "dispatch", KEY, "--plan", str(plan), "--run", "run_1", "--no-probe", "--retry-of", dispatch_id),
+        reason="recovery-inspection",
+    )
+    assert seen == [dispatch_id, dispatch_id]
 
 
 def test_dispatch_reads_saved_plan_from_stdin(dispatch_env) -> None:

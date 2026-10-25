@@ -47,7 +47,6 @@ everywhere else in this package and in `work-tracker-okf`.
 
 from __future__ import annotations
 
-import hashlib
 import os
 import time
 from collections.abc import Callable, Iterable, Mapping, Sequence
@@ -101,10 +100,14 @@ from gw_pipeline.decision_owner import (
     hold_for,
     locked_decision_owner,
 )
+from gw_pipeline.decision_owner import decision_mutation as _decision_mutation
+from gw_pipeline.decision_owner import planned_write as _planned_write
+from gw_pipeline.decision_owner import write_plan as _write_plan
 from gw_pipeline.execute_return import pending_return
 from gw_pipeline.finish import FinishTarget, resolve_finish_targets
 from gw_pipeline.guidance.assembly import Guidance, assemble_guidance, write_guidance
 from gw_pipeline.landed import stale_spec_for
+from gw_pipeline.placement import EffectivePlacement, effective_placement
 from gw_pipeline.transactions import (
     MutationApplication,
     _document_members,
@@ -130,7 +133,7 @@ from work_tracker_okf.compose import (
     stage_artifact_for_source,
     stage_artifact_ref,
 )
-from work_tracker_okf.decisions import Decision, DecisionPlan, ledger_ref
+from work_tracker_okf.decisions import Decision, DecisionPlan
 from work_tracker_okf.dependencies import (
     DependencyEdge,
     DependencyIssue,
@@ -163,10 +166,6 @@ from gw_work.carried import CarriedContext, SlotInput
 from gw_work.path_report import PathReport, StageArtifactReport, artifact_reports, path_report
 
 
-def _digest(content: bytes) -> str:
-    return hashlib.sha256(content).hexdigest()
-
-
 def _repo_roots(layout: WorkspaceLayout) -> tuple[Path, ...]:
     """Every code repo `workspace.yaml` declares, for `apply_mutation`'s
     postcondition validation -- never `layout.repo_root`, which is a `.git`
@@ -188,47 +187,6 @@ def _materialize(value: object) -> object:
     return value
 
 
-def _planned_write(
-    member: str,
-    before: bytes | None,
-    after: bytes,
-    *,
-    source_member: str | None = None,
-) -> PlannedWrite:
-    """Retain the planner's preimage instead of resnapshotting live state."""
-    return PlannedWrite(member, _digest(before) if before is not None else None, after, source_member)
-
-
-def _write_plan(
-    root: Path,
-    operation: Literal["file", "indexes"],
-    writes: Sequence[PlannedWrite],
-    *,
-    mkdirs: Sequence[str] = (),
-    validate_paths: Sequence[str] = (),
-    warnings: Sequence[str] = (),
-    directory_preconditions: Sequence[DirectoryPrecondition] = (),
-) -> WorkMutationPlan:
-    planned = tuple(sorted(writes, key=lambda write: write.member))
-    directories = tuple(
-        sorted(set(mkdirs) | {Path(write.member).parent.as_posix() for write in planned if "/" in write.member})
-    )
-    return WorkMutationPlan(
-        root=root,
-        operation=operation,
-        path_mapping=MappingProxyType({}),
-        move_plan=None,
-        moves=(),
-        writes=planned,
-        deletes=(),
-        mkdirs=directories,
-        warnings=tuple(warnings),
-        refusals=(),
-        validate_paths=tuple(sorted(set(validate_paths))),
-        directory_preconditions=tuple(sorted(directory_preconditions, key=lambda condition: condition.member)),
-    )
-
-
 @dataclass(frozen=True, slots=True)
 class FilingRun:
     """A path-native filing plan and its optional journaled application."""
@@ -245,14 +203,7 @@ def _filing_mutation(bundle: Bundle, plan: FilingCompositionPlan) -> WorkMutatio
     document.set_body(filing.body)
     writes = [
         _planned_write(f"{filing.path}.md", None, document.serialize().encode("utf-8")),
-        *(
-            _planned_write(
-                index.path.relative_to(bundle.root).as_posix(),
-                index.before.encode("utf-8") if index.before is not None else None,
-                index.after.encode("utf-8"),
-            )
-            for index in plan.indexes
-        ),
+        *(_planned_write(relative, None, b"") for relative in filing.required_indexes),
     ]
     if plan.log is not None:
         log_path = Path(plan.log.path) if plan.log.path is not None else bundle.root / "log.md"
@@ -378,6 +329,46 @@ def run_work_list(layout: WorkspaceLayout, *, session: ReadSession | None = None
     with borrow_read_session(layout, session) as session:
         items = session.work_snapshot()
     return tuple(sorted((item for item in items if not item.archived), key=lambda item: item.path))
+
+
+@dataclass(frozen=True, slots=True)
+class BoardRow:
+    """One board row: an active item and where it lives (`None` when no repository resolves)."""
+
+    item: WorkItem
+    placement: EffectivePlacement | None
+
+
+def board_rows(layout: WorkspaceLayout, items: Sequence[WorkItem]) -> tuple[BoardRow, ...]:
+    """Attach each item's effective placement. Never writes; `default_base` is probed once per repository path."""
+    by_path = {item.path: item for item in items}
+    bases: dict[Path, str] = {}
+    rows: list[BoardRow] = []
+    for item in items:
+        placement: EffectivePlacement | None = None
+        try:
+            repo = resolve_item_repo(layout, item, by_path)
+        except WorkspaceError:
+            repo = None
+        if repo is not None and repo.name is not None and repo.path is not None:
+            if repo.path not in bases:
+                bases[repo.path] = provenance.default_base(repo.path)
+            placement = effective_placement(
+                item,
+                by_path,
+                repo=repo,
+                own_repo_name=repo.name,
+                worktrees_dir=layout.worktrees_dir,
+                default_base=bases[repo.path],
+            )
+        rows.append(BoardRow(item, placement))
+    return tuple(rows)
+
+
+def run_work_board(layout: WorkspaceLayout, *, session: ReadSession | None = None) -> tuple[BoardRow, ...]:
+    """`run_work_list` with each row's effective placement. Never writes."""
+    items = run_work_list(layout, session=session)
+    return board_rows(layout, items)
 
 
 @dataclass(frozen=True, slots=True)
@@ -1228,8 +1219,16 @@ def run_lint(
     page, owned = f"{path}.md", f"{path}/"
     scope = frozenset(f"{cid}.md" for cid in bundle.concepts if cid == path or cid.startswith(owned))
     report = okf_validate(bundle, today=today, extra_rules=rules, strict=strict, scope=scope)
+    # Lane indexes are generated, shared state: an item-scoped lint reports on
+    # the item, not on drift a sibling's index carries.
     return Report(
-        tuple(f for f in report.findings if f.path is not None and (f.path == page or f.path.startswith(owned)))
+        tuple(
+            f
+            for f in report.findings
+            if f.path is not None
+            and (f.path == page or f.path.startswith(owned))
+            and not f.code.startswith("structure.index-")
+        )
         + schema
     )
 
@@ -1561,33 +1560,6 @@ def _optional_bytes(path: Path) -> bytes | None:
         return path.read_bytes()
     except FileNotFoundError:
         return None
-
-
-def _decision_mutation(
-    context: DecisionContext,
-    plan: DecisionPlan,
-    ledger_before: bytes | None,
-    extra_writes: Sequence[PlannedWrite] = (),
-) -> WorkMutationPlan:
-    owner_path = context.owner.owner_path
-    owner_page = item_page(owner_path).path(context.bundle.root)
-    owner_before = owner_page.read_bytes()
-    owner_document = parse(owner_before.decode("utf-8"), path=owner_page)
-    upsert(owner_document, ledger_ref(owner_path), title="Decisions")
-    ledger_member = context.owner.ledger.relative_to(context.bundle.root).as_posix()
-    owner_member = item_page(owner_path).rel
-    ledger_text = _decisions.render(_decisions.parse(plan.snapshot.text).preamble, plan.after)
-    return _write_plan(
-        context.bundle.root,
-        "file",
-        (
-            _planned_write(ledger_member, ledger_before, ledger_text.encode("utf-8")),
-            _planned_write(owner_member, owner_before, owner_document.serialize().encode("utf-8")),
-            *extra_writes,
-        ),
-        validate_paths=(owner_path,),
-        warnings=plan.warnings,
-    )
 
 
 def _apply_decision(
@@ -2041,6 +2013,7 @@ def run_decision_overturn(
 
 
 __all__ = [
+    "BoardRow",
     "ChildRollup",
     "Decision",
     "DecisionCommandResult",
@@ -2085,6 +2058,7 @@ __all__ = [
     "run_release_adoption",
     "run_reparent",
     "run_status",
+    "run_work_board",
     "run_work_list",
     "run_work_queue",
 ]

@@ -10,6 +10,7 @@ from types import SimpleNamespace
 
 import gw_work
 import pytest
+from code_wiki_okf.config import Config, StateGateConfig
 from gw_kernel import apply_init, plan_init
 from gw_kernel.testing.transactions import git as _git
 from gw_kernel.testing.transactions import init_git as _init_git
@@ -516,3 +517,47 @@ def test_a_wiki_sweep_archives_a_drained_source(tmp_path: Path) -> None:
     run = archive.run_archive(layout, (), None, today=TODAY, dry_run=True)
 
     assert "sources/2026-09-s" in run.wiki_plan.tokens
+
+
+def _lane_indexes(layout) -> dict[str, bytes]:
+    return {
+        "work/index.md": b"# Work\n\n- [Feature: d](feature-done.md) \xe2\x80\x94 resolved \xc2\xb7 done\n",
+        "work/_archive/index.md": b"# Archive\n",
+    }
+
+
+def test_archive_leaves_lane_indexes_byte_identical(tmp_path: Path) -> None:
+    layout = _workspace(tmp_path)
+    for member, content in _lane_indexes(layout).items():
+        path = layout.bundle_dir / member
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(content)
+    result = archive.run_archive(layout, today=TODAY, dry_run=False)
+    assert result.result is not None and result.result.ok
+    for member, content in _lane_indexes(layout).items():
+        assert (layout.bundle_dir / member).read_bytes() == content
+    config = Config(
+        graph_dir=layout.cache_dir / "graph",
+        declarations_dir=layout.config_dir,
+        repos=(),
+        state_gate=StateGateConfig(enabled=False, branches=("main",)),
+    )
+    report = gw_work.commands.run_lint(layout, config, today=TODAY, path=None)
+    by_path = {(f.code, f.path) for f in report.findings if f.code.startswith("structure.index-")}
+    assert ("structure.index-entry-stale", "work/index.md") in by_path
+    assert ("structure.index-entry-missing", "work/_archive/index.md") in by_path
+
+
+def test_archive_moves_outdated_child_index_verbatim(tmp_path: Path) -> None:
+    layout = _layout(tmp_path)
+    epic = "work/epic-done"
+    page = layout.bundle_dir / f"{epic}.md"
+    _write(layout, epic, work_status="resolved", phase="done")
+    page.write_text(page.read_text(encoding="utf-8").replace("type: Feature", "type: Epic"), encoding="utf-8")
+    _write(layout, f"{epic}/children/feature-kid", work_status="resolved", phase="done")
+    child_index = layout.bundle_dir / epic / "children/index.md"
+    original = b"# Children\n\n- [Feature: kid](feature-kid.md) \xe2\x80\x94 open \xc2\xb7 design\n"
+    child_index.write_bytes(original)
+    result = archive.run_archive(layout, today=TODAY, dry_run=False)
+    assert result.result is not None and result.result.ok, result.result
+    assert (layout.bundle_dir / "work/_archive/epic-done/children/index.md").read_bytes() == original

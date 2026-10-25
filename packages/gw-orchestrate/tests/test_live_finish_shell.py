@@ -83,7 +83,8 @@ def test_shell_retains_live_finish_outside_candidate_subtree(tmp_path, monkeypat
     _assert_waits(layout, a, b, "/core/epic" if nested else "/core")
 
 
-@pytest.mark.parametrize("failed_repos", [("/core",), ("/ui",), ("/core", "/ui")])
+# Foreign repositories no longer come from repo_stamps (targets are placement-derived), so only /core is a target.
+@pytest.mark.parametrize("failed_repos", [("/core",), ("/core", "/ui")])
 @pytest.mark.parametrize("fault", ["dirty-source", "missing-source", "dirty-target"])
 def test_shell_retains_root_targets_after_full_or_partial_revalidation_failure(
     tmp_path, monkeypatch, failed_repos, fault
@@ -177,15 +178,15 @@ def test_live_finish_revalidation_failure_preserves_independent_work(tmp_path, m
         encoding="utf-8",
         newline="",
     )
-    contexts["/ui"] = replace(contexts["/ui"], branch_tips={"branch/b": "a" * 40})
     if phase == "design":
-        # Even unknown live target evidence does not alter reader placement.
+        # Even unknown live target evidence does not alter a design's placement.
         contexts["/core"] = replace(contexts["/core"], inventory_known=False)
     result = commands.run_orchestrate(layout, b, live=(commands.session_name(a, "Feature", "finish"),))
     assert [d.slug for d in result.dispatches] == [b], result.blocked
     if phase == "design":
-        assert result.dispatches[0].worktree.action == "pin-detached"
-        assert result.dispatches[0].worktree.start_sha == "a" * 40
+        (dispatch,) = result.dispatches
+        assert dispatch.worktree.path == str(result.placements[dispatch.key].worktree)
+        assert result.placements[dispatch.key].repo_name == "ui"
 
 
 def test_partial_unknown_evidence_keeps_the_other_proven_target_claim(tmp_path, monkeypatch):

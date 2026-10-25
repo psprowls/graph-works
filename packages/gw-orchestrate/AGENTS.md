@@ -25,12 +25,10 @@ scenario helpers local; never import kernel test modules.
 
 ## Modules
 
-`commands.py`, `stage_advance.py` and `placement.py` own planning,
-stage advancement and observed placement; `workspace_prepare.py` plans or creates/adopts
-workspace worktrees outermost first and records committed, guarded stamps.
-`merge_workspace.py` merges workspace branches into the default base under decision-owner
-then bundle locks and records a receipt using fresh post-merge content; nested children
-merge in their epic anchor instead. `finish_receipt.record_finish_in` uses an existing
+`commands.py` and `stage_advance.py` own planning and stage advancement;
+`placing.py` is the one adapter to the gw-pipeline placement engine (compute, resolve, and `realize` with `verify_only`).
+Workspace writes land on the primary checkout: no module prepares, stamps or merges a workspace branch.
+`finish_receipt.record_finish_in` uses an existing
 owner lock and never reacquires ownership. `gate.py` resolves a gate request
 (item, repository, worktree, clean tree), shares one pending run per
 `RunKey` (`repo`, `tree`, `scope`, `command`) across the whole workspace in the flat
@@ -76,7 +74,7 @@ satisfying receipt. See "The dispatch seam" in `../gw-kernel/README.md`.
   records target inventory independently of source/target admission checks,
   retaining root/default-base and foreign targets after revalidation failures.
   Incomplete live target evidence refuses mutable admission; it never releases
-  a target for reuse or changes pinned-reader placement. Known target claims
+  a target for reuse or changes computed placement. Known target claims
   still use the shared conflict predicate and take diagnostic precedence.
   Only emitted dispatches reserve claims; refused or capacity-dropped candidates
   reserve nothing. Live items are never re-proposed or reported blocked against
@@ -93,43 +91,16 @@ satisfying receipt. See "The dispatch seam" in `../gw-kernel/README.md`.
   `--descend` keeps plain `PICK_ORDER`; there is no `--prefer` -- human
   priority is expressed by editing `depends_on`.
 
-- **`READER_ACTION = "pin-detached"`** for `design` and `plan`, including roots
-  with historical stamps. `RepositoryContext.branch_tips` supplies the full
-  committed `start_sha`; the action has `path=None`, `branch=None` and
-  `exists=None`. The nearest owner's verified repository-local anchor supplies
-  the source branch; only an unanchored root can use the default base. Missing
-  or ambiguous repository/ref evidence is `worktree-unprovable`; inability to
-  provision is `worktree-unsupported`, never mutable-anchor reuse. Dirty anchors
-  are valid sources of committed refs: pinning promises stability, not freshness.
-  The launcher prepares one dedicated detached checkout per dispatch before
-  injection: `gw work dispatch` (`dispatch._prepare_reader`) creates it
-  through the Orca port with an attempt-derived marker comment, detaches
-  only that new checkout at `start_sha`, verifies it by content at settle
-  time, and records a reader receipt (`_record_reader`) instead of a
-  placement stamp. Readers claim no mutable checkout, including historical
-  stamps, and hold no `affects` claims (`claims_for`).
-  Epic/Release roots at design and plan also use this detached reader path;
-  their repository and workspace anchors are prepared when they enter execute,
-  before a child reaches execute. They never dispatch `create-top-level` for
-  the owner anchor.
+- **Placement is computed, not chosen.** `plan()` asks the placement engine's pure functions (`gw_pipeline.placement.placement_for` / `placement_chain`, through `gw_orchestrate/placing.py`) where each item belongs and states the answer: every code dispatch carries a `placement` block (`branch`, `worktree`, `parent_branch`, `parent_worktree`, `repo`) and `PlannedDispatch.worktree` is a `WorktreePlacement(path, branch, parent_path)`. There is no worktree action vocabulary, no reader pinning and no `preparations`: design and plan run in the item's own computed worktree like every other stage. A null placement (a workspace-only item, or no repository evidence) launches in the workspace primary checkout and claims no worktree. Every step of the chain (owners outermost first, then the item) is checked as a `WorktreeScope` write claim against live and accepted claims, and a conflict is `worktree-pending` naming the owner path and holder.
 
-- **Reader receipts are observations, not placement stamps.**
-  `gw_orchestrate.placement.run_record_reader` backs `gw work record-reader` and
-  writes under `layout.cache_dir / "reader-receipts"`, keyed by item digest and
-  dispatch ID. It never changes phase, `updated`, scalar placement or
-  `repo_stamps`, and never stores preambles or dispatch capabilities. Live calls
-  revalidate under the decision-owner lock shared with advance. Current-phase
-  refusal precedes replay; identical eligible evidence replays without writing,
-  while changed evidence for the same attempt returns `attempt-mismatch`.
-  Receipt recording trusts the caller's verified Git observation; it does not
-  itself prove repository identity, detachment or the checkout's SHA.
+- **Dispatch realizes the placement before any Orca call.** `gw work dispatch` (`dispatch.py`) recomputes the placement, refuses a plan that differs (`plan-invalid`), and calls `placing.realize` so the engine creates, adopts or refreshes the checkout (`placement-refused` carries the engine's refusal kind and journals nothing). Only then does it create the Task and launch with `--worktree path:<computed>`. A retry or park-resume relaunches through `gw work dispatch --retry-of <dispatch-id>`, which re-verifies the placement with `realize(verify_only=True)`: verify-only never creates, adopts or refreshes, and a missing worktree is refused as `foreign-checkout`. The stamp is recorded after settle (`placement-unrecorded` when an owner already holds a different pair); read-only phases record nothing.
 
 - Multi-repository orchestration resolves assignments and observations in the
   shell, then uses one frontier and global worker budget. Affects reservations
-  are keyed by Git common-directory identity. Preparations defer launch and
-  stamp the owning item's phase, never the child's. `gw_pipeline.finish` is the
+  are keyed by Git common-directory identity. Placement is computed per item and
+  realized at dispatch; no deferred preparation stands between a child and its launch. `gw_pipeline.finish` is the
   shared target/receipt reader; `gw_orchestrate.finish_receipt` is the writer. Receipt v2 entries carry `strategy`/`evidence`/`target_before`; `integration_shape` verifies each strategy's history shape (squash by single parent plus `git merge-tree --write-tree` tree equality) and `discover_integration` rediscovers a landed merge, fast-forward or squash for `record`.
-  Finish targets include foreign-only and nested owner sources. Partial proof
+  Finish targets are computed from placement (`placement_resolve.item_placement`), one per repository, with no `_workspace` target and no stamp-derived anchors; a legacy Orca-named branch with no overlay surfaces as a finish-plan blocker. Finish targets include foreign-only and nested owner sources. Partial proof
   blocks advance until every target's current Git ancestry is verified; scalar
   `resolved_in` prefers the owner's repository, falling back to the first
   verified target in deterministic order. Explicit `repo=Path`

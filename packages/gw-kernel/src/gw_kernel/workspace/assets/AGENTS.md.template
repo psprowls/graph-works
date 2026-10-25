@@ -33,7 +33,7 @@ from the skill-doc-routing hook, never from here.
   tag; the work lane and curated pages draw `tags:` from it.
 - `{{CONFIG_DIR}}/cache/` — derived and disposable: the code graph (`code.db`), scan
   results, traces, and the `config.json` projection of the manifest. Gitignored.
-- `{{CONFIG_DIR}}/worktrees/` — feature-work worktrees created under this workspace.
+- `{{CONFIG_DIR}}/worktrees/` — one worktree per code-touching work item, created, refreshed and removed only by `gw work place`.
   Gitignored.
 - `scratch/` — handoffs, staged material, and scratch documents. Not bundle content.
   Ingest reads material from anywhere on disk, so nothing has to be staged here first.
@@ -55,7 +55,7 @@ top-level verbs:
 | `gw next <path>` | Compute what to dispatch for a work item |
 | `gw archive` | Sweep eligible work items, proposals and drained Sources into `_archive/` |
 | `gw wiki …` | `lint`, `stats`, `index`, `archive`, `proposals`, `proposal` |
-| `gw work …` | `file`, `status`, `next`, `advance`, `lint`, `regen-index`, `orchestrate`, `archive`, `reparent`, `adopt`, `decision` |
+| `gw work …` | `file`, `status`, `next`, `advance`, `lint`, `regen-index`, `orchestrate`, `archive`, `reparent`, `adopt`, `decision`, `place` |
 | `gw config …` | `get` / `set` / `list` / `unset` / `sync` / `hooks` over the manifest |
 | `gw graph …` | Code-graph queries |
 | `gw util …` | Diagnostics: log, tokens, traces, surface freeze |
@@ -159,8 +159,7 @@ what every `gw work` verb takes and what links should point at (with `.md` appen
 Types: `Bug`, `Feature`, `TechDebt`, `Spike`, `TestGap`, `Epic`, `Release`. Epics and
 Releases roll up children rather than carrying their own implementation.
 
-`work/index.md` is the generated index — reconcile it with `gw work regen-index` after
-any out-of-band edit. Terminal items sweep to `work/_archive/` via `gw work archive`.
+`work/index.md` is the generated index. Work-lane indexes are reconciled by `gw scan`, `gw work regen-index` and auto-drive wrap-up; lint reports drift in between. Terminal items sweep to `work/_archive/` via `gw work archive`.
 
 ## The pipeline
 
@@ -176,8 +175,7 @@ write, and the `on_dispatch` / `on_complete` frontmatter deltas. Dispatch one st
 session with `/gw:workflow <path>` and clear context between stages. `--descend`
 switches to the next actionable child when a parent is waiting on its subtree.
 
-Frontmatter carries the live state: `phase`, `work_status`, `worktree`, `branch`,
-`affects`, `depends_on`, `sources`.
+Frontmatter carries the live state: `phase`, `work_status`, `repo`, `start_sha`, `affects`, `depends_on`, `sources`. An item's branch and worktree are computed from its path, never stored; `gw work place <path>` creates and refreshes them.
 
 Unattended runs go through `/gw:auto-drive`, which dispatches each ready stage as an Orca-supervised worker using the agent and model its dispatch rules in `workflow.yaml` (and `workflow.local.yaml`) resolve, within the `workflow.auto_drive` limits in that file's `workflow:` block. Re-running the same command is the resume path.
 
@@ -261,7 +259,7 @@ rules. Present findings as a report with suggested actions; append a `lint` entr
 ## Committing workspace changes
 
 **gw verbs commit their own workspace writes.** Every work-lane verb — `gw work file`, `advance`,
-`record-placement`, decisions, `regen-index`, `reparent`, `archive`, the finish-receipt
+decisions, `regen-index`, `reparent`, `archive`, the finish-receipt
 `record` — and the SessionEnd transcript hook commits exactly the paths it wrote, once,
 under the workspace lock, with a single-line `workspace:` subject. Whether they commit is
 `workflow.workspace_commits` (set in the workflow file): `auto` (the default: only when this workspace is its own git

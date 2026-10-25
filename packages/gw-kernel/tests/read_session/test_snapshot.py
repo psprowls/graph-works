@@ -229,7 +229,7 @@ def test_custom_work_projection_retains_mapping_fields(workspace) -> None:
         snap = materialize(source)
     actual = snap.work_snapshot(ignore=()).by_path["work/mappings"]
     assert actual == expected
-    assert actual.repo_stamps["code"].worktree == "/checkout"
+    assert actual.legacy_placement.repos["code"].worktree == "/checkout"
     assert actual.spec_baseline.code == "a" * 40
 
 

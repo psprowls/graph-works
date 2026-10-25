@@ -390,64 +390,21 @@ readers live in `workspace/` so the work and orchestration verticals agree.
 **A reservation describes an emitted dispatch, not a candidate.** `plan()`
 walks the sorted candidates once and checks each against every gate in order —
 declared affects, overlap with live or already-emitted dispatches, capacity,
-dispatch profile, placement, backend provisioning. Only a candidate that
+dispatch profile, computed placement. Only a candidate that
 passes all of them consumes a slot, claims a worktree, or reserves its
 `affects`. A candidate refused at any gate reserves nothing, so an overlapping
 sibling behind it can still dispatch in the same cycle. Live dispatches always
 reserve. A dispatch the coordinator chooses not to launch after planning is
 outside `plan()`'s view: it still reserved in that plan.
 
-**Placement is recorded from observation, not inferred (D-006).** Code and
-integration checkouts are recorded with `gw work record-placement`
-(`orchestrate/placement.py`): the observed branch pair goes into scalar
-`worktree`/`branch` or the selected `repo_stamps` entry, plus `updated`.
-Recording never fires a routing transition and shares the decision-owner lock
-with `gw work advance`. It refuses a stale phase. The API permits root anchor
-recording at every dispatchable phase, and descendant recording only at
-`execute`/`finish`; detached reader checkouts never become these stamps.
-`plan()` attaches a known epic pair only to the root's planned advance.
-`run_stage_advance` infers a pair from cwd only for a top-level item, and never
-with `infer_worktree=False` (`--no-infer-worktree`), which every supervised
-worker passes. An explicit pair on an attended advance is still applied as stated.
+**Placement is computed, never recorded.** `gw work record-placement` and `record-baseline` are gone: dispatch writes no stamp (its journal `record` step is a no-op kept for Runs that straddle the upgrade). No writer survives: workspace writes land on the primary checkout, so nothing records a workspace stamp either. A legacy `repo_stamps._workspace` entry is read only by `gw work migrate-placement`, and the manifest still refuses a repository named `_workspace` until that legacy read path is deleted.
+`run_stage_advance` never writes placement: it takes no `worktree`, `branch` or
+`infer_worktree`, and `gw work advance --no-infer-worktree` is a hidden no-op that warns.
+The commit gate reads placement through `gw_pipeline.placement.effective_placement`.
 
-**Design and plan read a pinned commit.** `READER_ACTION = "pin-detached"`
-applies to roots and descendants, even when an old placement stamp exists.
-The shell observes full branch-tip IDs; the pure planner carries one immutable
-`start_sha` in the action and baseline prompt, with `path=None`, `branch=None`
-and `exists=None`. The nearest owner's verified repository-local anchor
-supplies the source ref; only an unanchored root may use its default base.
-An unanchored descendant or missing/ambiguous evidence refuses with
-`worktree-unprovable`. Provisioning gaps refuse with `worktree-unsupported`.
+**Placement is computed and realized at dispatch.** `plan()` computes where each item's worker runs from the item, its owner chain and the repository (`gw_pipeline.placement.placement_for` / `placement_chain`) and states it on the dispatch: a `placement` block plus `PlannedDispatch.worktree`, a `WorktreePlacement(path, branch, parent_path)`. Every stage, design and plan included, runs in the item's own computed worktree; there is no worktree action vocabulary, no pinned reader checkout and no `preparations[]`. A child's worktree parents on its epic's. A workspace-only item has a null placement and launches in the workspace primary checkout. Every chain step is checked as a write claim against live and accepted claims, so an owner held by a live finish yields `worktree-pending`.
 
-The launcher prepares one dedicated detached checkout per reader dispatch,
-verifying repository identity, exact SHA and cleanliness before injection.
-`gw work dispatch` does this in process for a `pin-detached` entry and
-records a reader receipt rather than a placement stamp.
-A dirty source anchor is allowed because only its committed ref is read.
-Concurrent integration can advance that ref without changing the reader's
-checkout; pinning promises a stable baseline, not the latest tree. The baseline
-prompt asks the worker to cite the commit and make no checkout commits.
-
-**Reader receipts record observations without changing the item.**
-`gw work record-reader` records the verified checkout, `start_sha`, repo,
-task/dispatch IDs and dispatch key under `layout.cache_dir / "reader-receipts"`.
-It never changes phase, `updated`, scalar placement or `repo_stamps`, and stores
-no preamble or dispatch capability. Core revalidates eligibility under the
-same lock as advance before checking replay: an identical eligible observation
-replays without writing, a changed attempt returns `attempt-mismatch`, and a
-stale phase refuses before either. The caller must verify the Git facts;
-receipt storage does not probe Git itself.
-
-**Repository-local anchors are prepared lazily.** A runnable modifying child
-without its nearest owner's verified anchor emits a deferred `preparations[]`
-entry. Preparation consumes no worker slot and authorizes no child launch.
-Create or recover the deterministic worktree outside the workspace lock, verify
-its repository, branch, parent/base and cleanliness, then record the observed
-pair on `owner_path` at `owner_phase`. Own-repository pairs remain scalar;
-foreign pairs live in `repo_stamps`. A refused stamp leaves a discoverable
-worktree; replan before dispatch. Nested owners prepare from their nearest
-repository-local enclosing anchor. Readers need no new integration anchor,
-but do need their dedicated detached checkout and proven source ref.
+`gw work dispatch` recomputes the placement and refuses a plan that differs (`plan-invalid`). It then asks the placement engine to realize the checkout (create, adopt or refresh) before any Orca call, and launches into that path. An engine refusal is `placement-refused` and journals nothing. Backends only launch into an existing path and provision nothing. A retry or park-resume goes through `gw work dispatch --retry-of`, which verifies the placement without ever creating, adopting or refreshing it: a missing worktree is refused.
 
 **Overlap is repository-scoped; capacity is global.** Each dispatch carries
 its own resolved `repo`; top-level `repo` remains root metadata. Equal affects
@@ -498,16 +455,6 @@ eligibility, inventory and branch evidence remain independent. Explicit Python
 `repo=Path(...)` is the single-repository compatibility override; it does not
 manufacture foreign assignments, and foreign stamps are refused. `layout.repo_root`
 continues to locate the workspace's own repository, not the code repositories.
-
-`run_record_placement` validates the work item's own repository for every
-eligible pair, including dry-run previews and unchanged replays, and returns
-the resolver's note in `PlacementRecord.repo_note`. An explicit `repo=` names
-the stamp destination; the item's own repository is still resolved to decide
-whether the pair belongs in scalar fields or `repo_stamps`. Undeclared targets
-and conflicting selections raise `WorkspaceError`. A preview reads without
-locking or writing; a live call re-reads and resolves under the decision-owner
-lock before its journaled write. The lock does not make later external file
-edits atomic: stale preimages still report a failed application.
 
 Four limits worth knowing before you rely on the result:
 

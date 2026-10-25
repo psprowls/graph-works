@@ -41,7 +41,7 @@ def execution_owner(layout: WorkspaceLayout, key: str) -> Iterator[None]:
     This is a separate, non-reentrant OS lock, held before return/dispatch
     admission (when dispatching) and any short item owner lock, which in turn
     precedes placement's bundle/executor locks.
-    No item owner lock is held across an Orca call or record-placement call.
+    No item owner lock is held across an Orca call.
     The key is workspace-wide (not Run-specific), so another Run cannot bypass
     ownership. Never unlink the lock file: process death releases its descriptor.
     """
@@ -122,6 +122,10 @@ class DispatchRecord:
     def with_attempt(self, attempt: Attempt) -> DispatchRecord:
         if self.attempts and self.attempts[-1].task_id in (None, attempt.task_id):
             return replace(self, attempts=(*self.attempts[:-1], attempt))
+        return replace(self, attempts=(*self.attempts, attempt))
+
+    def with_retry(self, attempt: Attempt) -> DispatchRecord:
+        """Append *attempt* as a relaunch of an existing Task; never replaces the attempt it retries."""
         return replace(self, attempts=(*self.attempts, attempt))
 
     def with_step(self, index: int, step: str, state: StepState, **fields: Any) -> DispatchRecord:  # noqa: ANN401

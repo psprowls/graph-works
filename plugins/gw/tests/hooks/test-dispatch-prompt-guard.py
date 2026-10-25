@@ -26,17 +26,17 @@ ENVELOPE = 'GW_LAUNCH_V1 {"version":1,"dispatch_key":"example","agent":"claude",
 PREAMBLE = (
     HEADER + "\nYour coordinator's terminal handle is: term_coordinator\n"
     "Your task ID is: task_example\n\n=== CLI COMMANDS ===\n```sh\n"
-    + "  # Report the task outcome to the coordinator after completing the work.\n" * 20
+    + "  # Report the task outcome to the coordinator after completing the work.\n"
+    * 20
     + "  orca orchestration send --from term_worker-123 --type worker_done "
     "--task-id task_example --dispatch-id ctx_example --outcome succeeded\n"
-    "  orca orchestration ask --from term_worker-123 --question \"<question>\"\n"
+    '  orca orchestration ask --from term_worker-123 --question "<question>"\n'
     "```\n\n=== SUB-DISPATCH ===\nWorker guidance.\n\n=== TASK ===\n"
 )
-ASK_CUT = PREAMBLE[:PREAMBLE.index("--question")]
+ASK_CUT = PREAMBLE[: PREAMBLE.index("--question")]
 # Sanitized historical cutoff: transport stopped inside the ask explanation.
-ASK_COMMENT_CUT = (PREAMBLE[:PREAMBLE.index("  orca orchestration ask")]
-                   + "  # If the ask call times out or disconnect")
-FULL = PREAMBLE + ENVELOPE + "\nReturn the exact result: café \\ path \"quoted\".\n=== TASK ===\nEnd of body.\n"
+ASK_COMMENT_CUT = PREAMBLE[: PREAMBLE.index("  orca orchestration ask")] + "  # If the ask call times out or disconnect"
+FULL = PREAMBLE + ENVELOPE + '\nReturn the exact result: café \\ path "quoted".\n=== TASK ===\nEnd of body.\n'
 
 
 class GuardTest(unittest.TestCase):
@@ -57,17 +57,27 @@ class GuardTest(unittest.TestCase):
             "sys.stdout.buffer.write(b'invalid json' if os.environ.get('GUARD_BAD_JSON') else pathlib.Path(os.environ['GUARD_RESPONSE']).read_bytes())\n"
             "sys.stderr.write('PRIVATE STDERR MUST NOT BE INJECTED')\n"
             "sys.exit(int(os.environ.get('GUARD_EXIT', '0')))\n",
-            encoding="utf-8", newline="",
+            encoding="utf-8",
+            newline="",
         )
         self.cli.chmod(0o755)
-        self.env = {k: v for k, v in os.environ.items() if not k.startswith('ORCA_')}
-        self.env.update(ORCA_CLI_COMMAND=str(self.cli), ORCA_TERMINAL_HANDLE=WORKER,
-                        GUARD_CALLS=str(self.calls), GUARD_RESPONSE=str(self.response))
+        self.env = {k: v for k, v in os.environ.items() if not k.startswith("ORCA_")}
+        self.env.update(
+            ORCA_CLI_COMMAND=str(self.cli),
+            ORCA_TERMINAL_HANDLE=WORKER,
+            GUARD_CALLS=str(self.calls),
+            GUARD_RESPONSE=str(self.response),
+        )
         self.data = {
             "ok": True,
             "result": {
-                "dispatch": {"id": DISPATCH, "task_id": TASK, "assignee_handle": WORKER,
-                             "status": "dispatched", "completed_at": None},
+                "dispatch": {
+                    "id": DISPATCH,
+                    "task_id": TASK,
+                    "assignee_handle": WORKER,
+                    "status": "dispatched",
+                    "completed_at": None,
+                },
                 "preamble": FULL,
                 "capability": "PRIVATE METADATA MUST NOT BE INJECTED",
             },
@@ -79,7 +89,11 @@ class GuardTest(unittest.TestCase):
             raw = json.dumps({"hook_event_name": event, "prompt": prompt})
         result = subprocess.run(
             ["bash", str(self.plugin / "hooks/run-hook.cmd"), "dispatch-prompt-guard"],
-            input=raw.encode(), capture_output=True, env=self.env, cwd=self.root, timeout=10,
+            input=raw.encode(),
+            capture_output=True,
+            env=self.env,
+            cwd=self.root,
+            timeout=10,
         )
         self.assertEqual(result.returncode, 0, result.stderr.decode())
         self.assertEqual(result.stderr, b"")
@@ -89,8 +103,10 @@ class GuardTest(unittest.TestCase):
 
     def assert_calls(self, count):
         calls = self.calls.read_text(encoding="utf-8").splitlines() if self.calls.exists() else []
-        self.assertEqual([json.loads(line) for line in calls],
-                         [["orchestration", "dispatch-show", "--task", TASK, "--preamble", "--json"]] * count)
+        self.assertEqual(
+            [json.loads(line) for line in calls],
+            [["orchestration", "dispatch-show", "--task", TASK, "--preamble", "--json"]] * count,
+        )
         self.calls.unlink(missing_ok=True)
 
     def assert_recovery(self, output, full=FULL):
@@ -113,21 +129,28 @@ class GuardTest(unittest.TestCase):
         self.assertNotIn("GW_LAUNCH_V1", context)
 
     def test_new_encoder_output_is_silent_when_complete_and_recovers_when_cut(self):
-        import argparse
         import runpy
-        import io
-        from contextlib import redirect_stdout
+
         helper = runpy.run_path(str(PLUGIN / "skills/auto-drive/references/launch-worker.py"))
-        dispatch = self.root / "dispatch.json"
-        placement = self.root / "placement.json"
-        dispatch.write_text(json.dumps({"key": "example", "agent": "claude", "model": None,
-            "reasoning_effort": None, "mode": "attend", "worktree": {"path": "/a path"},
-            "prompt": "Return café and the exact result.\n"}), encoding="utf-8", newline="\n")
-        placement.write_text(json.dumps(["--worktree", "path:/a path"]), encoding="utf-8", newline="\n")
-        encoded = io.StringIO()
-        with redirect_stdout(encoded):
-            helper["encode"](argparse.Namespace(dispatch=str(dispatch), placement=str(placement)))
-        full = PREAMBLE + encoded.getvalue()
+        # The v2 envelope exactly as core's `encode_launch_envelope` writes it; the
+        # plugin only decodes now, so the decoder vouches for the shape.
+        envelope = {
+            "version": 2,
+            "dispatch_key": "example",
+            "agent": "claude",
+            "model": None,
+            "reasoning_effort": None,
+            "placement_argv": ["--worktree", "path:/a path"],
+            "mode": "attend",
+            "worktree_path": "/a path",
+        }
+        encoded = (
+            helper["PREFIX"]
+            + json.dumps(envelope, ensure_ascii=False, separators=(",", ":"))
+            + "\nReturn café and the exact result.\n"
+        )
+        helper["decode_spec_text"](encoded)
+        full = PREAMBLE + encoded
         self.data["result"]["preamble"] = full
         self.assertIsNone(self.run_guard(full))
         for fragment in (full[:1016], full[:-10]):
@@ -135,7 +158,7 @@ class GuardTest(unittest.TestCase):
         self.assert_calls(3)
 
     def test_early_and_mid_preamble_cuts_restore_once(self):
-        for fragment in (FULL[:1016], FULL[:len(PREAMBLE)-15], PREAMBLE + "GW_L"):
+        for fragment in (FULL[:1016], FULL[: len(PREAMBLE) - 15], PREAMBLE + "GW_L"):
             with self.subTest(fragment_length=len(fragment)):
                 self.assert_recovery(self.run_guard(fragment))
                 self.assert_calls(1)
@@ -169,7 +192,9 @@ class GuardTest(unittest.TestCase):
         full = FULL.replace("\n", "\r\n")
         self.data["result"]["preamble"] = full
         fragment = full[:1016]
-        self.assert_recovery(self.run_guard('<pasted_content id="1">\r\n' + fragment + '\r\n</pasted_content id="1">'), full)
+        self.assert_recovery(
+            self.run_guard('<pasted_content id="1">\r\n' + fragment + '\r\n</pasted_content id="1">'), full
+        )
         self.assert_calls(1)
         self.assertIsNone(self.run_guard('<pasted_content id="1">\n' + fragment + '\n</pasted_content id="2">'))
         self.assert_calls(0)
@@ -191,13 +216,16 @@ class GuardTest(unittest.TestCase):
             self.assert_calls(1)
 
     def test_wrapper_is_recognized_once_and_only_at_start(self):
-        for prompt in (WRAPPER + " " + WRAPPER + " " + ASK_CUT,
-                       "Note: " + WRAPPER + " " + ASK_CUT,
-                       "> " + WRAPPER + " " + ASK_CUT,
-                       WRAPPER + " Also see:\n" + ASK_CUT,
-                       WRAPPER + " \n> " + ASK_CUT,
-                       WRAPPER + ASK_CUT, WRAPPER.lower() + " " + ASK_CUT,
-                       " " + WRAPPER + " " + ASK_CUT):
+        for prompt in (
+            WRAPPER + " " + WRAPPER + " " + ASK_CUT,
+            "Note: " + WRAPPER + " " + ASK_CUT,
+            "> " + WRAPPER + " " + ASK_CUT,
+            WRAPPER + " Also see:\n" + ASK_CUT,
+            WRAPPER + " \n> " + ASK_CUT,
+            WRAPPER + ASK_CUT,
+            WRAPPER.lower() + " " + ASK_CUT,
+            " " + WRAPPER + " " + ASK_CUT,
+        ):
             with self.subTest(prompt=prompt[:40]):
                 self.assertIsNone(self.run_guard(prompt))
                 self.assert_calls(0)
@@ -207,14 +235,13 @@ class GuardTest(unittest.TestCase):
         self.assert_calls(1)
 
     def test_wrapper_does_not_rescue_conflicting_identity(self):
-        for cut in (ASK_CUT.replace(WORKER, "term_other"),
-                    ASK_CUT.replace(DISPATCH, "ctx_other")):
+        for cut in (ASK_CUT.replace(WORKER, "term_other"), ASK_CUT.replace(DISPATCH, "ctx_other")):
             self.assert_declined(self.run_guard(WRAPPER + " " + cut))
             self.assert_calls(0 if "term_other" in cut else 1)
 
     def test_wrapper_preserves_incomplete_identity_and_task_prefix_guards(self):
         del self.env["ORCA_TERMINAL_HANDLE"]
-        cut = PREAMBLE[:PREAMBLE.index(WORKER) + len(WORKER)]
+        cut = PREAMBLE[: PREAMBLE.index(WORKER) + len(WORKER)]
         self.assert_declined(self.run_guard(WRAPPER + " " + cut))
         self.assert_calls(0)
         self.assert_declined(self.run_guard(WRAPPER + " " + FULL.replace("exact result", "different result")))
@@ -239,10 +266,16 @@ class GuardTest(unittest.TestCase):
         shutil.copytree(PLUGIN / "hooks", self.plugin / "hooks")
         metadata = self.plugin / ".claude-plugin/plugin.json"
         metadata.parent.mkdir()
-        cases = [(None, "unknown"), (b"{bad", "unknown"), (b"[]", "unknown"),
-                 (b"null", "unknown"), (b'{"version":12}', "unknown"),
-                 (b"{}", "unknown"), (b"\xff", "unknown"),
-                 (b'{"version":"fixture-version"}', "fixture-version")]
+        cases = [
+            (None, "unknown"),
+            (b"{bad", "unknown"),
+            (b"[]", "unknown"),
+            (b"null", "unknown"),
+            (b'{"version":12}', "unknown"),
+            (b"{}", "unknown"),
+            (b"\xff", "unknown"),
+            (b'{"version":"fixture-version"}', "fixture-version"),
+        ]
         for raw, expected in cases:
             with self.subTest(metadata=raw):
                 metadata.unlink(missing_ok=True)
@@ -268,7 +301,7 @@ class GuardTest(unittest.TestCase):
     def test_crlf_wrappers_do_not_add_carriage_returns_to_task(self):
         full = FULL.replace("\n", "\r\n")
         self.data["result"]["preamble"] = full
-        for delivered, intact in ((full, True), (full[:full.index("exact")], False)):
+        for delivered, intact in ((full, True), (full[: full.index("exact")], False)):
             with self.subTest(intact=intact):
                 wrapped = '<pasted_content id="7">\r\n' + delivered + '\r\n</pasted_content id="7">\r\n'
                 result = self.run_guard(wrapped)
@@ -283,18 +316,21 @@ class GuardTest(unittest.TestCase):
         entries = config["hooks"].get("UserPromptSubmit", [])
         self.assertEqual(len(entries), 1)
         self.assertNotIn("matcher", entries[0])
-        hook, = entries[0]["hooks"]
+        (hook,) = entries[0]["hooks"]
         self.assertEqual(hook["type"], "command")
         self.assertFalse(hook["async"])
         self.assertEqual(hook["timeout"], 15)
         self.assertEqual(hook["command"], '"${CLAUDE_PLUGIN_ROOT}/hooks/run-hook.cmd" dispatch-prompt-guard')
 
     def test_missing_ambiguous_or_incomplete_task_id_never_looks_up(self):
-        for before in (HEADER, HEADER + "\nYour task ID is: task_example",
-                       HEADER + "\nYour task ID is: task_\n",
-                       PREAMBLE.replace("task_example\n", "task_example; touch BAD\n"),
-                       PREAMBLE.replace("\n=== CLI", "\nYour task ID is: task_other\n=== CLI"),
-                       PREAMBLE.replace("\n=== CLI", "\nYour task ID is: task_example\n=== CLI")):
+        for before in (
+            HEADER,
+            HEADER + "\nYour task ID is: task_example",
+            HEADER + "\nYour task ID is: task_\n",
+            PREAMBLE.replace("task_example\n", "task_example; touch BAD\n"),
+            PREAMBLE.replace("\n=== CLI", "\nYour task ID is: task_other\n=== CLI"),
+            PREAMBLE.replace("\n=== CLI", "\nYour task ID is: task_example\n=== CLI"),
+        ):
             with self.subTest(before=before[:200]):
                 self.assert_declined(self.run_guard(before))
                 self.assert_calls(0)
@@ -306,15 +342,17 @@ class GuardTest(unittest.TestCase):
         self.assert_recovery(self.run_guard(PREAMBLE + "GW_L"))
         self.assert_calls(1)
         # A --from fragment at EOF is not a complete token.
-        cut = PREAMBLE[:PREAMBLE.index(WORKER) + len(WORKER)]
+        cut = PREAMBLE[: PREAMBLE.index(WORKER) + len(WORKER)]
         self.assert_declined(self.run_guard(cut))
         self.assert_calls(0)
         self.assert_declined(self.run_guard(PREAMBLE.replace(WORKER, "term_coordinator") + "GW_L"))
         self.assert_calls(1)
 
     def test_surviving_worker_and_dispatch_ids_must_agree(self):
-        for prompt in (PREAMBLE.replace(DISPATCH, "ctx_other") + "GW_L",
-                       PREAMBLE.replace(WORKER, "term_other", 1) + "GW_L"):
+        for prompt in (
+            PREAMBLE.replace(DISPATCH, "ctx_other") + "GW_L",
+            PREAMBLE.replace(WORKER, "term_other", 1) + "GW_L",
+        ):
             with self.subTest(prompt=prompt):
                 self.assert_declined(self.run_guard(prompt))
                 # It is valid to reject contradictory local identity before lookup.
@@ -323,30 +361,51 @@ class GuardTest(unittest.TestCase):
 
     def test_invalid_or_settled_response_cannot_inject_task(self):
         original = copy.deepcopy(self.data)
-        cases = [("task_id", "task_other"), ("assignee_handle", "term_other"),
-                 ("id", ""), ("id", 1), ("status", "failed"), ("status", "completed"),
-                 ("status", "revoked"), ("status", "settled"), ("status", None),
-                 ("completed_at", "2026-09-23"), ("revoked_at", "2026-09-23")]
+        cases = [
+            ("task_id", "task_other"),
+            ("assignee_handle", "term_other"),
+            ("id", ""),
+            ("id", 1),
+            ("status", "failed"),
+            ("status", "completed"),
+            ("status", "revoked"),
+            ("status", "settled"),
+            ("status", None),
+            ("completed_at", "2026-09-23"),
+            ("revoked_at", "2026-09-23"),
+        ]
         for key, value in cases:
             with self.subTest(key=key, value=value):
                 self.data = copy.deepcopy(original)
                 self.data["result"]["dispatch"][key] = value
                 self.assert_declined(self.run_guard(FULL[:1016]))
                 self.assert_calls(1)
-        for response in ({}, [], None, {"ok": 1, "result": original["result"]},
-                         {"ok": False, "result": original["result"]},
-                         {"ok": True, "result": []}, {"ok": True, "result": {"dispatch": []}}):
+        for response in (
+            {},
+            [],
+            None,
+            {"ok": 1, "result": original["result"]},
+            {"ok": False, "result": original["result"]},
+            {"ok": True, "result": []},
+            {"ok": True, "result": {"dispatch": []}},
+        ):
             with self.subTest(response=response):
                 self.data = response
                 self.assert_declined(self.run_guard(FULL[:1016]))
                 self.assert_calls(1)
 
     def test_recovered_preamble_must_have_same_identity_and_valid_task(self):
-        for full in (None, 1, FULL.replace(HEADER, "not a worker"),
-                     FULL.replace("Your task ID is: task_example", "Your task ID is: task_other"),
-                     FULL.replace(WORKER, "term_other"), FULL.replace(DISPATCH, "ctx_other"),
-                     FULL.replace("\n=== CLI", "\nYour task ID is: task_other\n=== CLI"),
-                     FULL.replace("=== TASK ===", "TASK"), PREAMBLE + "plain task"):
+        for full in (
+            None,
+            1,
+            FULL.replace(HEADER, "not a worker"),
+            FULL.replace("Your task ID is: task_example", "Your task ID is: task_other"),
+            FULL.replace(WORKER, "term_other"),
+            FULL.replace(DISPATCH, "ctx_other"),
+            FULL.replace("\n=== CLI", "\nYour task ID is: task_other\n=== CLI"),
+            FULL.replace("=== TASK ===", "TASK"),
+            PREAMBLE + "plain task",
+        ):
             with self.subTest(full=str(full)[:100]):
                 self.data["result"]["preamble"] = full
                 self.assert_declined(self.run_guard(FULL[:1016]))
@@ -355,10 +414,18 @@ class GuardTest(unittest.TestCase):
     def test_six_field_launch_contract_and_nonblank_body(self):
         envelope = json.loads(ENVELOPE.removeprefix("GW_LAUNCH_V1 "))
         invalid = [[], {}, {**envelope, "extra": 1}]
-        for key, value in (("version", True), ("version", 2), ("agent", ""),
-                           ("dispatch_key", " "), ("model", 1), ("model", " "),
-                           ("reasoning_effort", []), ("reasoning_effort", "high"),
-                           ("placement_argv", "--cwd"), ("placement_argv", [1])):
+        for key, value in (
+            ("version", True),
+            ("version", 2),
+            ("agent", ""),
+            ("dispatch_key", " "),
+            ("model", 1),
+            ("model", " "),
+            ("reasoning_effort", []),
+            ("reasoning_effort", "high"),
+            ("placement_argv", "--cwd"),
+            ("placement_argv", [1]),
+        ):
             invalid.append({**envelope, key: value})
         for value in invalid:
             with self.subTest(envelope=value):
@@ -371,13 +438,26 @@ class GuardTest(unittest.TestCase):
             self.assert_calls(1)
 
     def test_v2_requires_exact_fields_and_typed_metadata(self):
-        envelope = {**json.loads(ENVELOPE.removeprefix("GW_LAUNCH_V1 ")),
-                    "version": 2, "mode": "autonomous", "worktree_path": None}
+        envelope = {
+            **json.loads(ENVELOPE.removeprefix("GW_LAUNCH_V1 ")),
+            "version": 2,
+            "mode": "autonomous",
+            "worktree_path": None,
+        }
         invalid = [{k: v for k, v in envelope.items() if k != missing} for missing in envelope]
         invalid += [{**envelope, "extra": True}]
-        invalid += [{**envelope, key: value} for key, value in (
-            ("version", True), ("version", 3), ("mode", None), ("mode", " "),
-            ("mode", []), ("worktree_path", 3), ("worktree_path", []))]
+        invalid += [
+            {**envelope, key: value}
+            for key, value in (
+                ("version", True),
+                ("version", 3),
+                ("mode", None),
+                ("mode", " "),
+                ("mode", []),
+                ("worktree_path", 3),
+                ("worktree_path", []),
+            )
+        ]
         for value in invalid:
             with self.subTest(envelope=value):
                 full = PREAMBLE + "GW_LAUNCH_V1 " + json.dumps(value) + "\nBody"
@@ -386,9 +466,12 @@ class GuardTest(unittest.TestCase):
                 self.assert_calls(1)
 
     def test_conflicting_task_or_internal_whitespace_is_not_overwritten(self):
-        for delivered in (FULL.replace("exact result", "different result"),
-                          FULL.replace("Return the", "Return  the"),
-                          FULL.replace("\n", "\r\n"), FULL + "Extra instruction"):
+        for delivered in (
+            FULL.replace("exact result", "different result"),
+            FULL.replace("Return the", "Return  the"),
+            FULL.replace("\n", "\r\n"),
+            FULL + "Extra instruction",
+        ):
             self.assert_declined(self.run_guard(delivered))
             self.assert_calls(1)
 
@@ -433,8 +516,13 @@ class GuardTest(unittest.TestCase):
 
     def test_missing_python_is_nonblocking_without_installation(self):
         # Run the extensionless entrypoint with a PATH containing no Python.
-        result = subprocess.run(["/bin/bash", str(PLUGIN / "hooks/dispatch-prompt-guard")],
-                                input=b"{}", capture_output=True, env={"PATH": str(self.root)}, timeout=2)
+        result = subprocess.run(
+            ["/bin/bash", str(PLUGIN / "hooks/dispatch-prompt-guard")],
+            input=b"{}",
+            capture_output=True,
+            env={"PATH": str(self.root)},
+            timeout=2,
+        )
         self.assertEqual(result.returncode, 0)
         self.assertEqual(result.stderr, b"")
         self.assert_declined(json.loads(result.stdout))
@@ -448,12 +536,17 @@ class GuardTest(unittest.TestCase):
         cases = [
             ("linux", {}, "orca-ide"),
             ("linux", {"ORCA_TERMINAL_HANDLE": WORKER}, "orca"),
-            ("darwin", {}, "orca"), ("win32", {}, "orca"),
+            ("darwin", {}, "orca"),
+            ("win32", {}, "orca"),
             ("linux", {"ORCA_DEV_REPO_ROOT": "/dev/repo"}, "orca-dev"),
             ("darwin", {"ORCA_CLI_COMMAND": "/custom cli", "ORCA_DEV_REPO_ROOT": "/dev/repo"}, "/custom cli"),
         ]
         for platform, env, expected in cases:
-            with self.subTest(platform=platform, env=env), patch.dict(os.environ, env, clear=True), patch.object(sys, "platform", platform):
+            with (
+                self.subTest(platform=platform, env=env),
+                patch.dict(os.environ, env, clear=True),
+                patch.object(sys, "platform", platform),
+            ):
                 self.assertEqual(guard.orca_executable(), expected)
 
 

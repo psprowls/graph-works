@@ -1,13 +1,15 @@
 """The Orca-mutating orchestrate module (spec §4.2/§4.3).
 
-Every Orca call goes through OrcaPort and Git runs through probe_git.
-Journal attempted before effects and done after verified results; only an
-uncertain create may be resolved by title, while other pending effects halt.
+Every Orca call goes through OrcaPort and Git runs through probe_git. Where a
+worker runs is computed (`placing.resolve`) and made so by the placement engine
+(`placing.realize`) before any Orca call; every worker launches with
+`--worktree path:<computed>`. Journal attempted before effects and done after
+verified results; only an uncertain create may be resolved by title, while
+other pending effects halt.
 """
 
 from __future__ import annotations
 
-import hashlib
 import json
 import os
 import re
@@ -20,17 +22,16 @@ from pathlib import Path
 from typing import Any, Literal
 
 from gw_kernel.workspace.layout import WorkspaceLayout
-from gw_kernel.workspace.provenance import GitFailure, gate_git, probe_git, strict_commit, strict_git
+from gw_kernel.workspace.provenance import probe_git
 from gw_pipeline.execute_return import pending_return, return_dispatch_admission
-from gw_pipeline.workspace_branch import WORKSPACE_REPO
+from gw_pipeline.placement import Placement, PlacementNotifier
 from subagents_io.backend import BackendError
 from work_tracker_okf.pipeline import code_phases
-from work_tracker_okf.placement import ReaderObservation
 
 from gw_orchestrate import delivery
 from gw_orchestrate import dispatch_record as dr
 from gw_orchestrate.orca_port import OrcaPort
-from gw_orchestrate.placement import PlacementRecord, run_record_placement, run_record_reader
+from gw_orchestrate.placing import Refused, realize, resolve
 
 _CODE_PHASES: frozenset[str] = code_phases()
 
@@ -58,13 +59,13 @@ FAILURE_REASONS: frozenset[str] = frozenset(
 PROBE_OUTCOMES = ("submitted-heartbeat", "submitted-transcript", "nudged", "inconclusive", "no-terminal", "skipped")
 DELIVERY_READ_LIMIT = 200
 DELIVERY_READS = 3
-#: `pin-detached` is the planner's reader placement (`commands.READER_ACTION`): a
-#: dedicated checkout detached at the planned `start_sha`, never a shared one.
-READER_ACTION = "pin-detached"
-CREATION_ACTIONS = ("fork-child", "create-top-level")
-ACTIONS = ("reuse", "main", *CREATION_ACTIONS, READER_ACTION)
-RECORDED = ("recorded", "unchanged", "skipped:read-only-descendant", "reader-receipt", "reader-replayed")
-_HEX_OID = re.compile(r"[0-9a-f]{40}(?:[0-9a-f]{24})?")
+RECORDED = ("recorded", "unchanged")
+_TERMINAL_WORKER_STATES = ("succeeded", "failed", "stopped")
+#: Journal `placement` keys only the pre-computed-placement dispatcher wrote. An
+#: attempt carrying any of them is read tolerantly (`_validate_legacy`), never migrated.
+_LEGACY_PLACEMENT_KEYS = frozenset({"action", "repo_id", "parent_worktree_id", "marker", "reused"})
+_LEGACY_ACTIONS = ("reuse", "main", "fork-child", "create-top-level", "pin-detached")
+_LEGACY_RECORDED = (*RECORDED, "skipped:read-only-descendant", "reader-receipt", "reader-replayed")
 
 
 @dataclass(frozen=True, slots=True)
@@ -79,16 +80,13 @@ class DispatchFailure:
 
 @dataclass(frozen=True, slots=True)
 class ObservedPlacement:
-    action: str
-    path: str | None
+    path: str
+    #: The checked-out branch; `None` for a workspace-root launch, which has no branch to verify.
     branch: str | None
     display_name: str | None
-    repo_id: str | None
-    parent_worktree_id: str | None
-    lineage_set: bool
     notes: tuple[str, ...]
-    #: The detached commit a `pin-detached` reader was verified at; `None` otherwise.
-    start_sha: str | None = None
+    #: The execute baseline the engine recorded; `None` outside execute.
+    start_sha: str | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -149,6 +147,7 @@ class _Dispatch:
     today: date
     clock: Callable[[], datetime]
     result: DispatchResult
+    notifier: PlacementNotifier | None = None
     root: str = ""
     entry: dict[str, Any] | None = None
     record: dr.DispatchRecord | None = None
@@ -207,17 +206,11 @@ def _validate(c: _Dispatch, plan: object) -> None:
     if (
         any(not isinstance(entry.get(n), str) for n in ("path", "phase", "mode", "agent", "prompt"))
         or any(entry.get(n) is not None and not isinstance(entry[n], str) for n in ("model", "reasoning_effort"))
-        or not isinstance(entry.get("worktree"), dict)
-        or entry["worktree"].get("action") not in ACTIONS
         or (entry.get("repo") is not None and not isinstance(entry["repo"], dict))
     ):
         raise _Stop("plan-invalid", "dispatch entry has invalid launch fields")
-    if entry["worktree"]["action"] == READER_ACTION and (
-        not isinstance(entry["worktree"].get("start_sha"), str)
-        or not _HEX_OID.fullmatch(entry["worktree"]["start_sha"])
-        or entry["worktree"].get("branch") is not None
-    ):
-        raise _Stop("plan-invalid", "reader dispatch needs a full commit start_sha and no branch")
+    if "placement" not in entry or not _planned_placement(entry["placement"]):
+        raise _Stop("plan-invalid", "dispatch entry needs a placement (branch, worktree, parents, repo) or null")
     if pending_return(c.layout, entry["path"]) is not None:
         raise _Stop("recovery-inspection", "execute return is pending; inspect or resume before dispatch")
     c.root, c.entry = plan["path"], entry
@@ -250,6 +243,20 @@ def _validate(c: _Dispatch, plan: object) -> None:
 
 def _string(value: object) -> bool:
     return isinstance(value, str)
+
+
+_PLACEMENT_FIELDS = ("branch", "worktree", "parent_branch", "parent_worktree")
+
+
+def _planned_placement(value: object) -> bool:
+    """A planned code placement, or `None` for a stage with no code repository."""
+    if value is None:
+        return True
+    return (
+        isinstance(value, dict)
+        and all(isinstance(value.get(n), str) and value[n] for n in _PLACEMENT_FIELDS)
+        and isinstance(value.get("repo"), dict)
+    )
 
 
 def _nullable_string(value: object) -> bool:
@@ -289,12 +296,36 @@ def _valid_receipt(value: object) -> bool:
     )
 
 
+def _flag(value: object) -> bool:
+    return type(value) is bool
+
+
+def _chain(value: object) -> bool:
+    return isinstance(value, list) and all(
+        isinstance(step, Mapping)
+        and set(step) == {"path", "action", "refresh"}
+        and _string(step["path"])
+        and _string(step["action"])
+        and _nullable_string(step["refresh"])
+        for step in value
+    )
+
+
+def _legacy(a: dr.Attempt) -> bool:
+    """Whether the dispatcher before computed placement wrote *a* (its `placement` names an action or Orca ids)."""
+    return isinstance(a.placement, Mapping) and bool(_LEGACY_PLACEMENT_KEYS & a.placement.keys())
+
+
 def _validate_persisted(a: dr.Attempt, key: str) -> None:
     """Check dispatch-owned shapes before any restore, lookup or resumed effect.
 
     The shared journal reader guarantees JSON mappings, not these producer
     contracts. Attempted and skipped steps may lack results; done data steps may not.
+    The strict unknown-key rule applies to the records this version writes; an attempt
+    journaled before computed placement is checked against the shape it was written in,
+    and only its `path`, `placement_argv`, `start_sha` and `worktree_id` are ever read.
     """
+    legacy = _legacy(a)
     _shape(
         a.envelope,
         "envelope",
@@ -311,44 +342,66 @@ def _validate_persisted(a: dr.Attempt, key: str) -> None:
     )
 
     def action(value: object) -> bool:
-        return value in ACTIONS
+        return value in _LEGACY_ACTIONS
 
-    def flag(value: object) -> bool:
-        return type(value) is bool
-
-    _shape(
-        a.placement,
-        "placement",
-        {
-            "action": action,
-            "placement_argv": _strings,
-            "repo_id": _nullable_string,
-            "parent_worktree_id": _nullable_string,
-        },
-        {
-            "worktree_id": _string,
-            "start_sha": _string,
-            "path": _string,
-            "attempt_id": _string,
-            "marker": _string,
-            "reused": flag,
-        },
-    )
-    schemas: dict[str, dict[str, Callable[[object], bool]]] = {
-        "place": {"notes": _strings},
-        "create": {"task_id": _string},
-        "launch": dict.fromkeys(("dispatch_id", "terminal", "worktree_id"), _nullable_string),
-        "settle": {
+    if legacy:
+        _shape(
+            a.placement,
+            "placement",
+            {
+                "action": action,
+                "placement_argv": _strings,
+                "repo_id": _nullable_string,
+                "parent_worktree_id": _nullable_string,
+            },
+            {
+                "worktree_id": _string,
+                "start_sha": _string,
+                "path": _string,
+                "attempt_id": _string,
+                "marker": _string,
+                "reused": _flag,
+            },
+        )
+        settle: dict[str, Callable[[object], bool]] = {
             "action": action,
             "path": lambda v: isinstance(v, str) and bool(v),
             "branch": lambda v: v is None or (isinstance(v, str) and bool(v)),
             "display_name": _nullable_string,
             "repo_id": _nullable_string,
             "parent_worktree_id": _nullable_string,
-            "lineage_set": lambda v: type(v) is bool,
+            "lineage_set": _flag,
             "notes": _strings,
-        },
-        "record": {"recorded": lambda v: v in RECORDED},
+        }
+    else:
+        _shape(
+            a.placement,
+            "placement",
+            {
+                "path": lambda v: isinstance(v, str) and bool(v),
+                "branch": _nullable_string,
+                "parent_path": _nullable_string,
+                "start_sha": _nullable_string,
+                "placement_argv": _strings,
+                "chain": _chain,
+                "orca": _nullable_string,
+            },
+            {"worktree_id": _string},
+        )
+        settle = {
+            "path": lambda v: isinstance(v, str) and bool(v),
+            "branch": lambda v: v is None or (isinstance(v, str) and bool(v)),
+            "display_name": _nullable_string,
+            "notes": _strings,
+            "start_sha": _nullable_string,
+        }
+    recorded = _LEGACY_RECORDED if legacy else RECORDED
+    schemas: dict[str, dict[str, Callable[[object], bool]]] = {
+        "place": {"notes": _strings},
+        "create": {"task_id": _string},
+        "launch": dict.fromkeys(("dispatch_id", "terminal", "worktree_id"), _nullable_string),
+        "settle": settle,
+        "record": {"recorded": lambda v: v in recorded},
         "probe": {"probe": lambda v: v in PROBE_OUTCOMES},
     }
     for name, state in a.steps.items():
@@ -359,22 +412,16 @@ def _validate_persisted(a: dr.Attempt, key: str) -> None:
             continue
         optional: dict[str, Callable[[object], bool]] = {}
         if name == "create":
-            optional = {"adopted": flag}
+            optional = {"adopted": _flag, "retry_of": _string}
         elif name == "attend":
             optional = {"warning": _string}
-        elif name == "settle":
+        elif name == "settle" and legacy:
             optional = {"start_sha": _nullable_string}
         elif name == "encode":
             optional = {"receipt": _valid_receipt}
         elif name == "probe":
             optional = {"delivery": lambda v: v in delivery.DELIVERY_OUTCOMES}
         _shape(state.result, f"{name}.result", schema, optional)
-        settled = state.result
-        if name == "settle" and settled is not None:
-            # Only a reader settles without a branch, and then it settles with a commit.
-            is_reader = settled["action"] == READER_ACTION
-            if is_reader != (settled["branch"] is None) or (is_reader and not _string(settled.get("start_sha"))):
-                raise dr.DispatchRecordError("settle.result: branch and start_sha disagree with the action")
         if state.state == "done":
             if name == "create" and a.task_id is None:
                 raise dr.DispatchRecordError("create: completed step requires task_id")
@@ -407,7 +454,11 @@ def _restore(c: _Dispatch) -> None:
     settled = a.steps.get("settle", dr.StepState("attempted")).result
     placement = None
     if settled is not None:
-        placement = ObservedPlacement(**{**settled, "notes": tuple(settled["notes"])})
+        # A legacy settle result also carries action and Orca ids; only these fields are read.
+        notes = tuple(settled["notes"])
+        placement = ObservedPlacement(
+            settled["path"], settled["branch"], settled["display_name"], notes, settled.get("start_sha")
+        )
     attended = a.steps.get("attend", dr.StepState("attempted")).result or {}
     if placement is not None and "warning" in attended:
         placement = replace(placement, notes=(*placement.notes, f"in-review not set: {attended['warning']}"))
@@ -422,7 +473,10 @@ def _restore(c: _Dispatch) -> None:
         display_name=a.display_name,
         terminal=launch.get("terminal"),
         placement=placement,
-        recorded=recorded.get("recorded", "skipped:read-only-descendant" if record_step.state == "skipped" else None),
+        recorded=recorded.get(
+            "recorded",
+            f"skipped:{record_step.reason}" if record_step.state == "skipped" and record_step.reason else None,
+        ),
         probe=probed.get("probe", "skipped" if probe_step.state == "skipped" else None),
         delivery=probed.get(
             "delivery",
@@ -470,231 +524,238 @@ def _resolve(c: _Dispatch) -> bool:
     return False
 
 
-def _text(value: object, label: str) -> str:
-    if not isinstance(value, str) or not value.strip():
-        raise _Stop("placement-refused", f"{label} is missing")
-    return value
+def _same_path(left: object, right: object) -> bool:
+    return isinstance(left, str) and isinstance(right, str) and os.path.realpath(left) == os.path.realpath(right)
 
 
-def _placement_file(c: _Dispatch) -> Path:
-    path = (
-        dr.record_file(c.layout, c.item["path"], c.result.key).parent.parent / "orca-placement" / f"{c.result.key}.json"
-    )
-    owner = c.layout.bundle_dir / c.item["path"]
-    if (
-        owner.resolve() != c.layout.bundle_dir.resolve() / c.item["path"]
-        or not path.parent.resolve().is_relative_to(owner.resolve())
-        or path.is_symlink()
-    ):
-        raise _Stop("placement-refused", "placement path escapes its owner directory")
-    return path
-
-
-def _owning_checkout(repo_path: str) -> str | None:
-    """The primary checkout that owns *repo_path*'s git directory, or None when git cannot say.
-
-    Git lists the main working tree first. For a managed repository the plan
-    names a linked working checkout, and the repository Orca knows is the
-    clone that owns it.
-    """
-    inventory = probe_git(Path(repo_path), "worktree", "list", "--porcelain", "-z")
-    if inventory.returncode != 0:
-        return None
-    first = next((field for field in inventory.stdout.split("\0") if field.startswith("worktree ")), None)
-    return os.path.realpath(first[len("worktree ") :]) if first else None
-
-
-def _orca_repo_id(c: _Dispatch, repo_path: str) -> str:
-    """The one Orca repository for *repo_path*: registered at its owning checkout, else at the path itself."""
-    wanted = [path for path in dict.fromkeys((_owning_checkout(repo_path), os.path.realpath(repo_path))) if path]
-    registered = c.port.repo_list()
-    for path in wanted:
-        repos = [r for r in registered if os.path.realpath(r["path"]) == path]
-        if len(repos) == 1:
-            return repos[0]["id"]
-        if repos:
-            raise _Stop("placement-refused", f"{len(repos)} Orca repositories match {path}; exactly one required")
-    raise _Stop("placement-refused", f"0 Orca repositories match {' or '.join(wanted)}; exactly one required")
-
-
-def _reader_problem(repo: str, path: str, sha: str, *, detached: bool = True) -> str | None:
-    """Why *path* is not a clean checkout of *repo* at *sha* (detached unless told otherwise)."""
-    if not Path(path).is_absolute():
-        return "path is not absolute"
-    common = probe_git(Path(repo), "rev-parse", "--path-format=absolute", "--git-common-dir")
-    actual = probe_git(Path(path), "rev-parse", "--path-format=absolute", "--git-common-dir")
-    if (
-        common.returncode != 0
-        or actual.returncode != 0
-        or os.path.realpath(common.stdout.strip()) != os.path.realpath(actual.stdout.strip())
-    ):
-        return "wrong observed repository"
-    top = probe_git(Path(path), "rev-parse", "--show-toplevel")
-    if top.returncode != 0 or os.path.realpath(top.stdout.strip()) != os.path.realpath(path):
-        return "path is not the checkout root"
-    if detached:
-        symbolic = probe_git(Path(path), "symbolic-ref", "-q", "HEAD")
-        if symbolic.returncode == 0:
-            return "checkout is on a branch, not detached"
-        if symbolic.returncode != 1:
-            return "cannot prove detached HEAD"
-    head = probe_git(Path(path), "rev-parse", "HEAD")
-    if head.returncode != 0 or head.stdout.strip() != sha:
-        return f"HEAD is {head.stdout.strip() or 'unknown'}, not {sha}"
-    status = probe_git(Path(path), "status", "--porcelain", "--untracked-files=all")
-    if status.returncode != 0 or status.stdout.strip():
-        return "checkout is dirty"
+def _matches(planned: Mapping[str, Any], computed: Placement) -> str | None:
+    """Why the plan's placement is not the one computed now, or `None` when they agree."""
+    for name in ("branch", "parent_branch"):
+        if planned[name] != getattr(computed, name):
+            return f"{name} {planned[name]!r} != {getattr(computed, name)!r}"
+    for name in ("worktree", "parent_worktree"):
+        if not _same_path(planned[name], str(getattr(computed, name))):
+            return f"{name} {planned[name]} != {getattr(computed, name)}"
     return None
 
 
-def _prepare_reader(c: _Dispatch, placement_file: Path) -> dict[str, Any]:
-    """Allocate one detached reader checkout per attempt; recovery verifies, never repairs.
+def _occupied(c: _Dispatch) -> Callable[[str], str | None]:
+    """Who holds *path* in this Run: another key's unfinished attempt or a non-terminal Orca worker.
 
-    The marker (an Orca worktree comment) is derived from the key, the SHA,
-    the repository and this attempt's ordinal, so a crash between creation
-    and the journal write is recovered by re-deriving it and finding the
-    checkout again. A superseded attempt gets a new ordinal, so a launched
-    checkout is never shared with a later dispatch, even at the same SHA.
+    Conservative: an unreadable journal or an Orca error answers with a holder, never `None`.
     """
-    wt = c.item["worktree"]
-    sha = wt["start_sha"]
-    base = _text(wt.get("base_branch"), "source branch")
-    repo = _text((c.item.get("repo") or {}).get("path"), "code repository path")
-    if not Path(repo).is_absolute():
-        raise _Stop("placement-refused", "code repository path is not absolute")
-    commit = probe_git(Path(repo), "rev-parse", "--verify", f"{sha}^{{commit}}")
-    if commit.returncode != 0 or commit.stdout.strip() != sha:
-        raise _Stop("placement-refused", f"start_sha {sha} is not a commit in {repo}")
-    inventory = probe_git(Path(repo), "worktree", "list", "--porcelain", "-z")
-    if inventory.returncode != 0:
-        raise _Stop("placement-refused", "cannot read the repository's worktree inventory")
-    before = {
-        os.path.realpath(field[len("worktree ") :])
-        for field in inventory.stdout.split("\0")
-        if field.startswith("worktree ")
-    }
-    before.add(os.path.realpath(repo))
-    protected = {os.path.realpath(repo)}
-    parent_path = wt.get("parent_path")
-    if parent_path is not None:
-        protected.add(os.path.realpath(_text(parent_path, "parent_path")))
-    repo_id = _orca_repo_id(c, repo)
-    attempt = f"{c.result.run_id}-{len(c.journal.attempts) + 1}"
-    digest = hashlib.sha256(
-        json.dumps([c.result.key, sha, os.path.realpath(repo), attempt], separators=(",", ":")).encode("utf-8")
-    ).hexdigest()
-    marker = f"gw-reader:{digest}"
-    # Intent before effect: a crash after `worktree create` leaves this file
-    # naming the marker the next attempt re-derives and looks for.
-    dr.write_json_atomic(
-        placement_file,
-        {"action": READER_ACTION, "attempt_id": attempt, "marker": marker, "start_sha": sha, "prepared": False},
-    )
-    marked = [row for row in c.port.worktree_list(repo_id) if row["comment"] == marker]
-    if len(marked) > 1:
-        raise _Stop("placement-refused", "ambiguous reader markers; repair before creating")
-    reused = bool(marked)
-    if marked:
-        row = marked[0]
-        tip = sha
-    else:
-        tip_probe = probe_git(Path(repo), "rev-parse", "--verify", f"{base}^{{commit}}")
-        if tip_probe.returncode != 0 or not tip_probe.stdout.strip():
-            raise _Stop("placement-refused", f"source branch {base} is not a commit in {repo}")
-        tip = tip_probe.stdout.strip()
-        row = c.port.worktree_create(name=f"gw-reader-{digest}", repo_id=repo_id, base_branch=base, comment=marker)
-    if row["repo_id"] != repo_id:
-        raise _Stop("placement-refused", "wrong observed repository")
-    raw_path = row["path"]
-    if not raw_path or not Path(raw_path).is_absolute():
-        raise _Stop("placement-refused", "observed path is not absolute")
-    path = os.path.realpath(raw_path)
-    if path in protected or row["is_main"] is not False:
-        raise _Stop("placement-refused", f"reader cannot enter an integration checkout {path}")
-    if not reused:
-        if path in before:
-            raise _Stop("placement-refused", f"Orca returned an existing checkout {path}")
-        problem = _reader_problem(repo, path, tip, detached=False)
-        if problem is not None:
-            raise _Stop("placement-refused", f"newly created checkout failed verification ({problem})")
-        # Only a new, clean, correct-repository checkout at the source tip
-        # returned by this creation is ever mutated, and only by detaching it.
-        if probe_git(Path(path), "checkout", "--quiet", "--detach", sha).returncode != 0:
-            raise _Stop("placement-refused", f"cannot detach the reader checkout at {sha}")
-    problem = _reader_problem(repo, path, sha)
-    if problem is not None:
-        raise _Stop("placement-refused", f"reader checkout is not verified ({problem}); it is never reset -- repair")
+
+    def holder(path: str) -> str | None:
+        for journal in sorted(c.layout.bundle_dir.glob("work/**/references/orca-dispatch/*.json")):
+            try:
+                other = dr.load_record(journal)
+            except dr.DispatchRecordError as exc:
+                return f"unreadable dispatch journal {journal.name}: {exc}"
+            if other is None or other.run_id != c.result.run_id or other.key == c.result.key or not other.attempts:
+                continue
+            last = other.attempts[-1]
+            if last.task_id in other.superseded or last.complete:
+                continue
+            placed = last.placement or {}
+            if _same_path(placed.get("path"), path):
+                return f"dispatch {other.key} in Run {c.result.run_id}"
+        try:
+            row = c.port.worktree_show(f"path:{path}")
+            if row is None:
+                return None
+            for worker in c.port.worker_list(c.result.run_id):
+                if worker["worktree_id"] == row["id"] and worker["state"] not in _TERMINAL_WORKER_STATES:
+                    return f"Orca worker {worker['dispatch_id']}"
+        except BackendError as exc:
+            return f"Orca cannot say who holds {path}: {exc}"
+        return None
+
+    return holder
+
+
+def _repo_hint(c: _Dispatch) -> str | None:
+    repo_name = c.item["placement"]["repo"].get("name")
+    return repo_name if isinstance(repo_name, str) and repo_name else None
+
+
+def _computed(c: _Dispatch) -> Placement | None:
+    """The placement computed now, checked against the plan's; `None` for a stage with no code placement.
+
+    The plan's placement must still be the one computed now (an item reparented
+    or retyped since `orchestrate` stops `plan-invalid` before any mutation).
+    """
+    planned = c.item["placement"]
+    if planned is None:
+        return None
+    resolved = resolve(c.layout, c.item["path"], repo_name=_repo_hint(c))
+    if isinstance(resolved, Refused):
+        raise _Stop("placement-refused", resolved.detail, refusal=resolved.kind)
+    computed = resolved.placement
+    if computed is None:
+        raise _Stop("plan-invalid", f"{c.item['path']} has no code placement now; replan")
+    mismatch = _matches(planned, computed)
+    if mismatch is not None:
+        raise _Stop("plan-invalid", f"planned placement differs from the computed one ({mismatch}); replan")
+    return computed
+
+
+def _root_placed(c: _Dispatch) -> dict[str, Any]:
+    """A stage with no code placement launches in the workspace root, which has no branch to verify."""
+    path = str(c.layout.root)
     return {
-        "action": READER_ACTION,
-        "placement_argv": ["--worktree", f"path:{path}"],
-        "repo_id": repo_id,
-        "parent_worktree_id": None,
-        "start_sha": sha,
         "path": path,
-        "attempt_id": attempt,
-        "marker": marker,
-        "reused": reused,
+        "branch": None,
+        "parent_path": None,
+        "start_sha": None,
+        "placement_argv": ["--worktree", f"path:{path}"],
+        "chain": [],
+        "orca": None,
     }
+
+
+def _realize(c: _Dispatch, *, verify_only: bool) -> tuple[dict[str, Any], tuple[str, ...]]:
+    """Run the engine for the item's computed placement; a refusal stops `placement-refused`."""
+    assert c.notifier is not None
+    realized = realize(
+        c.layout,
+        c.item["path"],
+        phase=c.item["phase"],
+        verify_only=verify_only,
+        notifier=c.notifier,
+        occupied=_occupied(c),
+        today=c.today,
+        repo_name=_repo_hint(c),
+    )
+    if isinstance(realized, Refused):
+        raise _Stop("placement-refused", realized.detail, refusal=realized.kind)
+    path = str(realized.placement.worktree)
+    placed = {
+        "path": path,
+        "branch": realized.placement.branch,
+        "parent_path": str(realized.placement.parent_worktree),
+        "start_sha": realized.start_sha,
+        "placement_argv": ["--worktree", f"path:{path}"],
+        "chain": [{"path": step.worktree, "action": step.action, "refresh": step.refresh} for step in realized.chain],
+        "orca": realized.chain[-1].orca if realized.chain else None,
+    }
+    notes = tuple(f"{step.worktree}: {step.orca}" for step in realized.chain if step.orca is not None)
+    return placed, notes
 
 
 def _place(c: _Dispatch) -> tuple[dict[str, Any], tuple[str, ...]]:
+    """Make the planned placement so through the engine, before any Orca call.
+
+    A stage with no code placement launches in the workspace root and calls
+    no engine.
+    """
     c.step = "place"
-    wt = c.item["worktree"]
-    action = wt["action"]
-    repo_id = parent_id = None
-    notes: list[str] = []
-    placement_file = _placement_file(c)
-    # The entry itself is durable too: a park-resume or retry of this Task
-    # (auto-drive §2.6/§4.1) re-prepares a reader from it, never from a later plan.
-    dr.write_json_atomic(placement_file.with_name(f"{c.result.key}.dispatch.json"), c.item)
-    if action == READER_ACTION:
-        placed = _prepare_reader(c, placement_file)
-        dr.write_json_atomic(placement_file, placed)
-        return placed, ()
-    git = gate_git(c.layout)
-    if isinstance(git, GitFailure):
-        raise _Stop("placement-refused", f"git-unavailable ({git.cause}): {git.detail}")
-    if action in ("reuse", "main"):
-        argv = ["--worktree", f"path:{_text(wt.get('path'), 'worktree path')}"]
-        baseline = strict_commit(Path(_text(wt.get("path"), "worktree path")), "HEAD", git=git)
+    if _computed(c) is None:
+        return _root_placed(c), ()
+    return _realize(c, verify_only=False)
+
+
+def _retried(c: _Dispatch, retry_of: str) -> dr.Attempt:
+    """The attempt `--retry-of` relaunches, after every precondition (own D-002); stops `recovery-inspection`.
+
+    The journal's latest attempt must name a Task no reroute superseded, its
+    dispatch must be *retry_of* (an earlier attempt on the same Task with that
+    dispatch means it was already retried), and the Task must still be current
+    in `task_list`. Nothing here mutates the port or the journal.
+    """
+    c.step = "create"
+    if not c.journal.attempts:
+        raise _Stop("recovery-inspection", f"no attempt to retry: {c.result.key} has no journaled dispatch")
+    a = c.attempt
+    if a.task_id is None:
+        raise _Stop("recovery-inspection", "the latest attempt created no Task; there is nothing to retry")
+    c.result = replace(c.result, task_id=a.task_id)
+    if a.task_id in c.journal.superseded:
+        raise _Stop("recovery-inspection", f"Task {a.task_id} was superseded by a reroute; dispatch the key afresh")
+    if a.dispatch_id != retry_of:
+        if any(p.task_id == a.task_id and p.dispatch_id == retry_of for p in c.journal.attempts[:-1]):
+            later = a.dispatch_id or "an attempt that has not launched yet"
+            raise _Stop("recovery-inspection", f"{retry_of} was already retried as {later}; leave it alone")
+        raise _Stop(
+            "recovery-inspection",
+            f"the latest attempt on Task {a.task_id} is dispatch {a.dispatch_id}, not {retry_of}",
+        )
+    try:
+        tasks = c.port.task_list(c.result.run_id)
+    except BackendError as exc:
+        raise _Stop("recovery-inspection", f"cannot resolve current Tasks: {exc}") from exc
+    if not any(t["id"] == a.task_id for t in tasks):
+        raise _Stop("recovery-inspection", f"Task {a.task_id} is absent from task_list for Run {c.result.run_id}")
+    return a
+
+
+def _argv_path(envelope: Mapping[str, Any]) -> str | None:
+    """The `path:` an envelope's placement argv launched into, if it named one."""
+    argv = envelope.get("placement_argv") or []
+    return next((arg.removeprefix("path:") for arg in argv if isinstance(arg, str) and arg.startswith("path:")), None)
+
+
+def _launched_at(a: dr.Attempt) -> tuple[str | None, str | None, str | None]:
+    """The path, branch and `start_sha` attempt *a* launched with; all a retry reads of a legacy attempt."""
+    placed = a.placement or {}
+    if not _legacy(a):
+        return placed.get("path"), placed.get("branch"), placed.get("start_sha")
+    settled = a.steps.get("settle", dr.StepState("attempted")).result or {}
+    path = placed.get("path") or settled.get("path") or _argv_path(a.envelope)
+    return path, settled.get("branch"), placed.get("start_sha") or settled.get("start_sha")
+
+
+def _retry_place(c: _Dispatch, prior: dr.Attempt) -> tuple[dict[str, Any], tuple[str, ...]]:
+    """Verify, never refresh: the retried stage continues in the place it was launched (own D-005).
+
+    A retried attempt launched anywhere but the computed path (placed under the
+    old rules) stops `recovery-inspection` before the engine runs; a human re-points it.
+    """
+    c.step = "place"
+    path, branch, start_sha = _launched_at(prior)
+    if path is None:
+        raise _Stop("recovery-inspection", "the retried attempt journaled no launch path; inspect it before retrying")
+    computed = _computed(c)
+    root: dict[str, Any] | None = None
+    if computed is None:
+        root = _root_placed(c)
+        want_path, want_branch = root["path"], root["branch"]
     else:
-        branch, base = _text(wt.get("branch"), "branch"), _text(wt.get("base_branch"), "base_branch")
-        repo_path = _text((c.item.get("repo") or {}).get("path"), "code repository path")
-        baseline = strict_commit(Path(repo_path), base, git=git)
-        repo_id = _orca_repo_id(c, repo_path)
-        parent_path = wt.get("parent_path")
-        if parent_path is not None:
-            parent_path = _text(parent_path, "parent_path")
-            try:
-                parent = c.port.worktree_show(f"path:{parent_path}")
-            except BackendError:
-                parent = None
-            if parent is None:
-                notes.append(
-                    f"Orca does not know the planned parent {parent_path}; "
-                    "creating a parentless top-level worktree instead."
-                )
-            elif parent["repo_id"] != repo_id:
-                raise _Stop("placement-refused", "planned parent belongs to another repository")
-            elif parent["is_main"] is not False:
-                notes.append(
-                    f"Parent {parent_path} is the repository's own checkout; "
-                    "creating a parentless top-level worktree instead."
-                )
-            else:
-                parent_id = parent["id"]
-        argv = ["--worktree", "new-top-level", "--name", branch, "--base-branch", base, "--repo", f"id:{repo_id}"]
-    if isinstance(baseline, GitFailure):
-        raise _Stop("placement-refused", f"cannot read the pre-launch baseline: {baseline.detail}")
-    placed = {
-        "action": action,
-        "placement_argv": argv,
-        "repo_id": repo_id,
-        "parent_worktree_id": parent_id,
-        "start_sha": baseline,
+        want_path, want_branch = str(computed.worktree), computed.branch
+    if not _same_path(path, want_path):
+        raise _Stop(
+            "recovery-inspection",
+            f"the retried attempt ran in {path}, not the computed {want_path}; re-point it by hand before retrying",
+        )
+    if branch is not None and branch != want_branch:
+        raise _Stop(
+            "recovery-inspection",
+            f"the retried attempt ran on {branch}, not the computed {want_branch}; re-point it by hand before retrying",
+        )
+    if root is not None:
+        return root, ()
+    placed, notes = _realize(c, verify_only=True)
+    # A verify-only ensure records no baseline: the continued stage keeps the one it started with.
+    return {**placed, "start_sha": start_sha}, notes
+
+
+def _journal_retry(c: _Dispatch, prior: dr.Attempt, retry_of: str) -> None:
+    """Place verify-only, then journal a new attempt on the same Task with `create` skipped."""
+    placed, notes = _retry_place(c, prior)
+    at = c.clock().isoformat()
+    envelope = {**dict(prior.envelope), "placement_argv": placed["placement_argv"], "worktree_path": placed["path"]}
+    encoded = prior.steps.get("encode", dr.StepState("attempted")).result
+    steps = {
+        "validate": dr.StepState("done", at=at),
+        "place": dr.StepState("done", at=at, result={"notes": list(notes)}),
+        # The Task's frozen spec carries the original receipt instruction; keep its token.
+        "encode": dr.StepState("done", at=at, result=encoded),
+        "create": dr.StepState(
+            "skipped", at=at, result={"task_id": prior.task_id, "retry_of": retry_of}, reason="retry-of"
+        ),
     }
-    dr.write_json_atomic(placement_file, placed)
-    return placed, tuple(notes)
+    attempt = dr.Attempt(prior.task_id, None, prior.display_name, envelope, placed, steps)
+    c.save(c.journal.with_retry(attempt))
+    c.result = replace(c.result, status="dispatched", task_id=prior.task_id, display_name=prior.display_name)
 
 
 def _encode(c: _Dispatch, placed: dict[str, Any], profile: tuple[str, str | None, str | None]) -> dict[str, Any]:
@@ -707,7 +768,7 @@ def _encode(c: _Dispatch, placed: dict[str, Any], profile: tuple[str, str | None
         reasoning_effort=effort,
         placement_argv=placed["placement_argv"],
         mode=c.item["mode"],
-        worktree_path=c.item["worktree"].get("path"),
+        worktree_path=placed["path"],
         prompt="",
     )
     envelope: dict[str, Any] = json.loads(spec.split("\n", 1)[0].removeprefix("GW_LAUNCH_V1 "))
@@ -737,12 +798,15 @@ def _create(c: _Dispatch) -> None:
 
 def _launch(c: _Dispatch) -> None:
     assert c.result.task_id is not None
+    created = c.attempt.steps.get("create", dr.StepState("attempted")).result or {}
+    retry_of = created.get("retry_of")
     try:
         start = c.port.worker_start(
             c.result.run_id,
             c.result.task_id,
             request=dict(c.attempt.envelope),
             placement_argv=c.attempt.envelope["placement_argv"],
+            retry_of=retry_of if isinstance(retry_of, str) else None,
         )
     except BackendError as exc:
         # BackendError is the cross-band seam. Whitelist IDs; never persist the
@@ -783,38 +847,8 @@ def _launch(c: _Dispatch) -> None:
     c.mark("done", result=known, dispatch_id=start["dispatch_id"])
 
 
-def _writer_baseline(c: _Dispatch, path: Path, branch: str, *, creation: bool, pre_launch: str) -> str:
-    """The commit this writer's work starts from, proved rather than assumed.
-
-    Existing checkouts: the HEAD read before launch (`_place`). New branches:
-    the branch's creation commit from its reflog; without a reflog, the
-    pre-launch base tip only when it is exactly where the branch forked.
-    """
-    if not pre_launch:
-        raise _Stop("placement-mismatch", "no pre-launch baseline was captured for this attempt")
-    if not creation:
-        return pre_launch
-    git = gate_git(c.layout)
-    if isinstance(git, GitFailure):
-        raise _Stop("placement-mismatch", f"git-unavailable ({git.cause}): {git.detail}")
-    log = strict_git(path, "reflog", "show", "--format=%H", f"refs/heads/{branch}", "--", git=git)
-    entries = log.split() if isinstance(log, str) else []
-    if entries:
-        created = entries[-1]
-        if created != pre_launch:
-            raise _Stop(
-                "placement-mismatch",
-                f"branch {branch} was created at {created}, not the pre-launch base tip {pre_launch}",
-            )
-        return created
-    fork = strict_git(path, "merge-base", "HEAD", c.item["worktree"]["base_branch"], git=git)
-    # merge-base(HEAD, base) equal to the pre-launch tip already proves it is an ancestor of HEAD.
-    if isinstance(fork, str) and fork.strip() == pre_launch:
-        return pre_launch
-    raise _Stop("placement-mismatch", f"cannot prove where branch {branch} started")
-
-
 def _settle(c: _Dispatch) -> None:
+    """Verify the worker landed in the computed path on the computed branch; link nothing, name nothing."""
     assert c.result.dispatch_id is not None
     launched = c.attempt.steps["launch"].result or {}
     wid = launched.get("worktree_id") or c.port.worker_show(c.result.dispatch_id)["worktree_id"]
@@ -823,151 +857,57 @@ def _settle(c: _Dispatch) -> None:
     row = c.port.worktree_show(f"id:{wid}")
     if row is None:
         raise _Stop("placement-mismatch", "worker worktree is absent")
-    wt = c.item["worktree"]
     placed = c.attempt.placement or {}
-    reader = wt["action"] == READER_ACTION
-    creation = wt["action"] in CREATION_ACTIONS
-    lineage_set = False
-    if reader:
-        prepared = placed.get("path")
-        if not row["path"] or not prepared or os.path.realpath(row["path"]) != os.path.realpath(prepared):
-            raise _Stop("placement-mismatch", "observed reader path differs from the prepared path")
-        if row["parent_id"] is not None:
-            raise _Stop("placement-mismatch", "reader has unexpected parent")
-    elif not creation:
-        if not row["path"] or os.path.realpath(row["path"]) != os.path.realpath(wt["path"]):
-            raise _Stop("placement-mismatch", "observed worktree path differs from planned path")
-    else:
-        if row["repo_id"] != placed.get("repo_id") or row["is_main"] is not False:
-            raise _Stop("placement-mismatch", "worktree repository or main-checkout flag differs")
-        parent = placed.get("parent_worktree_id")
-        if parent is not None and row["parent_id"] is None:
-            c.port.worktree_set_parent(wid, parent)
-            lineage_set = True
-            row = c.port.worktree_show(f"id:{wid}")
-        if row is None or row["parent_id"] != parent:
-            raise _Stop("placement-mismatch", "observed parent differs from planned parent")
+    legacy = _legacy(c.attempt)
+    expected = placed.get("path")
+    if expected is None and legacy:
+        expected = _argv_path(c.attempt.envelope)
+    if expected is None:
+        raise _Stop("placement-mismatch", "this attempt journaled no launch path; inspect before settling")
+    path = row["path"]
+    if not path or not _same_path(path, expected):
+        raise _Stop("placement-mismatch", f"observed worktree path {path} differs from the computed {expected}")
     for worker in c.port.worker_list(c.result.run_id):
         if (
             worker["task_id"] != c.result.task_id
             and worker["worktree_id"] == wid
-            and worker["state"] not in ("succeeded", "failed", "stopped")
+            and worker["state"] not in _TERMINAL_WORKER_STATES
         ):
             raise _Stop("placement-mismatch", "path already claimed by another dispatch this Run")
-    path = row["path"]
-    if not path or not Path(path).is_dir():
+    if not Path(path).is_dir():
         raise _Stop("placement-mismatch", "observed path not reachable from this host; cannot verify")
-    if creation and probe_git(Path(path), "merge-base", "--is-ancestor", wt["base_branch"], "HEAD").returncode != 0:
-        raise _Stop("placement-mismatch", "planned base is not an ancestor of observed HEAD")
-    branch: str | None
-    start_sha: str | None = None
-    if reader:
-        # A reader is verified by content, not by branch: detached at the
-        # planned commit, clean, and rooted in the planned repository.
-        start_sha = str(placed.get("start_sha") or "")
-        repo = str((c.item.get("repo") or {}).get("path") or "")
-        problem = _reader_problem(repo, path, start_sha)
-        if problem is not None:
-            raise _Stop("placement-mismatch", f"reader checkout is not verified ({problem})")
-        branch = None
-    else:
-        branch_probe = probe_git(Path(path), "branch", "--show-current")
-        branch = branch_probe.stdout.strip()
-        if branch_probe.returncode != 0 or not branch or branch != row["branch"]:
-            raise _Stop("placement-mismatch", "Git branch disagrees with observed worktree branch")
-        start_sha = _writer_baseline(
-            c, Path(path), branch, creation=creation, pre_launch=str(placed.get("start_sha") or "")
-        )
+    branch = row["branch"] if legacy else placed.get("branch")
+    if branch is not None:
+        head = probe_git(Path(path), "symbolic-ref", "--short", "HEAD")
+        if head.returncode != 0 or head.stdout.strip() != branch:
+            raise _Stop(
+                "placement-mismatch", f"{path} has {head.stdout.strip() or 'no branch'} checked out, not {branch}"
+            )
     place_step = c.attempt.steps["place"].result or {}
-    notes = tuple(place_step.get("notes", ()))
-    if creation and row["display_name"] != wt["branch"]:
-        notes += (f'worktree name uniquified by Orca (requested "{wt["branch"]}", landed at {path})',)
     observed = ObservedPlacement(
-        wt["action"],
-        path,
-        branch,
-        row["display_name"],
-        row["repo_id"],
-        row["parent_id"],
-        lineage_set,
-        notes,
-        start_sha,
+        path, branch, row["display_name"], tuple(place_step.get("notes", ())), placed.get("start_sha")
     )
     c.result = replace(c.result, placement=observed)
     # Keep the resolved id even when worker-start did not return it.
     c.mark("done", result={**asdict(observed), "notes": list(observed.notes)}, placement={**placed, "worktree_id": wid})
 
 
-def _record_reader(c: _Dispatch) -> None:
-    """A reader — root or descendant — records a receipt, never a placement stamp."""
-    observed = c.result.placement
-    assert observed is not None and observed.path is not None and observed.start_sha is not None
-    assert c.result.task_id is not None and c.result.dispatch_id is not None
-    repo_name = (c.item.get("repo") or {}).get("name")
-    if not isinstance(repo_name, str) or not repo_name:
-        raise _Stop("placement-unrecorded", "reader dispatch names no declared repository")
-    observation = ReaderObservation(
-        c.result.task_id, c.result.dispatch_id, c.result.key, repo_name, observed.path, observed.start_sha
-    )
-    written = run_record_reader(
-        c.layout, c.item["path"], root=c.root, phase=c.item["phase"], observation=observation, dry_run=False
-    )
-    if written.plan.refusal is not None:
-        raise _Stop("placement-unrecorded", str(written.plan.detail), refusal=written.plan.refusal)
-    if written.conflict is not None:
-        raise _Stop(
-            "placement-unrecorded", "reader receipt differs from an earlier attempt's", refusal=written.conflict
-        )
-    if not (written.written or written.replayed):
-        raise _Stop("placement-unrecorded", "reader receipt was not written")
-    c.result = replace(c.result, recorded="reader-receipt" if written.written else "reader-replayed")
-    c.mark("done", result={"recorded": c.result.recorded})
-
-
 def _record(c: _Dispatch) -> None:
-    if c.item["worktree"]["action"] == READER_ACTION:
-        _record_reader(c)
-        return
-    if c.item["path"] != c.root and c.item["phase"] not in _CODE_PHASES:
-        c.result = replace(c.result, recorded="skipped:read-only-descendant")
-        c.mark("skipped", reason="read-only-descendant", result={"recorded": c.result.recorded})
-        return
+    """The journal's `record` step. It stays so a Run that straddles the upgrade resumes; it writes nothing.
+
+    Placement is computed, so no stamp is recorded on the item or any owner. A
+    stage with no code placement still records `skipped:<reason>`; a code
+    placement marks the step done as `unchanged`.
+    """
     observed = c.result.placement
-    assert observed is not None and observed.path is not None and observed.branch is not None
-
-    path, branch = observed.path, observed.branch
-    selected_repo = (c.item.get("repo") or {}).get("name")
-
-    code_phase = c.item["phase"] in _CODE_PHASES and selected_repo != WORKSPACE_REPO
-
-    def apply(dry_run: bool, start_sha: str | None) -> PlacementRecord:
-        return run_record_placement(
-            c.layout,
-            c.item["path"],
-            root=c.root,
-            phase=c.item["phase"],
-            worktree=path,
-            branch=branch,
-            today=c.today,
-            repo_name=None if selected_repo == WORKSPACE_REPO else selected_repo,
-            repo=WORKSPACE_REPO if selected_repo == WORKSPACE_REPO else None,
-            start_sha=start_sha,
-            require_start_sha=code_phase and dry_run is False,
-            dry_run=dry_run,
-        )
-
-    preview = apply(True, None)
-    keep = preview.plan.refusal is None and not preview.plan.changed and preview.plan.start_after is not None
-    candidate = None if keep or not code_phase else observed.start_sha
-    written = apply(False, candidate)
-    if written.plan.refusal is not None:
-        raise _Stop("placement-unrecorded", str(written.plan.detail), refusal=written.plan.refusal)
-    if written.application is not None and not written.application.ok:
-        raise _Stop("placement-unrecorded", "placement application failed")
-    verified = apply(True, candidate)
-    if verified.plan.refusal is not None or verified.plan.changed:
-        raise _Stop("placement-unrecorded", "verification failed", refusal=verified.plan.refusal)
-    c.result = replace(c.result, recorded="recorded" if written.written else "unchanged")
+    assert observed is not None
+    phase = c.item["phase"]
+    if phase not in _CODE_PHASES or observed.branch is None:
+        reason = "read-only-phase" if phase not in _CODE_PHASES else "no-branch"
+        c.result = replace(c.result, recorded=f"skipped:{reason}")
+        c.mark("skipped", reason=reason)
+        return
+    c.result = replace(c.result, recorded="unchanged")
     c.mark("done", result={"recorded": c.result.recorded})
 
 
@@ -1076,10 +1016,50 @@ def _probe(c: _Dispatch, enabled: bool, seconds: float, sleep: Callable[[float],
     raise _Stop("unsent", "prompt remains unsubmitted after two Enter nudges")
 
 
+def _profile(c: _Dispatch) -> tuple[str, str | None, str | None]:
+    return dr.apply_overrides(
+        c.item["agent"], c.item.get("model"), c.item.get("reasoning_effort"), c.journal.latest_overrides()
+    )
+
+
 def _task_update(c: _Dispatch) -> None:
     assert c.result.task_id is not None
     c.port.task_update(c.result.run_id, c.result.task_id, "dispatched")
     c.mark("done")
+
+
+def _begin(c: _Dispatch) -> bool:
+    """Journal a fresh attempt or find the one to resume; `False` when an existing Task ends the call."""
+    placed: dict[str, Any] | None = None
+    notes: tuple[str, ...] = ()
+    profile: tuple[str, str | None, str | None] | None = None
+    if not c.journal.attempts or c.attempt.task_id in c.journal.superseded:
+        # Nothing to resume: reject overrides, then place, before any Orca call.
+        c.step = "encode"
+        profile = _profile(c)
+        placed, notes = _place(c)
+    resuming = _resolve(c)
+    if c.result.status == "existing":
+        return False
+    if not resuming:
+        if placed is None or profile is None:
+            # Reject overrides before *any* placement write or provisioning.
+            c.step = "encode"
+            profile = _profile(c)
+            placed, notes = _place(c)
+        envelope = _encode(c, placed, profile)
+        at = c.clock().isoformat()
+        steps = {name: dr.StepState("done", at=at) for name in ("validate", "place", "encode")}
+        steps["place"] = dr.StepState("done", at=at, result={"notes": list(notes)})
+        token = delivery.receipt_token(c.result.key, c.item["prompt"])
+        steps["encode"] = dr.StepState(
+            "done", at=at, result={"receipt": {"version": delivery.RECEIPT_VERSION, "token": token}}
+        )
+        steps["create"] = dr.StepState("attempted", at=at)
+        attempt = dr.Attempt(None, None, c.result.display_name or "", envelope, placed, steps)
+        c.save(c.journal.with_attempt(attempt))
+        c.result = replace(c.result, status="dispatched")
+    return True
 
 
 def run_dispatch(
@@ -1089,13 +1069,25 @@ def run_dispatch(
     plan: object,
     run_id: str,
     port: OrcaPort,
+    notifier: PlacementNotifier,
     today: date,
     clock: Callable[[], datetime],
     probe: bool = True,
     settle_seconds: float = 10.0,
     sleep: Callable[[float], None] = time.sleep,
+    retry_of: str | None = None,
 ) -> DispatchResult:
-    c = _Dispatch(layout, port, today, clock, DispatchResult(None, key, run_id))
+    """Dispatch one planned stage: place it through the engine, then launch, settle and record.
+
+    A fresh dispatch places before any Orca call, so a refusal leaves no Task,
+    envelope or journal attempt; a resumed attempt never places again.
+
+    *retry_of* relaunches the journal's latest attempt (a parked or failed
+    worker) on the same Task: its preconditions are checked under the key's
+    execution owner before anything else, place runs verify-only, and a new
+    attempt with `create` skipped is launched with `--retry-of <dispatch-id>`.
+    """
+    c = _Dispatch(layout, port, today, clock, DispatchResult(None, key, run_id), notifier)
     with ExitStack() as ownership:
         try:
             _validate(c, plan)
@@ -1106,30 +1098,12 @@ def run_dispatch(
                 raise dr.DispatchRecordConflict("dispatch record changed before execution ownership; retry")
             if pending_return(layout, c.item["path"]) is not None:
                 raise _Stop("recovery-inspection", "execute return is pending; inspect or resume before dispatch")
-            resuming = _resolve(c)
-            if c.result.status == "existing":
+            if retry_of is not None:
+                _journal_retry(c, _retried(c, retry_of), retry_of)
+            elif not _begin(c):
                 if probe:
                     _recheck_delivery(c)
                 return c.result
-            if not resuming:
-                # Reject overrides before *any* placement write or provisioning.
-                c.step = "encode"
-                profile = dr.apply_overrides(
-                    c.item["agent"], c.item.get("model"), c.item.get("reasoning_effort"), c.journal.latest_overrides()
-                )
-                placed, notes = _place(c)
-                envelope = _encode(c, placed, profile)
-                at = clock().isoformat()
-                steps = {name: dr.StepState("done", at=at) for name in ("validate", "place", "encode")}
-                steps["place"] = dr.StepState("done", at=at, result={"notes": list(notes)})
-                token = delivery.receipt_token(c.result.key, c.item["prompt"])
-                steps["encode"] = dr.StepState(
-                    "done", at=at, result={"receipt": {"version": delivery.RECEIPT_VERSION, "token": token}}
-                )
-                steps["create"] = dr.StepState("attempted", at=at)
-                attempt = dr.Attempt(None, None, c.result.display_name or "", envelope, placed, steps)
-                c.save(c.journal.with_attempt(attempt))
-                c.result = replace(c.result, status="dispatched")
             operations: tuple[tuple[str, Callable[[], None]], ...] = (
                 ("create", lambda: _create(c)),
                 ("launch", lambda: _launch(c)),

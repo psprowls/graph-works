@@ -435,18 +435,12 @@ def file(
         raise typer.Exit(code=1)
     if dry_run:
         typer.echo(outcome.plan.filing.diff())
-        for index in outcome.plan.indexes:
-            if index.changed:
-                typer.echo(f"would reconcile {index.path}")
         if outcome.plan.log is not None and outcome.plan.log.changed:
             typer.echo(outcome.plan.log.diff())
         return
     outcome = FilingOutcome(plan=outcome.plan, application=apply_file_and_reconcile(outcome.plan))
     # Report the preflighted canonical target rather than composing it twice.
     typer.echo(f"wrote {outcome.plan.filing.target.relative_to(root).as_posix()}")
-    for update in outcome.application.indexes:
-        if update.changed:
-            typer.echo(f"reconciled {update.path}")
     if outcome.application.log is not None:
         typer.echo(f"wrote log.md: {outcome.application.log.entry.removeprefix('- ')}")
 

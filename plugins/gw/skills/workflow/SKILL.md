@@ -138,17 +138,11 @@ inspect the result before any retry. When there is no dispatch transition,
 stage completion keeps the phase captured in step 1.
 
 **Supervised dispatch.** When the prompt that launched this session carries a
-`Dispatch key:` line, a coordinator dispatched it and records where it runs.
-Every `gw work advance` this skill runs then adds `--no-infer-worktree` and
-never `--worktree`/`--branch` — here, and at step 5. An attended session
-(no `Dispatch key:` line) keeps today's behavior.
+`Dispatch key:` line, a coordinator dispatched it, placed the item's worktree
+with `gw work place` and launched this session in it. An attended session (no
+`Dispatch key:` line) places the worktree itself, below.
 
-**Workspace branch at execute.** When the dispatch transition (or the current
-phase) enters `execute`, run `gw work prepare-workspace <work-path> --apply --json`
-after it, adding nothing else under a supervised dispatch. A refusal stops the
-stage with its `refusal.detail`. A `note` (workspace placement disabled)
-continues without a content root. Otherwise keep `placement.worktree` and
-`placement.branch` for step 3.
+**Placement (attended sessions only).** After the dispatch transition, run `gw work place <work-path> --ensure --json`, or `gw work place <work-path> --start --json` when the stage about to run is `execute` (entered now, or already the phase). `--start` ensures the item's computed worktree exists, refreshes it from its parent branch and records its HEAD as the item's `start_sha`, which the `execute -> finish` gate reads; it is a no-op on a retry. `placement: null` means the item touches only the workspace: it has no code root, every stage runs in the workspace primary checkout, and the stage continues. A refusal stops the stage with its `refusal.detail`; the kinds are `unknown-item`, `git-unavailable`, `parent-unresolved`, `foreign-checkout`, `occupied`, `dirty-worktree`, `refresh-conflict`, `timeout`, `wrong-phase`, `already-started` and `not-finished`. For `refresh-conflict`, tell the human to resolve the merge in the named worktree, then rerun `/gw:workflow <work-path>`; never retry it yourself. For `already-started`, the checkout already carries commits past its branch point, so where the stage started can no longer be read: report `refusal.detail` and stop for a human. For every other kind, report and stop. Never work around a refusal: no forcing, no manual removal, no worktree you create yourself. Keep `placement.worktree`, `placement.branch` and `repo.name` for step 3. Under a supervised dispatch (`Dispatch key:` present) skip this step.
 
 ### 3. Dispatch the stage skill
 
@@ -160,8 +154,6 @@ exit advance at step 5 deliberately leaves the pointer alone, so this session's
 transcript is not filed under the next phase. A refusal or a "not written"
 warning is a note to relay, never a reason to stop: capture is provenance, not
 a gate.
-
-**Record the execute baseline.** When the stage about to run is `execute` (the phase captured in step 1, or entered by step 2's dispatch transition), run `gw work record-baseline <work-path> --json` from the checkout where the stage's code work starts — the session's own checkout, or `--cwd <worktree>` when the item's frontmatter names a `worktree:` the rider sends the stage to — before invoking the stage skill. It records that checkout's HEAD as the item's `start_sha`, which the `execute -> finish` gate reads. Under a supervised dispatch it is a no-op when `gw work dispatch` already recorded the baseline. A refusal (`baseline-conflict`, `wrong-checkout`, `already-started`, `outside-repository`, `git-unavailable`, `no-repo`) stops the stage: report it rather than starting code work without a baseline. `wrong-checkout` means the item records a different `worktree:` — rerun with `--cwd` at that worktree. `already-started` means the checkout already carries commits past its branch point, so where the stage started can no longer be read; never record from another checkout to get past it — a human decides between `--skip-gate no-start-sha` at advance and returning the item to execute.
 
 Invoke the stage skill named by `action.skill` via the Skill tool, using the
 value **verbatim**, prepending a work-item brief.
@@ -195,9 +187,7 @@ another stage, same as the stock skill it replaces.
   stage starts from durable artifacts, not from memory
 - when `artifact.path` is set: "Write your output document to
   `<artifact.path>` — this overrides the skill's default location."
-- **Workspace content root.** When step 2 produced a placement, add the line
-  `Workspace content root: <worktree> (branch <branch>). Write workspace content there — run content-producing commands with GRAPH_WORKS_DIR=<worktree> — and commit it on that branch. Run every gw work verb against GRAPH_WORKS_DIR=<workspace>.`
-  This is the same line `gw work orchestrate` puts in a supervised prompt.
+- **Code root.** In an attended session, when step 2 produced a placement, add the line `Code root: <worktree> (branch <branch>, repository <repo>). This is the item's only checkout. cd there before reading or changing code, and run git, tests and gw work gate from there. Never create another worktree and never switch its branch. Write workspace content (artifacts, decisions, work items) to <workspace> as before.` A supervised session already starts in the worktree and its coordinator's prompt carries the same line. Add nothing when `placement` is null.
 - when the `gw next` output's `guidance_file` is non-null, add a
   `## Relevant guidance` block to the brief pointing the stage skill at the
   assembled bundle:
@@ -325,8 +315,8 @@ When `carried_context.slots.execute_return` has lines, read the coverage locatio
 ### 5. Advance
 
 For a finish dispatch, include the complete `next.finish_targets` list in
-both the attended brief and relay brief: repository, worktree, source branch
-and target branch for every entry. Require test results and an integration
+both the attended brief and relay brief: `repo.name`, `worktree`, `source_branch`,
+`target_branch` and `target_worktree` for every entry. Require test results and an integration
 choice for the entire set. The outcome rows below apply only after **every**
 target has verified integration evidence and green merged-result checks.
 Record that evidence as the workflow-owned finish receipt; missing evidence,
@@ -338,9 +328,9 @@ owns its one advance after the stock finishing skill returns.
 For non-finish stages and satisfied gates, run `gw work advance <work-path> --from <expected-phase>`
 with whatever flags the stage produced (`--effort` if the command demands it).
 A same-phase completion (`--from plan` landing at `plan`) is normal for a plan-stage reconcile: it re-stamps the spec baseline, and the next `gw work next` dispatches writing-plans.
-Under a supervised dispatch (step 2), add `--no-infer-worktree`; this applies to the finish-outcome rows below too.
+Never pass `--worktree` or `--branch`: placement is computed, not stored.
 
-**Gate refusals.** The `execute -> finish` advance fails closed. It refuses with `no-affects`, `no-repo`, `worktree-missing`, `git-unavailable`, `uncommitted-work`, `no-start-sha`, `range-unreadable`, `no-commits`, `no-affects-touched`, `no-gate-receipt`, `no-gate-configured`, `units-invalid` or `units-command-failed`, and its `refusal.detail` says what is missing. Fix the cause when you can (commit the work, restore the worktree, configure `toolchain.git`, run `gw work gate run <work-path>` and `gw work gate wait <work-path>` for `no-gate-receipt`, configure `repositories.<name>.gate.full` for `no-gate-configured`, repair the repository's `gate.units` manifest command for `units-invalid` / `units-command-failed` (its `refusal.detail` carries the validation message or the command's stderr tail)) and advance again. Only a human may bypass one: in an attended session, show the refusal and ask the user whether to bypass exactly that code; on a yes, run `gw work advance <work-path> --from execute --skip-gate <code> --reason "<their reason>" --actor <their handle>`, which records an answered decision in the ledger. A supervised worker must never pass `--skip-gate`: it sends `worker_done --outcome failed` with subject `gate refused: <code>` and the refusal detail in its body, and stops.
+**Gate refusals.** The `execute -> finish` advance fails closed. It refuses with `no-affects`, `no-repo`, `worktree-missing`, `git-unavailable`, `uncommitted-work`, `range-unreadable`, `no-commits`, `no-affects-touched`, `no-gate-receipt`, `no-gate-configured`, `units-invalid` or `units-command-failed`, and its `refusal.detail` says what is missing. Fix the cause when you can (commit the work, restore the worktree, configure `toolchain.git`, run `gw work gate run <work-path>` and `gw work gate wait <work-path>` for `no-gate-receipt`, configure `repositories.<name>.gate.full` for `no-gate-configured`, repair the repository's `gate.units` manifest command for `units-invalid` / `units-command-failed` (its `refusal.detail` carries the validation message or the command's stderr tail)) and advance again. Only a human may bypass one: in an attended session, show the refusal and ask the user whether to bypass exactly that code; on a yes, run `gw work advance <work-path> --from execute --skip-gate <code> --reason "<their reason>" --actor <their handle>`, which records an answered decision in the ledger. A supervised worker must never pass `--skip-gate`: it sends `worker_done --outcome failed` with subject `gate refused: <code>` and the refusal detail in its body, and stops.
 
 **Returned-scope refusals.** `return-evidence-missing`, `return-evidence-stale`, `return-evidence-incomplete`, `return-plan-changed` and `return-metadata-invalid` are non-bypassable. Fix the report or return again; never `--skip-gate`.
 
@@ -375,7 +365,7 @@ it per `<plugin>/skills/finishing-relay/references/finish-cleanup.md`:
 uv run --package gw-pipeline python <plugin>/skills/finishing-relay/references/finish-receipt.py cleanup <work-path> --workspace <workspace> --runner-cwd "$PWD"
 ```
 
-Name any `deferred` worktree for the user: "remove it from another directory with `git worktree remove <path>` (or `orca worktree rm`)".
+Print the `command` of any `deferred` row for the user to run from another directory; never run it from inside the worktree it removes.
 Held outcomes run no cleanup. The relay row stays "no advance" and adds nothing here: relay R5
 already cleaned up, and the coordinator removed its deferred worktree.
 
@@ -440,6 +430,7 @@ context window).
 2. **Point at archiving; never offer it (any terminal status).** Say that
    `<work-path>` stays in `work/` and can be archived later, from a fresh
    session, with `/gw:archive <work-path>`.
+   `/gw:archive` runs `gw work archive`, which also deletes the item's merged branches through `gw work place --prune`.
    This skill never runs `/gw:archive`.
 
 ### Detaching a child
@@ -474,15 +465,7 @@ uv run --package gw-orchestrate python <plugin>/skills/finishing-relay/reference
 uv run --package gw-pipeline python <plugin>/skills/finishing-relay/references/finish-receipt.py cleanup <work-path> --workspace <workspace> --runner-cwd <cwd>
 ```
 
-Inspect before any integration. `gw work integrate` records code targets itself; record each workspace-anchor target immediately after its merge and merged-result
-checks pass.
-For a `_workspace` entry in `finish_targets` targeting workspace `main`, run
-`gw work merge-workspace <work-path> --apply --json`. It merges and records
-that receipt entry in one locked step; do not run `record` for it. A
-`_workspace` target that is an epic's workspace anchor is merged like code
-(`git merge` in the anchor worktree), then recorded with
-`finish-receipt.py record <work-path> --workspace <workspace> --repo _workspace`.
-A `merge-failed` refusal holds the entire finish.
+Inspect before any integration. `gw work integrate` records code targets itself.
 `record` commits the receipt itself; do not commit the workspace.
 `record` derives commit evidence itself; never hand-author completion
 claims. Preserve source branches and worktrees until the item resolves: the
@@ -498,7 +481,7 @@ repair, not replacement. No cross-repository atomicity is promised.
 
 Run `inspect` again after recording every target. Only `complete: true` authorizes
 the single final advance; use its `resolved_in` verbatim and
-`gw work advance <work-path> --from finish --no-infer-worktree --resolved-in <resolved_in>`
+`gw work advance <work-path> --from finish --resolved-in <resolved_in>`
 (with the required Release date when applicable). An incomplete inspection exits
 nonzero and names blockers. No helper mode merges, advances or removes
 anything; `cleanup` only prints the plan.

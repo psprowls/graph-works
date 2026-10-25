@@ -108,9 +108,7 @@ def test_two_guarded_writers_serialize_and_only_one_applies(tmp_path: Path, monk
     page = _design_with_artifacts(layout)
 
     def call():
-        return stage.run_stage_advance(
-            layout, ITEM, today=TODAY, expected_phase="design", infer_worktree=False, dry_run=False
-        )
+        return stage.run_stage_advance(layout, ITEM, today=TODAY, expected_phase="design", dry_run=False)
 
     entered, release = _pause(monkeypatch, stage, "apply_mutation")
     paused_apply = stage.apply_mutation
@@ -162,9 +160,6 @@ def test_stale_guard_preserves_page_artifacts_and_pointer(tmp_path: Path, dry_ru
         ITEM,
         today=TODAY,
         expected_phase="plan",
-        worktree="/tmp/stale-place",
-        branch="stale-branch",
-        infer_worktree=False,
         dry_run=dry_run,
     )
 
@@ -189,14 +184,14 @@ def test_unsized_design_refuses_before_apply_and_supplied_effort_succeeds(
 
     with monkeypatch.context() as patch:
         patch.setattr(stage, "apply_mutation", lambda *a, **k: pytest.fail("must refuse before apply"))
-        refused = stage.run_stage_advance(layout, ITEM, today=TODAY, infer_worktree=False, dry_run=dry_run)
+        refused = stage.run_stage_advance(layout, ITEM, today=TODAY, dry_run=dry_run)
 
     assert refused.outcome.plan.refusal == "effort-required"
     assert refused.application is None
     assert refused.results_path is None and refused.pointer_path is None
     assert {path: path.read_bytes() for path in watched} == before
 
-    accepted = stage.run_stage_advance(layout, ITEM, today=TODAY, effort="medium", infer_worktree=False, dry_run=False)
+    accepted = stage.run_stage_advance(layout, ITEM, today=TODAY, effort="medium", dry_run=False)
     assert accepted.outcome.plan.refusal is None
     assert accepted.application is not None and accepted.application.ok
     assert load(page).fm_data()["phase"] == "plan"

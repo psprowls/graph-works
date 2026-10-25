@@ -238,6 +238,8 @@ def test_archive_json_conflict_carries_the_conflicting_paths(monkeypatch: pytest
         wiki=None,
         wiki_commit=None,
         pointer_cleared=False,
+        pruned=None,
+        prune_warnings=(),
         logged=None,
         ok=False,
     )
@@ -274,6 +276,8 @@ def test_archive_json_incomplete_apply_carries_an_error_envelope(
         wiki=wiki,
         wiki_commit=None,
         pointer_cleared=False,
+        pruned=None,
+        prune_warnings=(),
         logged=None,
         ok=True,
     )
@@ -305,6 +309,8 @@ def test_wiki_archive_json_refusal_carries_the_computed_refusals_in_the_envelope
         wiki=None,
         wiki_commit=None,
         pointer_cleared=False,
+        pruned=None,
+        prune_warnings=(),
         logged=None,
         ok=False,
     )

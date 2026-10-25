@@ -31,21 +31,17 @@ from gw_orchestrate.commands import run_orchestrate
 from gw_orchestrate.dispatch import run_dispatch
 from gw_orchestrate.gate import gate_wait_facts
 from gw_orchestrate.integrate import run_integrate
-from gw_orchestrate.merge_workspace import run_merge_workspace
-from gw_orchestrate.placement import (
-    ReaderObservation,
-    run_record_baseline,
-    run_record_placement,
-    run_record_reader,
-)
 from gw_orchestrate.reroute import run_reroute
 from gw_orchestrate.stage_advance import ExpectedPhase, run_stage_advance
 from gw_orchestrate.wait import WAIT_FLOOR_S, WaitClock, WaitFailed, apply_wait_floor, run_wait
-from gw_orchestrate.workspace_prepare import run_prepare_workspace
 from gw_pipeline.finish import STRATEGIES, IntegrationStrategy
+from gw_pipeline.place import PlaceMode
 from gw_wire import work as wire_work
+from gw_wire._jsonable import commit_payload
 from gw_work import commands as work
 from gw_work.archive.commands import run_archive, stranded_warnings
+from gw_work.migrate_placement import apply_migrate_placement, plan_migrate_placement
+from gw_work.place import run_place
 
 from gw_cli import exit_codes
 from gw_cli.provenance import warn_if_stale_routing
@@ -54,7 +50,7 @@ from gw_cli.work_cli.ask import ask, ask_answer
 from gw_cli.work_cli.decision import decision_app
 from gw_cli.work_cli.gate import gate_app
 from gw_cli.work_cli.obligation import obligation_app
-from gw_cli.work_cli.orca import orca_port
+from gw_cli.work_cli.orca import orca_port, placement_notifier
 from gw_cli.work_cli.reconcile import reconcile_context
 from gw_cli.workspace_resolution import resolve_workspace
 
@@ -254,8 +250,6 @@ def file(
         typer.echo(outcome.plan.filing.diff())
         return
     typer.echo(f"[ok] filed {payload['path']}: {payload['page_path']}")
-    for path in payload["indexes"]:
-        typer.echo(f"  reconciled {path}")
     if payload["logged"]:
         typer.echo(f"  log.md: {payload['logged'].removeprefix('- ')}")
     rendering.render_commit(payload["commit"])
@@ -392,15 +386,11 @@ def advance(
     owner: str = typer.Option("", "--owner", help="Handle to record when execution starts."),
     resolved_in: str = typer.Option("", "--resolved-in", help="PR or commit ref."),
     released_at: str = typer.Option("", "--released-at", help="Release date (YYYY-MM-DD)."),
-    worktree: str = typer.Option("", "--worktree", help="The item's worktree path, when the caller knows it."),
-    branch: str = typer.Option("", "--branch", help="The item's branch, paired with --worktree."),
     no_infer_worktree: bool = typer.Option(
         False,
         "--no-infer-worktree",
-        help="Never infer the worktree/branch from the current directory (every supervised worker passes this).",
-    ),
-    start_sha: str = typer.Option(
-        "", "--start-sha", help="Where this phase started; required for a finish-stage results stub."
+        hidden=True,
+        help="Retired; accepted and ignored.",
     ),
     return_: bool = typer.Option(False, "--return", help="Send an item at `finish` back to `execute`."),
     return_scope: list[str] = typer.Option(  # noqa: B008 - Typer declares options in defaults
@@ -423,18 +413,10 @@ def advance(
 ) -> None:
     """Apply the routing table's next transition for PATH.
 
-    The pipeline's single mutation point. An explicit `--worktree`/`--branch`
-    pair is applied unconditionally -- it is the caller's own resolved
-    decision, which is what lets an item be evicted out of a shared main
-    checkout; without the pair, a top-level item falls back to cwd inference
-    unless `--no-infer-worktree` is given; a descendant never infers — its
-    coordinator records placement with `gw work record-placement`.
+    The pipeline's single mutation point. Advance never writes placement.
 
-    `--start-sha` names where the phase being completed began. Out of `execute`
-    it is optional — core derives one from the worktree's merge base against the
-    default branch, then from the spec's own anchors. Out of `finish` there is no
-    derivation: a guessed range there would sweep in the whole execute range, so
-    the stub is written only when this flag is given.
+    The execute -> finish gate measures the item's own commits in its computed
+    worktree against its parent branch; there is no baseline option.
 
     `--return` is the way home: it walks the routing table's one backwards
     transition, `finish` -> `execute`, for an item that reached `finish`
@@ -452,6 +434,8 @@ def advance(
     workers never pass it; a human does.
     """
     warn_if_stale_routing()
+    if no_infer_worktree:
+        rendering.warn("--no-infer-worktree is retired and ignored")
     layout = resolve_workspace(workspace)
     try:
         result = run_stage_advance(
@@ -463,10 +447,6 @@ def advance(
             owner=owner or None,
             resolved_in=resolved_in or None,
             released_at=_optional_date(released_at, "--released-at"),
-            worktree=worktree or None,
-            branch=branch or None,
-            infer_worktree=not no_infer_worktree,
-            start_sha=start_sha or None,
             return_=return_,
             return_scope=tuple(return_scope),
             skip_gate=skip_gate or None,
@@ -507,60 +487,34 @@ def advance(
     rendering.render_commit(payload["commit"])
 
 
-@work_app.command(name="record-placement")
-def record_placement(
-    path: str = typer.Argument(..., help="Extensionless bundle-relative canonical concept path."),
-    root: str = typer.Option(..., "--root", help="The orchestration subtree root this dispatch belongs to."),
-    phase: str = typer.Option(..., "--phase", help="The phase of the dispatch being recorded."),
-    worktree: str = typer.Option(..., "--worktree", help="The observed absolute worktree path."),
-    branch: str = typer.Option(..., "--branch", help="The observed branch name, without `refs/heads/`."),
-    repo_name: str = typer.Option("", "--repo-name", help="Select among several declared repositories."),
-    repo: str = typer.Option(
-        "",
-        "--repo",
-        help=(
-            "Declared repository the observed pair lives in; one other than the item's own is "
-            "recorded under repo_stamps."
-        ),
-    ),
-    start_sha: str = typer.Option("", "--start-sha", help="The observed commit this placement's work starts from."),
+@work_app.command(name="place")
+def place(
+    path: str | None = typer.Argument(None, help="Extensionless bundle-relative canonical concept path."),
+    ensure: bool = typer.Option(False, "--ensure", help="Ensure the item's worktree exists (default mode)."),
+    start: bool = typer.Option(False, "--start", help="Ensure placement and record the execute baseline."),
+    remove: bool = typer.Option(False, "--remove", help="Remove the item's verified finished worktree."),
+    prune: bool = typer.Option(False, "--prune", help="Prune finished worktrees under PATH, or the whole workspace."),
     dry_run: bool = typer.Option(False, "--dry-run", help="Print the plan instead of writing."),
+    repo_name: str = typer.Option("", "--repo-name", help="Select among several declared repositories."),
     workspace: str = typer.Option("", "--workspace", help="Workspace path."),
-    json_output: bool = rendering.json_option("Emit the placement record as JSON."),
+    json_output: bool = rendering.json_option("Emit the placement result as JSON."),
 ) -> None:
-    """Record where a dispatched stage runs. Never advances PATH.
-
-    Writes `worktree`, `branch` and `updated` -- or, with `--repo` naming a
-    repository other than PATH's own, `repo_stamps[NAME]` and `updated`
-    instead. Refuses -- writing nothing -- when PATH is not ROOT or its
-    descendant, when a descendant is recorded at `design` or `plan`, when
-    PATH's phase is no longer `--phase`, and for an invalid or terminal item
-    or an invalid observation. An identical pair is a no-op. The values must
-    be observed, never the planner's requested names.
-
-    `--repo-name` selects the code repository when `workspace.yaml` declares
-    several and PATH's chain sets no `repo:`; an item whose own or an
-    ancestor's `repo:` already resolves one needs neither flag, and a
-    conflicting `--repo-name` refuses.
-
-    `--repo` names the repository the pair was observed in. A repository
-    other than PATH's own records under `repo_stamps`; its own records the
-    scalar pair.
-    """
+    """Place an item's worktree, record its baseline, or clean up finished placements."""
+    if sum((ensure, start, remove, prune)) > 1:
+        rendering.fail("--ensure, --start, --remove, and --prune are mutually exclusive", reason="usage")
+    if not path and not prune:
+        rendering.fail("PATH is required unless --prune is selected", reason="usage")
+    mode: PlaceMode = "start" if start else "remove" if remove else "prune" if prune else "ensure"
     layout = resolve_workspace(workspace)
     try:
-        result = run_record_placement(
+        result = run_place(
             layout,
-            path,
-            root=root,
-            phase=phase,
-            worktree=worktree,
-            branch=branch,
-            today=_today(),
-            repo_name=repo_name or None,
-            repo=repo or None,
+            path or None,
+            mode=mode,
             dry_run=dry_run,
-            start_sha=start_sha or None,
+            repo_name=repo_name or None,
+            today=_today(),
+            notifier=placement_notifier(),
         )
     except WorkspaceError as exc:
         rendering.fail(str(exc), reason="workspace", code=exit_codes.SCHEMA_MISMATCH, cause=exc)
@@ -569,132 +523,70 @@ def record_placement(
     except OSError as exc:
         rendering.fail(str(exc), reason="io", cause=exc)
 
-    payload = wire_work.placement_payload(result)
-    if payload["refusal"] is not None:
-        rendering.fail(
-            f"{path}: refused ({payload['refusal']['reason']}) — {payload['refusal']['detail']}",
-            reason="refused",
-            payload=payload,
-        )
-    if payload["applied"] and (payload["rolled_back"] or payload["failures"]):
-        for failure in payload["failures"]:
-            rendering.warn(failure)
-        rendering.fail(f"{path}: apply was incomplete", reason="incomplete-apply", payload=payload)
+    payload = wire_work.place_payload(result)
     for warning in payload["warnings"]:
         rendering.warn(warning)
-    if json_output:
-        rendering.emit(payload)
-        if payload["repo_note"]:
-            rendering.warn(payload["repo_note"])
-        return
-    rendering.render_placement(payload)
-    rendering.render_commit(payload["commit"])
-
-
-@work_app.command(name="record-baseline")
-def record_baseline(
-    path: str = typer.Argument(..., help="Extensionless bundle-relative canonical concept path."),
-    cwd: str = typer.Option("", "--cwd", help="Checkout whose HEAD is recorded; default: the current directory."),
-    repo_name: str = typer.Option("", "--repo-name", help="Select among several declared repositories."),
-    dry_run: bool = typer.Option(False, "--dry-run", help="Print the plan instead of writing."),
-    workspace: str = typer.Option("", "--workspace", help="Workspace path."),
-    json_output: bool = rendering.json_option("Emit the baseline record as JSON."),
-) -> None:
-    """Record where this item's execute stage starts.
-
-    Records HEAD of --cwd (default: the current directory), which must be in the
-    item's code repository. Run by the workflow skill before an execute stage's
-    code work starts. An already-recorded baseline HEAD descends from is kept; an
-    unrelated one refuses.
-    """
-    layout = resolve_workspace(workspace)
-    try:
-        result = run_record_baseline(
-            layout,
-            path,
-            cwd=Path(cwd) if cwd else Path.cwd(),
-            today=_today(),
-            repo_name=repo_name or None,
-            dry_run=dry_run,
-        )
-    except WorkspaceError as exc:
-        rendering.fail(str(exc), reason="workspace", code=exit_codes.SCHEMA_MISMATCH, cause=exc)
-    except ValueError as exc:
-        rendering.fail(str(exc), reason="unresolved", code=exit_codes.AMBIGUOUS, cause=exc)
-    except OSError as exc:
-        rendering.fail(str(exc), reason="io", cause=exc)
-
-    payload = wire_work.baseline_payload(result)
     if payload["refusal"] is not None:
         rendering.fail(
-            f"{path}: refused ({payload['refusal']['reason']}) — {payload['refusal']['detail']}",
+            f"{path}: refused ({payload['refusal']['kind']}) — {payload['refusal']['detail']}",
             reason="refused",
             payload=payload,
         )
-    if payload["applied"] and (payload["rolled_back"] or payload["failures"]):
-        for failure in payload["failures"]:
-            rendering.warn(failure)
+    if result.application is not None and not result.application.ok:
         rendering.fail(f"{path}: apply was incomplete", reason="incomplete-apply", payload=payload)
-    for warning in payload["warnings"]:
-        rendering.warn(warning)
     if json_output:
         rendering.emit(payload)
-        if payload["repo_note"]:
-            rendering.warn(payload["repo_note"])
         return
-    typer.echo(f"{path}: start_sha {payload['after']} ({'recorded' if payload['written'] else 'unchanged'})")
-    rendering.render_commit(payload["commit"])
+    for step in payload["chain"]:
+        line = f"{step['path']}: {step['action']} {step['worktree']} ({step['branch']})"
+        if step["refresh"] is not None:
+            line += f", refresh {step['refresh']['kind']}"
+        if step["orca"] is not None:
+            line += f"; {step['orca']}"
+        typer.echo(line)
+    if payload["pruned"] is not None:
+        pruned = payload["pruned"]
+        typer.echo("removed worktrees:")
+        for worktree in pruned["removed_worktrees"]:
+            typer.echo(f"  {worktree}")
+        typer.echo("deleted branches:")
+        for branch in pruned["deleted_branches"]:
+            typer.echo(f"  {branch}")
+        typer.echo("kept:")
+        for kept in pruned["kept"]:
+            typer.echo(f"  {kept['path']}: {kept['repo']} {kept['branch']} ({kept['why']})")
+    rendering.render_commit(commit_payload(result.workspace_commit))
 
 
-@work_app.command(name="record-reader")
-def record_reader(
-    path: str = typer.Argument(..., help="Extensionless bundle-relative canonical concept path."),
-    root: str = typer.Option(..., "--root", help="The orchestration subtree root this dispatch belongs to."),
-    phase: str = typer.Option(..., "--phase", help="The phase of the dispatch being recorded."),
-    task_id: str = typer.Option(..., "--task-id", help="The dispatched task identifier."),
-    dispatch_id: str = typer.Option(..., "--dispatch-id", help="The dispatch attempt identifier."),
-    dispatch_key: str = typer.Option(..., "--dispatch-key", help="The planner's dispatch key."),
-    repo: str = typer.Option(..., "--repo", help="The declared repository the reader observed."),
-    worktree: str = typer.Option(..., "--worktree", help="The observed absolute worktree path."),
-    start_sha: str = typer.Option(..., "--start-sha", help="The observed full detached commit OID."),
-    dry_run: bool = typer.Option(False, "--dry-run", help="Print the plan instead of writing."),
+@work_app.command(name="migrate-placement")
+def migrate_placement(
+    apply: bool = typer.Option(False, "--apply", help="Clean up git and strip the retired keys (default: plan only)."),
     workspace: str = typer.Option("", "--workspace", help="Workspace path."),
-    json_output: bool = rendering.json_option("Emit the reader receipt as JSON."),
+    json_output: bool = rendering.json_option("Emit the migration plan or result as JSON."),
 ) -> None:
-    """Record the detached commit a design/plan dispatch actually launched on.
-
-    Writes one receipt under the workspace cache; never the item page, never a stamp.
-    """
+    """Retire stored placement fields: remove finished worktrees and merged branches, then strip the keys."""
     layout = resolve_workspace(workspace)
     try:
-        result = run_record_reader(
-            layout,
-            path,
-            root=root,
-            phase=phase,
-            observation=ReaderObservation(task_id, dispatch_id, dispatch_key, repo, worktree, start_sha),
-            dry_run=dry_run,
-        )
+        plan = plan_migrate_placement(layout)
+        result = apply_migrate_placement(layout, plan, today=_today()) if apply else None
     except WorkspaceError as exc:
         rendering.fail(str(exc), reason="workspace", code=exit_codes.SCHEMA_MISMATCH, cause=exc)
-    except ValueError as exc:
-        rendering.fail(str(exc), reason="unresolved", code=exit_codes.AMBIGUOUS, cause=exc)
     except OSError as exc:
         rendering.fail(str(exc), reason="io", cause=exc)
-
-    payload = wire_work.reader_receipt_payload(result)
+    payload = wire_work.migrate_placement_payload(plan, result)
     if payload["refusal"] is not None:
+        detail = result.failed_step if result is not None and result.failed_step else None
         rendering.fail(
-            f"{path}: refused ({payload['refusal']['reason']}) — {payload['refusal']['detail']}",
+            f"migrate-placement refused ({payload['refusal']})" + (f": {detail}" if detail else ""),
             reason="refused",
             payload=payload,
         )
-    if payload["conflict"] is not None:
-        rendering.fail(f"{path}: attempt-mismatch", reason="attempt-mismatch", payload=payload)
     if json_output:
         rendering.emit(payload)
         return
-    rendering.render_reader_receipt(payload)
+    rendering.render_migrate_placement(payload)
+    if result is not None:
+        rendering.render_commit(commit_payload(result.commit))
 
 
 @work_app.command(name="touch-active-work")
@@ -781,10 +673,21 @@ def dispatch(
     run: str = typer.Option(..., "--run", help="The Orca Run id."),
     no_probe: bool = typer.Option(False, "--no-probe", help="Skip the submission probe."),
     settle_seconds: float = typer.Option(10.0, "--settle-seconds", help="Probe settle interval."),
+    retry_of: str = typer.Option(
+        "",
+        "--retry-of",
+        help="Relaunch this dispatch id (the key's latest attempt) on the same Task: retry or park-resume.",
+    ),
     workspace: str = typer.Option("", "--workspace", help="Workspace path."),
     json_output: bool = rendering.json_option("Emit the dispatch envelope as JSON."),
 ) -> None:
-    """Dispatch one saved planned stage, resuming a journaled attempt by key."""
+    """Dispatch one saved planned stage, resuming a journaled attempt by key.
+
+    A fresh stage is placed first: its computed worktree is made by the placement
+    engine before any Orca call, and the worker launches into that path. With
+    --retry-of, the key's latest attempt is relaunched on its existing Task in the
+    same computed worktree, verified but not refreshed.
+    """
     layout = resolve_workspace(workspace, json_mode=json_output, command="work dispatch")
     try:
         document = json.loads(sys.stdin.read() if plan == "-" else Path(plan).read_text(encoding="utf-8"))
@@ -797,10 +700,12 @@ def dispatch(
             plan=document,
             run_id=run,
             port=orca_port(),
+            notifier=placement_notifier(),
             today=_today(),
             clock=lambda: datetime.now(UTC),
             probe=not no_probe,
             settle_seconds=settle_seconds,
+            retry_of=retry_of or None,
         )
     except WorkspaceError as exc:
         rendering.fail(str(exc), reason="workspace", code=exit_codes.SCHEMA_MISMATCH, cause=exc)
@@ -816,12 +721,8 @@ def dispatch(
         typer.echo(f"{payload['status']} {payload['task_id']} for {key}; placement was not read back")
         return
     placement = payload["placement"]
-    if placement.get("branch") is None and placement.get("start_sha"):
-        typer.echo(
-            f"dispatched {key} -> {placement.get('path')} detached at {placement['start_sha']} ({payload['status']})"
-        )
-    else:
-        typer.echo(f"dispatched {key} -> {placement.get('path')} on {placement.get('branch')} ({payload['status']})")
+    branch = placement.get("branch") or "the workspace checkout"
+    typer.echo(f"dispatched {key} -> {placement.get('path')} on {branch} ({payload['status']})")
     for note in placement.get("notes", []):
         typer.echo(f"note {key}: {note}")
 
@@ -1030,6 +931,7 @@ def archive(
             typer.echo(f"log.md: {payload['logged']}")
         rendering.render_commit(payload["commit"])
         rendering.render_commit(payload["wiki_commit"])
+        rendering.render_pruned(payload["pruned"])
 
 
 def _finish_path_mutation(payload: dict[str, object], *, dry_run: bool, json_output: bool) -> None:
@@ -1103,42 +1005,6 @@ def adopt(
     _finish_path_mutation(wire_work.path_mutation_payload(result), dry_run=dry_run, json_output=json_output)
 
 
-@work_app.command(name="prepare-workspace")
-def prepare_workspace(
-    path: str = typer.Argument(..., help="Extensionless bundle-relative canonical concept path."),
-    apply: bool = typer.Option(False, "--apply", help="Create and record; without it, print the plan."),
-    workspace: str = typer.Option("", "--workspace", help="Workspace path."),
-    json_output: bool = rendering.json_option("Emit the preparation as JSON."),
-) -> None:
-    """Create PATH's gw-owned workspace worktree and branch, outermost owner first.
-
-    Plans by default. With `--apply`, runs `git worktree add` under
-    `<worktrees_dir>/workspace/<stem>` and records `repo_stamps[_workspace]`.
-    Idempotent. A workspace that is not its own git toplevel, or has
-    `workflow.workspace_commits: off`, prints a note and does nothing.
-    """
-    layout = resolve_workspace(workspace)
-    try:
-        result = run_prepare_workspace(layout, path, today=_today(), apply=apply)
-    except WorkspaceError as exc:
-        rendering.fail(str(exc), reason="workspace", code=exit_codes.SCHEMA_MISMATCH, cause=exc)
-    except OSError as exc:
-        rendering.fail(str(exc), reason="io", cause=exc)
-    payload = wire_work.prepare_workspace_payload(result)
-    if payload["refusal"] is not None:
-        rendering.fail(
-            f"{path}: refused ({payload['refusal']['reason']}) — {payload['refusal']['detail']}",
-            reason="refused",
-            payload=payload,
-        )
-    if json_output:
-        rendering.emit(payload)
-    else:
-        rendering.render_prepare_workspace(payload)
-    if payload["note"]:
-        rendering.warn(payload["note"])
-
-
 @work_app.command(name="integrate")
 def integrate(
     path: str = typer.Argument(..., help="Extensionless bundle-relative canonical concept path."),
@@ -1193,9 +1059,7 @@ def integrate(
 @work_app.command(name="accept-integration")
 def accept_integration(
     path: str = typer.Argument(..., help="Extensionless bundle-relative canonical concept path."),
-    repo: str = typer.Option(
-        ..., "--repo", help="Declared repository (or _workspace) whose finish target this settles."
-    ),
+    repo: str = typer.Option(..., "--repo", help="Declared repository whose finish target this settles."),
     evidence: str = typer.Option(..., "--evidence", help="Commit on the target branch that holds the integration."),
     reason: str = typer.Option("", "--reason", help="Why this evidence stands (e.g. squashed in PR 12)."),
     by: str = typer.Option("", "--by", help="Who attests: the human's handle, never a worker."),
@@ -1228,35 +1092,3 @@ def accept_integration(
         rendering.emit(payload)
     else:
         rendering.render_accept_integration(payload)
-
-
-@work_app.command(name="merge-workspace")
-def merge_workspace(
-    path: str = typer.Argument(..., help="Extensionless bundle-relative canonical concept path."),
-    apply: bool = typer.Option(False, "--apply", help="Merge and record; without it, print the plan."),
-    workspace: str = typer.Option("", "--workspace", help="Workspace path."),
-    json_output: bool = rendering.json_option("Emit the merge result as JSON."),
-) -> None:
-    """Merge PATH's workspace branch into workspace main and record its receipt.
-
-    The one sanctioned non-verb commit on workspace main; a conflict aborts and
-    refuses, holding the finish. Plans by default; only --apply changes Git.
-    """
-    layout = resolve_workspace(workspace)
-    try:
-        result = run_merge_workspace(layout, path, today=_today(), apply=apply)
-    except WorkspaceError as exc:
-        rendering.fail(str(exc), reason="workspace", code=exit_codes.SCHEMA_MISMATCH, cause=exc)
-    except OSError as exc:
-        rendering.fail(str(exc), reason="io", cause=exc)
-    payload = wire_work.merge_workspace_payload(result)
-    if payload["refusal"] is not None:
-        rendering.fail(
-            f"{path}: refused ({payload['refusal']['reason']}) — {payload['refusal']['detail']}",
-            reason="refused",
-            payload=payload,
-        )
-    if json_output:
-        rendering.emit(payload)
-    else:
-        rendering.render_merge_workspace(payload)

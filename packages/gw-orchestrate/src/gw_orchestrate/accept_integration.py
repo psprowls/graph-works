@@ -8,12 +8,9 @@ receipt and the ledger in one guarded mutation and never advances the item.
 
 from __future__ import annotations
 
-import hashlib
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import date
-from pathlib import Path
-from types import MappingProxyType
 from typing import Literal
 
 from gw_kernel.workspace.bundle import load_workspace_bundle
@@ -21,8 +18,9 @@ from gw_kernel.workspace.commits import WorkspaceCommit, commit_mode, item_stem
 from gw_kernel.workspace.errors import WorkspaceError
 from gw_kernel.workspace.layout import WorkspaceLayout
 from gw_kernel.workspace.repos import resolve_repos
-from gw_pipeline.decision_owner import DecisionContext, locked_decision_owner
+from gw_pipeline.decision_owner import decision_mutation, locked_decision_owner, planned_write
 from gw_pipeline.finish import (
+    FinishRefused,
     FinishTarget,
     VerifiedIntegration,
     finish_git,
@@ -30,17 +28,17 @@ from gw_pipeline.finish import (
     finish_toolchain,
     historical_integration,
     read_finish_receipt,
+    resolve_commit,
     resolve_finish_targets,
 )
 from gw_pipeline.transactions import apply_mutation
-from okf_io import Document, parse
+from okf_io import Document
 from work_tracker_okf import decisions as _decisions
 from work_tracker_okf.items import IGNORE, WorkItem, load_items
-from work_tracker_okf.mutation import DirectoryPrecondition, PlannedWrite, WorkMutationPlan
-from work_tracker_okf.paths import item_page
-from work_tracker_okf.sources import upsert
+from work_tracker_okf.mutation import DirectoryPrecondition
+from work_tracker_okf.vocabulary import TERMINAL_STATUSES
 
-from gw_orchestrate.finish_receipt import ReceiptDraft, draft_receipt, link_receipt
+from gw_orchestrate.finish_receipt import draft_receipt, link_receipt
 
 AcceptRefusal = Literal[
     "unknown-path",
@@ -51,7 +49,6 @@ AcceptRefusal = Literal[
     "missing-attribution",
     "receipt-refused",
 ]
-_TERMINAL = frozenset({"resolved", "wontfix", "superseded"})
 
 
 @dataclass(frozen=True, slots=True)
@@ -72,16 +69,8 @@ class AcceptIntegrationResult:
     applied: bool
 
 
-class _Refused(Exception):
-    def __init__(self, refusal: AcceptRefusal, detail: str) -> None:
-        super().__init__(detail)
-        self.refusal = refusal
-        self.detail = detail
-
-
-def _resolve(repo: Path, ref: str) -> str | None:
-    resolved = finish_git(repo, "rev-parse", "--verify", "--end-of-options", ref + "^{commit}")
-    return resolved.stdout.strip() if resolved.returncode == 0 else None
+class _Refused(FinishRefused):
+    refusal: AcceptRefusal
 
 
 def _observe(
@@ -91,7 +80,7 @@ def _observe(
     item = next((i for i in context_items if i.path == path), None)
     if item is None:
         raise _Refused("unknown-path", f"unknown work item {path!r}")
-    if item.phase != "finish" or item.work_status in _TERMINAL:
+    if item.phase != "finish" or item.work_status in TERMINAL_STATUSES:
         raise _Refused("not-at-finish", f"{path} is at {item.phase!r} ({item.work_status})")
     plan = resolve_finish_targets(layout, context_items, path)
     if plan.blockers:
@@ -109,59 +98,16 @@ def _observe(
             f"{repo_name} already has verified {previous.strategy} evidence; attested evidence never replaces it",
         )
     repo = target.repo.path
-    source = _resolve(repo, "refs/heads/" + target.source_branch)
-    tip = _resolve(repo, "refs/heads/" + target.target_branch)
+    source = resolve_commit(repo, "refs/heads/" + target.source_branch)
+    tip = resolve_commit(repo, "refs/heads/" + target.target_branch)
     if source is None or tip is None:
         raise _Refused("no-target", f"{repo_name}: cannot resolve {target.source_branch!r} or {target.target_branch!r}")
-    sha = _resolve(repo, evidence)
+    sha = resolve_commit(repo, evidence)
     if sha is None:
         raise _Refused("unknown-commit", f"{evidence!r} is not a commit in {repo_name}")
     if finish_git(repo, "merge-base", "--is-ancestor", sha, tip).returncode != 0:
         raise _Refused("not-on-target", f"{sha} is not reachable from {target.target_branch} in {repo_name}")
     return target, source, sha
-
-
-def _mutation(
-    context: DecisionContext, path: str, plan: _decisions.DecisionPlan, ledger_before: bytes | None, draft: ReceiptDraft
-) -> WorkMutationPlan:
-    root = context.bundle.root
-    owner_path = context.owner.owner_path
-    ledger_member = context.owner.ledger.relative_to(root).as_posix()
-    ledger_after = _decisions.render(_decisions.parse(plan.snapshot.text).preamble, plan.after).encode("utf-8")
-    pages: dict[str, tuple[bytes, Document]] = {}
-    for member_path in dict.fromkeys((path, owner_path)):
-        before = context.bundle.concepts[member_path].serialize().encode("utf-8")
-        pages[member_path] = (before, parse(before.decode("utf-8")))
-    item_before, item_doc = pages[path]
-    link_receipt(item_doc, draft.ref, newline="\r\n" if b"\r\n" in item_before else "\n")
-    upsert(pages[owner_path][1], _decisions.ledger_ref(owner_path), title="Decisions")
-    candidates = [
-        (ledger_member, ledger_before, ledger_after),
-        *((item_page(p).rel, before, doc.serialize().encode("utf-8")) for p, (before, doc) in pages.items()),
-        (draft.ref.rel, draft.before, draft.after),
-    ]
-    writes = tuple(
-        PlannedWrite(member, hashlib.sha256(before).hexdigest() if before is not None else None, after)
-        for member, before, after in candidates
-        if before != after
-    )
-    parents = tuple(dict.fromkeys(Path(member).parent.as_posix() for member in (ledger_member, draft.ref.rel)))
-    return WorkMutationPlan(
-        root=root,
-        operation="file",
-        path_mapping=MappingProxyType({}),
-        move_plan=None,
-        moves=(),
-        writes=writes,
-        deletes=(),
-        mkdirs=parents,
-        warnings=plan.warnings,
-        refusals=(),
-        validate_paths=(path,),
-        directory_preconditions=tuple(
-            DirectoryPrecondition(parent, None) for parent in parents if not (root / parent).exists()
-        ),
-    )
 
 
 @finish_toolchain
@@ -270,9 +216,25 @@ def run_accept_integration(
             if finish_read_guard(layout, path) != guard or current[1] != source:
                 raise WorkspaceError("finish owner, receipt, configuration or source changed; inspect and retry")
 
+        def edit_item(page: Document) -> None:
+            link_receipt(page, draft.ref, newline="\r\n" if b"\r\n" in page.serialize().encode("utf-8") else "\n")
+
+        parent = draft.ref.rel.rpartition("/")[0]
+        parents = tuple(dict.fromkeys((ledger_rel.rpartition("/")[0], parent)))
+        mutation = decision_mutation(
+            context,
+            plan,
+            ledger_before,
+            (planned_write(draft.ref.rel, draft.before, draft.after),) if draft.before != draft.after else (),
+            page_edits={path: edit_item},
+            validate_paths=(path,),
+            directory_preconditions=tuple(
+                DirectoryPrecondition(d, None) for d in parents if not (context.bundle.root / d).exists()
+            ),
+        )
         application = apply_mutation(
             layout,
-            _mutation(context, path, plan, ledger_before, draft),
+            mutation,
             repo_roots=resolve_repos(layout),
             baseline_bundle=context.bundle,
             validate_read_set=validate,

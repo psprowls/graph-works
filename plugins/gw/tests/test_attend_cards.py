@@ -127,28 +127,63 @@ class AttendCardsTests(unittest.TestCase):
         item["spec"] = "GW_LAUNCH_V1 " + json.dumps(envelope) + "\nRun it.\n"
         self.assertEqual(HELPER["attend_target"](item), ("attend", None, "worktree-unknown"))
 
+    def test_worktree_path_join_is_total(self):
+        # `gw work dispatch` launches every worker into its computed placement, so the
+        # envelope it freezes always carries `worktree_path` (`placement_argv` is always
+        # `path:<worktree>`): every attend Task joins to a card and none is skipped.
+        paths = [f"/wt/item-{index}" for index in range(4)]
+        tasks = [task(f"t{index}", worktree=path) for index, path in enumerate(paths)]
+        for item, path in zip(tasks, paths):
+            with self.subTest(task=item["id"]):
+                self.assertEqual(HELPER["attend_target"](item), ("attend", path, None))
+        live = cards(tasks, [row(item["id"], "live") for item in tasks])
+        settled = cards(tasks, [row(item["id"], "settled") for item in tasks])
+        self.assertEqual((live["skipped"], settled["skipped"]), ([], []))
+        self.assertEqual(live["set_in_review"], sorted(paths))
+        self.assertEqual(settled["release_candidates"], sorted(paths))
+        self.assertTrue(all(isinstance(path, str) and path for path in live["set_in_review"]))
+
     def test_malformed_rows_are_silent_and_do_not_hide_valid_tasks(self):
         tasks = [{}, {"id": 12}, {"id": "missing"}, task("bad", spec="GW_LAUNCH_V1 {}\n"), task("ok")]
         output, errors = io.StringIO(), io.StringIO()
         with contextlib.redirect_stdout(output), contextlib.redirect_stderr(errors):
             result = cards(tasks, [row("ok", "live")])
         self.assertEqual((output.getvalue(), errors.getvalue()), ("", ""))
-        self.assertEqual(result, {"set_in_review": [WT_A], "release_candidates": [], "skipped": [
-            {"task_id": None, "reason": "task-unreadable"},
-            {"task_id": None, "reason": "task-unreadable"},
-            {"task_id": "bad", "reason": "envelope-undecodable"},
-            {"task_id": "missing", "reason": "spec-unreadable"},
-        ]})
+        self.assertEqual(
+            result,
+            {
+                "set_in_review": [WT_A],
+                "release_candidates": [],
+                "skipped": [
+                    {"task_id": None, "reason": "task-unreadable"},
+                    {"task_id": None, "reason": "task-unreadable"},
+                    {"task_id": "bad", "reason": "envelope-undecodable"},
+                    {"task_id": "missing", "reason": "spec-unreadable"},
+                ],
+            },
+        )
 
     def test_cli_registration_and_invalid_classification(self):
         with tempfile.TemporaryDirectory() as directory:
             tasks_path, rows_path = Path(directory) / "tasks.json", Path(directory) / "rows.json"
-            tasks_path.write_text(json.dumps({"ok": True, "result": {"tasks": [task("t1")]}}), encoding="utf-8", newline="\n")
+            tasks_path.write_text(
+                json.dumps({"ok": True, "result": {"tasks": [task("t1")]}}), encoding="utf-8", newline="\n"
+            )
             rows_path.write_text(json.dumps([row("t1", "live")]), encoding="utf-8", newline="\n")
-            command = [sys.executable, str(Path(__file__).resolve().parents[1] / "skills/auto-drive/references/launch-worker.py"), "attend-cards", "--tasks", str(tasks_path), "--classification", str(rows_path)]
+            command = [
+                sys.executable,
+                str(Path(__file__).resolve().parents[1] / "skills/auto-drive/references/launch-worker.py"),
+                "attend-cards",
+                "--tasks",
+                str(tasks_path),
+                "--classification",
+                str(rows_path),
+            ]
             result = subprocess.run(command, capture_output=True, text=True, check=False)
             self.assertEqual(result.returncode, 0, result.stderr)
-            self.assertEqual(json.loads(result.stdout), {"set_in_review": [WT_A], "release_candidates": [], "skipped": []})
+            self.assertEqual(
+                json.loads(result.stdout), {"set_in_review": [WT_A], "release_candidates": [], "skipped": []}
+            )
             self.assertEqual(len(result.stdout.splitlines()), 1)
             rows_path.write_text("{}", encoding="utf-8", newline="\n")
             result = subprocess.run(command, capture_output=True, text=True, check=False)
@@ -159,7 +194,9 @@ class AttendCardsTests(unittest.TestCase):
     def test_cli_reads_task_list_and_classification_files(self):
         with tempfile.TemporaryDirectory() as directory:
             tasks_path, rows_path = Path(directory) / "tasks.json", Path(directory) / "rows.json"
-            tasks_path.write_text(json.dumps({"ok": True, "result": {"tasks": [task("t1")]}}), encoding="utf-8", newline="\n")
+            tasks_path.write_text(
+                json.dumps({"ok": True, "result": {"tasks": [task("t1")]}}), encoding="utf-8", newline="\n"
+            )
             rows_path.write_text(json.dumps([row("t1", "live")]), encoding="utf-8", newline="\n")
             output = io.StringIO()
             with contextlib.redirect_stdout(output):

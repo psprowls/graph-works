@@ -23,20 +23,20 @@ from gw_orchestrate.dispatch import DispatchFailure, DispatchResult, ObservedPla
 from gw_orchestrate.gate import GateCheckResult, GateRunResult, GateWaitResult, NotifyResult
 from gw_orchestrate.gate_receipts import GateEvidence, UnitEvidence
 from gw_orchestrate.integrate import IntegrateResult
-from gw_orchestrate.merge_workspace import MergeWorkspaceResult
 from gw_orchestrate.orca_port import OrcaMessage
-from gw_orchestrate.placement import BaselineRecord, PlacementRecord, ReaderRecord
 from gw_orchestrate.reroute import RerouteResult
 from gw_orchestrate.stage_advance import StageAdvance
 from gw_orchestrate.wait import WaitResult
-from gw_orchestrate.workspace_prepare import WorkspacePrepareResult
 from gw_pipeline.finish import FinishTarget
 from gw_pipeline.guidance.assembly import Guidance
+from gw_pipeline.place import PlaceResult, PruneReport
+from gw_pipeline.placement import EffectivePlacement
 from gw_work.affecting import WorkAffecting
 from gw_work.archive.commands import ArchiveRun
 from gw_work.carried import CarriedContext
 from gw_work.commands import (
     ActiveWorkTouch,
+    BoardRow,
     ChildRollup,
     Decision,
     DecisionCommandResult,
@@ -54,6 +54,7 @@ from gw_work.commands import (
     Transition,
     WorkItem,
 )
+from gw_work.migrate_placement import MigrationPlan, MigrationResult
 from gw_work.obligations import ObligationRecord
 from gw_work.path_report import PathReport, PathRuleRef, StageArtifactReport
 from gw_work.reconcile import ReconcileContext
@@ -197,16 +198,6 @@ class _ApplicationView(Protocol):
     commit: CommitOutcome | None
 
 
-class _WorktreeView(Protocol):
-    action: str
-    path: str | None
-    branch: str | None
-    base_branch: str | None
-    exists: bool | None
-    parent_path: str | None
-    start_sha: str | None
-
-
 def _refusal(value: object) -> dict[str, str]:
     refusal = cast(_RefusalView, value)
     return {
@@ -313,13 +304,9 @@ def dispatch_payload(resolution: DispatchResolution | DispatchResult) -> dict[st
 
 def _observed_placement(placement: ObservedPlacement) -> dict[str, Any]:
     return {
-        "action": placement.action,
         "path": placement.path,
         "branch": placement.branch,
         "display_name": placement.display_name,
-        "repo_id": placement.repo_id,
-        "parent_worktree_id": placement.parent_worktree_id,
-        "lineage_set": placement.lineage_set,
         "notes": list(placement.notes),
         "start_sha": placement.start_sha,
     }
@@ -768,80 +755,6 @@ def gate_check_payload(result: GateCheckResult, path: str) -> dict[str, Any]:
 
 
 # ---------------------------------------------------------------------------
-# record-placement
-# ---------------------------------------------------------------------------
-
-
-def placement_payload(result: PlacementRecord) -> dict[str, Any]:
-    """The `gw work record-placement` contract: the observed pair, and whether it landed."""
-    plan = result.plan
-    application = result.application
-    return {
-        "path": plan.path,
-        "root": plan.root,
-        "expected_phase": plan.expected_phase,
-        "current_phase": plan.current_phase,
-        "before": {"worktree": plan.before[0], "branch": plan.before[1], "start_sha": plan.start_before},
-        "after": {"worktree": plan.after[0], "branch": plan.after[1], "start_sha": plan.start_after},
-        "repo": plan.repo,
-        "changed": plan.changed,
-        "applied": application is not None,
-        "written": result.written,
-        "rolled_back": False if application is None else application.rolled_back,
-        "failures": [] if application is None else list(application.failures),
-        "warnings": list(result.warnings),
-        "commit": commit_payload(application.commit if application is not None else result.pending_commit),
-        "refusal": None if plan.refusal is None else {"reason": plan.refusal, "detail": plan.detail},
-        "repo_note": result.repo_note,
-    }
-
-
-def baseline_payload(result: BaselineRecord) -> dict[str, Any]:
-    """The `gw work record-baseline` contract."""
-    plan = result.plan
-    application = result.application
-    return {
-        "path": plan.path,
-        "before": plan.before,
-        "after": plan.after,
-        "changed": plan.changed,
-        "applied": application is not None,
-        "written": result.written,
-        "rolled_back": False if application is None else application.rolled_back,
-        "failures": [] if application is None else list(application.failures),
-        "warnings": [] if application is None else list(application.warnings),
-        "commit": commit_payload(None if application is None else application.commit),
-        "refusal": None if plan.refusal is None else {"reason": plan.refusal, "detail": plan.detail},
-        "repo_note": result.repo_note,
-    }
-
-
-def reader_receipt_payload(result: ReaderRecord) -> dict[str, Any]:
-    """The observed detached reader attempt and its receipt outcome."""
-    plan = result.plan
-    observation = plan.observation
-    return {
-        "path": plan.path,
-        "root": plan.root,
-        "expected_phase": plan.expected_phase,
-        "current_phase": plan.current_phase,
-        "observation": {
-            "task_id": observation.task_id,
-            "dispatch_id": observation.dispatch_id,
-            "dispatch_key": observation.dispatch_key,
-            "repo": observation.repo,
-            "worktree": observation.worktree,
-            "start_sha": observation.start_sha,
-        },
-        "receipt_path": None if result.receipt_path is None else str(result.receipt_path),
-        "written": result.written,
-        "replayed": result.replayed,
-        "conflict": result.conflict,
-        "refusal": None if plan.refusal is None else {"reason": plan.refusal, "detail": plan.detail},
-    }
-
-
-# ---------------------------------------------------------------------------
 # touch-active-work
 # ---------------------------------------------------------------------------
 
@@ -868,7 +781,6 @@ def file_payload(outcome: FilingRun) -> dict[str, Any]:
         "page_path": str(plan.filing.target),
         "refusal": plan.refusal,
         "detail": plan.filing.detail,
-        "indexes": [str(update.path) for update in plan.indexes if update.changed],
         "logged": None if plan.log is None else plan.log.entry,
         "warnings": [*plan.warnings, *(() if application is None else application.warnings)],
         "applied": application is not None and application.ok and bool(application.written),
@@ -915,9 +827,21 @@ def _work_row(item: WorkItem) -> dict[str, Any]:
     }
 
 
-def work_list_payload(items: Sequence[WorkItem]) -> dict[str, Any]:
-    """`/v1/work/list`: the board's rows. `parent` is the parent item's canonical path or null."""
-    return {"items": [_work_row(item) for item in items]}
+def _placement_payload(placement: EffectivePlacement | None) -> dict[str, Any] | None:
+    if placement is None:
+        return None
+    return {
+        "repo": placement.repo_name,
+        "branch": placement.branch,
+        "worktree": placement.worktree,
+        "source": placement.source,
+    }
+
+
+def work_list_payload(rows: Sequence[BoardRow]) -> dict[str, Any]:
+    """`/v1/work/list`: the board's rows. `parent` is the parent item's canonical path or null; `placement` is
+    the item's effective placement or null."""
+    return {"items": [{**_work_row(row.item), "placement": _placement_payload(row.placement)} for row in rows]}
 
 
 def work_affecting_payload(result: WorkAffecting) -> dict[str, Any]:
@@ -925,7 +849,14 @@ def work_affecting_payload(result: WorkAffecting) -> dict[str, Any]:
     return {
         "repo": result.repo,
         "path": result.path,
-        "items": [{**_work_row(row.item), "affects": list(row.matching)} for row in result.rows],
+        "items": [
+            {
+                **_work_row(row.item),
+                "affects": list(row.matching),
+                "placement": _placement_payload(row.placement),
+            }
+            for row in result.rows
+        ],
         "refusal": result.refusal,
     }
 
@@ -985,6 +916,18 @@ def _wiki_archive(run: ArchiveRun) -> dict[str, Any]:
     }
 
 
+def _prune_payload(pruned: PruneReport | None) -> dict[str, Any] | None:
+    if pruned is None:
+        return None
+    return {
+        "removed_worktrees": list(pruned.removed_worktrees),
+        "deleted_branches": list(pruned.deleted_branches),
+        "kept": [
+            {"path": kept.path, "repo": kept.repo, "branch": kept.branch, "why": kept.why} for kept in pruned.kept
+        ],
+    }
+
+
 def archive_payload(run: ArchiveRun, *, dry_run: bool) -> dict[str, Any]:
     result = run.result
     return {
@@ -993,9 +936,10 @@ def archive_payload(run: ArchiveRun, *, dry_run: bool) -> dict[str, Any]:
         "conflict": list(run.conflict),
         "path_mapping": dict(run.plan.path_mapping),
         "indexes": [] if result is None else [path for path in result.written if path.endswith("index.md")],
-        "warnings": [*run.plan.warnings, *(() if result is None else result.warnings)],
+        "warnings": [*run.plan.warnings, *(() if result is None else result.warnings), *run.prune_warnings],
         "refusals": [_refusal(refusal) for refusal in run.plan.refusals],
         **_application(result),
+        "pruned": _prune_payload(run.pruned),
         "wiki_commit": commit_payload(run.wiki_commit),
         "pointer_cleared": run.pointer_cleared,
         "logged": run.logged,
@@ -1103,16 +1047,19 @@ def ask_answer_payload(result: AskAnswerResult) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 
-def _worktree(value: object) -> dict[str, Any]:
-    action = cast(_WorktreeView, value)
+def _placement(value: object | None) -> dict[str, Any] | None:
+    """Project a computed code placement, or null for a workspace-repository dispatch."""
+    if value is None:
+        return None
+    placement = cast(Any, value)
     return {
-        "action": action.action,
-        "path": action.path,
-        "branch": action.branch,
-        "base_branch": action.base_branch,
-        "exists": action.exists,
-        "parent_path": action.parent_path,
-        "start_sha": action.start_sha,
+        "repo": {"name": placement.repo_name, "path": str(placement.repo_root)},
+        "branch": placement.branch,
+        "worktree": str(placement.worktree),
+        "parent_branch": placement.parent_branch,
+        "parent_worktree": str(placement.parent_worktree),
+        "owner_path": placement.owner_path,
+        "slug": placement.slug,
     }
 
 
@@ -1158,12 +1105,7 @@ def orchestrate_payload(result: OrchestrateResult) -> dict[str, Any]:
                 "model": dispatch.model,
                 "provenance": dispatch_payload(result.plan.dispatch_resolutions[dispatch.key])["provenance"],
                 "reasoning_effort": dispatch.reasoning_effort,
-                "worktree": _worktree(dispatch.worktree),
-                "workspace": (
-                    None
-                    if (placement := result.plan.workspace_placements.get(dispatch.key)) is None
-                    else {"worktree": placement.worktree, "branch": placement.branch}
-                ),
+                "placement": _placement(result.plan.placements.get(dispatch.key)),
                 "merge_target": dispatch.merge_target,
                 "auto_merge": dispatch.auto_merge,
                 "human_checkpoints": _checkpoints(result.plan.human_checkpoints.get(dispatch.key)),
@@ -1171,37 +1113,10 @@ def orchestrate_payload(result: OrchestrateResult) -> dict[str, Any]:
             }
             for dispatch in result.dispatches
         ],
-        "preparations": [
-            {
-                "owner_path": preparation.owner_path,
-                "owner_phase": preparation.owner_phase,
-                "repo": {
-                    "name": preparation.repo.name,
-                    "path": str(preparation.repo.path),
-                    "source": preparation.repo.source,
-                },
-                "branch": preparation.branch,
-                "base_branch": preparation.base_branch,
-                "worktree": _worktree(preparation.worktree),
-            }
-            for preparation in result.preparations
-        ],
-        "workspace_preparations": [
-            {
-                "owner_path": preparation.owner_path,
-                "owner_phase": preparation.owner_phase,
-                "worktree": preparation.worktree,
-                "branch": preparation.branch,
-                "base_branch": preparation.base_branch,
-            }
-            for preparation in result.workspace_preparations
-        ],
         "advances": [
             {
                 "path": advance.path,
                 "reason": advance.reason,
-                "worktree": advance.worktree,
-                "branch": advance.branch,
                 "mode": advance.mode,
             }
             for advance in result.advances
@@ -1251,43 +1166,6 @@ def reconcile_payload(context: ReconcileContext) -> dict[str, Any]:
     }
 
 
-def prepare_workspace_payload(result: WorkspacePrepareResult) -> dict[str, Any]:
-    """Ordered workspace preparations, including effects before a refusal."""
-    placement = result.placement
-    return {
-        "path": result.path,
-        "applied": result.applied,
-        "note": result.note,
-        "refusal": None if result.refusal is None else {"reason": result.refusal, "detail": result.detail},
-        "steps": [
-            {
-                "owner_path": step.owner_path,
-                "owner_phase": step.owner_phase,
-                "worktree": step.worktree,
-                "branch": step.branch,
-                "base_branch": step.base_branch,
-                "action": step.action,
-                "recorded": step.recorded,
-            }
-            for step in result.steps
-        ],
-        "placement": None if placement is None else {"worktree": placement.worktree, "branch": placement.branch},
-    }
-
-
-def merge_workspace_payload(result: MergeWorkspaceResult) -> dict[str, Any]:
-    """Workspace integration, including a merge whose receipt was refused."""
-    return {
-        "path": result.path,
-        "source_branch": result.source_branch,
-        "target_branch": result.target_branch,
-        "applied": result.applied,
-        "merge_commit": result.merge_commit,
-        "receipt_path": result.receipt_path,
-        "refusal": None if result.refusal is None else {"reason": result.refusal, "detail": result.detail},
-    }
-
-
 def accept_integration_payload(result: AcceptIntegrationResult) -> dict[str, Any]:
     """Attested finish evidence and the ledger entry recording who accepted it."""
     return {
@@ -1325,4 +1203,116 @@ def integrate_payload(result: IntegrateResult) -> dict[str, Any]:
         "receipt_path": result.receipt_path,
         "applied": result.applied,
         "refusal": None if result.refusal is None else {"reason": result.refusal, "detail": result.detail},
+    }
+
+
+def migrate_placement_payload(plan: MigrationPlan, result: MigrationResult | None = None) -> dict[str, Any]:
+    """`gw work migrate-placement`: the plan (rows, blockers, orphans, strips) and, once applied, its result."""
+    return {
+        "mode": "plan" if result is None else "apply",
+        "nothing_to_migrate": plan.nothing_to_migrate,
+        "refusal": plan.refusal if result is None or result.refusal is None else result.refusal,
+        "rows": [
+            {
+                "item": row.item,
+                "repo": row.repo,
+                "worktree": row.worktree,
+                "branch": row.branch,
+                "action": row.action,
+                "reason": row.reason,
+            }
+            for row in plan.rows
+        ],
+        "blockers": [
+            {
+                "item": blocker.item,
+                "repo": blocker.repo,
+                "worktree": blocker.worktree,
+                "legacy_branch": blocker.legacy_branch,
+                "computed_branch": blocker.computed_branch,
+                "commands": list(blocker.commands),
+            }
+            for blocker in plan.blockers
+        ],
+        "orphans": [{"repo": orphan.repo, "branch": orphan.branch} for orphan in plan.orphans],
+        "strips": list(plan.strips),
+        "workspace_stamps": [
+            {"item": stamp.item, "worktree": stamp.worktree, "branch": stamp.branch, "ahead": stamp.ahead}
+            for stamp in plan.workspace_stamps
+        ],
+        "result": None
+        if result is None
+        else {
+            "removed_worktrees": list(result.removed_worktrees),
+            "deleted_branches": list(result.deleted_branches),
+            "stripped": list(result.stripped),
+            "failed_step": result.failed_step,
+            "commit": commit_payload(result.commit),
+        },
+    }
+
+
+def place_payload(result: PlaceResult) -> dict[str, Any]:
+    """The explicit `gw work place` contract, including predicted effects."""
+    placement = result.placement
+    commit = result.workspace_commit
+    pruned = result.pruned
+    return {
+        "path": result.path,
+        "mode": result.mode,
+        "dry_run": result.dry_run,
+        "repo": None if placement is None else {"name": placement.repo_name, "path": str(placement.repo_root)},
+        "placement": None
+        if placement is None
+        else {
+            "branch": placement.branch,
+            "worktree": str(placement.worktree),
+            "parent_branch": placement.parent_branch,
+            "parent_worktree": str(placement.parent_worktree),
+            "owner_path": placement.owner_path,
+            "slug": placement.slug,
+        },
+        "chain": [
+            {
+                "path": step.placement.path,
+                "repo": step.placement.repo_name,
+                "branch": step.placement.branch,
+                "worktree": str(step.placement.worktree),
+                "action": step.action,
+                "refresh": None
+                if step.refresh is None
+                else {
+                    "kind": step.refresh.kind,
+                    "from": step.refresh.from_sha,
+                    "to": step.refresh.to_sha,
+                },
+                "orca": step.orca,
+            }
+            for step in result.chain
+        ],
+        "start_sha": None
+        if result.start_sha is None
+        else {
+            "before": result.start_sha[0],
+            "after": result.start_sha[1],
+        },
+        "workspace_commit": None
+        if commit is None
+        else {
+            "status": commit.status,
+            "sha": commit.sha,
+            "paths": list(commit.paths),
+        },
+        "dirty_workspace_paths": list(result.dirty_workspace_paths),
+        "pruned": _prune_payload(pruned),
+        "refusal": None
+        if result.refusal is None
+        else {
+            "kind": result.refusal.kind,
+            "detail": result.refusal.detail,
+        },
+        "warnings": [
+            *result.warnings,
+            *([] if result.application is None else [f"apply: {failure}" for failure in result.application.failures]),
+        ],
     }

@@ -20,7 +20,9 @@ PLUGIN_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 TASK_MARKER = re.compile(r"^=== TASK ===(?:\r?\n|$)", re.MULTILINE)
 PASTE = re.compile(r'<pasted_content id="([^"\r\n]+)">\r?\n(.*?)\r?\n</pasted_content id="\1">(?:\r?\n)?', re.DOTALL)
 TASK_ID = re.compile(r"^Your task ID is: (task_[A-Za-z0-9_-]+)\r?\n", re.MULTILINE)
-COMMAND = re.compile(r'^[ \t]*(?:"[^"\r\n]+"|[^ \t\r\n]+)[ \t]+orchestration[ \t]+(?:send|ask)[ \t]+[^\r\n]*', re.MULTILINE)
+COMMAND = re.compile(
+    r'^[ \t]*(?:"[^"\r\n]+"|[^ \t\r\n]+)[ \t]+orchestration[ \t]+(?:send|ask)[ \t]+[^\r\n]*', re.MULTILINE
+)
 V1_FIELDS = {"version", "dispatch_key", "agent", "model", "reasoning_effort", "placement_argv"}
 
 V2_FIELDS = V1_FIELDS | {"mode", "worktree_path"}
@@ -47,7 +49,7 @@ def require(condition, reason):
 
 def split_task(prompt):
     marker = TASK_MARKER.search(prompt)
-    return (prompt[:marker.start()], prompt[marker.end():]) if marker else (prompt, None)
+    return (prompt[: marker.start()], prompt[marker.end() :]) if marker else (prompt, None)
 
 
 def without_final_eol(text):
@@ -60,8 +62,7 @@ def task_identity(before):
     # example further down the CLI instructions. Duplicates are ambiguous too.
     intro = re.split(r"\r?\n\r?\n", before, maxsplit=1)[0] + "\n"
     require(len(matches) == 1 and TASK_ID.search(intro), "missing or ambiguous task identity")
-    require(len(re.findall(r"^Your task ID is:", before, re.MULTILINE)) == 1,
-            "ambiguous task identity")
+    require(len(re.findall(r"^Your task ID is:", before, re.MULTILINE)) == 1, "ambiguous task identity")
     return matches[0]
 
 
@@ -95,7 +96,7 @@ def validate_envelope(task):
     line, separator, body = task.partition("\n")
     require(separator and line.startswith("GW_LAUNCH_V1 "), "missing GW launch envelope")
     try:
-        value = json.loads(line[len("GW_LAUNCH_V1 "):])
+        value = json.loads(line[len("GW_LAUNCH_V1 ") :])
     except ValueError:
         raise Unverified("invalid GW launch envelope") from None
     require(isinstance(value, dict), "invalid GW launch fields")
@@ -104,15 +105,22 @@ def validate_envelope(task):
     require(set(value) == (V1_FIELDS if version == 1 else V2_FIELDS), "invalid GW launch fields")
     if version == 2:
         require(isinstance(value["mode"], str) and value["mode"].strip(), "invalid GW launch mode")
-        require(value["worktree_path"] is None or isinstance(value["worktree_path"], str),
-                "invalid GW launch worktree path")
-    require(all(isinstance(value[k], str) and value[k].strip() for k in ("dispatch_key", "agent")),
-            "invalid GW launch identity")
-    require(all(value[k] is None or isinstance(value[k], str) and value[k].strip()
-                for k in ("model", "reasoning_effort")), "invalid GW launch preferences")
+        require(
+            value["worktree_path"] is None or isinstance(value["worktree_path"], str), "invalid GW launch worktree path"
+        )
+    require(
+        all(isinstance(value[k], str) and value[k].strip() for k in ("dispatch_key", "agent")),
+        "invalid GW launch identity",
+    )
+    require(
+        all(value[k] is None or isinstance(value[k], str) and value[k].strip() for k in ("model", "reasoning_effort")),
+        "invalid GW launch preferences",
+    )
     require(value["reasoning_effort"] is None or value["model"] is not None, "GW effort requires a model")
-    require(isinstance(value["placement_argv"], list) and all(isinstance(v, str) for v in value["placement_argv"]),
-            "invalid GW launch placement")
+    require(
+        isinstance(value["placement_argv"], list) and all(isinstance(v, str) for v in value["placement_argv"]),
+        "invalid GW launch placement",
+    )
     require(body.strip(), "missing GW task body")
 
 
@@ -132,9 +140,9 @@ def recover(prompt):
     worker = worker_identity(before)
     try:
         result = subprocess.run(
-            [orca_executable(), "orchestration", "dispatch-show",
-             "--task", task_id, "--preamble", "--json"],
-            capture_output=True, timeout=5,
+            [orca_executable(), "orchestration", "dispatch-show", "--task", task_id, "--preamble", "--json"],
+            capture_output=True,
+            timeout=5,
         )
     except subprocess.TimeoutExpired:
         raise Unverified("Orca lookup timed out") from None
@@ -152,16 +160,18 @@ def recover(prompt):
     require(isinstance(dispatch, dict), "missing dispatch record")
     require(dispatch.get("task_id") == task_id, "wrong task in dispatch record")
     dispatch_id = dispatch.get("id")
-    require(isinstance(dispatch_id, str) and re.fullmatch(r"ctx_[A-Za-z0-9_-]+", dispatch_id),
-            "invalid dispatch identity")
-    require(dispatch.get("status") == "dispatched" and not dispatch.get("completed_at")
-            and not dispatch.get("revoked_at"), "dispatch is not live")
+    require(
+        isinstance(dispatch_id, str) and re.fullmatch(r"ctx_[A-Za-z0-9_-]+", dispatch_id), "invalid dispatch identity"
+    )
+    require(
+        dispatch.get("status") == "dispatched" and not dispatch.get("completed_at") and not dispatch.get("revoked_at"),
+        "dispatch is not live",
+    )
     require(dispatch.get("assignee_handle") == worker, "dispatch belongs to a different worker attempt")
     ids = command_ids(before, "--dispatch-id", "ctx_")
     require(not ids or ids == {dispatch_id}, "dispatch attempt changed")
     full = data.get("preamble")
-    require(isinstance(full, str) and full.split("\n", 1)[0].removesuffix("\r") == HEADER,
-            "invalid recovered preamble")
+    require(isinstance(full, str) and full.split("\n", 1)[0].removesuffix("\r") == HEADER, "invalid recovered preamble")
     recovered_before, expected = split_task(full)
     require(task_identity(recovered_before) == task_id, "wrong task in recovered preamble")
     recovered_workers = command_ids(recovered_before, "--from", "term_")
@@ -172,10 +182,14 @@ def recover(prompt):
     validate_envelope(expected)
     if delivered is not None and without_final_eol(delivered) == without_final_eol(expected):
         return
-    require(delivered is None or expected.startswith(without_final_eol(delivered)),
-            "task text conflicts with the stored dispatch")
-    note = (f"The submitted Orca dispatch was truncated (task {task_id}, dispatch {dispatch_id}). "
-            "The complete intended task follows.")
+    require(
+        delivered is None or expected.startswith(without_final_eol(delivered)),
+        "task text conflicts with the stored dispatch",
+    )
+    note = (
+        f"The submitted Orca dispatch was truncated (task {task_id}, dispatch {dispatch_id}). "
+        "The complete intended task follows."
+    )
     stamp = " " + guard_stamp()
     if len(note) + len(stamp) + 2 + len(full) > 10000:
         note += " Please read the full hook-output file supplied by Claude before acting; the preview is incomplete."
@@ -201,7 +215,7 @@ def main():
         return
     wrapped = WRAPPED.match(prompt)
     if wrapped:
-        prompt = prompt[wrapped.end():]
+        prompt = prompt[wrapped.end() :]
     wrapper = PASTE.fullmatch(prompt)
     if wrapper:
         prompt = wrapper[2]
@@ -210,7 +224,10 @@ def main():
     try:
         recover(prompt)
     except Unverified as error:
-        emit(f"Dispatch recovery was not verified: {error}. Do not guess incomplete work; request the full task. {guard_stamp()}", True)
+        emit(
+            f"Dispatch recovery was not verified: {error}. Do not guess incomplete work; request the full task. {guard_stamp()}",
+            True,
+        )
 
 
 if __name__ == "__main__":

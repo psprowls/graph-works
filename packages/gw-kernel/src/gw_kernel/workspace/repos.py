@@ -149,7 +149,7 @@ def resolve_repos(layout: WorkspaceLayout) -> tuple[Path, ...]:
     return tuple(_working(layout, config.repos).values())
 
 
-RepoSource = Literal["frontmatter", "flag", "cwd", "sole", "fallback", "workspace"]
+RepoSource = Literal["frontmatter", "flag", "cwd", "sole", "fallback"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -160,7 +160,6 @@ class ItemRepo:
     (`frontmatter`), the caller's `repo_name` (`flag`), a caller fallback
     (`cwd` for advance, `fallback` for an orchestration descendant inheriting
     its root's), or strict resolution (`sole` -- one declared, or none).
-    `workspace` names the workspace's own repository (`_workspace`).
     `name` and `path` are both `None` only when nothing resolved; `note`
     then says why.
     """

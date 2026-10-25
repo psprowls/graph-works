@@ -167,7 +167,7 @@ def test_parent_archive_prunes_its_entry_and_rebases_the_lanes_other_links(tmp_p
     assert plan.path_mapping[epic] == "work/_archive/epic-migration"
     by_member = {write.member: write for write in plan.writes}
     source_index = by_member["work/index.md"].after.decode("utf-8")
-    assert "(epic-migration.md)" not in source_index
+    assert "- [Epic: T](epic-migration.md) — resolved · not started" in source_index
     assert "_archive/epic-migration.md" not in source_index
     assert "- [Release: T](release-cutover.md) — open · not started" in source_index
     assert "Start with [the import feature](_archive/epic-migration/children/feature-done.md)." in source_index
@@ -283,8 +283,8 @@ def test_archive_plans_local_indexes_and_never_writes_during_planning(tmp_path: 
     plan = plan_archive(bundle, load_items(bundle), (feature,))
 
     members = {write.member for write in plan.writes}
-    assert "work/index.md" in members
-    assert "work/_archive/index.md" in members
+    assert "work/index.md" not in members
+    assert "work/_archive/index.md" not in members
     after = {path.relative_to(tmp_path).as_posix(): path.read_bytes() for path in tmp_path.rglob("*") if path.is_file()}
     assert after == before
 

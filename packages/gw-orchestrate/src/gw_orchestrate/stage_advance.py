@@ -48,10 +48,11 @@ from gw_pipeline.decision_owner import (
     locked_decision_owner,
 )
 from gw_pipeline.execute_return import return_dispatch_admission
-from gw_pipeline.finish import finish_read_guard, inspect_finish
+from gw_pipeline.finish import finish_read_guard, inspect_finish, resolve_finish_targets
 from gw_pipeline.gate_config import repo_gate
 from gw_pipeline.landed import stale_spec_for
-from gw_pipeline.repo_context import observe_repository
+from gw_pipeline.placement import Placement
+from gw_pipeline.placement_resolve import item_placement, worktree_missing_detail
 from gw_pipeline.transactions import MutationApplication, apply_mutation
 from okf_io import Bundle, parse
 from work_tracker_okf import decisions as _decisions
@@ -74,7 +75,6 @@ from work_tracker_okf.workflow import Blocker
 
 from gw_orchestrate import execute_return as returns
 from gw_orchestrate import gate_git, gate_units
-from gw_orchestrate.anchors import Anchor, AnchorRefusal, enclosing_owner, reader_anchor
 from gw_orchestrate.gate_receipts import GateEvidence, evaluate
 
 #: The phases whose *completion* produces a results stub. A design or plan
@@ -116,11 +116,8 @@ class StageAdvance:
     every git-derived field above it is `None` for one known reason rather
     than for an unknown one.
 
-    `warnings` carries the gate's note for a workspace-only item, a skipped
-    worktree inference when the item's repository came from `repo:`
-    (frontmatter) or `repo_name` (flag) and cwd is not in that repository --
-    inference is skipped, never a silent guess, and a foreign checkout is
-    never stamped -- and the plan-exit affects-drift check. Gate *failures*
+    `warnings` carries the gate's note for a workspace-only item and the
+    plan-exit affects-drift check. Gate *failures*
     are refusals, never warnings.
     At `plan -> execute` it also carries the advisory affects-drift check
     (plan-named files outside `affects`), on a dry run too.
@@ -141,19 +138,8 @@ class StageAdvance:
         return self.outcome.changed
 
 
-def _infers_from_cwd(item: WorkItem) -> bool:
-    """Whether an attended advance may fall back to a cwd-inferred stamp.
-
-    Only a physically top-level item may. A descendant's placement is recorded
-    by its coordinator from Orca's observed readback (`gw work record-placement`,
-    D-006), never inferred from wherever a worker happens to stand. The former
-    code-phase inference left placement ownership with the advancing worker
-    instead of the coordinator that observed the dispatch.
-
-    This is a conservative attended fallback. A nested orchestration root is a
-    descendant here and is recorded explicitly, and a supervised worker disables
-    inference outright with `infer_worktree=False` (`--no-infer-worktree`).
-    """
+def _is_top_level(item: WorkItem) -> bool:
+    """Whether *item* is physically top-level: it falls back to the declared checkout, a descendant to its anchor."""
     return item.parent_path is None
 
 
@@ -167,13 +153,9 @@ def run_stage_advance(
     owner: str | None = None,
     resolved_in: str | None = None,
     released_at: date | None = None,
-    worktree: str | None = None,
-    branch: str | None = None,
-    infer_worktree: bool = True,
     cwd: Path | None = None,
     repo: Path | None = None,
     repo_name: str | None = None,
-    start_sha: str | None = None,
     return_: bool = False,
     return_scope: Sequence[str] = (),
     skip_gate: str | None = None,
@@ -184,30 +166,15 @@ def run_stage_advance(
 ) -> StageAdvance:
     """Complete one stage: advance the item and capture what the stage left.
 
-    Worktree provenance has two paths. An explicit `worktree`/`branch` pair is
-    the caller's own resolved `plan()` decision -- main-mode eviction,
-    fork-child, cold start -- never a guess, so it is applied unconditionally
-    and overwrites an already-valid recorded stamp. That is what lets an item
-    be evicted out of a shared main checkout: a stamp that is still a live
-    directory could otherwise never be repointed. Without the pair, provenance
-    falls back to cwd inference under the original conservative guard -- stamp
-    only when the recorded path is unset or gone -- so an advance run from an
-    unrelated cwd cannot silently repoint a live item. Inference also cannot
-    see the main checkout at all (`provenance.worktree_state` answers `None`
-    when `--git-dir` and `--git-common-dir` agree).
+    Advance never writes placement. The commit gate and the results stub read it
+    from `item_placement`: the computed worktree and parent branch, with a
+    legacy stamp winning when one is present.
 
-    Inference runs only for a top-level item (`_infers_from_cwd`) and only when
-    `infer_worktree` is true. Every supervised worker passes
-    `infer_worktree=False`: its coordinator records the observed placement
-    separately, and a worker's cwd is not evidence of where its stage runs.
-
-    The execute baseline resolves in order: the `start_sha` argument, then the
-    placement's recorded `start_sha` (its `repo_stamps` entry for the gated
-    repository when that entry carries one, else the scalar one). The commit gate uses only those two and
-    refuses `no-start-sha` when neither exists. Only the results *stub* falls
-    back further: at `execute` it derives one by
+    The commit gate measures the item's own commits (`<parent>..HEAD`, merges
+    excluded) in its computed worktree. The results stub's execute baseline is
+    the item's recorded `start_sha`, else derived by
     `workspace.anchor.phase_start_sha` -- merge-base first, then the spec's own
-    arms. At `finish` it uses only an explicit argument and derives nothing: a derived range there sweeps in the
+    arms. At `finish` it derives nothing: a derived range there sweeps in the
     whole execute range, and a finish report claiming work it did not do is
     exactly what this pipeline exists to prevent.
 
@@ -278,10 +245,7 @@ def run_stage_advance(
     bundle = load_workspace_bundle(layout, ignore=IGNORE)
     items = load_items(bundle)
     receipt_finish = any(
-        item.path == path
-        and item.phase == "finish"
-        and (item.repo_stamps or "repo_stamps" in item.invalid_optional_fields)
-        for item in items
+        item.path == path and item.phase == "finish" and _has_finish_target(layout, items, path) for item in items
     )
     if (dry_run and (return_ or not receipt_finish)) or return_ or not any(item.path == path for item in items):
         preview = _advance(
@@ -298,13 +262,9 @@ def run_stage_advance(
             owner=owner,
             resolved_in=resolved_in,
             released_at=released_at,
-            worktree=worktree,
-            branch=branch,
-            infer_worktree=infer_worktree,
             cwd=cwd,
             repo=repo,
             repo_name=repo_name,
-            start_sha=start_sha,
             return_=return_,
             return_scope=return_scope,
             skip_gate=skip_gate,
@@ -340,13 +300,13 @@ def run_stage_advance(
         ):
             raise WorkspaceError("execute return admission changed; inspect and retry")
         completion_lock = (
-            returns.completion_locks(layout, context.items.by_path, context.items.by_path[path])
+            returns.completion_locks(layout, context.items.by_path[path])
             if not dry_run and not return_
-            else nullcontext(None)
+            else nullcontext(False)
         )
-        with completion_lock as locked_destination:
-            if locked_destination is not None:
-                # Reload after acquiring both evidence locks; the decision owner
+        with completion_lock as return_locked:
+            if return_locked:
+                # Reload after acquiring the bundle lock; the decision owner
                 # remains held, and every preimage now belongs to this snapshot.
                 fresh_context = decision_context(layout, path)
                 if fresh_context.owner != context.owner:
@@ -366,13 +326,9 @@ def run_stage_advance(
                 owner=owner,
                 resolved_in=resolved_in,
                 released_at=released_at,
-                worktree=worktree,
-                branch=branch,
-                infer_worktree=infer_worktree,
                 cwd=cwd,
                 repo=repo,
                 repo_name=repo_name,
-                start_sha=start_sha,
                 return_=return_,
                 return_scope=return_scope,
                 skip_gate=skip_gate,
@@ -380,7 +336,6 @@ def run_stage_advance(
                 actor=actor,
                 decision_owner_=context.owner,
                 before_apply=before_apply,
-                locked_completion_destination=locked_destination,
             )
 
 
@@ -398,8 +353,8 @@ def _baseline_stamp(
 ) -> tuple[dict[str, str], tuple[str, ...]]:
     """Resolve spec anchors, then the matching cwd HEAD, without refusing an advance.
 
-    Omit the existing stamp when resolving its replacement. Workspace HEAD is
-    observed before this advance commits.
+    Omit the existing stamp when resolving its replacement. Only the code
+    commit is stamped.
     """
     stamp: dict[str, str] = {}
     code: str | None = None
@@ -419,10 +374,13 @@ def _baseline_stamp(
             code = provenance.head_sha(here)
     if code is not None:
         stamp["code"] = code
-    workspace = provenance.head_sha(layout.root)
-    if workspace is not None:
-        stamp["workspace"] = workspace
     return stamp, (() if code is not None else (_NO_CODE_BASELINE,))
+
+
+def _has_finish_target(layout: WorkspaceLayout, items: Sequence[WorkItem], path: str) -> bool:
+    """True when computed placement yields at least one finish target or blocker for the item."""
+    plan = resolve_finish_targets(layout, items, path)
+    return bool(plan.targets or plan.blockers)
 
 
 def _advance(
@@ -439,13 +397,9 @@ def _advance(
     owner: str | None,
     resolved_in: str | None,
     released_at: date | None,
-    worktree: str | None,
-    branch: str | None,
-    infer_worktree: bool,
     cwd: Path | None,
     repo: Path | None,
     repo_name: str | None,
-    start_sha: str | None,
     return_: bool,
     return_scope: Sequence[str],
     skip_gate: str | None,
@@ -454,7 +408,6 @@ def _advance(
     decision_owner_: DecisionOwner | None,
     dry_run: bool,
     before_apply: Callable[[StageAdvance], None] | None,
-    locked_completion_destination: returns.ReturnDestination | None = None,
 ) -> StageAdvance:
     item = next((candidate for candidate in items if candidate.path == path), None)
     old_phase = item.phase if item is not None else None
@@ -466,39 +419,9 @@ def _advance(
         item_repo, declared = _resolve_repo(layout, items, item, repo_name=repo_name, cwd=cwd)
         resolved_repo, repo_note = item_repo.path, item_repo.note
 
-    inference_warnings: tuple[str, ...] = ()
-    stamped_worktree: str | None = None
-    stamped_branch: str | None = None
-    inferred = False
-    if worktree and branch:
-        stamped_worktree, stamped_branch = worktree, branch
-    elif infer_worktree and item is not None and resolved_repo is not None and _infers_from_cwd(item):
-        here = cwd or Path.cwd()
-        if (
-            item_repo is not None
-            and item_repo.source in ("frontmatter", "flag")
-            and provenance.repository_of(here, (resolved_repo,)) is None
-        ):
-            inference_warnings = (
-                f"worktree inference skipped: {here} is not in {item.path}'s repository "
-                f"{item_repo.name!r} ({resolved_repo}); record placement explicitly if it runs elsewhere",
-            )
-        else:
-            recorded = item.worktree
-            if not recorded or not Path(recorded).is_dir():
-                detected = provenance.worktree_state(here, resolved_repo, git=provenance.gate_git(layout))
-                if detected is not None:
-                    stamped_worktree, stamped_branch = detected
-                    inferred = True
-
     finish_guard: str | None = None
     finish_blockers: tuple[str, ...] = ()
-    if (
-        item is not None
-        and old_phase == "finish"
-        and not return_
-        and (item.repo_stamps or "repo_stamps" in item.invalid_optional_fields)
-    ):
+    if item is not None and old_phase == "finish" and not return_ and _has_finish_target(layout, items, path):
         finish_guard = finish_read_guard(layout, path, bundle=bundle)
         verification = inspect_finish(layout, path)
         finish_blockers = verification.blockers
@@ -518,8 +441,6 @@ def _advance(
         owner=owner,
         resolved_in=resolved_in,
         released_at=released_at,
-        worktree=stamped_worktree,
-        branch=stamped_branch,
         return_=return_,
         hold=hold,
         stale_spec=stale,
@@ -553,8 +474,6 @@ def _advance(
             return StageAdvance(outcome=_refuse(outcome, "return-metadata-invalid", "repair malformed execute_return"))
         planned_return = returns.plan_return(
             layout,
-            bundle,
-            {i.path: i for i in items},
             item,
             scope=return_scope,
             definition=definition,
@@ -564,18 +483,6 @@ def _advance(
         if isinstance(planned_return, tuple):
             return StageAdvance(outcome=_refuse(outcome, *planned_return))
         return_plan = planned_return
-    if outcome.plan.trigger == "repair" and inferred:
-        # Moving off a removed stage does not claim the caller's checkout or
-        # discard the recorded baseline. Explicit placement remains authored.
-        outcome = replace(
-            outcome,
-            plan=replace(
-                outcome.plan,
-                changes=tuple(c for c in outcome.plan.changes if c.key not in {"worktree", "branch", "start_sha"}),
-            ),
-        )
-        stamped_worktree, stamped_branch = None, None
-        inferred = False
     if finish_blockers:
         refused = replace(
             outcome.plan,
@@ -613,7 +520,7 @@ def _advance(
     candidate = StageAdvance(
         outcome=outcome,
         repo_note=repo_note,
-        warnings=inference_warnings + drift_warnings + baseline_warnings,
+        warnings=drift_warnings + baseline_warnings,
         execute_return=return_plan,
     )
     if not dry_run and before_apply is not None:
@@ -650,17 +557,13 @@ def _advance(
         return replace(
             candidate, outcome=_refuse(outcome, "gate-bypass-unused", "no execute -> finish gate runs on this advance")
         )
-    anchor_root = _anchor_resolver(layout, items, item, resolved_repo, item_repo)
+    placement = _item_placement(layout, items, item, resolved_repo, item_repo, repo_name)
     if gated:
         verdict = _commit_gate(
             item,
-            anchor_root=anchor_root,
+            placement=placement,
             repo=resolved_repo,
             repo_note=repo_note,
-            repo_name=item_repo.name if item_repo is not None else None,
-            stamped_worktree=stamped_worktree,
-            worktree_inferred=inferred,
-            explicit_start=start_sha,
             git=provenance.gate_git(layout),
         )
         commit_refusal = verdict.refusal
@@ -681,7 +584,7 @@ def _advance(
                 return StageAdvance(
                     outcome=_refuse(outcome, receipt_verdict.refusal, receipt_verdict.detail),
                     repo_note=repo_note,
-                    warnings=inference_warnings + drift_warnings,
+                    warnings=drift_warnings,
                 )
         warnings = (verdict.note,) if verdict.note else ()
         gate_receipt = verdict.receipt
@@ -707,29 +610,14 @@ def _advance(
             return StageAdvance(
                 outcome=_refuse(outcome, verdict.refusal, verdict.detail),
                 repo_note=repo_note,
-                warnings=inference_warnings + drift_warnings + baseline_warnings + warnings,
+                warnings=drift_warnings + baseline_warnings + warnings,
             )
     returned_coverage: str | None = None
-    completion_destination: returns.ReturnDestination | None = None
     active_return = completes_execute and item.execute_return is not None and item.execute_return.active
     if completes_execute:
-        item_map = {entry.path: entry for entry in items}
-        returned_coverage, refusal, detail = returns.verify_completion(layout, item_map, item, definition)
+        returned_coverage, refusal, detail = returns.verify_completion(layout, item, definition)
         if refusal is not None:
             return replace(candidate, outcome=_refuse(outcome, refusal, detail), gate_receipt=gate_receipt)
-        if active_return:
-            destination = returns.resolve_destination(layout, item_map, item)
-            if isinstance(destination, tuple):
-                return replace(candidate, outcome=_refuse(outcome, *destination), gate_receipt=gate_receipt)
-            completion_destination = destination
-            if not dry_run and destination != locked_completion_destination:
-                return replace(
-                    candidate,
-                    outcome=_refuse(
-                        outcome, "return-destination-unverified", "return destination changed during locking"
-                    ),
-                    gate_receipt=gate_receipt,
-                )
     owner_ctx = decision_owner_
     ledger_plan: _decisions.DecisionPlan | None = None
     if bypass is not None:
@@ -773,7 +661,7 @@ def _advance(
     results_path: Path | None = None
     result_member: str | None = None
     result_bytes: bytes | None = None
-    facts_root = _facts_root(item, stamped_worktree, resolved_repo, anchor_root=anchor_root)
+    facts_root = _facts_root(placement, resolved_repo)
     if (
         outcome.plan.trigger == "complete"
         and facts_root is not None
@@ -781,13 +669,12 @@ def _advance(
         and new_phase != old_phase
     ):
         effective_start_sha = _effective_start_sha(
-            start_sha,
             definition=definition,
             phase=old_phase,
             facts_root=facts_root,
             bundle_root=bundle.root,
             item=item,
-            repo_name=item_repo.name if item_repo is not None else None,
+            recorded_start=item.start_sha,
         )
         if effective_start_sha is not None:
             facts = provenance.results_facts(
@@ -861,8 +748,8 @@ def _advance(
         if not (bundle.root / parent).exists():
             conditions = (DirectoryPrecondition(parent, None),)
 
-    if return_plan is not None and return_plan.destination.same_root:
-        coverage = returns.coverage_mutation(return_plan)
+    if return_plan is not None:
+        coverage = returns.coverage_mutation(layout, return_plan)
         writes.extend(coverage.writes)
         mkdirs = (*mkdirs, *coverage.mkdirs)
         conditions = (*conditions, *coverage.directory_preconditions)
@@ -949,10 +836,6 @@ def _advance(
         subject + (" (resolved)" if resolved else ""),
         items=() if return_plan is not None else commit_items,
     )
-    return_op: returns.ReturnOperation | None = None
-    if return_plan is not None and not return_plan.destination.same_root:
-        return_op = returns.apply_content(layout, return_plan)
-        return_op = returns.mark_publication(layout, return_op, writes[0].after)
 
     def validate_reads() -> None:
         if active_return:
@@ -960,25 +843,14 @@ def _advance(
             fresh_item = fresh_items.get(path)
             if fresh_item is None or fresh_item.execute_return != item.execute_return:
                 raise WorkspaceError("execute return metadata changed; inspect and retry")
-            text, refusal, detail = returns.verify_completion(layout, fresh_items, fresh_item, definition)
-            destination = returns.resolve_destination(layout, fresh_items, fresh_item)
-            if refusal is not None or text != returned_coverage or destination != completion_destination:
+            text, refusal, detail = returns.verify_completion(layout, fresh_item, definition)
+            if refusal is not None or text != returned_coverage:
                 raise WorkspaceError(detail or "execute return evidence changed; inspect and retry")
         validate_read_set()
-        if return_op is not None:
-            returns.publish_guard(layout, return_op)()
-        elif return_plan is not None:
-            if (
-                returns.digest(returns.read_member(layout.bundle_dir, return_plan.plan_member))
-                != return_plan.plan_sha256
-            ):
-                raise WorkspaceError("return plan changed; inspect and retry")
-            fresh_items = {i.path: i for i in load_items(load_workspace_bundle(layout, ignore=IGNORE))}
-            if path not in fresh_items:
-                raise WorkspaceError("return item disappeared; inspect")
-            fresh = returns.resolve_destination(layout, fresh_items, fresh_items[path])
-            if fresh != return_plan.destination:
-                raise WorkspaceError("return destination changed; inspect and retry")
+        if return_plan is not None and (
+            returns.digest(returns.read_member(layout.bundle_dir, return_plan.plan_member)) != return_plan.plan_sha256
+        ):
+            raise WorkspaceError("return plan changed; inspect and retry")
 
     def publish() -> MutationApplication:
         return apply_mutation(
@@ -991,9 +863,7 @@ def _advance(
             commit=workspace_commit,
         )
 
-    if return_op is not None:
-        application = returns.apply_publication(layout, return_op, page_before, publish)
-    elif return_plan is not None or active_return:
+    if return_plan is not None or active_return:
         publication_record = return_plan.record if return_plan is not None else item.execute_return
         if publication_record is None:
             raise WorkspaceError("return publication has no record; inspect")
@@ -1009,8 +879,6 @@ def _advance(
         )
     else:
         application = publish()
-    if return_op is not None and returns.pending_return(layout, path) is not None:
-        warnings = (*warnings, f"execute return {return_op.return_id} is pending; rerun the same return to resume")
     if application.ok:
         outcome = replace(outcome, written=True)
         if result_member is not None:
@@ -1029,7 +897,7 @@ def _advance(
         pointer_path=pointer_path,
         repo_note=repo_note,
         application=application,
-        warnings=inference_warnings + drift_warnings + baseline_warnings + warnings,
+        warnings=drift_warnings + baseline_warnings + warnings,
         gate_bypass=bypass if application.ok else None,
         gate_receipt=gate_receipt,
         execute_return=return_plan,
@@ -1132,105 +1000,40 @@ class GateVerdict:
     receipt: GateEvidence | None = None
 
 
-AnchorRoot = Callable[[], "Path | GateVerdict"]
-
-
-def _anchor_resolver(
+def _item_placement(
     layout: WorkspaceLayout,
     items: Sequence[WorkItem],
     item: WorkItem | None,
     repo: Path | None,
     item_repo: ItemRepo | None,
-) -> AnchorRoot | None:
-    """A memoized, lazy selector for a descendant's enclosing integration anchor.
-
-    `None` for a top-level item (the declared checkout stays its fallback) or when
-    no repository resolved. Observation of the repository happens at most once.
-    """
-    if item is None or repo is None or _infers_from_cwd(item):
+    repo_name: str | None,
+) -> Placement | None:
+    """The item's computed placement, or `None` when no repository or placement resolves."""
+    if item is None or repo is None:
         return None
-    by_path = {candidate.path: candidate for candidate in items}
-    memo: list[Path | GateVerdict] = []
-
-    def refuse(detail: str) -> GateVerdict:
-        # the closed vocabulary keeps `worktree-missing`; a bypass never authorizes reading trunk
-        return GateVerdict("worktree-missing", detail)
-
-    def select() -> Path | GateVerdict:
-        owner = enclosing_owner(item, by_path)
-        if owner is None:
-            return refuse(
-                f"{item.path} has no enclosing integration owner (Epic, Release or Feature with children) and "
-                "records no worktree; the gate never substitutes the declared checkout -- record its placement"
-            )
-        repo_name = item_repo.name if item_repo is not None else _repo_name_of(layout, repo)
-        gated = ItemRepo(repo_name, repo, "flag")
-        try:
-            owner_repo = resolve_item_repo(layout, owner, by_path, fallback=lambda: gated)
-            anchor_ = reader_anchor(
-                owner,
-                repos={owner.path: owner_repo},
-                repo=gated,
-                context=observe_repository(repo),
-            )
-        except WorkspaceError as exc:
-            return refuse(f"{item.path}: integration owner {owner.path}: {exc}")
-        if isinstance(anchor_, AnchorRefusal):
-            return refuse(f"{item.path}: nearest integration owner {owner.path}: {anchor_.reason}")
-        if not isinstance(anchor_, Anchor):
-            return refuse(
-                f"{item.path} records no worktree and its nearest integration owner {owner.path} records no "
-                f"anchor for repository {repo_name or repo}; record the placement (`gw work record-placement`)"
-            )
-        return Path(anchor_.worktree)
-
-    def resolve() -> Path | GateVerdict:
-        if not memo:
-            memo.append(select())
-        return memo[0]
-
-    return resolve
-
-
-def _gate_placement(item: WorkItem, repo_name: str | None) -> tuple[str | None, str | None]:
-    """`(worktree, start_sha)` recorded for the gated repository: its `repo_stamps`
-    entry when it has one *with* a `start_sha`, else the scalar placement. A
-    stamp without a baseline still supplies its worktree."""
-    stamp = item.repo_stamps.get(repo_name) if repo_name is not None else None
-    if stamp is not None:
-        return stamp.worktree, stamp.start_sha or item.start_sha
-    return item.worktree, item.start_sha
+    name = item_repo.name if item_repo is not None else (repo_name or _repo_name_of(layout, repo))
+    try:
+        return item_placement(layout, item, {candidate.path: candidate for candidate in items}, repo_name=name)
+    except WorkspaceError:
+        return None
 
 
 def _commit_gate(
     item: WorkItem,
     *,
-    anchor_root: AnchorRoot | None = None,
+    placement: Placement | None,
     repo: Path | None,
     repo_note: str | None,
-    repo_name: str | None,
-    stamped_worktree: str | None,
-    explicit_start: str | None,
     git: provenance.GitExecutable | provenance.GitFailure,
-    worktree_inferred: bool = False,
 ) -> GateVerdict:
-    """Whether the execute stage left its work, and only its work, where git can see it.
+    """Whether the execute stage left its work, and only its work, in the item's own worktree.
 
-    Fails **closed**. Every input the gate needs -- a code scope, a repository,
-    the recorded worktree, a runnable git, a baseline, a readable range -- is
-    either present or the advance refuses with its own code (D-004). The only
-    way past a refusal is `gw work advance --skip-gate <code> --reason ... --actor ...`,
-    which the ledger records. A `gw:workspace`-only item is the one pass that
-    evaluates nothing: it has no code surface, and its workspace checks run elsewhere.
+    Fails **closed**; the only way past a refusal is `gw work advance --skip-gate <code> --reason ... --actor ...`.
+    A `gw:workspace`-only item is the one pass that evaluates nothing.
 
-    Order: no-affects, no-repo, worktree-missing, git-unavailable, then the three
-    evaluated signals -- uncommitted-work before the baseline is even needed,
-    then no-start-sha, range-unreadable, no-commits, no-affects-touched (most
-    specific last: an empty range has an empty file list too).
-
-    False positives are accepted and recoverable -- unrelated dirt under an
-    `affects` directory refuses an advance that would otherwise pass. The
-    refusal names every offending path.
+    Order: no-affects, no-repo, worktree-missing, git-unavailable, uncommitted-work, range-unreadable,
+    no-commits, no-affects-touched. The range is the item's own non-merge commits against its parent branch's
+    local tip, so a refresh merge and parent-side files never count.
     """
     paths = code_affects(item.affects)
     if not paths:
@@ -1246,25 +1049,14 @@ def _commit_gate(
     if repo is None:
         note = f" ({repo_note})" if repo_note else ""
         return GateVerdict("no-repo", f"no code repository resolved for {item.path}{note}")
-    recorded_worktree, recorded_start = _gate_placement(item, repo_name)
-    if stamped_worktree and not (worktree_inferred and recorded_worktree and not Path(recorded_worktree).is_dir()):
-        root = Path(stamped_worktree)
-    elif recorded_worktree:
-        root = Path(recorded_worktree)
-        if not root.is_dir():
-            return GateVerdict(
-                "worktree-missing",
-                f"{item.path} records worktree {recorded_worktree}, which no longer exists; the gate never "
-                "substitutes another checkout -- restore it or record the placement again",
-            )
-    elif anchor_root is not None and not _infers_from_cwd(item):
-        # D-004: an unstamped descendant reads its enclosing anchor, never the declared checkout.
-        selected = anchor_root()
-        if isinstance(selected, GateVerdict):
-            return selected
-        root = selected
-    else:
-        root = repo
+    if placement is None:
+        return GateVerdict(
+            "worktree-missing",
+            f"{item.path}: no computed worktree resolves in {repo}; run gw work place {item.path}",
+        )
+    root = placement.worktree
+    if not root.is_dir():
+        return GateVerdict("worktree-missing", worktree_missing_detail(item.path, placement))
 
     def refuse(code: RefusalReason, detail: str) -> GateVerdict:
         # the resolved root rides along so a bypassed commit refusal still reaches the receipt gate
@@ -1272,6 +1064,16 @@ def _commit_gate(
 
     if isinstance(git, provenance.GitFailure):
         return refuse("git-unavailable", f"no usable git ({git.cause}): {git.detail}")
+    same = provenance.strict_same_repository(root, repo, git=git)
+    if isinstance(same, provenance.GitFailure):
+        return refuse("git-unavailable", f"cannot compare {root} with {repo} ({same.cause}): {same.detail}")
+    if not same:
+        return GateVerdict("worktree-missing", worktree_missing_detail(item.path, placement))
+    current = provenance.strict_git(root, "branch", "--show-current", git=git)
+    if isinstance(current, provenance.GitFailure):
+        return refuse("git-unavailable", f"cannot read the branch of {root} ({current.cause}): {current.detail}")
+    if current.strip() != placement.branch:
+        return GateVerdict("worktree-missing", worktree_missing_detail(item.path, placement))
     dirty = provenance.strict_dirty_paths(root, paths, git=git)
     if isinstance(dirty, provenance.GitFailure):
         return refuse("git-unavailable", f"`git status` could not be read in {root} ({dirty.cause}): {dirty.detail}")
@@ -1282,26 +1084,16 @@ def _commit_gate(
             + ", ".join(dirty)
             + " -- commit them (or stash what does not belong to this item), then advance again",
         )
-    start = explicit_start or recorded_start
-    if not start:
-        return refuse(
-            "no-start-sha",
-            f"{item.path} has no recorded execute baseline (`start_sha`) and none was passed; record one with "
-            f"`gw work record-baseline {item.path}` before execute work starts, pass --start-sha, or, for an item "
-            f"that predates baselines, `gw work advance {item.path} --from execute --skip-gate no-start-sha "
-            '--reason "..." --actor <you>`',
-        )
-    resolved = provenance.strict_commit(root, start, git=git)
-    if isinstance(resolved, provenance.GitFailure):
-        return refuse(
-            "range-unreadable", f"start_sha {start} does not resolve to a commit in {root}: {resolved.detail}"
-        )
-    facts = provenance.strict_range(root, start_sha=resolved, paths=paths, git=git)
+    facts = provenance.strict_branch_range(root, base_ref=placement.parent_branch, paths=paths, git=git)
     if isinstance(facts, provenance.GitFailure):
-        return refuse("range-unreadable", f"the range {start}..HEAD is unreadable in {root}: {facts.detail}")
+        return refuse(
+            "range-unreadable",
+            f"the range {placement.parent_branch}..HEAD is unreadable in {root}: {facts.detail}",
+        )
     if not facts.commits:
         return refuse(
-            "no-commits", f"the execute stage recorded no commits touching `affects` in {start}..{facts.end_sha}"
+            "no-commits",
+            f"the execute stage recorded no commits of its own touching `affects` beyond {placement.parent_branch}",
         )
     if not facts.files:
         return refuse(
@@ -1379,49 +1171,37 @@ def _receipt_gate(layout: WorkspaceLayout, item: WorkItem, root: Path, repo_name
 
 
 def _effective_start_sha(
-    explicit: str | None,
     *,
     definition: PipelineDefinition,
     phase: str | None,
     facts_root: Path,
     bundle_root: Path,
     item: WorkItem,
-    repo_name: str | None,
+    recorded_start: str | None,
 ) -> str | None:
     """The start of the range this stage covers, or `None` for no stub.
 
-    An explicit caller argument wins. At `execute`, the placement's recorded
-    baseline comes next, then a derived one. At `finish` nothing else applies:
+    At `execute`, the item's recorded baseline wins, then a derived one. At `finish` nothing else applies:
     the recorded baseline is the *execute* range's start, and a finish stub
     built on it would claim the execute commits.
     """
-    if explicit:
-        return explicit
     if phase != "execute":
         return None
-    _worktree, recorded = _gate_placement(item, repo_name)
-    if recorded:
-        return recorded
+    if recorded_start:
+        return recorded_start
     spec_path = bundle_root / anchor.spec_ref(item, definition=definition)
     spec_text = spec_path.read_text(encoding="utf-8") if spec_path.is_file() else ""
     return anchor.phase_start_sha(facts_root, spec_path, spec_text)
 
 
-def _facts_root(
-    item: WorkItem | None, worktree: str | None, repo: Path | None, *, anchor_root: AnchorRoot | None = None
-) -> Path | None:
-    """Where the stage's commits actually landed: the worktree this call
-    detected, then the item's recorded one, then (for a descendant with no
-    recorded placement) its enclosing anchor, then the repo. A stub gathered
-    from the main checkout when the work happened in a worktree is a stub of
-    the wrong range. A descendant whose anchor cannot be proven gets no stub
-    rather than a trunk one."""
-    for candidate in (worktree, item.worktree if item is not None else None):
-        if candidate and Path(candidate).is_dir():
-            return Path(candidate)
-    if item is not None and anchor_root is not None and not item.worktree and not _infers_from_cwd(item):
-        selected = anchor_root()
-        return selected if isinstance(selected, Path) else None
+def _facts_root(placement: Placement | None, repo: Path | None) -> Path | None:
+    """Where the stage's commits landed: the computed worktree when it is a directory.
+
+    A placement whose worktree is missing yields `None` (no stub), never the declared checkout; the repository
+    is the root only when no placement resolved at all.
+    """
+    if placement is not None:
+        return placement.worktree if placement.worktree.is_dir() else None
     return repo
 
 

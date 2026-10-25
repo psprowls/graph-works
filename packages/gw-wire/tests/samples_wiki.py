@@ -246,6 +246,16 @@ WIKI: dict[str, tuple[Callable[[], object], ...]] = {
                 errors=("e",),
             )
         ),
+        lambda: wiki.scan_normal_payload(
+            ns(
+                ok=True,
+                worklist=ns(short_head="abc"),
+                structural=STRUCTURAL,
+                applied=ns(narrated=1, sections_filled=2, stamped=3),
+                errors=(),
+            ),
+            work_indexes={"indexes": ["work/index.md"], "commit": None},
+        ),
     ),
     "wiki.scan_emit_payload": (
         lambda: wiki.scan_emit_payload(
@@ -254,6 +264,14 @@ WIKI: dict[str, tuple[Callable[[], object], ...]] = {
             results_dir=Path("/c/results"),
             short_head="abc",
             structural=STRUCTURAL,
+        ),
+        lambda: wiki.scan_emit_payload(
+            worklist_path=Path("/c/worklist.json"),
+            briefs_dir=Path("/c/briefs"),
+            results_dir=Path("/c/results"),
+            short_head="abc",
+            structural=STRUCTURAL,
+            work_indexes={"indexes": [], "commit": None},
         ),
     ),
     "wiki.repo_scan_payload": (

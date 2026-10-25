@@ -47,7 +47,6 @@ RefusalReason = Literal[
     "return-scope-required",
     "return-metadata-invalid",
     "return-pending",
-    "return-destination-unverified",
     "return-evidence-missing",
     "return-evidence-stale",
     "return-evidence-incomplete",
@@ -57,7 +56,6 @@ RefusalReason = Literal[
     "no-repo",
     "worktree-missing",
     "git-unavailable",
-    "no-start-sha",
     "range-unreadable",
     "gate-bypass-invalid",
     "gate-bypass-mismatch",
@@ -92,7 +90,6 @@ COMMIT_GATE_REFUSALS: frozenset[str] = frozenset(
         "worktree-missing",
         "git-unavailable",
         "uncommitted-work",
-        "no-start-sha",
         "range-unreadable",
         "no-commits",
         "no-affects-touched",
@@ -167,8 +164,6 @@ def advance(
     owner: str | None = None,
     resolved_in: str | None = None,
     released_at: date | None = None,
-    worktree: str | None = None,
-    branch: str | None = None,
     return_: bool = False,
     unreadable: Mapping[str, str] | None = None,
     hold: HoldFact | None = None,
@@ -310,8 +305,6 @@ def advance(
             owner=owner,
             resolved_in=resolved_in,
             released_at=released_at,
-            worktree=worktree,
-            branch=branch,
         ),
         stamp_source=transition.stamp_source,
         sync_plan_table=transition.sync_plan_table,
@@ -354,8 +347,6 @@ def _changes(
     owner: str | None,
     resolved_in: str | None,
     released_at: date | None,
-    worktree: str | None = None,
-    branch: str | None = None,
 ) -> tuple[FieldChange, ...]:
     """The keys to write, in the order they are written -- which is also the
     order they append in on a page that lacks them."""
@@ -367,16 +358,10 @@ def _changes(
         ("owner", item.owner, owner),
         ("resolved_in", item.resolved_in, resolved_in),
         ("released_at", item.released_at, released_at),
-        ("worktree", item.worktree, worktree),
-        ("branch", item.branch, branch),
     )
     changes = [
         FieldChange(key, before, after) for key, before, after in candidates if after is not None and after != before
     ]
-    # A changed placement never retains the prior baseline (the `plan_placement` rule).
-    placement_changed = any(change.key in ("worktree", "branch") for change in changes)
-    if placement_changed and item.start_sha is not None:
-        changes.append(FieldChange("start_sha", item.start_sha, None))
     # `updated` is written as a `date`, not an ISO string (C3-J): ruamel quotes
     # a `str` that would re-parse as a date, and every authored page is bare.
     if item.updated != today.isoformat():

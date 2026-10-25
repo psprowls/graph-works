@@ -409,14 +409,18 @@ def test_archive_applies_the_unified_effect_set_and_logs_the_path(tmp_path: Path
     document = load(page)
     document.set("work_status", "resolved")
     document.save()
+    work_index = tmp_path / "work/index.md"
+    work_index.write_bytes(b"# Work\n\nHuman prose.\n")
+    index_before = work_index.read_bytes()
 
     result = runner.invoke(app, ["archive", str(tmp_path), path, "--today", TODAY])
 
     assert result.exit_code == 0, result.output
+    assert work_index.read_bytes() == index_before
     assert not page.exists()
     assert (tmp_path / "work/_archive/bug-done.md").is_file()
-    assert "bug-done" not in (tmp_path / "work/index.md").read_text(encoding="utf-8")
-    assert "bug-done" in (tmp_path / "work/_archive/index.md").read_text(encoding="utf-8")
+    # Archive does not reconcile lane indexes; `gw work regen-index` does.
+    assert not (tmp_path / "work/_archive/index.md").exists()
     assert f"archived {path}" in (tmp_path / "log.md").read_text(encoding="utf-8")
 
 
@@ -517,7 +521,7 @@ def test_file_dry_run_renders_every_planned_effect_without_writing(tmp_path: Pat
         ],
     )
     assert result.exit_code == 0, result.output
-    assert "would reconcile" in result.stdout and "filed work/feature-preview" in result.stdout
+    assert "would reconcile" not in result.stdout and "filed work/feature-preview" in result.stdout
     assert not (tmp_path / "work/feature-preview.md").exists()
 
 

@@ -14,9 +14,9 @@ and system coupling is *allowed* to live; `workflow-orca` is this package's futu
 second backend squeezed in here. Read `packages/subagents-io/src/subagents_io/backend.py` and
 `dispatch.py` before touching this package's protocol-facing code — they're short, and this
 package's job only makes sense in light of what `WorkerRecord.state`, `WorkerEvent`,
-`DISPATCH_MODES`, and `WorktreeAction` mean there.
+`DISPATCH_MODES`, and `WorktreePlacement` mean there.
 
-Single runtime dependency: `subagents-io` (workspace-pinned `>=0.2,<0.3`). Deliberately no
+Single runtime dependency: `subagents-io` (workspace-pinned `>=0.3,<0.4`). Deliberately no
 optional extras — a vendor SDK arriving as an extra would make this the package that runs two
 backends, which the one-package-per-backend rule forbids.
 
@@ -61,14 +61,7 @@ by name is what makes a coordinator restart a no-op rather than a second session
 
 1. Refuses a `dispatch.key` already present in this session (`BackendError`) — silently returning
    the existing record would make a re-dispatch after a failure read as a success.
-2. Refuses `pin-detached` (`WorktreeNotProvisioned`) even when a path is supplied: this backend
-   cannot verify the detached repository and SHA contract. Supplying a path
-   never bypasses that refusal; it occurs before ledger or process creation.
-   It also refuses
-   `dispatch.worktree.path is None` (`WorktreeNotProvisioned`) — it never touches git and expects
-   a fully-resolved worktree from a band-3 planner. A `reuse` or `"main"` dispatch works
-   end-to-end here; `fork-child`/`create-top-level` don't until something upstream provisions
-   the worktree.
+2. Launches into `dispatch.worktree.path`, which is always set: this backend never touches git and expects a fully placed worktree from a band-3 planner, so no placement-shaped dispatch is refused. A missing directory surfaces as the `Popen` failure it is.
 3. Computes a deterministic, collision-proof `handle` via `_handle_for(key)`: sanitize the key to
    filesystem-safe characters, then suffix with a 4-byte blake2s digest of the *original* key —
    deterministic because resumption looks the directory up by key with no live process to ask;

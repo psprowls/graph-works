@@ -57,7 +57,7 @@ def test_verify_integration_requires_current_refs_shape_and_reachability(tmp_pat
         ItemRepo("code", tmp_path, "frontmatter"), str(tmp_path), "source", "main", str(tmp_path)
     )
     entry = finish.VerifiedIntegration("code", "source", "a" * 40, "main", "b" * 40)
-    monkeypatch.setattr(finish, "_commit", lambda repo, ref: None if fault == "missing-ref" else "a" * 40)
+    monkeypatch.setattr(finish, "resolve_commit", lambda repo, ref: None if fault == "missing-ref" else "a" * 40)
     monkeypatch.setattr(finish, "integration_shape", lambda *args: "invalid shape" if fault == "shape" else None)
     monkeypatch.setattr(finish, "_is_ancestor", lambda *args: False)
     reason = finish.verify_integration(target, entry)
@@ -71,21 +71,12 @@ def test_verify_integration_requires_current_refs_shape_and_reachability(tmp_pat
     )
 
 
-def test_observe_integration_refuses_unresolved_current_tip(tmp_path, monkeypatch):
-    target = finish.FinishTarget(
-        ItemRepo("code", tmp_path, "frontmatter"), str(tmp_path), "source", "main", str(tmp_path)
-    )
-    monkeypatch.setattr(finish, "_commit", lambda *args: None)
-    assert finish.observe_integration(target) is None
-    assert finish.observe_integration(finish.FinishTarget(ItemRepo(None, None, "none"), "", "", "", None)) is None
-
-
 @pytest.mark.parametrize("fault", ["history-unreadable", "no-match", "ambiguous"])
 def test_rediscovery_never_invents_an_integration(tmp_path, monkeypatch, fault):
     target = finish.FinishTarget(
         ItemRepo("code", tmp_path, "frontmatter"), str(tmp_path), "source", "main", str(tmp_path)
     )
-    monkeypatch.setattr(finish, "_commit", lambda *args: "a" * 40)
+    monkeypatch.setattr(finish, "resolve_commit", lambda *args: "a" * 40)
     monkeypatch.setattr(finish, "_is_ancestor", lambda *args: False)
     monkeypatch.setattr(finish, "finish_git", lambda *args, **kwargs: GitOutcome(0, "b" * 40, "ok"))
     log = (
@@ -93,7 +84,7 @@ def test_rediscovery_never_invents_an_integration(tmp_path, monkeypatch, fault):
         if fault == "history-unreadable"
         else []
         if fault == "no-match"
-        else [["c" * 40, "d" * 40], ["e" * 40, "f" * 40]]
+        else [("c" * 40, ("d" * 40,), "1" * 40), ("e" * 40, ("f" * 40,), "2" * 40)]
     )
     monkeypatch.setattr(finish, "_first_parent_log", lambda *args: log)
     monkeypatch.setattr(finish, "_tree", lambda repo, ref: ref)

@@ -8,7 +8,7 @@ from datetime import date
 from pathlib import Path
 
 import pytest
-from _gate_helpers import gate_ready
+from _gate_helpers import declare_code, gate_ready, place_item
 from gw_kernel import apply_init, plan_init
 from gw_kernel.testing.transactions import git as _git
 from gw_kernel.testing.transactions import init_git as _init_git
@@ -18,6 +18,7 @@ from gw_kernel.workspace.repos import ItemRepo
 from gw_kernel.workspace.work_schemas import declarations_dir_for, packaged_schemas
 from gw_orchestrate import commands as orchestrate
 from gw_orchestrate import stage_advance as stage
+from gw_pipeline.placement import branch_name
 from okf_io import load
 from work_tracker_okf.pipeline import PACKAGED_DEFINITION
 
@@ -151,39 +152,21 @@ def _commit_workspace(root: Path) -> None:
     )
 
 
-def test_git_workspace_emits_workspace_preparations(tmp_path: Path) -> None:
+@pytest.mark.parametrize("affects", [("packages/a/x.py",), ("gw:workspace",)], ids=["code", "workspace-only"])
+def test_a_git_workspace_prepares_no_workspace_branch(tmp_path: Path, affects: tuple[str, ...]) -> None:
+    """A workspace that is its own git toplevel plans as any other: workspace writes land on the primary checkout."""
     layout = _workspace_with_git(tmp_path)
-    _write(layout, "work/feature-lone", phase="execute", work_status="accepted", affects=("packages/a/x.py",))
+    _write(layout, "work/feature-lone", phase="execute", work_status="accepted", affects=affects)
     _commit_workspace(layout.root)
     result = orchestrate.run_orchestrate(layout, "work/feature-lone")
-    (prep,) = result.workspace_preparations
-    assert Path(prep.worktree).parent == (layout.worktrees_dir.resolve() / "workspace")
-    assert prep.base_branch == "main"
-    assert [b.kind for b in result.blocked] == ["workspace-pending"]
-
-
-def test_embedded_workspace_notes_and_plans_as_before(tmp_path: Path) -> None:
-    layout = _workspace_with_git(tmp_path, embedded=True)
-    _write(layout, "work/feature-lone", phase="execute", work_status="accepted", affects=("packages/a/x.py",))
-    _commit_workspace(layout.root.parent)
-    result = orchestrate.run_orchestrate(layout, "work/feature-lone")
-    assert not result.workspace_preparations
-    assert any("workspace placement disabled" in warning for warning in result.warnings)
-    assert [dispatch.slug for dispatch in result.dispatches] == ["work/feature-lone"]
-
-
-def test_workspace_commits_off_notes_and_plans_as_before(tmp_path: Path) -> None:
-    layout = _workspace_with_git(tmp_path)
-    workflow_file = layout.root / "workflow.yaml"
-    workflow_file.write_text(
-        "workflow:\n  workspace_commits: off\n" + workflow_file.read_text(encoding="utf-8"), encoding="utf-8"
-    )
-    _write(layout, "work/feature-lone", phase="execute", work_status="accepted", affects=("packages/a/x.py",))
-    _commit_workspace(layout.root)
-    result = orchestrate.run_orchestrate(layout, "work/feature-lone")
-    assert not result.workspace_preparations
-    assert any("workspace placement disabled" in warning for warning in result.warnings)
-    assert [dispatch.slug for dispatch in result.dispatches] == ["work/feature-lone"]
+    [dispatch] = result.dispatches
+    assert result.blocked == ()
+    assert not any("workspace placement" in warning for warning in result.warnings)
+    if affects == ("gw:workspace",):
+        assert dispatch.key not in result.placements
+        assert dispatch.worktree.path == str(layout.root)
+    else:
+        assert dispatch.worktree.path == str(result.placements[dispatch.key].worktree)
 
 
 def test_lone_item_shell_returns_canonical_dispatch(tmp_path: Path, monkeypatch) -> None:
@@ -362,31 +345,6 @@ def test_return_transition_does_not_restamp_the_pointer(tmp_path: Path) -> None:
     assert _pointer(layout) == {"path": path, "phase": "finish", "updated": TODAY.isoformat()}
 
 
-def test_live_stage_advance_forwards_explicit_worktree_stamping(tmp_path: Path) -> None:
-    layout = _initialized_workspace(tmp_path)
-    path = "work/feature-a"
-    _write(layout, path)
-    _artifact(layout, path, "plan")
-    from gw_work import commands as work
-
-    assert work.run_regen_indexes(layout, dry_run=False).application.ok
-    result = stage.run_stage_advance(
-        layout,
-        path,
-        today=TODAY,
-        worktree="/wt/feature-a",
-        branch="feature/a",
-        dry_run=False,
-    )
-    assert result.application is not None and result.application.ok
-    changes = {change.key: change.after for change in result.outcome.plan.changes}
-    assert changes["worktree"] == "/wt/feature-a"
-    assert changes["branch"] == "feature/a"
-    written = load(layout.bundle_dir / f"{path}.md").fm_data()
-    assert written["worktree"] == "/wt/feature-a"
-    assert written["branch"] == "feature/a"
-
-
 def test_refused_stage_advance_writes_no_page_pointer_or_journal(tmp_path: Path) -> None:
     layout = _initialized_workspace(tmp_path)
     epic = "work/epic-a"
@@ -406,7 +364,7 @@ def test_refused_stage_advance_writes_no_page_pointer_or_journal(tmp_path: Path)
 def test_release_finish_forwards_released_at_to_the_domain_plan(tmp_path: Path) -> None:
     layout = _workspace(tmp_path)
     path = "work/release-v1"
-    _write(layout, path, type="Release", phase="finish")
+    _write(layout, path, type="Release", phase="finish", affects=("gw:workspace",))
     result = stage.run_stage_advance(layout, path, today=TODAY, released_at=TODAY)
     assert result.outcome.plan.refusal is None
     assert any(change.key == "released_at" and change.after == TODAY for change in result.outcome.plan.changes)
@@ -430,16 +388,14 @@ def test_explicit_repo_skips_declared_repo_resolution(tmp_path: Path, monkeypatc
     path = "work/feature-a"
     _write(layout, path, phase="design")
     monkeypatch.setattr(orchestrate, "resolve_item_repo", lambda *args, **kwargs: pytest.fail("must not resolve"))
-    monkeypatch.setattr(orchestrate, "_checkout_is_dirty", lambda candidate: False)
-    monkeypatch.setattr(orchestrate, "default_base", lambda candidate: "main")
     result = orchestrate.run_orchestrate(layout, path, repo=repo)
-    assert len(result.warnings) == 1
-    assert "workspace placement disabled" in result.warnings[0]
-    # A reader pins the explicit repository baseline -- `resolve_item_repo` still must not be called, since
-    # `repo=` bypasses declared-repo resolution regardless of placement.
-    assert result.dispatches[0].worktree.action == "pin-detached"
-    assert result.dispatches[0].worktree.path is None
-    assert result.dispatches[0].merge_target == "main"
+    assert result.warnings == ()
+    # `repo=` bypasses declared-repo resolution; placement names the override by its basename (D-009).
+    [dispatch] = result.dispatches
+    placement = result.placements[dispatch.key]
+    assert placement.repo_name == "code" and placement.repo_root == repo.resolve()
+    assert dispatch.worktree.path == str(layout.worktrees_dir.resolve() / "code" / branch_name(path, "Feature"))
+    assert dispatch.merge_target == "main"
     assert result.code_repo == str(repo)
 
 
@@ -454,15 +410,17 @@ def test_declared_repo_resolution_note_is_preserved(tmp_path: Path, monkeypatch)
     assert "repo unavailable" in result.warnings
 
 
-def test_the_declared_code_repo_is_reported_even_when_its_checkout_is_withheld(tmp_path: Path, monkeypatch) -> None:
+def test_a_dirty_declared_checkout_is_reported_and_changes_no_placement(tmp_path: Path, monkeypatch) -> None:
     layout = _workspace(tmp_path / "workspace")
     path = "work/feature-a"
     _write(layout, path, phase="design")
     code = _declare_repo(monkeypatch, tmp_path)
     (code / "dirty.txt").write_text("local edit\n", encoding="utf-8")
     result = orchestrate.run_orchestrate(layout, path)
-    assert result.code_repo == str(code)
-    assert result.dispatches[0].worktree.action == "pin-detached"
+    assert result.code_repo == str(code.resolve())
+    [dispatch] = result.dispatches
+    assert dispatch.worktree.path == str(layout.worktrees_dir.resolve() / "code" / branch_name(path, "Feature"))
+    assert dispatch.worktree.parent_path == str(code.resolve())
 
 
 def test_a_root_whose_design_ran_attended_is_placed_at_plan_not_refused(tmp_path: Path, monkeypatch) -> None:
@@ -478,10 +436,10 @@ def test_a_root_whose_design_ran_attended_is_placed_at_plan_not_refused(tmp_path
 
     assert [blocked.kind for blocked in result.blocked] == []
     assert [dispatch.phase for dispatch in result.dispatches] == ["plan"]
-    assert result.dispatches[0].worktree.action == "pin-detached"
+    assert result.dispatches[0].key in result.placements
 
 
-def test_no_declared_code_repo_reports_null_and_blocks_a_worktree_creation(tmp_path: Path, monkeypatch) -> None:
+def test_no_declared_code_repo_reports_null_and_launches_in_the_workspace(tmp_path: Path, monkeypatch) -> None:
     layout = _workspace(tmp_path)
     path = "work/feature-a"
     _write(layout, path, phase="design")
@@ -491,71 +449,9 @@ def test_no_declared_code_repo_reports_null_and_blocks_a_worktree_creation(tmp_p
     result = orchestrate.run_orchestrate(layout, path)
     assert result.code_repo is None
     assert "repo unavailable" in result.warnings
-    assert result.dispatches == ()
-    assert [blocked.kind for blocked in result.blocked] == ["worktree-unprovable"]
-
-
-def test_worktree_inventory_parses_porcelain_output(monkeypatch) -> None:
-    porcelain = (
-        "worktree /repo\n"
-        "HEAD 8a1f0000000000000000000000000000000000aa\n"
-        "branch refs/heads/main\n"
-        "\n"
-        "worktree /wt/bug-x\n"
-        "HEAD 3c2d0000000000000000000000000000000000bb\n"
-        "branch refs/heads/psprowls/bug-x-1a2b3c4d\n"
-        "\n"
-        "worktree /wt/detached\n"
-        "HEAD 9f0e0000000000000000000000000000000000cc\n"
-        "detached\n"
-        "\n"
-    )
-    monkeypatch.setattr(orchestrate, "run_git", lambda cwd, *args: porcelain)
-
-    inventory = orchestrate._worktree_inventory(Path("/repo"))
-
-    assert inventory == {
-        "main": "/repo",
-        "psprowls/bug-x-1a2b3c4d": "/wt/bug-x",
-    }
-
-
-def test_worktree_inventory_drops_a_prunable_record(monkeypatch) -> None:
-    """`prunable <reason>` appears *after* the record's `branch` line, keeps
-    listing a worktree whose directory has already been deleted, until
-    `git worktree prune` runs. Such a record must not be admitted -- adopting
-    it would report a gone directory as existing."""
-    porcelain = (
-        "worktree /repo\n"
-        "HEAD 8a1f0000000000000000000000000000000000aa\n"
-        "branch refs/heads/main\n"
-        "\n"
-        "worktree /wt1\n"
-        "HEAD 5323a37f00000000000000000000000000000000\n"
-        "branch refs/heads/feat1\n"
-        "prunable gitdir file points to non-existent location\n"
-        "\n"
-        "worktree /wt/bug-x\n"
-        "HEAD 3c2d0000000000000000000000000000000000bb\n"
-        "branch refs/heads/psprowls/bug-x-1a2b3c4d\n"
-        "\n"
-    )
-    monkeypatch.setattr(orchestrate, "run_git", lambda cwd, *args: porcelain)
-
-    inventory = orchestrate._worktree_inventory(Path("/repo"))
-
-    assert inventory == {
-        "main": "/repo",
-        "psprowls/bug-x-1a2b3c4d": "/wt/bug-x",
-    }
-    assert "feat1" not in inventory
-
-
-def test_worktree_inventory_degrades_to_empty(monkeypatch) -> None:
-    assert orchestrate._worktree_inventory(None) == {}
-
-    monkeypatch.setattr(orchestrate, "run_git", lambda cwd, *args: None)
-    assert orchestrate._worktree_inventory(Path("/repo")) == {}
+    [dispatch] = result.dispatches
+    assert result.placements == {}
+    assert (dispatch.worktree.path, dispatch.worktree.branch) == (str(layout.root), None)
 
 
 def test_the_planner_half_does_not_re_export_the_stage_advance_half() -> None:
@@ -675,24 +571,26 @@ def test_a_missing_plan_artifact_is_a_warning_not_an_error(tmp_path: Path) -> No
     )
 
 
-def test_an_explicit_start_sha_writes_the_execute_results_stub(tmp_path: Path) -> None:
+def test_the_execute_stage_writes_the_results_stub(tmp_path: Path) -> None:
     layout = _initialized_workspace(tmp_path)
-    repo, fork = _code_repo(tmp_path / "c")
+    repo, _fork = _code_repo(tmp_path / "c")
     path = "work/feature-a"
     _ready(layout, path)
-    gate_ready(layout, repo, path)
-    result = stage.run_stage_advance(layout, path, today=TODAY, repo=repo, start_sha=fork, dry_run=False)
+    wt = place_item(layout, repo, path)
+    gate_ready(layout, repo, path, tree_of=wt)
+    result = stage.run_stage_advance(layout, path, today=TODAY, repo=repo, dry_run=False)
     assert result.results_path is not None and result.results_path.is_file()
     assert "Execute — results" in result.results_path.read_text(encoding="utf-8")
 
 
 def test_the_execute_stage_reads_the_recorded_baseline_with_no_flag(tmp_path: Path) -> None:
-    """A plain advance writes the stub from the placement's recorded baseline."""
+    """A plain advance writes the stub from the item's recorded baseline."""
     layout = _initialized_workspace(tmp_path)
     repo, fork = _code_repo(tmp_path / "c")
     path = "work/feature-a"
     _ready(layout, path, extra=f"start_sha: {fork}\n")
-    gate_ready(layout, repo, path)
+    wt = place_item(layout, repo, path)
+    gate_ready(layout, repo, path, tree_of=wt)
     result = stage.run_stage_advance(layout, path, today=TODAY, repo=repo, dry_run=False)
     assert result.results_path is not None and result.results_path.is_file()
 
@@ -706,17 +604,6 @@ def test_the_finish_stage_never_derives_a_start_sha(tmp_path: Path) -> None:
     _ready(layout, path, phase="finish")
     result = stage.run_stage_advance(layout, path, today=TODAY, repo=repo, resolved_in="pr-1", dry_run=False)
     assert result.results_path is None
-
-
-def test_an_explicit_start_sha_still_works_at_finish(tmp_path: Path) -> None:
-    layout = _initialized_workspace(tmp_path)
-    repo, fork = _code_repo(tmp_path / "c")
-    path = "work/feature-a"
-    _ready(layout, path, phase="finish")
-    result = stage.run_stage_advance(
-        layout, path, today=TODAY, repo=repo, start_sha=fork, resolved_in="pr-1", dry_run=False
-    )
-    assert result.results_path is not None and result.results_path.is_file()
 
 
 def _base_branch_repo(tmp_path: Path) -> Path:
@@ -756,13 +643,12 @@ def test_a_derived_start_sha_equal_to_head_still_writes_a_stub_carrying_the_empt
     _ready(layout, path)
     item = _item(layout, path)
     start = stage._effective_start_sha(
-        None,
         definition=PACKAGED_DEFINITION,
         phase="execute",
         facts_root=repo,
         bundle_root=layout.bundle_dir,
         item=item,
-        repo_name=None,
+        recorded_start=None,
     )
     assert start is not None
     facts = stage.provenance.results_facts(
@@ -779,13 +665,12 @@ def test_a_derivation_that_finds_nothing_writes_no_stub(tmp_path: Path, monkeypa
     _ready(layout, path)
     monkeypatch.setattr(stage.anchor, "phase_start_sha", lambda *args: None)
     start = stage._effective_start_sha(
-        None,
         definition=PACKAGED_DEFINITION,
         phase="execute",
         facts_root=repo,
         bundle_root=layout.bundle_dir,
         item=_item(layout, path),
-        repo_name=None,
+        recorded_start=None,
     )
     assert start is None
 
@@ -797,13 +682,12 @@ def test_a_recorded_baseline_is_used_for_the_stub_before_any_derivation(tmp_path
     _ready(layout, path, extra=f"start_sha: {fork}\n")
     monkeypatch.setattr(stage.anchor, "phase_start_sha", lambda *args: pytest.fail("derived despite a baseline"))
     start = stage._effective_start_sha(
-        None,
         definition=PACKAGED_DEFINITION,
         phase="execute",
         facts_root=repo,
         bundle_root=layout.bundle_dir,
         item=_item(layout, path),
-        repo_name=None,
+        recorded_start=fork,
     )
     assert start == fork
 
@@ -824,7 +708,8 @@ def test_a_dirty_execute_stage_is_refused_and_writes_nothing(tmp_path: Path) -> 
     repo, _fork = _code_repo(tmp_path / "c")
     path = "work/feature-a"
     _ready(layout, path)
-    _dirty(repo)
+    wt = place_item(layout, repo, path)
+    _dirty(wt)
     page = layout.bundle_dir / f"{path}.md"
     before = page.read_bytes()
     result = stage.run_stage_advance(layout, path, today=TODAY, repo=repo, dry_run=False)
@@ -838,33 +723,34 @@ def test_a_dirty_execute_stage_is_refused_and_writes_nothing(tmp_path: Path) -> 
 
 def test_dirt_outside_the_declared_affects_does_not_refuse(tmp_path: Path) -> None:
     layout = _initialized_workspace(tmp_path)
-    repo, fork = _code_repo(tmp_path / "c")
+    repo, _fork = _code_repo(tmp_path / "c")
     path = "work/feature-a"
     _ready(layout, path)
-    _dirty(repo, "elsewhere/unrelated.py")
-    gate_ready(layout, repo, path)
-    result = stage.run_stage_advance(layout, path, today=TODAY, repo=repo, start_sha=fork, dry_run=False)
+    wt = place_item(layout, repo, path)
+    _dirty(wt, "elsewhere/unrelated.py")
+    gate_ready(layout, repo, path, tree_of=wt)
+    result = stage.run_stage_advance(layout, path, today=TODAY, repo=repo, dry_run=False)
     assert result.outcome.plan.refusal is None
 
 
-def test_an_execute_stage_with_no_commits_in_an_explicit_range_is_refused(tmp_path: Path) -> None:
+def test_an_execute_stage_with_no_commits_of_its_own_is_refused(tmp_path: Path) -> None:
     layout = _initialized_workspace(tmp_path)
     repo, _fork = _code_repo(tmp_path / "c")
     path = "work/feature-a"
     _ready(layout, path)
-    head = stage.provenance.head_sha(repo)
-    assert head is not None
-    result = stage.run_stage_advance(layout, path, today=TODAY, repo=repo, start_sha=head, dry_run=False)
+    place_item(layout, repo, path, commit=False)
+    result = stage.run_stage_advance(layout, path, today=TODAY, repo=repo, dry_run=False)
     assert result.outcome.plan.refusal == "no-commits"
 
 
 def test_a_clean_execute_stage_with_commits_advances_unchanged(tmp_path: Path) -> None:
     layout = _initialized_workspace(tmp_path)
-    repo, fork = _code_repo(tmp_path / "c")
+    repo, _fork = _code_repo(tmp_path / "c")
     path = "work/feature-a"
     _ready(layout, path)
-    gate_ready(layout, repo, path)
-    result = stage.run_stage_advance(layout, path, today=TODAY, repo=repo, start_sha=fork, dry_run=False)
+    wt = place_item(layout, repo, path)
+    gate_ready(layout, repo, path, tree_of=wt)
+    result = stage.run_stage_advance(layout, path, today=TODAY, repo=repo, dry_run=False)
     assert result.outcome.plan.refusal is None
     assert result.outcome.written
 
@@ -874,7 +760,8 @@ def test_the_gate_scopes_its_read_to_code_affects(tmp_path: Path) -> None:
     repo, _fork = _code_repo(tmp_path / "c")
     path = "work/feature-a"
     _ready(layout, path, affects=("gw:workspace", "packages/a"))
-    _dirty(repo)
+    wt = place_item(layout, repo, path)
+    _dirty(wt)
     result = stage.run_stage_advance(layout, path, today=TODAY, repo=repo, dry_run=False)
     assert result.outcome.plan.refusal == "uncommitted-work"
 
@@ -903,10 +790,10 @@ def test_no_code_repository_refuses_no_repo(tmp_path: Path) -> None:
 
 def test_an_empty_affects_refuses_no_affects(tmp_path: Path) -> None:
     layout = _initialized_workspace(tmp_path)
-    repo, fork = _code_repo(tmp_path / "c")
+    repo, _fork = _code_repo(tmp_path / "c")
     path = "work/feature-a"
     _ready(layout, path, affects=())
-    result = stage.run_stage_advance(layout, path, today=TODAY, repo=repo, start_sha=fork, dry_run=False)
+    result = stage.run_stage_advance(layout, path, today=TODAY, repo=repo, dry_run=False)
     _refused_inertly(layout, path, result, "no-affects")
 
 
@@ -920,106 +807,55 @@ def test_a_workspace_only_item_passes_without_a_repo(tmp_path: Path) -> None:
     assert any("workspace-only" in warning for warning in result.warnings)
 
 
-def test_a_non_repo_worktree_refuses_git_unavailable(tmp_path: Path) -> None:
+def test_a_non_repo_checkout_has_no_placement_and_refuses_worktree_missing(tmp_path: Path) -> None:
     layout = _initialized_workspace(tmp_path)
     loose = tmp_path / "loose"
     (loose / "packages/a").mkdir(parents=True)
     path = "work/feature-a"
     _ready(layout, path)
     result = stage.run_stage_advance(layout, path, today=TODAY, repo=loose, dry_run=False)
-    _refused_inertly(layout, path, result, "git-unavailable")
+    _refused_inertly(layout, path, result, "worktree-missing")
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="fake git is a POSIX shell script")
 def test_a_configured_broken_git_refuses_git_unavailable(tmp_path: Path) -> None:
     layout = _initialized_workspace(tmp_path)
-    repo, fork = _code_repo(tmp_path / "c")
+    repo, _fork = _code_repo(tmp_path / "c")
+    path = "work/feature-a"
+    _ready(layout, path)
+    place_item(layout, repo, path)
     broken = tmp_path / "broken-git"
     broken.write_text("#!/bin/sh\necho 'xcrun: error: license' >&2\nexit 69\n", encoding="utf-8", newline="\n")
     broken.chmod(0o755)
     layout.local_manifest_path.write_text(f"toolchain:\n  git: {broken}\n", encoding="utf-8", newline="\n")
     stage.provenance._VALIDATED.clear()
-    path = "work/feature-a"
-    _ready(layout, path)
-    result = stage.run_stage_advance(layout, path, today=TODAY, repo=repo, start_sha=fork, dry_run=False)
+    result = stage.run_stage_advance(layout, path, today=TODAY, repo=repo, dry_run=False)
     _refused_inertly(layout, path, result, "git-unavailable")
     assert "license" in result.outcome.plan.detail
 
 
-def test_no_baseline_refuses_and_names_the_bypass(tmp_path: Path) -> None:
+def test_a_missing_computed_worktree_refuses_instead_of_reading_the_repo(tmp_path: Path) -> None:
     layout = _initialized_workspace(tmp_path)
     repo, _fork = _code_repo(tmp_path / "c")
     path = "work/feature-a"
     _ready(layout, path)
+    declare_code(layout, repo)
     result = stage.run_stage_advance(layout, path, today=TODAY, repo=repo, dry_run=False)
-    _refused_inertly(layout, path, result, "no-start-sha")
-    assert "--skip-gate no-start-sha" in result.outcome.plan.detail
-
-
-def test_a_recorded_baseline_is_read_without_a_flag(tmp_path: Path) -> None:
-    layout = _initialized_workspace(tmp_path)
-    repo, fork = _code_repo(tmp_path / "c")
-    path = "work/feature-a"
-    _ready(layout, path, extra=f"start_sha: {fork}\n")
-    gate_ready(layout, repo, path)
-    result = stage.run_stage_advance(layout, path, today=TODAY, repo=repo, dry_run=False)
-    assert result.outcome.plan.refusal is None and result.outcome.written
-
-
-def test_an_explicit_flag_overrides_the_recorded_baseline(tmp_path: Path) -> None:
-    layout = _initialized_workspace(tmp_path)
-    repo, fork = _code_repo(tmp_path / "c")
-    head = stage.provenance.head_sha(repo)
-    path = "work/feature-a"
-    _ready(layout, path, extra=f"start_sha: {fork}\n")
-    result = stage.run_stage_advance(layout, path, today=TODAY, repo=repo, start_sha=head, dry_run=False)
-    assert result.outcome.plan.refusal == "no-commits"
-
-
-def test_an_unknown_start_sha_refuses_range_unreadable(tmp_path: Path) -> None:
-    layout = _initialized_workspace(tmp_path)
-    repo, _fork = _code_repo(tmp_path / "c")
-    path = "work/feature-a"
-    _ready(layout, path)
-    fabricated = "0123456789abcdef0123456789abcdef01234567"
-    result = stage.run_stage_advance(layout, path, today=TODAY, repo=repo, start_sha=fabricated, dry_run=False)
-    _refused_inertly(layout, path, result, "range-unreadable")
-    assert fabricated in result.outcome.plan.detail
-
-
-def test_a_missing_recorded_worktree_refuses_instead_of_reading_the_repo(tmp_path: Path) -> None:
-    layout = _initialized_workspace(tmp_path)
-    repo, fork = _code_repo(tmp_path / "c")
-    path = "work/feature-a"
-    _ready(layout, path, extra=f"worktree: {tmp_path / 'gone'}\nbranch: feature/a\nstart_sha: {fork}\n")
-    result = stage.run_stage_advance(layout, path, today=TODAY, repo=repo, infer_worktree=False, dry_run=False)
     _refused_inertly(layout, path, result, "worktree-missing")
 
 
-def test_a_missing_recorded_worktree_refuses_even_when_inference_finds_another_checkout(tmp_path: Path) -> None:
+def test_a_missing_computed_worktree_refuses_even_when_cwd_is_another_checkout(tmp_path: Path) -> None:
     import subprocess
 
     layout = _initialized_workspace(tmp_path)
-    repo, fork = _code_repo(tmp_path / "c")
+    repo, _fork = _code_repo(tmp_path / "c")
     other = tmp_path / "other"
     subprocess.run(["git", "worktree", "add", "-b", "feature/b", str(other)], cwd=repo, check=True, capture_output=True)
     path = "work/feature-a"
-    _ready(layout, path, extra=f"worktree: {tmp_path / 'gone'}\nbranch: feature/a\nstart_sha: {fork}\n")
+    _ready(layout, path)
+    declare_code(layout, repo)
     result = stage.run_stage_advance(layout, path, today=TODAY, repo=repo, cwd=other, dry_run=False)
     _refused_inertly(layout, path, result, "worktree-missing")
-
-
-def test_a_foreign_stamp_without_a_baseline_falls_back_to_the_scalar_one(tmp_path: Path) -> None:
-    layout = _initialized_workspace(tmp_path)
-    repo, fork = _code_repo(tmp_path / "c")
-    path = "work/feature-a"
-    _ready(
-        layout,
-        path,
-        extra=f"start_sha: {fork}\nrepo_stamps:\n  code:\n    worktree: {repo}\n    branch: feature/a\n",
-    )
-    item = stage.load_items(stage.load_workspace_bundle(layout, ignore=stage.IGNORE))[0]
-    assert stage._gate_placement(item, "code") == (str(repo), fork)
 
 
 def test_finish_never_claims_the_recorded_execute_baseline(tmp_path: Path) -> None:
@@ -1031,78 +867,47 @@ def test_finish_never_claims_the_recorded_execute_baseline(tmp_path: Path) -> No
     assert result.results_path is None
 
 
-def test_a_foreign_stamp_supplies_its_own_baseline(tmp_path: Path) -> None:
+def test_an_unreadable_range_refuses_range_unreadable(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     layout = _initialized_workspace(tmp_path)
-    repo, fork = _code_repo(tmp_path / "c")
-    path = "work/feature-a"
-    _ready(
-        layout,
-        path,
-        extra=f"repo_stamps:\n  code:\n    worktree: {repo}\n    branch: feature/a\n    start_sha: {fork}\n",
-    )
-    verdict = stage._commit_gate(
-        stage.load_items(stage.load_workspace_bundle(layout, ignore=stage.IGNORE))[0],
-        repo=repo,
-        repo_note=None,
-        repo_name="code",
-        stamped_worktree=None,
-        explicit_start=None,
-        git=stage.provenance.gate_git(layout),
-    )
-    assert verdict.refusal is None
-
-
-def test_an_unreadable_range_after_a_resolved_start_refuses_range_unreadable(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    layout = _initialized_workspace(tmp_path)
-    repo, fork = _code_repo(tmp_path / "c")
+    repo, _fork = _code_repo(tmp_path / "c")
     path = "work/feature-a"
     _ready(layout, path)
+    place_item(layout, repo, path)
     failure = stage.provenance.GitFailure("error", "boom")
-    monkeypatch.setattr(stage.provenance, "strict_range", lambda *args, **kwargs: failure)
-    result = stage.run_stage_advance(layout, path, today=TODAY, repo=repo, start_sha=fork, dry_run=False)
+    monkeypatch.setattr(stage.provenance, "strict_branch_range", lambda *args, **kwargs: failure)
+    result = stage.run_stage_advance(layout, path, today=TODAY, repo=repo, dry_run=False)
     _refused_inertly(layout, path, result, "range-unreadable")
     assert "boom" in result.outcome.plan.detail
 
 
-def test_an_explicitly_stamped_worktree_is_the_gate_root(tmp_path: Path) -> None:
+def test_a_parent_without_a_local_tip_refuses_range_unreadable(tmp_path: Path) -> None:
+    import subprocess
+
     layout = _initialized_workspace(tmp_path)
-    repo, fork = _code_repo(tmp_path / "c")
+    repo, _fork = _code_repo(tmp_path / "c")
     path = "work/feature-a"
     _ready(layout, path)
-    _dirty(repo)
-    result = stage.run_stage_advance(
-        layout,
-        path,
-        today=TODAY,
-        repo=repo,
-        start_sha=fork,
-        worktree=str(repo),
-        branch="feature/a",
-        dry_run=False,
-    )
-    assert result.outcome.plan.refusal == "uncommitted-work"
+    wt = place_item(layout, repo, path)
+    subprocess.run(["git", "update-ref", "-d", "refs/heads/main"], cwd=repo, check=True, capture_output=True)
+    assert wt.is_dir()
+    result = stage.run_stage_advance(layout, path, today=TODAY, repo=repo, dry_run=False)
+    _refused_inertly(layout, path, result, "range-unreadable")
 
 
-@pytest.mark.parametrize("code", ["uncommitted-work", "no-commits", "no-affects-touched", "no-start-sha"])
+@pytest.mark.parametrize("code", ["uncommitted-work", "no-commits", "no-affects-touched"])
 def test_a_dry_run_reports_the_same_refusal_and_writes_nothing(tmp_path: Path, code: str) -> None:
     layout = _initialized_workspace(tmp_path)
-    repo, fork = _code_repo(tmp_path / "c")
+    repo, _fork = _code_repo(tmp_path / "c")
     path = "work/feature-a"
     _ready(layout, path)
-    start: str | None = fork
+    wt = place_item(layout, repo, path, commit=code == "uncommitted-work")
     if code == "uncommitted-work":
-        _dirty(repo)
-    elif code == "no-commits":
-        start = stage.provenance.head_sha(repo)
+        _dirty(wt)
     elif code == "no-affects-touched":
-        start = _net_zero_range(repo)
-    else:
-        start = None
+        _net_zero_range(wt)
     page = layout.bundle_dir / f"{path}.md"
     before = page.read_bytes()
-    result = stage.run_stage_advance(layout, path, today=TODAY, repo=repo, start_sha=start, dry_run=True)
+    result = stage.run_stage_advance(layout, path, today=TODAY, repo=repo, dry_run=True)
     assert result.outcome.plan.refusal == code
     assert page.read_bytes() == before
 
@@ -1112,7 +917,7 @@ def test_the_gate_fires_only_at_the_execute_boundary(tmp_path: Path, phase: str)
     layout = _initialized_workspace(tmp_path)
     repo, _fork = _code_repo(tmp_path / "c")
     path = "work/feature-a"
-    _ready(layout, path, phase=phase)
+    _ready(layout, path, phase=phase, affects=("gw:workspace",) if phase == "finish" else ("packages/a",))
     _dirty(repo)
     result = stage.run_stage_advance(
         layout, path, today=TODAY, repo=repo, resolved_in="pr-1" if phase == "finish" else None, dry_run=False
@@ -1167,42 +972,38 @@ def _net_zero_range(repo: Path) -> str:
 
 
 def test_commits_that_touch_nothing_in_scope_are_refused(tmp_path: Path) -> None:
-    """The net-zero case: work committed and then reverted inside the range, so
-    `git log` reports commits while `git diff start..HEAD` reports no files.
-    This is the only shape where the two signals genuinely diverge, which is
-    why it is the signal's central test rather than an edge case."""
+    """The net-zero case: work committed and then reverted, so the log reports
+    commits while the diff against the parent reports no files."""
     layout = _initialized_workspace(tmp_path)
     repo, _fork = _code_repo(tmp_path / "c")
     path = "work/feature-a"
     _ready(layout, path)
-    start = _net_zero_range(repo)
-    result = stage.run_stage_advance(layout, path, today=TODAY, repo=repo, start_sha=start, dry_run=False)
+    wt = place_item(layout, repo, path, commit=False)
+    _net_zero_range(wt)
+    result = stage.run_stage_advance(layout, path, today=TODAY, repo=repo, dry_run=False)
     assert result.outcome.plan.refusal == "no-affects-touched"
     assert "packages/a" in result.outcome.plan.detail
     assert result.outcome.plan.changes == ()
 
 
 def test_zero_commits_reports_no_commits_not_no_affects_touched(tmp_path: Path) -> None:
-    """Precedence: an item that committed nothing should be told it committed
-    nothing. Most-specific diagnosis last -- an empty range has an empty file
-    list too, so the ordering is what keeps the diagnosis honest."""
     layout = _initialized_workspace(tmp_path)
     repo, _fork = _code_repo(tmp_path / "c")
     path = "work/feature-a"
     _ready(layout, path)
-    start = stage.provenance.head_sha(repo)
-    assert start is not None
-    result = stage.run_stage_advance(layout, path, today=TODAY, repo=repo, start_sha=start, dry_run=False)
+    place_item(layout, repo, path, commit=False)
+    result = stage.run_stage_advance(layout, path, today=TODAY, repo=repo, dry_run=False)
     assert result.outcome.plan.refusal == "no-commits"
 
 
 def test_commits_touching_the_declared_scope_advance(tmp_path: Path) -> None:
     layout = _initialized_workspace(tmp_path)
-    repo, fork = _code_repo(tmp_path / "c")
+    repo, _fork = _code_repo(tmp_path / "c")
     path = "work/feature-a"
     _ready(layout, path)
-    gate_ready(layout, repo, path)
-    result = stage.run_stage_advance(layout, path, today=TODAY, repo=repo, start_sha=fork, dry_run=False)
+    wt = place_item(layout, repo, path)
+    gate_ready(layout, repo, path, tree_of=wt)
+    result = stage.run_stage_advance(layout, path, today=TODAY, repo=repo, dry_run=False)
     assert result.outcome.plan.refusal is None
     assert result.outcome.plan.transition is not None
     assert result.outcome.plan.transition.phase == "finish"
@@ -1215,26 +1016,23 @@ def test_the_signal_does_not_fire_outside_execute_to_finish(tmp_path: Path, phas
     repo, _fork = _code_repo(repo)
     path = "work/feature-a"
     _ready(layout, path, phase=phase)
-    start = _net_zero_range(repo)
-    result = stage.run_stage_advance(
-        layout, path, today=TODAY, repo=repo, start_sha=start, resolved_in="pr-1", dry_run=False
-    )
+    _net_zero_range(repo)
+    result = stage.run_stage_advance(layout, path, today=TODAY, repo=repo, resolved_in="pr-1", dry_run=False)
     assert result.outcome.plan.refusal != "no-affects-touched"
 
 
 def test_a_refusal_writes_nothing(tmp_path: Path) -> None:
     """Refusal is inert: no page write, no results stub, no coverage source, no
-    active-work pointer. The gate runs after the advance is planned and before
-    the mutation is composed, so this is structural -- but it is the property
-    the whole design rests on, so it is asserted, not assumed."""
+    active-work pointer."""
     layout = _initialized_workspace(tmp_path)
     repo, _fork = _code_repo(tmp_path / "c")
     path = "work/feature-a"
     _ready(layout, path)
-    start = _net_zero_range(repo)
+    wt = place_item(layout, repo, path, commit=False)
+    _net_zero_range(wt)
     page = layout.bundle_dir / f"{path}.md"
     before = page.read_bytes()
-    result = stage.run_stage_advance(layout, path, today=TODAY, repo=repo, start_sha=start, dry_run=False)
+    result = stage.run_stage_advance(layout, path, today=TODAY, repo=repo, dry_run=False)
     assert result.outcome.plan.refusal == "no-affects-touched"
     assert page.read_bytes() == before
     assert result.results_path is None
@@ -1544,26 +1342,6 @@ def test_an_untagged_child_inherits_the_root_s_flag_repository(tmp_path: Path) -
     assert "cross-repo-child" not in _kinds(result).values()
 
 
-def test_a_cross_repo_child_requires_an_owner_anchor(tmp_path: Path) -> None:
-    layout, _code, _ui = _two_repo_stamping_workspace(tmp_path)
-    _tag(layout, "work/epic-a", "ui")
-    _tag(layout, "work/epic-a/children/feature-a", "code")
-
-    child = load(layout.bundle_dir / "work/epic-a/children/feature-a.md")
-    child.set("phase", "execute")
-    child.save()
-    result = orchestrate.run_orchestrate(layout, "work/epic-a")
-
-    (preparation,) = result.plan.preparations
-    assert preparation.owner_path == "work/epic-a"
-    assert preparation.repo.name == "code"
-    assert preparation.worktree.action == "create-top-level"
-    assert preparation.worktree.parent_path is None
-    (blocked,) = [b for b in result.blocked if b.path == "work/epic-a/children/feature-a"]
-    assert blocked.kind == "worktree-pending"
-    assert all(d.slug != blocked.path for d in result.dispatches)
-
-
 def test_dirty_foreign_checkout_does_not_withhold_clean_repository_dispatch(tmp_path: Path, monkeypatch) -> None:
     layout, code, ui = _two_repo_stamping_workspace(tmp_path)
     _tag(layout, "work/epic-a", "code")
@@ -1588,14 +1366,14 @@ def test_dirty_foreign_checkout_does_not_withhold_clean_repository_dispatch(tmp_
 
     monkeypatch.setattr(orchestrate, "plan", capture)
     result = orchestrate.run_orchestrate(layout, "work/epic-a")
+    worktrees = layout.worktrees_dir.resolve()
+    epic_branch = branch_name("work/epic-a", "Epic")
     dispatch = next(d for d in result.dispatches if d.slug == "work/epic-a/children/feature-a")
-    assert dispatch.worktree.action == "pin-detached"
-    assert dispatch.worktree.parent_path is None
+    assert dispatch.worktree.parent_path == str(worktrees / "ui" / epic_branch)
     assert result.dispatch_repos[dispatch.key].path == ui.resolve()
-    assert not result.preparations
     clean = next(d for d in result.dispatches if d.slug == sibling)
-    assert clean.worktree.path is None
-    assert clean.worktree.action == "pin-detached"
+    assert clean.worktree.path == str(worktrees / "code" / branch_name(sibling, "Feature"))
+    assert clean.worktree.parent_path == str(worktrees / "code" / epic_branch)
     assert result.dispatch_repos[clean.key].path == code.resolve()
     assert len(observed) == 2
     by_path = {context.path: context for context in observed.values()}
@@ -1637,7 +1415,9 @@ def test_linked_declared_checkouts_keep_separate_eligibility(tmp_path: Path, mon
     monkeypatch.setattr(orchestrate, "plan", capture)
     result = orchestrate.run_orchestrate(layout, "work/epic-a")
     (dispatch,) = result.dispatches
-    assert dispatch.worktree.action == "pin-detached"
+    placement = result.placements[dispatch.key]
+    assert (placement.repo_name, placement.repo_root) == ("ui", linked.resolve())
+    assert placement.parent_branch == branch_name("work/epic-a", "Epic")
     assert result.dispatch_repos[dispatch.key].path == linked.resolve()
     selected = captured["item_repos"]
     assert selected["work/epic-a"].path == code.resolve()
@@ -1647,7 +1427,8 @@ def test_linked_declared_checkouts_keep_separate_eligibility(tmp_path: Path, mon
     assert context.checkout_usable_by_path[str(linked.resolve())] is False
 
 
-def test_non_git_declared_repository_refuses_fresh_root(tmp_path: Path, monkeypatch) -> None:
+def test_non_git_declared_repository_still_states_its_computed_placement(tmp_path: Path, monkeypatch) -> None:
+    """Placement is computed from facts, not proved: the engine refuses at dispatch time."""
     layout = _workspace(tmp_path / "workspace")
     path = "work/feature-a"
     _write(layout, path, phase="design")
@@ -1655,8 +1436,9 @@ def test_non_git_declared_repository_refuses_fresh_root(tmp_path: Path, monkeypa
     code.mkdir()
     monkeypatch.setattr(orchestrate, "resolve_item_repo", lambda *args, **kwargs: ItemRepo("code", code, "sole"))
     result = orchestrate.run_orchestrate(layout, path)
-    assert result.dispatches == ()
-    assert [(b.path, b.kind) for b in result.blocked] == [(path, "worktree-unprovable")]
+    assert result.blocked == ()
+    [dispatch] = result.dispatches
+    assert result.placements[dispatch.key].repo_root == code.resolve()
 
 
 def test_a_descendant_with_a_malformed_repo_surfaces_a_warning_and_is_not_blocked(tmp_path: Path) -> None:
@@ -1700,7 +1482,7 @@ def test_an_untagged_root_still_refuses_in_a_two_repo_workspace(tmp_path: Path) 
         orchestrate.run_orchestrate(layout, "work/epic-a")
 
 
-def test_a_two_repo_advance_infers_from_the_declared_repo_holding_the_cwd(tmp_path: Path) -> None:
+def test_a_two_repo_advance_resolves_the_declared_repo_holding_the_cwd(tmp_path: Path) -> None:
     """Several declared repos and no name: the one whose repository the cwd
     belongs to -- here through a linked worktree of it -- is the repo."""
     import subprocess
@@ -1715,9 +1497,7 @@ def test_a_two_repo_advance_infers_from_the_declared_repo_holding_the_cwd(tmp_pa
 
     assert result.outcome.plan.refusal is None
     assert result.repo_note is None
-    changes = _stamped(result)
-    assert Path(str(changes["worktree"])).resolve() == linked.resolve()
-    assert changes["branch"] == "feature/ui"
+    assert "worktree" not in _stamped(result) and "branch" not in _stamped(result)
     assert result.application is not None and result.application.ok, result.application.failures
 
 
@@ -1769,46 +1549,6 @@ def test_a_two_repo_advance_with_a_repo_name_uses_that_repo(tmp_path: Path, monk
     assert calls and calls[-1] is not None and calls[-1].resolve() == ui.resolve()
 
 
-def test_a_tagged_advance_from_another_repo_skips_inference_with_a_warning(tmp_path: Path, monkeypatch) -> None:
-    import subprocess
-
-    layout, code, ui = _two_repo_stamping_workspace(tmp_path)
-    _tag(layout, "work/feature-solo", "ui")
-    linked = tmp_path / "code-linked"
-    subprocess.run(
-        ["git", "worktree", "add", "-b", "feature/code", str(linked)],
-        cwd=code,
-        check=True,
-        capture_output=True,
-        text=True,
-    )
-    calls = _captured_repo_roots(monkeypatch)
-
-    result = stage.run_stage_advance(layout, "work/feature-solo", today=TODAY, cwd=linked, dry_run=False)
-
-    assert result.outcome.plan.refusal is None
-    changes = _stamped(result)
-    assert "worktree" not in changes and "branch" not in changes
-    assert any("worktree inference skipped" in warning for warning in result.warnings)
-    assert calls and calls[-1] is not None and calls[-1].resolve() == ui.resolve()
-
-
-def test_a_tagged_advance_from_its_own_repo_still_infers(tmp_path: Path) -> None:
-    import subprocess
-
-    layout, _code, ui = _two_repo_stamping_workspace(tmp_path)
-    _tag(layout, "work/feature-solo", "ui")
-    linked = tmp_path / "ui-linked"
-    subprocess.run(
-        ["git", "worktree", "add", "-b", "feature/ui", str(linked)], cwd=ui, check=True, capture_output=True, text=True
-    )
-
-    result = stage.run_stage_advance(layout, "work/feature-solo", today=TODAY, cwd=linked, dry_run=False)
-
-    assert Path(str(_stamped(result)["worktree"])).resolve() == linked.resolve()
-    assert not any("worktree inference skipped" in warning for warning in result.warnings)
-
-
 def test_a_tagged_advance_refuses_a_conflicting_repo_name(tmp_path: Path) -> None:
     layout, _code, _ui = _two_repo_stamping_workspace(tmp_path)
     _tag(layout, "work/feature-solo", "ui")
@@ -1835,26 +1575,17 @@ def test_a_descendant_read_only_advance_does_not_stamp_from_cwd(tmp_path: Path, 
     assert written.get("branch") is None
 
 
-def test_a_subtree_root_read_only_advance_still_stamps_from_cwd(tmp_path: Path, monkeypatch) -> None:
-    """The root carve-out: its stamp is the epic anchor every descendant
-    resolves against, and nothing else ever mints it."""
-    layout = _stamping_workspace(tmp_path)
-    _detects(monkeypatch)
-
-    result = stage.run_stage_advance(layout, "work/feature-solo", today=TODAY, repo=tmp_path / "repo", dry_run=False)
-
-    assert result.outcome.plan.refusal is None
-    changes = _stamped(result)
-    assert changes["worktree"] == "/wt/detected"
-    assert changes["branch"] == "detected/branch"
-
-
 @pytest.mark.parametrize("phase", ["execute", "finish"])
 def test_a_descendant_code_phase_advance_never_stamps_from_cwd(tmp_path: Path, monkeypatch, phase: str) -> None:
     """D-006: the coordinator records a descendant's observed placement; a
     worker's cwd never does, at any phase."""
     layout = _stamping_workspace(tmp_path)
-    _write(layout, "work/epic-a/children/feature-a", phase=phase)
+    _write(
+        layout,
+        "work/epic-a/children/feature-a",
+        phase=phase,
+        affects=("gw:workspace",) if phase == "finish" else ("packages/a",),
+    )
     _detects(monkeypatch)
 
     result = stage.run_stage_advance(
@@ -1871,43 +1602,6 @@ def test_a_descendant_code_phase_advance_never_stamps_from_cwd(tmp_path: Path, m
     assert "worktree" not in _stamped(result) and "branch" not in _stamped(result)
     written = load(layout.bundle_dir / "work/epic-a/children/feature-a.md").fm_data()
     assert written.get("worktree") is None
-
-
-def test_an_explicit_pair_overrides_the_read_only_suppression(tmp_path: Path, monkeypatch) -> None:
-    """A coordinator or a human stating a placement is never a guess."""
-    layout = _stamping_workspace(tmp_path)
-    _detects(monkeypatch)
-
-    result = stage.run_stage_advance(
-        layout,
-        "work/epic-a/children/feature-a",
-        today=TODAY,
-        repo=tmp_path / "repo",
-        worktree="/wt/explicit",
-        branch="explicit/branch",
-        dry_run=False,
-    )
-
-    changes = _stamped(result)
-    assert changes["worktree"] == "/wt/explicit"
-    assert changes["branch"] == "explicit/branch"
-
-
-def test_only_a_top_level_item_may_infer_from_cwd(tmp_path: Path) -> None:
-    """Inference is the attended top-level fallback. A never-entered TestGap
-    routed straight to `execute` is a descendant like any other."""
-    from okf_io import load_bundle
-    from work_tracker_okf.items import IGNORE, load_items
-
-    layout = _stamping_workspace(tmp_path)
-    _write(layout, "work/epic-a/children/bug-x", type="Bug", phase=None)
-    _write(layout, "work/epic-a/children/gap-x", type="TestGap", phase=None)
-    by_path = {item.path: item for item in load_items(load_bundle(layout.bundle_dir, ignore=IGNORE))}
-
-    assert stage._infers_from_cwd(by_path["work/epic-a"])
-    assert stage._infers_from_cwd(by_path["work/feature-solo"])
-    for path in ("work/epic-a/children/feature-a", "work/epic-a/children/bug-x", "work/epic-a/children/gap-x"):
-        assert not stage._infers_from_cwd(by_path[path]), path
 
 
 def test_a_direct_entry_test_gap_descendant_does_not_stamp_from_cwd(tmp_path: Path, monkeypatch) -> None:
@@ -1933,30 +1627,10 @@ def test_a_supervised_root_advance_with_the_opt_out_infers_nothing(tmp_path: Pat
     layout = _stamping_workspace(tmp_path)
     monkeypatch.setattr(stage.provenance, "worktree_state", lambda cwd, repo: pytest.fail("opt-out must not probe"))
 
-    result = stage.run_stage_advance(
-        layout, "work/feature-solo", today=TODAY, repo=tmp_path / "repo", infer_worktree=False, dry_run=False
-    )
+    result = stage.run_stage_advance(layout, "work/feature-solo", today=TODAY, repo=tmp_path / "repo", dry_run=False)
 
     assert result.outcome.plan.refusal is None
     assert "worktree" not in _stamped(result) and "branch" not in _stamped(result)
-
-
-def test_the_opt_out_still_applies_a_deliberate_explicit_pair(tmp_path: Path, monkeypatch) -> None:
-    layout = _stamping_workspace(tmp_path)
-    _detects(monkeypatch)
-
-    result = stage.run_stage_advance(
-        layout,
-        "work/feature-solo",
-        today=TODAY,
-        repo=tmp_path / "repo",
-        worktree="/wt/explicit",
-        branch="explicit/branch",
-        infer_worktree=False,
-        dry_run=False,
-    )
-
-    assert _stamped(result)["worktree"] == "/wt/explicit"
 
 
 def test_the_read_only_and_results_phases_are_complements() -> None:
@@ -1982,107 +1656,9 @@ def test_an_open_decision_at_design_stops_advance_stamping_plan(tmp_path: Path) 
     assert load(layout.bundle_dir / f"{path}.md").fm_data()["phase"] == "design"
 
 
-def test_foreign_anchor_adoption_stamp_and_replan_use_real_repository(tmp_path: Path) -> None:
-    import subprocess
-
-    layout, code, _ui = _two_repo_stamping_workspace(tmp_path)
-    owner, child = "work/epic-a", "work/epic-a/children/feature-a"
-    _tag(layout, owner, "ui")
-    _tag(layout, child, "code")
-    page = layout.bundle_dir / f"{child}.md"
-    before = page.read_bytes()
-    readonly = orchestrate.run_orchestrate(layout, owner)
-    assert [(p.owner_path, p.repo.name) for p in readonly.preparations] == [(owner, "code")]
-    assert not readonly.dispatches
-    assert _kinds(readonly)[child] == "worktree-unprovable"
-    assert page.read_bytes() == before
-    assert not load(layout.bundle_dir / f"{owner}.md").fm_data().get("repo_stamps")
-    document = load(page)
-    document.set("phase", "execute")
-    document.save()
-    (prep,) = orchestrate.run_orchestrate(layout, owner).preparations
-    anchor = tmp_path / "code-anchor"
-    subprocess.run(
-        ["git", "worktree", "add", "-b", prep.branch, str(anchor), prep.base_branch],
-        cwd=code,
-        check=True,
-        capture_output=True,
-    )
-    (adoption,) = orchestrate.run_orchestrate(layout, owner).preparations
-    assert adoption.worktree.action == "reuse"
-    assert adoption.worktree.path == str(anchor.resolve())
-    document = load(layout.bundle_dir / f"{owner}.md")
-    document.set("repo_stamps", {"code": {"worktree": str(anchor), "branch": prep.branch}})
-    document.save()
-    replanned = orchestrate.run_orchestrate(layout, owner)
-    assert not replanned.preparations
-    (dispatch,) = replanned.dispatches
-    assert dispatch.worktree.parent_path == str(anchor.resolve())
-    assert dispatch.worktree.base_branch == dispatch.merge_target == prep.branch
-
-
-def test_foreign_anchor_branch_without_worktree_is_a_repair_case(tmp_path: Path) -> None:
-    import subprocess
-
-    layout, code, _ui = _two_repo_stamping_workspace(tmp_path)
-    owner, child = "work/epic-a", "work/epic-a/children/feature-a"
-    _tag(layout, owner, "ui")
-    _tag(layout, child, "code")
-    document = load(layout.bundle_dir / f"{child}.md")
-    document.set("phase", "execute")
-    document.save()
-    branch = orchestrate.integration_branch(owner, "Epic")
-    subprocess.run(["git", "branch", branch], cwd=code, check=True, capture_output=True)
-    result = orchestrate.run_orchestrate(layout, owner)
-    assert not result.preparations and not result.dispatches
-    assert _kinds(result)[child] == "worktree-unprovable"
-
-
-@pytest.mark.parametrize("stamped", [False, True])
-@pytest.mark.parametrize("state", ["dirty", "unreadable"])
-def test_unsafe_undeclared_anchor_worktree_refuses_adoption_and_use(
-    tmp_path: Path, stamped: bool, state: str, monkeypatch
-) -> None:
-    import subprocess
-
-    layout, code, _ui = _two_repo_stamping_workspace(tmp_path)
-    owner, child = "work/epic-a", "work/epic-a/children/feature-a"
-    _tag(layout, owner, "ui")
-    _tag(layout, child, "code")
-    document = load(layout.bundle_dir / f"{child}.md")
-    document.set("phase", "execute")
-    document.save()
-    branch = orchestrate.integration_branch(owner, "Epic")
-    anchor = tmp_path / "undeclared-anchor"
-    subprocess.run(["git", "worktree", "add", "-b", branch, str(anchor)], cwd=code, check=True, capture_output=True)
-    if state == "dirty":
-        (anchor / "uncommitted.txt").write_text("local work\n", encoding="utf-8")
-    else:
-        from gw_kernel.workspace.provenance import GitOutcome
-        from gw_pipeline import repo_context
-
-        real_probe = repo_context.probe_git
-
-        def unreadable_status(cwd, *args):
-            if cwd == anchor.resolve() and args == ("status", "--porcelain"):
-                return GitOutcome(None, "", "error")
-            return real_probe(cwd, *args)
-
-        monkeypatch.setattr(repo_context, "probe_git", unreadable_status)
-    if stamped:
-        document = load(layout.bundle_dir / f"{owner}.md")
-        document.set("repo_stamps", {"code": {"worktree": str(anchor), "branch": branch}})
-        document.save()
-    result = orchestrate.run_orchestrate(layout, owner)
-    assert not result.preparations and not result.dispatches
-    assert _kinds(result)[child] == "worktree-unprovable"
-
-
 @pytest.mark.parametrize("tagged", [False, True])
 def test_explicit_repo_override_projects_dispatch_metadata(tmp_path: Path, tagged: bool) -> None:
-    """The singular Python override serializes without resolving foreign assignments."""
-    from gw_wire.work import orchestrate_payload
-
+    """The singular Python override reports its repository without resolving foreign assignments."""
     layout = _workspace(tmp_path / "workspace")
     repo = _git_repo(tmp_path / "code")
     path = "work/feature-explicit"
@@ -2094,74 +1670,18 @@ def test_explicit_repo_override_projects_dispatch_metadata(tmp_path: Path, tagge
 
     result = orchestrate.run_orchestrate(layout, path, repo=repo)
     [dispatch] = result.dispatches
-    payload = orchestrate_payload(result)
     assert result.dispatch_repos[dispatch.key] == ItemRepo(None, repo, "flag")
+    assert result.placements[dispatch.key].parent_branch == "main"
+
+
+def test_explicit_repo_override_serializes_its_dispatch_repository(tmp_path: Path) -> None:
+    from gw_wire.work import orchestrate_payload
+
+    layout = _workspace(tmp_path / "workspace")
+    repo = _git_repo(tmp_path / "code")
+    _write(layout, "work/feature-explicit", phase="design")
+    payload = orchestrate_payload(orchestrate.run_orchestrate(layout, "work/feature-explicit", repo=repo))
     assert payload["dispatches"][0]["repo"] == {"name": None, "path": str(repo), "source": "flag"}
-    assert payload["dispatches"][0]["worktree"]["action"] == "pin-detached"
-    assert payload["dispatches"][0]["worktree"]["base_branch"] == "main"
-    assert payload["preparations"] == []
-
-
-@pytest.mark.parametrize("legacy", [False, True])
-def test_run_orchestrate_threads_tip_evidence(tmp_path: Path, legacy: bool) -> None:
-    import subprocess
-
-    code = _git_repo(tmp_path / "code")
-    anchor = tmp_path / "anchor"
-    subprocess.run(
-        ["git", "worktree", "add", "-b", "epic/readers", str(anchor)], cwd=code, check=True, capture_output=True
-    )
-    layout = _workspace(tmp_path / "ws", f"version: 1\nrepositories:\n  code:\n    path: {code}\n")
-    root, child = "work/epic-readers", "work/epic-readers/children/feature-reader"
-    _write(layout, root, type="Epic", phase="execute")
-    _write(layout, child, phase="design")
-    document = load(layout.bundle_dir / f"{root}.md")
-    document.set("worktree", str(anchor))
-    document.set("branch", "epic/readers")
-    document.save()
-    tip = subprocess.run(
-        ["git", "rev-parse", "epic/readers"], cwd=code, check=True, capture_output=True, text=True
-    ).stdout.strip()
-    result = orchestrate.run_orchestrate(layout, root, repo=code if legacy else None)
-    (dispatch,) = result.plan.dispatches
-    assert dispatch.slug == child
-    assert (dispatch.worktree.action, dispatch.worktree.start_sha) == ("pin-detached", tip)
-    subprocess.run(
-        ["git", "commit", "--allow-empty", "-m", "advance anchor"], cwd=anchor, check=True, capture_output=True
-    )
-    advanced = subprocess.run(
-        ["git", "rev-parse", "epic/readers"], cwd=code, check=True, capture_output=True, text=True
-    ).stdout.strip()
-    assert advanced != tip
-    assert dispatch.worktree.start_sha == tip
-    (fresh,) = orchestrate.run_orchestrate(layout, root, repo=code if legacy else None).plan.dispatches
-    assert fresh.worktree.start_sha == advanced
-
-
-@pytest.mark.parametrize("legacy", [False, True])
-def test_shell_reader_refuses_duplicate_branch_checkouts(tmp_path: Path, legacy: bool) -> None:
-    import subprocess
-
-    code = _git_repo(tmp_path / "code")
-    # Git --force can produce duplicate branch observations; neither path proves a unique anchor.
-    for name in ("anchor-a", "anchor-z"):
-        subprocess.run(
-            ["git", "worktree", "add", "--force", str(tmp_path / name), "main"],
-            cwd=code,
-            check=True,
-            capture_output=True,
-        )
-    layout = _workspace(tmp_path / "ws", f"version: 1\nrepositories:\n  code:\n    path: {code}\n")
-    root = "work/feature-reader"
-    _write(layout, root, phase="design")
-    document = load(layout.bundle_dir / f"{root}.md")
-    document.set("worktree", str(tmp_path / "anchor-z"))
-    document.set("branch", "main")
-    document.save()
-    result = orchestrate.run_orchestrate(layout, root, repo=code if legacy else None)
-    assert not result.dispatches
-    assert {b.kind for b in result.blocked} <= {"worktree-unprovable", "worktree-ambiguous"}
-    assert result.blocked
 
 
 def test_run_orchestrate_routes_a_landed_sibling_under_the_reconcile_key(tmp_path: Path) -> None:
@@ -2191,3 +1711,122 @@ def test_run_orchestrate_routes_a_landed_sibling_under_the_reconcile_key(tmp_pat
     planning = orchestrate.run_orchestrate(layout, subject).plan.dispatches[0]
     assert planning.key.startswith("gw-plan-x-")
     assert reconciled.prompt.replace(reconciled.key, planning.key) == planning.prompt
+
+
+def test_cross_repo_chain_stops_at_items_repository(tmp_path: Path) -> None:
+    """A `ui` child of a `code` epic parents on the epic's branch in its own repository."""
+    layout, _code, ui = _two_repo_stamping_workspace(tmp_path)
+    _tag(layout, "work/epic-a", "code")
+    child = "work/epic-a/children/feature-a"
+    _tag(layout, child, "ui")
+    page = load(layout.bundle_dir / f"{child}.md")
+    page.set("phase", "execute")
+    page.set("work_status", "accepted")
+    page.save()
+    result = orchestrate.run_orchestrate(layout, "work/epic-a")
+    (dispatch,) = [d for d in result.dispatches if d.slug == child]
+    placement = result.placements[dispatch.key]
+    worktrees = layout.worktrees_dir.resolve()
+    epic_branch = branch_name("work/epic-a", "Epic")
+    assert (placement.repo_name, placement.repo_root) == ("ui", ui.resolve())
+    assert placement.parent_branch == epic_branch
+    assert placement.parent_worktree == worktrees / "ui" / epic_branch
+    assert placement.worktree == worktrees / "ui" / branch_name(child, "Feature")
+    assert not hasattr(result, "preparations")
+
+
+def test_repo_name_override_selects_repository(tmp_path: Path) -> None:
+    layout, _code, ui = _two_repo_stamping_workspace(tmp_path)
+    result = orchestrate.run_orchestrate(layout, "work/feature-solo", repo_name="ui")
+    [dispatch] = result.dispatches
+    placement = result.placements[dispatch.key]
+    assert (placement.repo_name, placement.repo_root) == ("ui", ui.resolve())
+    assert Path(dispatch.worktree.path).parent.parent == layout.worktrees_dir.resolve() / "ui"
+    assert dispatch.worktree.path == str(
+        layout.worktrees_dir.resolve() / "ui" / branch_name("work/feature-solo", "Feature")
+    )
+
+
+# --- an in-bundle repository behaves as if its checkout were its path (D-001) ---
+# Moved from test_managed_checkout.py; placement replaced the action comparison.
+
+
+def _run_git(cwd: Path, *args: str) -> str:
+    import subprocess
+
+    return subprocess.run(["git", *args], cwd=cwd, check=True, capture_output=True, text=True).stdout.strip()
+
+
+def _in_bundle(tmp_path: Path, *, track: str = "main"):
+    """A workspace whose `code` repository is a clone with a linked checkout on its track."""
+    upstream = _git_repo(tmp_path / "upstream")
+    if track != "main":
+        _run_git(upstream, "branch", "-m", track)
+    root = tmp_path / "ws"
+    layout = _workspace(root, "version: 1\n")
+    clone = layout.bundle_dir / "repositories/code/references/git"
+    clone.parent.mkdir(parents=True)
+    _run_git(tmp_path, "clone", "-q", str(upstream), str(clone))
+    _run_git(clone, "checkout", "-q", "--detach")
+    checkout = layout.worktrees_dir / "code" / track
+    checkout.parent.mkdir(parents=True)
+    _run_git(clone, "worktree", "add", "-q", str(checkout), track)
+    layout.manifest_path.write_text(
+        layout.manifest_path.read_text(encoding="utf-8")
+        + f"repositories:\n  code:\n    path: {clone.relative_to(root).as_posix()}\n"
+        + f"    checkout: {checkout.relative_to(root).as_posix()}\n",
+        encoding="utf-8",
+        newline="",
+    )
+    return layout, clone, checkout
+
+
+def _ordinary(tmp_path: Path, *, track: str = "main"):
+    """The same shape with the checkout declared directly as `path`."""
+    code = _git_repo(tmp_path / "code")
+    if track != "main":
+        _run_git(code, "branch", "-m", track)
+        _run_git(code, "update-ref", f"refs/remotes/origin/{track}", track)
+        _run_git(code, "symbolic-ref", "refs/remotes/origin/HEAD", f"refs/remotes/origin/{track}")
+    layout = _workspace(tmp_path / "ws", f"version: 1\nrepositories:\n  code:\n    path: {code}\n")
+    return layout, code
+
+
+def test_an_in_bundle_repository_places_like_an_ordinary_one(tmp_path: Path) -> None:
+    track = "release"
+    item = "work/feature-a"
+    layout, _clone, checkout = _in_bundle(tmp_path / "a", track=track)
+    _write(layout, item, phase="execute", work_status="accepted")
+    ordinary, code = _ordinary(tmp_path / "b", track=track)
+    _write(ordinary, item, phase="execute", work_status="accepted")
+    in_bundle, plain = orchestrate.run_orchestrate(layout, item), orchestrate.run_orchestrate(ordinary, item)
+    [bundled], [direct] = in_bundle.dispatches, plain.dispatches
+    assert in_bundle.code_repo == str(checkout.resolve())
+    for result, dispatch, base in ((in_bundle, bundled, checkout), (plain, direct, code)):
+        placement = result.placements[dispatch.key]
+        assert (placement.parent_branch, placement.parent_worktree) == (track, base.resolve())
+        assert placement.branch == branch_name(item, "Feature")
+
+
+def test_advance_matches_a_cwd_in_the_checkout_or_in_the_clone(tmp_path: Path) -> None:
+    from gw_orchestrate.stage_advance import _resolve_repo
+    from okf_io import load_bundle
+    from work_tracker_okf.items import IGNORE, load_items
+
+    item_path = "work/feature-a"
+    layout, clone, checkout = _in_bundle(tmp_path)
+    other = _git_repo(tmp_path / "other")
+    layout.manifest_path.write_text(
+        layout.manifest_path.read_text(encoding="utf-8") + f"  other:\n    path: {other}\n",
+        encoding="utf-8",
+        newline="",
+    )
+    _write(layout, item_path, phase="execute", work_status="accepted")
+    items = tuple(load_items(load_bundle(layout.bundle_dir, ignore=IGNORE)))
+    item = next(candidate for candidate in items if candidate.path == item_path)
+    for cwd in (checkout, checkout / "packages/a", clone):
+        repo, declared = _resolve_repo(layout, items, item, repo_name=None, cwd=cwd)
+        assert (repo.name, repo.path, repo.source) == ("code", checkout, "cwd")
+        assert checkout in declared and clone not in declared
+    repo, _ = _resolve_repo(layout, items, item, repo_name=None, cwd=other)
+    assert repo.name == "other"

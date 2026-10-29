@@ -181,7 +181,7 @@ def run_stage_advance(
     `repo` defaults to `resolve_item_repo` rather than to the layout's
     `repo_root`: in a split topology -- the workspace and the code in
     different git repositories -- the walk-up resolves to the workspace's own
-    repo, and both `worktree_state` and `results_facts` then degrade to
+    repo, and `results_facts` then degrades to
     `None` without a word. An explicit `repo` wins and skips resolution
     entirely. Precedence otherwise (`_resolve_repo`): the item's own `repo:`
     (or an ancestor's) wins first, then `repo_name`, then the cwd matcher --
@@ -192,11 +192,9 @@ def run_stage_advance(
     does refuse: a `WorkspaceError` naming the item is raised when the
     chain's `repo:` names an undeclared repository, or when `repo_name`
     conflicts with a `repo:` the chain already set -- deliberately, even for
-    a vault-only transition that touches no code at all. And when the repo
-    came from `repo:`/`repo_name` but cwd is outside it, worktree inference
-    is skipped rather than guessed, with an entry in `warnings` explaining
-    why. Postcondition validation checks `affects` against every declared
-    repo either way.
+    a vault-only transition that touches no code at all. Placement is
+    never inferred from cwd: `item_placement` computes it. Postcondition
+    validation checks `affects` against every declared repo either way.
 
     `return_=True` walks the routing table's one backwards transition,
     `finish -> execute`. It writes no results stub: a return is not a stage

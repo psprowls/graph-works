@@ -19,11 +19,11 @@ One page per admitted entity into `<workspace>/okf/code-graph/<repo>/` (one fold
 
 The default scan runs as a three-phase pipeline:
 
-**Phase 1 — Emit** (`--emit-worklist <path>`): builds the code graph (`cg update`, incremental), calls `write_entities`, injects deterministic file maps, computes the commit-gate, and serializes the worklist (`prose_tasks`, `propagate_tasks`, `short_head`) to `<root>/state/worklist.json`. It also writes `<root>/state/briefs/<page-stem>.md` — one rendered refresh prompt per stale entity — and resets an empty `<root>/state/results/`.
+**Phase 1 — Emit** (`--emit-worklist`, a flag that takes no path): builds the code graph (`cg update`, incremental), calls `write_entities`, injects deterministic file maps, computes the commit-gate, and serializes the worklist (`prose_tasks`, `propagate_tasks`, `short_head`) to `.gw/cache/scan/worklist.json`. It also writes `.gw/cache/scan/briefs/<page-stem>.md` — one rendered refresh prompt per stale entity — and resets an empty `.gw/cache/scan/results/`. The emit payload prints all three paths.
 
 **Phase 2 — Fan-out**: one read-only subagent per `prose_tasks` entry follows its brief and writes a single `results/<page-stem>.json`. Subagents read with Read/Grep/Glob and write nothing but that one file — no wiki page, no repo file.
 
-**Phase 3 — Apply** (`--results-dir <dir>` and/or `--apply-worklist <results.json>`, plus `--short-head <sha>`): sanitizes every result against its task's declared prose surface, injects it, runs the refill-gated anchor stamp, regenerates indexes and backlinks, and appends to `log.md`.
+**Phase 3 — Apply** (`--apply --results-dir <dir> --short-head <sha>`): sanitizes every result against its task's declared prose surface, injects it, runs the refill-gated anchor stamp, regenerates indexes and backlinks, and appends to `log.md`.
 
 ### 2. Report entities
 From the `ScanResult` JSON: `entities_created`, `entities_updated`, `entities_deleted` (URIs), `entity_errors`.
@@ -60,9 +60,9 @@ The state gate (stamping on scan/ingest) is configurable per-workspace via the `
 
 ## Contract
 
-Artifacts live under `<root>/state/` across the emit/apply boundary:
+Artifacts live under `.gw/cache/scan/` across the emit/apply boundary:
 
-**`worklist.json`** — written by `--emit-worklist`, consumed by `--apply-worklist` / `--results-dir`:
+**`worklist.json`** — written by `--emit-worklist`, consumed by `--apply`:
 - `prose_tasks` — one diff-gated `ProseRefreshTask` per stale entity: `trigger` (`first_fill` | `diff`), the scoped `diff`, `changed_files`, the current `prose_sections`, `word_limits` (per-heading word caps for agent sections), `file_map_rows`, `graph_context`, and `owning_short_head`.
 - `propagate_tasks` — cross-page drift propagation tasks.
 - `short_head` — abbreviated HEAD SHA at emit time; passed as `--short-head` to apply so anchors are stamped to the correct commit.
@@ -71,8 +71,6 @@ Artifacts live under `<root>/state/` across the emit/apply boundary:
 **`briefs/<page-stem>.md`** — one self-contained refresh prompt per `prose_tasks` entry, rendered from the same system prompt and work order the Bedrock provider sends. The fan-out follows these; nothing re-derives the contract from this document.
 
 **`results/<page-stem>.json`** — one `ProseRefreshResult` per entity, written by that entity's subagent: `uri`, `sections` (keyed by full H2 headings), `file_map_descriptions`, `dir_descriptions`, `overview`, `error`.
-
-**`results.json`** (optional) — a combined `{schema: 2, prose, propagate}` document; still accepted via `--apply-worklist`, and merged when both sources are given.
 
 Every one of these is a transient workspace artifact: safe to delete, and `briefs/` + `results/` are emptied at the start of each emit.
 

@@ -49,10 +49,10 @@ Follow `../graph-works/references/scan-workflow.md`. Summary:
 ### 1. Emit the worklist
 
 ```bash
-gw scan --emit-worklist "$GRAPH_WORKS_DIR/.gw/cache/worklist.json"
+gw scan --emit-worklist
 ```
 
-This builds the code graph, writes/updates/deletes entity pages under `code-graph/<repo>/`  deterministically, injects deterministic file maps, computes the commit-gate, and serializes the worklist (`prose_tasks`, `propagate_tasks`, `short_head`) to the given path. It also renders one **refresh brief** per stale entity into a sibling `briefs/` directory and resets an empty `results/` directory for the fan-out. It prints `worklist_path`, `briefs_dir`, `results_dir`, and a `ScanResult` with `entities_created`, `entities_updated`, `entities_deleted` (URIs), and `entity_errors`. Read those directory paths from the payload — never hardcode them. (`gw scan --no-narrate` is the structural-only fast path — no worklist, no briefs.) Scanner-owned keys (`uri`, `kind`, `depends_on`, `language`, …) are replaced from the graph each scan; human keys (`status`, `last_reviewed`, `owner`, `notes`) and a non-empty `summary` are preserved.
+This builds the code graph, writes/updates/deletes entity pages under `code-graph/<repo>/`  deterministically, injects deterministic file maps, computes the commit-gate, and serializes the worklist (`prose_tasks`, `propagate_tasks`, `short_head`) to `.gw/cache/scan/worklist.json`. `--emit-worklist` is a flag and takes no path. It also renders one **refresh brief** per stale entity into a sibling `briefs/` directory and resets an empty `results/` directory for the fan-out. It prints `worklist_path`, `briefs_dir`, `results_dir`, and a `ScanResult` with `entities_created`, `entities_updated`, `entities_deleted` (URIs), and `entity_errors`. Read those directory paths from the payload — never hardcode them. (`gw scan --no-narrate` is the structural-only fast path — no worklist, no briefs.) Scanner-owned keys (`uri`, `kind`, `depends_on`, `language`, …) are replaced from the graph each scan; human keys (`status`, `last_reviewed`, `owner`, `notes`) and a non-empty `summary` are preserved.
 
 Surface deletions and red flags here exactly as described below.
 

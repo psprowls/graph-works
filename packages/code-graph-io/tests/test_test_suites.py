@@ -389,6 +389,28 @@ def test_stale_suite_edge_cleared_when_file_loses_root_assignment(tmp_path: Path
     assert parents == ["repository"], f"expected sole Repository parent, got {parents}"
 
 
+def test_vanished_suite_pruned_on_incremental_run(tmp_path: Path) -> None:
+    """A suite whose root disappears (package renamed) must not survive an
+    incremental run: only update.run's full-mode cleanup prunes by path, so
+    the emitter has to drop suites it no longer discovers itself."""
+    old_dir = tmp_path / "packages" / "old-name"
+    _write_pyproject(old_dir, name="old-name")
+    _write_python_pkg(old_dir, "old_name")
+    (old_dir / "tests").mkdir()
+    (old_dir / "tests" / "test_a.py").write_text("")
+
+    conn = _setup(tmp_path)
+    _run_emit_pipeline(conn, tmp_path)
+    assert ("old-name-unit-tests", "packages/old-name/tests") in _suite_rows(conn)
+
+    new_dir = tmp_path / "packages" / "new-name"
+    shutil.move(old_dir, new_dir)
+    _write_pyproject(new_dir, name="new-name")
+    _run_emit_pipeline(conn, tmp_path)
+
+    assert _suite_rows(conn) == [("new-name-unit-tests", "packages/new-name/tests")]
+
+
 # ---------- kind classification, config, malformed, idempotency ----------
 
 

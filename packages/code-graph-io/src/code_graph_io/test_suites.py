@@ -424,6 +424,23 @@ def emit(
 
     upsert.upsert_records(conn, as_graph_records(nodes=nodes, edges=edges))
 
+    # Prune suites this pass no longer discovers (a renamed or removed root).
+    # update.run's path-keyed cleanup only runs on full builds, so without this
+    # an incremental pass keeps a vanished suite forever. ON DELETE CASCADE
+    # drops its edges; its files were re-parented to the Repository above.
+    current = {(n.name, n.path) for n in nodes}
+    stale_ids = [
+        row[0]
+        for row in conn.execute(
+            "SELECT id, name, path FROM nodes WHERE kind='test_suite' AND (repo = ? OR repo IS NULL)",
+            (member_repo,),
+        ).fetchall()
+        if (row[1], row[2]) not in current
+    ]
+    if stale_ids:
+        placeholders = ",".join("?" for _ in stale_ids)
+        conn.execute(f"DELETE FROM nodes WHERE id IN ({placeholders})", stale_ids)
+
     # Re-parent test files: DELETE-then-INSERT atomic. The outer
     # update.run already wraps emit() in a transaction,
     # so the per-file DELETE+INSERT is atomic with the rest of gw graph update.

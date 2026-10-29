@@ -105,7 +105,9 @@ Gotchas that span several files:
   set, since a package/app node's `path` is a directory — often `""` for a
   root manifest — that would never appear in the purge's `tracked_paths`).
   Every other emitter (`structural_nodes`, `agent_plugins`, `entry_points`,
-  `test_suites`) runs *after* the purge and gets pruning for free. Reordering
+  `test_suites`) runs *after* the purge and gets pruning for free on full
+  builds. `test_suites.emit` also prunes suites it no longer discovers, since
+  the purge never runs on an incremental pass. Reordering
   any of this silently reintroduces either false deletions or orphaned nodes.
 - **A Python package is a `pyproject.toml` with `[project].name` OR a
   requirements root.** `packages._discover_requirements_roots` admits a

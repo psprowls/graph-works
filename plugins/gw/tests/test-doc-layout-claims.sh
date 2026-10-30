@@ -52,7 +52,9 @@ sweep_denylist() {
             fail "$rel $message"
             echo "$hits" | sed 's/^/      /'
         fi
-    done < <(find "$PLUGIN_ROOT" -type f -not -path '*/node_modules/*' -not -path '*/.git/*' -print0)
+    # Bytecode is not a doc: constant folding rejoins split literals in a .pyc,
+    # and a .pyc embeds the checkout's absolute path as co_filename.
+    done < <(find "$PLUGIN_ROOT" -type f -not -path '*/node_modules/*' -not -path '*/.git/*' -not -path '*/__pycache__/*' -not -name '*.py[co]' -print0)
     if [[ "$FAILURES" -eq "$before" ]]; then
         pass "$name: no retired claims outside its allowlist"
     fi
@@ -673,7 +675,7 @@ assert_contains "skills/auto-drive/SKILL.md" 'gw work dispatch <key> --plan <pla
 # tech-debt-auto-drive-skill-orca-edge-cases: §2.7 waits through the tested
 # `gw work wait` verb; no raw `check --wait` / `check --ack` survives anywhere
 # in the skill tree. Wording pins are prose contracts, not a simulation.
-raw_check_hits="$(grep -rnE -- 'orchestration check --run <run_id> --(wait|ack)|check --wait|check --ack' \
+raw_check_hits="$(grep -rnE --exclude-dir=__pycache__ -- 'orchestration check --run <run_id> --(wait|ack)|check --wait|check --ack' \
     "$PLUGIN_ROOT/skills/auto-drive" || true)"
 if [[ -z "$raw_check_hits" ]]; then
     pass "auto-drive carries no raw orca check --wait / --ack loop"

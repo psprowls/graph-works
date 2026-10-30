@@ -180,6 +180,18 @@ class LogGuardTests(unittest.TestCase):
                     self.assertIn("RELEASE-NOTES.md carries a retired log", result.stdout)
             target.write_bytes(original)
 
+    def test_cached_bytecode_is_not_swept(self):
+        with tempfile.TemporaryDirectory() as temp:
+            plugin = Path(temp) / "gw"
+            shutil.copytree(PLUGIN, plugin, ignore=shutil.ignore_patterns("__pycache__", "node_modules"))
+            guard = plugin / "tests/test-doc-layout-claims.sh"
+            poison = ("## " + "[2026-04-23] lint | invalid").encode()
+            for cache in (plugin / "tests/__pycache__", plugin / "skills/auto-drive/references/__pycache__"):
+                cache.mkdir(parents=True)
+                (cache / "poison.cpython-312.pyc").write_bytes(b"\x00\x01" + poison + b"\x00")
+            result = subprocess.run(["bash", str(guard)], capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stdout)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import pytest
 from code_wiki_okf.config import load_config
@@ -260,3 +261,34 @@ async def test_apply_scan_worklist_uses_a_supplied_worklist_after_the_artifact_c
 
     assert result == scan_commands.ApplyResult()
     assert received == [worklist]
+
+
+def _follow_brief(brief_text: str) -> None:
+    """Do exactly what the brief says: write the named file with the named uri."""
+    path_line = next(line for line in brief_text.splitlines() if line.startswith("Write your result to: "))
+    uri_line = next(line for line in brief_text.splitlines() if line.startswith("Echo this uri: "))
+    target = Path(path_line.removeprefix("Write your result to: ").strip())
+    uri = uri_line.removeprefix("Echo this uri: ").strip()
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(json.dumps({"uri": uri, "sections": {"## Purpose": FILLED}, "error": None}), encoding="utf-8")
+
+
+def test_a_worker_that_follows_only_the_brief_produces_a_loadable_result(tmp_path):
+    """Round trip with a slug collision: the digest-suffixed path in the brief is the file written."""
+    colliding = ("dep:npm/@foo/bar", "dep:npm/foo-bar")
+    worklist = ScanWorklist(prose_tasks=tuple(_dep_task(uri) for uri in colliding))
+    out_dir = tmp_path / "scan"
+    emit_scan_worklist(worklist, out_dir=out_dir)
+    for brief in sorted((out_dir / "briefs").glob("*.md")):
+        _follow_brief(brief.read_text(encoding="utf-8"))
+    results = load_results_dir(out_dir / "results")
+    assert results.provider_errors == ()
+    assert {r.uri for r in results.prose} == set(colliding)
+
+
+def test_the_brief_names_an_absolute_results_path(tmp_path):
+    worklist = ScanWorklist(prose_tasks=(_dep_task("dep:npm/foo"),))
+    emit_scan_worklist(worklist, out_dir=tmp_path / "scan")
+    text = next((tmp_path / "scan" / "briefs").glob("*.md")).read_text(encoding="utf-8")
+    line = next(ln for ln in text.splitlines() if ln.startswith("Write your result to: "))
+    assert Path(line.removeprefix("Write your result to: ")).is_absolute()

@@ -70,7 +70,11 @@ from subagents_io.pool import SubagentPool
 from gw_wiki.agent_substrate.agent_tools import truncate_text
 from gw_wiki.agent_substrate.roles import role_binding
 from gw_wiki.scan.prose_refresh import run_prose_refresh
-from gw_wiki.scan.prose_refresher import build_prose_refresh_prompt, sanitize_prose_result
+from gw_wiki.scan.prose_refresher import (
+    build_prose_refresh_prompt,
+    render_result_instructions,
+    sanitize_prose_result,
+)
 from gw_wiki.scan.scan_contract import (
     ApplyResult,
     ProseRefreshResult,
@@ -1082,6 +1086,7 @@ def emit_scan_worklist(worklist: ScanWorklist, *, out_dir: Path) -> tuple[str, .
         newline="\n",
     )
     written = [str(worklist_path)]
+    results_dir = (out_dir / RESULTS_DIRNAME).resolve()
     seen: dict[str, int] = {}
     for task in worklist.prose_tasks:
         slug = brief_slug(task.uri)
@@ -1089,7 +1094,12 @@ def emit_scan_worklist(worklist: ScanWorklist, *, out_dir: Path) -> tuple[str, .
         if seen[slug] > 1:
             slug = f"{slug}-{hashlib.sha1(task.uri.encode('utf-8')).hexdigest()[:8]}"
         brief = briefs / f"{slug}.md"
-        brief.write_text(build_prose_refresh_prompt(task), encoding="utf-8", newline="")
+        result_path = results_dir / f"{slug}.json"
+        brief.write_text(
+            build_prose_refresh_prompt(task) + render_result_instructions(task, result_path),
+            encoding="utf-8",
+            newline="",
+        )
         written.append(str(brief))
     return tuple(written)
 

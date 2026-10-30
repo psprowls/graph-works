@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Mapping, Sequence
+from pathlib import Path
 from typing import Any
 
 from okf_ext.shape import word_count
@@ -114,6 +115,23 @@ def build_prose_refresh_prompt(task: ProseRefreshTask) -> str:
     )
 
 
+def render_result_instructions(task: ProseRefreshTask, result_path: Path) -> str:
+    """The file-surface half of a brief: where to write, and the `uri` to echo.
+
+    `build_prose_refresh_prompt` is shared with the in-process path, which pairs
+    each answer with its task and needs neither; the file surface reads `uri`
+    from the result file, so a worker following only its brief must be told both.
+    """
+    return (
+        "\n\n---\n"
+        "Output (file surface): write one JSON file; it is your only write.\n"
+        f"Write your result to: {result_path}\n"
+        f"Echo this uri: {task.uri}\n"
+        f'Shape: {{"uri": "{task.uri}", "sections": {{"## Heading": "body"}}, "error": null}}\n'
+        'Set "error" to a message (and leave "sections" empty) when this entity cannot be refreshed.\n'
+    )
+
+
 def parse_prose_refresher_output(text: str) -> tuple[dict[str, str], bool]:
     """Split the model's answer into `(sections, parsed)`.
 
@@ -181,5 +199,6 @@ __all__ = [
     "TODO_PREFIXES",
     "build_prose_refresh_prompt",
     "parse_prose_refresher_output",
+    "render_result_instructions",
     "sanitize_prose_result",
 ]

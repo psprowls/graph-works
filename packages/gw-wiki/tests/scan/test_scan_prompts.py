@@ -187,3 +187,9 @@ def test_sanitize_applies_a_limit_only_to_its_own_heading():
 def test_sanitize_without_limits_is_unchanged():
     long = "word " * 1000
     assert sanitize_prose_result({"## Purpose": long}, allowed=ALLOWED) == {"## Purpose": long.strip()}
+
+
+def test_the_in_process_prompt_names_no_results_path():
+    prompt = build_prose_refresh_prompt(_task())
+    assert "Write your result to" not in prompt
+    assert "Echo this uri" not in prompt

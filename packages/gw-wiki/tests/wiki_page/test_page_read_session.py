@@ -85,9 +85,7 @@ def test_unrelated_pages_do_not_change_the_cost(layout, counters) -> None:
     assert len([b for b in result.backlinks if b.startswith("docs/extra/")]) == 50
 
 
-@pytest.mark.parametrize(
-    "page_id", ["index", "log", "pic", "docs/gone", "repositories/clone/references/git/README", "docs/bad"]
-)
+@pytest.mark.parametrize("page_id", ["log", "pic", "docs/gone", "repositories/clone/references/git/README", "docs/bad"])
 def test_non_concepts_and_unknowns_are_unknown(layout, page_id) -> None:
     result = run_page_read(layout, page_id)
     assert result.refusal == "unknown-page"

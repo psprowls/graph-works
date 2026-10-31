@@ -96,6 +96,10 @@ def concept_ids(layout: WorkspaceLayout) -> list[str]:
 def oracle_page_read(layout: WorkspaceLayout, page_id: str) -> PageRead:
     bundle = load_workspace_bundle(layout)
     document = bundle.concept(page_id)
+    is_index = False
+    if document is None and (page_id == INDEX_NAME[: -len(".md")] or page_id.endswith("/index")):
+        document = bundle.indexes.get(page_id[: -len("index")].rstrip("/"))
+        is_index = document is not None
     if document is None:
         return PageRead(page_id, MappingProxyType({}), "", (), (), (), None, "unknown-page")
     graph = build_link_graph(bundle)
@@ -104,9 +108,9 @@ def oracle_page_read(layout: WorkspaceLayout, page_id: str) -> PageRead:
         id=page_id,
         frontmatter=MappingProxyType(document.fm_data(dates="iso")),
         body=document.body,
-        outlinks=tuple(_link(link) for link in graph.out.get(page_id, ())),
-        backlinks=tuple(graph.backlinks.get(page_id, ())),
-        broken=tuple(_link(link) for link in graph.broken if link.source == page_id),
+        outlinks=() if is_index else tuple(_link(link) for link in graph.out.get(page_id, ())),
+        backlinks=() if is_index else tuple(graph.backlinks.get(page_id, ())),
+        broken=() if is_index else tuple(_link(link) for link in graph.broken if link.source == page_id),
         parse_error=None if error is None else f"{error.kind}: {error.message}",
         refusal=None,
     )

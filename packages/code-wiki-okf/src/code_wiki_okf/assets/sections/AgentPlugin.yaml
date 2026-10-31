@@ -1,5 +1,5 @@
 frontmatter:
-  owned: [ecosystem, version, package]
+  owned: [ecosystem, version, package, path]
   provenance: [generated, last_updated_commit, tokens, prose_refreshed_commit, prose_refresh_attempts]
 sections:
   - heading: Purpose

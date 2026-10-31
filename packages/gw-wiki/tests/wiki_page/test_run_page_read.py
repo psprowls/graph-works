@@ -53,3 +53,29 @@ def test_reference_pages_are_readable(tmp_path):
     (refs / "01-design.md").write_text("---\ntitle: D\n---\n\n[A](/concepts/a.md)\n", encoding="utf-8")
     assert run_page_read(layout, "work/feature-a/references/01-design").refusal is None
     assert "work/feature-a/references/01-design" in run_page_read(layout, "concepts/a").backlinks
+
+
+def test_a_folder_index_reads_with_its_body_and_no_neighbourhood(tmp_path):
+    layout = _workspace(tmp_path)
+    (layout.bundle_dir / "concepts" / "index.md").write_text(
+        "# Concepts\n\n- [A](a.md) - the first\n- [B](b.md) - the second\n", encoding="utf-8"
+    )
+    result = run_page_read(layout, "concepts/index")
+
+    assert result.refusal is None
+    assert result.id == "concepts/index"
+    assert "[A](a.md)" in result.body
+    assert result.outlinks == () and result.backlinks == () and result.broken == ()
+
+
+def test_the_root_index_reads(tmp_path):
+    layout = _workspace(tmp_path)
+    result = run_page_read(layout, "index")
+    assert result.refusal is None
+    assert result.body != ""
+
+
+def test_the_log_stays_refused(tmp_path):
+    layout = _workspace(tmp_path)
+    assert (layout.bundle_dir / "log.md").is_file()
+    assert run_page_read(layout, "log").refusal == "unknown-page"

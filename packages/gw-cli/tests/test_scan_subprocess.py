@@ -115,6 +115,7 @@ def test_scan_emit_and_apply_round_trip_across_processes_and_refuse_unsafe_hando
         "entities_created",
         "entities_updated",
         "entities_deleted",
+        "entities_moved",
         "entity_errors",
         "mirror_created",
         "mirror_updated",

@@ -7,6 +7,7 @@ from pathlib import Path
 
 from gw_wiki.util.commands import (
     LineEndingFinding,
+    LineEndingSkip,
     LineEndingsReport,
     LogAppendResult,
     TokenStamp,
@@ -64,7 +65,20 @@ def test_tokens_payload_carries_every_bucket_in_full() -> None:
 
 def test_line_endings_payload_lists_findings() -> None:
     report = LineEndingsReport(findings=(LineEndingFinding("notes/a.md", 2),), fixed=True)
-    assert line_endings_payload(report) == {"fixed": True, "findings": [{"member": "notes/a.md", "crlf_count": 2}]}
+    assert line_endings_payload(report) == {
+        "fixed": True,
+        "findings": [{"member": "notes/a.md", "crlf_count": 2}],
+        "skipped": [],
+    }
+
+
+def test_line_endings_payload_lists_skipped() -> None:
+    report = LineEndingsReport(
+        findings=(LineEndingFinding("a.md", 1),),
+        fixed=True,
+        skipped=(LineEndingSkip("a.md", "changed-during-repair"),),
+    )
+    assert line_endings_payload(report)["skipped"] == [{"member": "a.md", "reason": "changed-during-repair"}]
 
 
 def test_read_index_payload_pins_every_field_and_sorted_counts() -> None:

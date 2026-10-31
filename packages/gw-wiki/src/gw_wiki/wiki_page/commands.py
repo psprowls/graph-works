@@ -87,9 +87,24 @@ def _concept_row(session: ReadSession, member_id: str) -> _ConceptRow | None:
     return row
 
 
+def _readable_row(session: ReadSession, member_id: str) -> _ConceptRow | None:
+    """The stored row for *member_id* when it is exactly a concept or folder-index file.
+
+    `log.md` stays refused: the route's contract is pages. The tree keeps `_concept_row`.
+    """
+    row = session.member(member_id)
+    if row is None or row.id != member_id or row.kind not in ("concept", "index"):
+        return None
+    return row
+
+
 def page_read(session: ReadSession, layout: WorkspaceLayout, page_id: str) -> PageRead:
-    """Read an extensionless, bundle-relative page id from an open *session*. Never writes."""
-    row = _concept_row(session, f"{page_id}.md")
+    """Read an extensionless, bundle-relative concept or index page id from an open *session*.
+
+    An index page's body carries its entries; its link neighbourhood is empty because the link
+    graph covers concepts only. Never writes.
+    """
+    row = _readable_row(session, f"{page_id}.md")
     if row is None:
         return _unknown(page_id)
     content = session.content(row.id)

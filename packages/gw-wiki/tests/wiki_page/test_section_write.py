@@ -238,3 +238,41 @@ def test_a_failed_write_reports_failures_and_commits_nothing(
     run = run_section_write(layout, PAGE, "Context", "y", today=TODAY, dry_run=False)
     assert run.applied and run.written == () and run.commit is None
     assert run.failures == (f"{PAGE}.md: unwritable -- denied",)
+
+
+@pytest.mark.parametrize(
+    "body",
+    ["```sh\ncode\n", "~~~\ncode\n", "<!-- note\n", "<pre>\ncode\n", "<script>\nx\n"],
+)
+def test_last_section_unclosed_block_is_refused(layout: WorkspaceLayout, body: str) -> None:
+    before = snapshot(layout)
+    run = run_section_write(layout, PAGE, "Trade-offs", body, today=TODAY, dry_run=False)
+    assert run.refusal == "unbalanced-body" and run.applied is False
+    assert run.before == run.after == "\nt\n"
+    assert run.written == () and run.commit is None
+    assert snapshot(layout) == before
+
+
+@pytest.mark.parametrize(
+    ("text", "body"),
+    [
+        (TEXT, "```sh\ncode\n```\n"),
+        (TEXT, "<!-- note -->\n"),
+        (TEXT, "<pre>\ncode\n</pre>\n"),
+        (TEXT, "<div>\nunclosed div\n"),
+        (TEXT.rstrip("\n"), "plain"),
+        (TEXT + "\n", "plain"),
+    ],
+)
+def test_last_section_balanced_bodies_are_accepted(layout: WorkspaceLayout, text: str, body: str) -> None:
+    _write(layout, PAGE, text)
+    run = run_section_write(layout, PAGE, "Trade-offs", body, today=TODAY, dry_run=False)
+    assert run.refusal is None and run.applied
+
+
+def test_crlf_page_last_section_unclosed_fence_is_refused(layout: WorkspaceLayout) -> None:
+    path = _write(layout, PAGE, TEXT.replace("\n", "\r\n"))
+    before = path.read_bytes()
+    run = run_section_write(layout, PAGE, "Trade-offs", "```\r\ncode\r\n", today=TODAY, dry_run=False)
+    assert run.refusal == "unbalanced-body" and run.applied is False
+    assert path.read_bytes() == before

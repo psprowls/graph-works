@@ -116,6 +116,7 @@ def test_lint_json_has_only_the_documented_nested_fields(
         "semantic": [{"group": "page-quality", "message": "thin", "page": "concepts/a", "model": "gpt-5"}],
         "open_proposals": {"count": 1, "oldest": "2026-08-01", "malformed": 2, "ages": {"7-30d": 1}},
         "errors": [],
+        "diagnostics": [],
     }
 
 

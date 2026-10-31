@@ -1,5 +1,5 @@
 frontmatter:
-  owned: [tested_packages, suite_kind, file_count]
+  owned: [tested_packages, suite_kind, file_count, path]
   provenance: [generated, last_updated_commit, tokens, prose_refreshed_commit, prose_refresh_attempts]
 sections:
   - heading: Purpose

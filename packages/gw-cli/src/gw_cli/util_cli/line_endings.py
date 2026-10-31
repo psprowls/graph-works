@@ -6,6 +6,8 @@ enforces that only at checkout; nothing enforces it on write, and `git
 status` cannot see a violation because it compares normalised content. This
 is the re-runnable detector for that gap -- the bare verb *is* the detection
 surface (no lint-catalog rule, no `okf-io` extra rule ships alongside it).
+A `--fix` run lists any finding it deliberately did not repair under `skipped`
+and exits non-zero while any remain.
 """
 
 from __future__ import annotations
@@ -40,7 +42,10 @@ def line_endings(
         verb = "fixed" if report.fixed else "found"
         lines = [f"{verb}: {len(report.findings)}"]
         lines.extend(f"  {finding.member} ({finding.crlf_count})" for finding in report.findings)
+        if report.skipped:
+            lines.append(f"skipped: {len(report.skipped)}")
+            lines.extend(f"  {skip.member} ({skip.reason})" for skip in report.skipped)
         typer.echo("\n".join(lines))
 
-    if report.findings and not report.fixed:
+    if (report.findings and not report.fixed) or report.skipped:
         raise typer.Exit(code=exit_codes.GENERIC)

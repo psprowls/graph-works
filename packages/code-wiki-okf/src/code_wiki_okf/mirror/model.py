@@ -70,6 +70,9 @@ class MirrorPlan:
     create is not yet a bundle member for `plan_regenerate` to accept, so
     that call has to happen later, after moves and creates have landed and
     the bundle has been reloaded (a later task's job, not this one's).
+    `move_renders` carries the same for each moved page, keyed by destination:
+    a move relocates a page but leaves its `resource` and `title` stale, so
+    apply restamps and regenerates it after the move.
     """
 
     repo: str
@@ -79,6 +82,8 @@ class MirrorPlan:
     updates: Mapping[str, Render]  # concept_id -> Render, rich pages only
     deletions: tuple[str, ...]  # rel_paths, prose-guard passed
     declined_deletions: tuple[DeclinedDeletion, ...]
+    move_renders: Mapping[str, tuple[Mapping[str, Any], Render]] = MappingProxyType({})  # dest concept_id -> parts
+    renames: Mapping[str, str] = MappingProxyType({})  # old source path -> new source path
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "targets", tuple(self.targets))
@@ -101,6 +106,20 @@ class MirrorPlan:
             "updates",
             MappingProxyType({concept_id: _freeze_render(render) for concept_id, render in self.updates.items()}),
         )
+        object.__setattr__(
+            self,
+            "move_renders",
+            MappingProxyType(
+                {
+                    concept_id: (
+                        MappingProxyType({key: _freeze(value) for key, value in frontmatter.items()}),
+                        _freeze_render(render),
+                    )
+                    for concept_id, (frontmatter, render) in self.move_renders.items()
+                }
+            ),
+        )
+        object.__setattr__(self, "renames", MappingProxyType(dict(self.renames)))
         object.__setattr__(self, "deletions", tuple(self.deletions))
         object.__setattr__(self, "declined_deletions", tuple(self.declined_deletions))
 

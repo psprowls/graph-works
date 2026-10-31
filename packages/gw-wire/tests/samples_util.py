@@ -47,7 +47,13 @@ UTIL: dict[str, tuple[Callable[[], object], ...]] = {
         ),
     ),
     "util.line_endings_payload": (
-        lambda: util.line_endings_payload(ns(fixed=False, findings=(ns(member="a.md", crlf_count=1),))),
+        lambda: util.line_endings_payload(
+            ns(
+                fixed=False,
+                findings=(ns(member="a.md", crlf_count=1),),
+                skipped=(ns(member="a.md", reason="symlink-outside-bundle"),),
+            )
+        ),
     ),
 }
 

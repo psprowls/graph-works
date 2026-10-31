@@ -412,7 +412,36 @@ def test_apply_rename_preserves_notes_and_removes_old_path(tmp_path: Path) -> No
     assert _notes_body(new_target.read_text(encoding="utf-8")) == custom_notes
     assert not old_target.exists()
     assert result2.moved == (("code-graph/acme/file-system/a.py.md", "code-graph/acme/file-system/renamed.py.md"),)
+    moved = load_bundle(bundle_root).concept("code-graph/acme/file-system/renamed.py")
+    assert moved is not None
+    assert moved.fm.resource == plan2.target_for("renamed.py").resource
+    assert moved.fm.title == "renamed.py"
+    assert result2.regenerated == ()
     reader.close()
+
+
+def test_apply_directory_move_restamps_resource(tmp_path: Path) -> None:
+    repo_root = _scratch_repo(tmp_path)
+    bundle_root = tmp_path / "bundle"
+    install_bundle(bundle_root, today=_TODAY, dry_run=False)
+    graph_dir = tmp_path / "graph"
+    run_workspace([repo_root], graph_dir=graph_dir, full=True)
+    repo = RepoConfig(name="acme", path=repo_root, ignore=())
+    with open_reader(graph_dir=graph_dir) as reader:
+        first = plan_mirror(load_bundle(bundle_root), reader, repo, tracked=("a.py",), sha=_head(repo_root), at=_AT)
+        apply_mirror(bundle_root, first, today=_TODAY)
+    (repo_root / "sub").mkdir()
+    _git(repo_root, "mv", "a.py", "sub/a.py")
+    _git(repo_root, "commit", "-q", "-m", "move")
+    run_workspace([repo_root], graph_dir=graph_dir, full=True)
+    with open_reader(graph_dir=graph_dir) as reader:
+        plan = plan_mirror(load_bundle(bundle_root), reader, repo, tracked=("sub/a.py",), sha=_head(repo_root), at=_AT)
+        apply_mirror(bundle_root, plan, today=_TODAY)
+
+    moved = load_bundle(bundle_root).concept("code-graph/acme/file-system/sub/a.py")
+    assert moved is not None
+    assert moved.fm.resource == plan.target_for("sub/a.py").resource
+    assert moved.fm.title == "a.py"
 
 
 def test_apply_reports_move_write_failures(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -446,6 +475,7 @@ def test_apply_reports_move_write_failures(tmp_path: Path, monkeypatch: pytest.M
     result = apply_mirror(bundle_root, plan, today=_TODAY)
 
     assert result.failed == ("code-graph/acme/file-system/renamed.py.md: commit-error: disk full",)
+    assert not (bundle_root / "code-graph/acme/file-system/renamed.py.md").exists()
 
 
 def test_apply_declined_deletion_leaves_file_and_is_reported(tmp_path: Path) -> None:

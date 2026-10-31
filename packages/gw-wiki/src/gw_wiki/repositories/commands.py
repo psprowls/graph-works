@@ -861,9 +861,17 @@ def _file_proposals(
     return tuple(written), tuple(skipped)
 
 
-#: Runs a structural scan of the workspace and returns its error lines. Injected by the interface, because this
-#: vertical may not import `gw_wiki.scan` (root `pyproject.toml`, verticals never import each other).
-Rescan = Callable[[], Sequence[str]]
+@dataclass(frozen=True, slots=True)
+class RescanOutcome:
+    """What a structural rescan reports: errors fail the advance, warnings only ride along."""
+
+    errors: tuple[str, ...] = ()
+    warnings: tuple[str, ...] = ()
+
+
+#: Runs a structural scan of the workspace and returns its error and warning lines. Injected by the interface,
+#: because this vertical may not import `gw_wiki.scan` (root `pyproject.toml`, verticals never import each other).
+Rescan = Callable[[], RescanOutcome]
 
 
 def _generation(layout: WorkspaceLayout, name: str) -> Generation:
@@ -1014,11 +1022,11 @@ def _advance_managed(
         if failure is not None:
             return undo(f"{failure.command}: {failure.detail}", "git-failed")
         try:
-            errors = tuple(rescan())
+            rescanned = rescan()
         except Exception as exc:
-            errors = (str(exc),)
-        if errors:
-            return undo("; ".join(errors), "scan-failed")
+            rescanned = RescanOutcome(errors=(str(exc),))
+        if rescanned.errors:
+            return undo("; ".join(rescanned.errors), "scan-failed")
         scanned_changes = bundle_changes(layout)
         if scanned_changes is None:
             return undo("cannot inspect structural scan output", "scan-failed")
@@ -1056,7 +1064,7 @@ def _advance_managed(
         except (OSError, ValueError) as exc:
             log.rollback()
             return undo(str(exc), "write-failed")
-        warnings = (*((log_warning,) if log_warning else ()), *commit_warnings)
+        warnings = (*rescanned.warnings, *((log_warning,) if log_warning else ()), *commit_warnings)
         return replace(
             result,
             outcome="advanced",

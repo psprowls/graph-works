@@ -98,6 +98,10 @@ def _declares_updated(layout: WorkspaceLayout, type_name: str) -> bool:
     return declares_property(schemas, type_name, "updated")
 
 
+# Appended to a probed page, never searched for, so a page heading of the same text is harmless.
+_PROBE = "__probe__"
+
+
 def _outline(body: str) -> list[tuple[int, str]]:
     """The page's `#`/`##` headings: what a body must leave exactly as it found them."""
     return [(parsed.level, parsed.heading) for parsed in sections(body) if parsed.level <= 2]
@@ -127,8 +131,9 @@ def _plan(layout: WorkspaceLayout, page_id: str, wanted: str, body: str) -> tupl
     if any(parsed.level <= 2 for parsed in sections(body)):
         return refused("heading-in-body", section.heading, before)
     spliced, _ = splice_sections(document.body, {f"## {section.heading}": body})
-    # An unclosed fence or HTML comment swallows every later heading of the page.
-    if _outline(spliced) != _outline(document.body):
+    # An unclosed fence or HTML block swallows every later heading, or on the last section runs to
+    # end of file: a trailing probe heading must survive, and so must every heading before it.
+    if _outline(f"{spliced}\n## {_PROBE}\n") != [*_outline(document.body), (2, _PROBE)]:
         return refused("unbalanced-body", section.heading, before)
     written = find_section(spliced, section.heading, level=2)
     assert written is not None  # the outline is unchanged, so this section's heading survived

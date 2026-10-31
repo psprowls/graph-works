@@ -132,6 +132,7 @@ class SyncSummary:
     catalog_created: tuple[str, ...] = field(default_factory=tuple)
     catalog_updated: tuple[str, ...] = field(default_factory=tuple)
     catalog_declined: tuple[tuple[str, str], ...] = field(default_factory=tuple)
+    moved: tuple[tuple[str, str], ...] = field(default_factory=tuple)  # (old member, new member)
 
     @property
     def ok(self) -> bool:
@@ -192,6 +193,13 @@ def _stamp_provenance(render: Render, *, sha: str | None, at: datetime) -> Rende
     if sha:
         frontmatter["last_updated_commit"] = last_updated_commit_value(sha)
     return Render(frontmatter=frontmatter, sections=render.sections)
+
+
+def _with_path(render: Render, node: NodeRecord) -> Render:
+    """Record the node's directory so a later rename can pair the vanished page with its successor."""
+    if not isinstance(node.path, str) or not node.path:
+        return render
+    return Render(frontmatter={**render.frontmatter, "path": node.path}, sections=render.sections)
 
 
 def _write(context: PlacementContext, *, title: str, render: Render) -> EntityWrite:
@@ -345,7 +353,7 @@ def plan_entities(
                 sha=sha,
                 at=generated_at,
             )
-            add(_write(context, title=node.name, render=render))
+            add(_write(context, title=node.name, render=_with_path(render, node)))
 
         for node in _nodes_for_repo(all_apps, repo_uri):
             context = context_from_resource("App", _resource_text(node))
@@ -358,7 +366,7 @@ def plan_entities(
                 sha=sha,
                 at=generated_at,
             )
-            add(_write(context, title=node.name, render=render))
+            add(_write(context, title=node.name, render=_with_path(render, node)))
 
         for node in _nodes_for_repo(all_suites, repo_uri):
             context = context_from_resource("TestSuite", _resource_text(node))
@@ -376,7 +384,7 @@ def plan_entities(
                 sha=sha,
                 at=generated_at,
             )
-            add(_write(context, title=node.name, render=render))
+            add(_write(context, title=node.name, render=_with_path(render, node)))
 
         for node in _nodes_for_repo(all_plugins, repo_uri):
             context = context_from_resource("AgentPlugin", _resource_text(node))
@@ -389,7 +397,7 @@ def plan_entities(
                 sha=sha,
                 at=generated_at,
             )
-            add(_write(context, title=node.name, render=render))
+            add(_write(context, title=node.name, render=_with_path(render, node)))
 
         for node in _nodes_for_repo(all_dependencies, repo_uri):
             context = context_from_resource("Dependency", _resource_text(node))

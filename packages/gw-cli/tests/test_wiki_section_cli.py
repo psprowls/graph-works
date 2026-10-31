@@ -96,3 +96,12 @@ def test_missing_body_file_is_an_io_error(workspace: Path, tmp_path: Path) -> No
     result = runner.invoke(app, _args(workspace, "--body-file", str(tmp_path / "absent.md"), "--json"))
     assert result.exit_code != 0
     assert json.loads(result.stdout)["error"]["reason"] == "io"
+
+
+def test_unclosed_fence_on_the_last_section_is_refused(workspace: Path) -> None:
+    page = workspace / "okf" / f"{PAGE}.md"
+    result = runner.invoke(app, _args(workspace, "--apply", "--json"), input="```sh\ncode\n")
+    assert result.exit_code != 0
+    error = json.loads(result.stdout)["error"]
+    assert error["reason"] == "refused" and error["payload"]["refusal"] == "unbalanced-body"
+    assert page.read_text(encoding="utf-8") == TEXT

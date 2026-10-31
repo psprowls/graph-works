@@ -76,10 +76,11 @@ def tokens_payload(update: TokensUpdate) -> dict[str, Any]:
 
 
 def line_endings_payload(report: LineEndingsReport) -> dict[str, Any]:
-    """Every CRLF finding, and whether this run fixed them."""
+    """Every CRLF finding, whether this run fixed them, and any it skipped."""
     return {
         "fixed": report.fixed,
         "findings": [{"member": finding.member, "crlf_count": finding.crlf_count} for finding in report.findings],
+        "skipped": [{"member": skip.member, "reason": skip.reason} for skip in report.skipped],
     }
 
 

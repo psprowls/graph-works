@@ -1034,3 +1034,184 @@ def test_sync_prunes_foreign_trees_on_every_reload(
     if not dry_run:
         assert (bundle_root / "code-graph/demo.md").is_file()
         assert (bundle_root / "code-graph/demo/file-system/src/widgets.py.md").is_file()
+
+
+_WIDGETS_SOURCE = "".join(f"VALUE_{n} = {n}\n" for n in range(6))
+_WIDGETS_PAGE = "code-graph/demo/file-system/src/widgets.py.md"
+_GADGETS_PAGE = "code-graph/demo/file-system/src/gadgets.py.md"
+
+
+def _sync(bundle_root: Path, graph_dir: Path, config: Config, **kwargs: object) -> run_module.SyncResult:
+    with open_reader(graph_dir=graph_dir) as reader:
+        return sync_bundle(bundle_root, config=config, reader=reader, at=_AT, today=_TODAY, **kwargs)  # type: ignore[arg-type]
+
+
+def _rename_widgets(config: Config, graph_dir: Path, *, extra: str = "") -> None:
+    repo_root = config.repos[0].path
+    _git(repo_root, "mv", "src/widgets.py", "src/gadgets.py")
+    if extra:
+        with (repo_root / "src" / "gadgets.py").open("a", encoding="utf-8", newline="") as handle:
+            handle.write(extra)
+        _git(repo_root, "add", "-A")
+    _git(repo_root, "commit", "-q", "-m", "rename")
+    run_workspace([repo_root], graph_dir=graph_dir, full=True)
+
+
+def _widgets_workspace(tmp_path: Path) -> tuple[Path, Path, Config]:
+    bundle_root, graph_dir, config = _workspace(tmp_path)
+    repo_root = config.repos[0].path
+    (repo_root / "src" / "widgets.py").write_text(_WIDGETS_SOURCE, encoding="utf-8")
+    _git(repo_root, "commit", "-q", "-am", "longer widgets")
+    run_workspace([repo_root], graph_dir=graph_dir, full=True)
+    return bundle_root, graph_dir, config
+
+
+def test_sync_rename_keeps_page_with_new_identity(tmp_path: Path) -> None:
+    bundle_root, graph_dir, config = _widgets_workspace(tmp_path)
+    _sync(bundle_root, graph_dir, config)
+    _rename_widgets(config, graph_dir)
+
+    result = _sync(bundle_root, graph_dir, config)
+
+    moved = load_bundle(bundle_root).concept(_GADGETS_PAGE.removesuffix(".md"))
+    assert moved is not None
+    assert moved.fm.resource == "file:acme/demo/src/gadgets.py"
+    assert moved.fm.title == "gadgets.py"
+    assert not (bundle_root / _WIDGETS_PAGE).exists()
+    assert result.entities.deleted == ()
+    assert result.mirror.moved == 1
+    assert result.mirror.created == 0
+    before = _bundle_bytes(bundle_root)
+    _sync(bundle_root, graph_dir, config)
+    assert _bundle_bytes(bundle_root) == before
+
+
+def test_sync_rename_with_prose_notes_survives_next_sync(tmp_path: Path) -> None:
+    bundle_root, graph_dir, config = _widgets_workspace(tmp_path)
+    _sync(bundle_root, graph_dir, config)
+    page = bundle_root / _WIDGETS_PAGE
+    text = page.read_text(encoding="utf-8")
+    start = text.index("## Notes") + len("## Notes")
+    page.write_text(text[:start] + "\n\nHand-written widget lore.\n", encoding="utf-8")
+    _rename_widgets(config, graph_dir)
+
+    _sync(bundle_root, graph_dir, config)
+    _sync(bundle_root, graph_dir, config)
+
+    assert "Hand-written widget lore." in (bundle_root / _GADGETS_PAGE).read_text(encoding="utf-8")
+
+
+def test_sync_rename_with_edit_regenerates_sections(tmp_path: Path) -> None:
+    bundle_root, graph_dir, config = _widgets_workspace(tmp_path)
+    _sync(bundle_root, graph_dir, config)
+    _rename_widgets(config, graph_dir, extra="def new_fn() -> int:\n    return 2\n")
+
+    _sync(bundle_root, graph_dir, config)
+
+    assert "new_fn" in (bundle_root / _GADGETS_PAGE).read_text(encoding="utf-8")
+
+
+def test_dry_run_reports_planned_mirror_move(tmp_path: Path) -> None:
+    bundle_root, graph_dir, config = _widgets_workspace(tmp_path)
+    _sync(bundle_root, graph_dir, config)
+    _rename_widgets(config, graph_dir)
+    before = _bundle_bytes(bundle_root)
+
+    result = _sync(bundle_root, graph_dir, config, dry_run=True)
+
+    assert result.mirror.moved == 1
+    assert result.mirror.created == 0
+    assert _bundle_bytes(bundle_root) == before
+
+
+def test_dry_run_reports_planned_mirror_creates(tmp_path: Path) -> None:
+    bundle_root, graph_dir, config = _workspace(tmp_path)
+
+    result = _sync(bundle_root, graph_dir, config, dry_run=True)
+
+    assert result.mirror.created == 2
+
+
+def _pkg_workspace(tmp_path: Path) -> tuple[Path, Path, Config]:
+    """A workspace whose package lives in `pkgs/widgetlib/`, with enough source for git to pair a rename."""
+    bundle_root, graph_dir, config = _workspace(tmp_path)
+    repo_root = config.repos[0].path
+    package = repo_root / "pkgs" / "widgetlib"
+    (package / "src").mkdir(parents=True)
+    (package / "pyproject.toml").write_text(
+        '[project]\nname = "widgetlib"\nversion = "0.1.0"\ndependencies = []\n', encoding="utf-8"
+    )
+    (package / "src" / "core.py").write_text(_WIDGETS_SOURCE, encoding="utf-8")
+    _git(repo_root, "add", "-A")
+    _git(repo_root, "commit", "-q", "-m", "add package")
+    run_workspace([repo_root], graph_dir=graph_dir, full=True)
+    return bundle_root, graph_dir, config
+
+
+def _rename_package(config: Config, graph_dir: Path) -> None:
+    repo_root = config.repos[0].path
+    _git(repo_root, "mv", "pkgs/widgetlib", "pkgs/gadgetlib")
+    manifest = repo_root / "pkgs" / "gadgetlib" / "pyproject.toml"
+    manifest.write_text(manifest.read_text(encoding="utf-8").replace('name = "widgetlib"', 'name = "gadgetlib"'))
+    _git(repo_root, "add", "-A")
+    _git(repo_root, "commit", "-q", "-m", "rename package")
+    run_workspace([repo_root], graph_dir=graph_dir, full=True)
+
+
+_OLD_PKG = "code-graph/demo/entities/packages/widgetlib"
+_NEW_PKG = "code-graph/demo/entities/packages/gadgetlib"
+
+
+def test_entity_pages_record_their_path(tmp_path: Path) -> None:
+    bundle_root, graph_dir, config = _pkg_workspace(tmp_path)
+    _sync(bundle_root, graph_dir, config)
+
+    package = load_bundle(bundle_root).concept(_OLD_PKG)
+    assert package is not None
+    assert package.fm_raw["path"] == "pkgs/widgetlib"
+
+
+def _hand_edit_purpose(bundle_root: Path) -> None:
+    page = bundle_root / f"{_OLD_PKG}.md"
+    text = page.read_text(encoding="utf-8")
+    start = text.index("## Purpose") + len("## Purpose")
+    end = text.index("\n## ", start)
+    page.write_text(text[:start] + "\n\nWidgets are made here.\n" + text[end:], encoding="utf-8", newline="")
+
+
+def test_package_rename_moves_entity_page_with_prose(tmp_path: Path) -> None:
+    bundle_root, graph_dir, config = _pkg_workspace(tmp_path)
+    _sync(bundle_root, graph_dir, config)
+    _hand_edit_purpose(bundle_root)
+    _rename_package(config, graph_dir)
+
+    result = _sync(bundle_root, graph_dir, config)
+
+    bundle = load_bundle(bundle_root)
+    moved = bundle.concept(_NEW_PKG)
+    assert moved is not None
+    assert bundle.concept(_OLD_PKG) is None
+    assert "Widgets are made here." in moved.body
+    assert moved.fm.resource == "pkg:acme/demo/gadgetlib"
+    assert moved.fm.title == "gadgetlib"
+    assert moved.fm_raw["path"] == "pkgs/gadgetlib"
+    assert result.entities.deleted == ()
+    assert result.entities.declined == ()
+    assert result.entities.moved == ((f"{_OLD_PKG}.md", f"{_NEW_PKG}.md"),)
+    before = _bundle_bytes(bundle_root)
+    _sync(bundle_root, graph_dir, config)
+    assert _bundle_bytes(bundle_root) == before
+
+
+def test_dry_run_projects_entity_move(tmp_path: Path) -> None:
+    bundle_root, graph_dir, config = _pkg_workspace(tmp_path)
+    _sync(bundle_root, graph_dir, config)
+    _rename_package(config, graph_dir)
+    before = _bundle_bytes(bundle_root)
+
+    result = _sync(bundle_root, graph_dir, config, dry_run=True)
+
+    assert _NEW_PKG not in result.entities.created
+    assert _OLD_PKG not in result.entities.deleted
+    assert result.entities.moved == ((f"{_OLD_PKG}.md", f"{_NEW_PKG}.md"),)
+    assert _bundle_bytes(bundle_root) == before

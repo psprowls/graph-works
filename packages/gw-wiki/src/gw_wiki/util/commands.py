@@ -12,9 +12,8 @@ rule the whole band inherits.
 
 from __future__ import annotations
 
-import os
 import re
-import tempfile
+from contextlib import nullcontext
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
@@ -23,8 +22,9 @@ from typing import Literal, cast
 from code_graph_io.tokens import count_tokens
 from code_wiki_okf.provenance import tokens_value
 from gw_kernel.workspace.bundle import load_workspace_bundle
+from gw_kernel.workspace.bundle_lock import held_bundle_lock
 from gw_kernel.workspace.layout import WorkspaceLayout
-from okf_ext.logs import append_entry
+from okf_ext.logs import append_entry, atomic_replace
 from okf_io import Document, load, parse_log
 
 #: The legacy op vocabulary, carried forward unchanged. A verb outside it is a
@@ -38,6 +38,9 @@ TOKENS_KEY = "tokens"
 #: Why a page was not stamped. Data, not a `[warn]` line on stderr: the CLI
 #: decides how to phrase these, and `--json` carries all of them.
 SkipReason = Literal["no-frontmatter", "parse-error", "unreadable", "count-failed"]
+
+#: Why a CRLF finding was found but not repaired by `--fix`.
+LineEndingSkipReason = Literal["changed-during-repair", "symlink-outside-bundle"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -80,16 +83,26 @@ class LineEndingFinding:
 
 
 @dataclass(frozen=True, slots=True)
+class LineEndingSkip:
+    """A finding `fix=True` deliberately left alone, and why."""
+
+    member: str
+    reason: LineEndingSkipReason
+
+
+@dataclass(frozen=True, slots=True)
 class LineEndingsReport:
     """What one `gw util line-endings` call found, sorted by member.
 
     `fixed` records whether `fix=True` was passed -- `findings` always lists
     what was found *before* any repair, so a `--fix` run's report still shows
-    what it just fixed.
+    what it just fixed. `skipped` lists findings a `fix=True` run did not
+    repair, sorted by member.
     """
 
     findings: tuple[LineEndingFinding, ...]
     fixed: bool
+    skipped: tuple[LineEndingSkip, ...] = ()
 
 
 def _is_binary(data: bytes) -> bool:
@@ -106,48 +119,73 @@ def run_line_endings(layout: WorkspaceLayout, *, fix: bool = False) -> LineEndin
     it a repairer too.
 
     A non-binary member (no NUL in its first 8 KiB) whose bytes contain CRLF
-    is a finding. `fix=True` rewrites each finding's file to LF via a temp
-    file in the same directory plus `os.replace`, so the mutation is
-    content-preserving and idempotent by construction -- a crash mid-sweep
-    leaves a partially-normalised bundle that a re-run finishes, and it
-    deliberately does not route through `WorkMutationPlan`: that engine plans
-    digests over exactly the bytes whose instability is being repaired, so
-    its own preflight would refuse this repair.
+    is a finding. `fix=True` rewrites each finding's file to LF through
+    `okf_ext.logs.atomic_replace`, which preserves the file mode and the
+    Windows read-only bit, so the mutation is content-preserving and
+    idempotent by construction -- a crash mid-sweep leaves a
+    partially-normalised bundle that a re-run finishes. It deliberately does
+    not route through `WorkMutationPlan`: that engine plans digests over
+    exactly the bytes whose instability is being repaired, so its own
+    preflight would refuse this repair.
+
+    `fix=True` runs the whole sweep under the bundle lock, which excludes other
+    gw writers (not editors or git). Immediately before replacing a file it
+    re-reads it and writes nothing if the bytes differ from those scanned
+    (`changed-during-repair`); the compare-to-replace window that remains is
+    unavoidable without a per-file OS lock. A symlink is never replaced: one
+    resolving to a regular file inside the bundle is repaired through to its
+    target (once, however many links reach it), and one resolving outside the
+    bundle is skipped (`symlink-outside-bundle`). Both land in `skipped`.
+    `fix=False` takes no lock and writes nothing.
     """
     findings: list[LineEndingFinding] = []
-    bundle = load_workspace_bundle(layout)
-    # Keep raw disk paths: authored identifiers may have a normalized spelling.
-    members = set(bundle.assets) | set(bundle.ignored) | set(bundle.unreadable)
-    for documents in (bundle.concepts, bundle.indexes, bundle.logs):
-        members.update(cast(Path, doc.path).relative_to(bundle.root).as_posix() for doc in documents.values())
-    for member in sorted(members):
-        path = bundle.root / member
-        if not path.is_file():
-            continue
-        data = path.read_bytes()
-        if _is_binary(data):
-            continue
-        crlf_count = data.count(b"\r\n")
-        if crlf_count == 0:
-            continue
-        member = path.relative_to(layout.bundle_dir).as_posix()
-        findings.append(LineEndingFinding(member=member, crlf_count=crlf_count))
+    pending: list[tuple[str, Path, bytes]] = []
+    skipped: list[LineEndingSkip] = []
+    with held_bundle_lock(layout) if fix else nullcontext():
+        bundle = load_workspace_bundle(layout)
+        # Keep raw disk paths: authored identifiers may have a normalized spelling.
+        members = set(bundle.assets) | set(bundle.ignored) | set(bundle.unreadable)
+        for documents in (bundle.concepts, bundle.indexes, bundle.logs):
+            members.update(cast(Path, doc.path).relative_to(bundle.root).as_posix() for doc in documents.values())
+        for member in sorted(members):
+            path = bundle.root / member
+            if not path.is_file():
+                continue
+            data = path.read_bytes()
+            if _is_binary(data):
+                continue
+            crlf_count = data.count(b"\r\n")
+            if crlf_count == 0:
+                continue
+            member = path.relative_to(layout.bundle_dir).as_posix()
+            findings.append(LineEndingFinding(member=member, crlf_count=crlf_count))
+            pending.append((member, path, data))
         if fix:
-            fixed_bytes = data.replace(b"\r\n", b"\n")
-            fd, tmp_name = tempfile.mkstemp(dir=path.parent)
-            tmp_path = Path(tmp_name)
-            try:
-                with os.fdopen(fd, "wb") as handle:
-                    handle.write(fixed_bytes)
-                tmp_path.replace(path)
-            except BaseException:
-                tmp_path.unlink()
-                raise
+            repaired: set[Path] = set()
+            for member, path, data in sorted(pending, key=lambda item: item[0]):
+                reason = _repair_member(path, data, bundle.root, repaired)
+                if reason is not None:
+                    skipped.append(LineEndingSkip(member=member, reason=reason))
 
     return LineEndingsReport(
         findings=tuple(sorted(findings, key=lambda finding: finding.member)),
         fixed=fix,
+        skipped=tuple(sorted(skipped, key=lambda skip: skip.member)),
     )
+
+
+def _repair_member(path: Path, preimage: bytes, bundle_root: Path, repaired: set[Path]) -> LineEndingSkipReason | None:
+    """Rewrite one finding to LF; return why it was left alone, or `None`."""
+    target = path.resolve(strict=True)
+    if path.is_symlink() and not (target.is_relative_to(bundle_root.resolve()) and target.is_file()):
+        return "symlink-outside-bundle"
+    if target in repaired:
+        return None
+    if target.read_bytes() != preimage:
+        return "changed-during-repair"
+    atomic_replace(target, preimage.replace(b"\r\n", b"\n"))
+    repaired.add(target)
+    return None
 
 
 @dataclass(frozen=True, slots=True)

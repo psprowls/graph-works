@@ -242,6 +242,7 @@ def test_scan_payloads_have_exact_keys_and_exclude_runtime_only_values() -> None
             "entities_created",
             "entities_updated",
             "entities_deleted",
+            "entities_moved",
             "narrated",
             "sections_filled",
             "stamped",
@@ -262,6 +263,7 @@ def test_scan_payloads_have_exact_keys_and_exclude_runtime_only_values() -> None
             "entities_created",
             "entities_updated",
             "entities_deleted",
+            "entities_moved",
             "entity_errors",
             "warnings",
             "work_indexes",
@@ -399,11 +401,12 @@ def test_lint_payload_has_exact_keys_and_explicit_nested_rows() -> None:
         semantic=(SemanticFinding("quality", "Clarify", "demo", "test-model"),),
         open_proposals=ProposalBacklog(count=1, oldest=date(2026, 8, 1), malformed=2, ages={"7-30d": 1}),
         errors=("lane failed",),
+        diagnostics=("quality (m): unknown page 'x'",),
     )
 
     payload = lint_payload(report)
 
-    assert set(payload) == {"ok", "mechanical", "semantic", "open_proposals", "errors"}
+    assert set(payload) == {"ok", "mechanical", "semantic", "open_proposals", "errors", "diagnostics"}
     assert payload["mechanical"] == [
         {
             "lane": "wiki",
@@ -420,6 +423,7 @@ def test_lint_payload_has_exact_keys_and_explicit_nested_rows() -> None:
         }
     ]
     assert payload["semantic"] == [{"group": "quality", "message": "Clarify", "page": "demo", "model": "test-model"}]
+    assert payload["diagnostics"] == ["quality (m): unknown page 'x'"]
     assert payload["open_proposals"] == {"count": 1, "oldest": "2026-08-01", "malformed": 2, "ages": {"7-30d": 1}}
 
 
@@ -729,3 +733,13 @@ def test_listing_payload_retains_raw_type_and_projects_resolution_refusal() -> N
     assert payload["target_type"] == "Source"
     assert payload["type"] is None
     assert payload["type_refusal"] == {"path": "proposals/p.md", "kind": "type-unavailable", "detail": "Source: locked"}
+
+
+def test_repo_scan_payload_carries_a_pin_drift_refusal() -> None:
+    from gw_wiki.scan import RepoScanRun
+    from samples_wiki import STRUCTURAL
+
+    run = RepoScanRun("lane", STRUCTURAL, "pin-drift", "repository 'lane': run gw repo restore lane")
+    payload = wiki.repo_scan_payload(run)
+    assert payload["refusal"] == "pin-drift"
+    assert payload["detail"] == "repository 'lane': run gw repo restore lane"

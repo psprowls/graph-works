@@ -107,7 +107,9 @@ Gotchas that span several files:
   Every other emitter (`structural_nodes`, `agent_plugins`, `entry_points`,
   `test_suites`) runs *after* the purge and gets pruning for free on full
   builds. `test_suites.emit` also prunes suites it no longer discovers, since
-  the purge never runs on an incremental pass. Reordering
+  the purge never runs on an incremental pass. Discovery requires a File node
+  at or under the root, so a `tests/` dir holding only gitignored caches
+  (`__pycache__`, `.pytest_cache`) is not admitted and a stored one is pruned. Reordering
   any of this silently reintroduces either false deletions or orphaned nodes.
 - **A Python package is a `pyproject.toml` with `[project].name` OR a
   requirements root.** `packages._discover_requirements_roots` admits a

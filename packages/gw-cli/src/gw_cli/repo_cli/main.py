@@ -8,7 +8,6 @@ and exits nonzero when any repository was refused.
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Sequence
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Annotated
@@ -18,7 +17,7 @@ from gw_kernel.workspace.config import load_workspace_config
 from gw_kernel.workspace.errors import ScanError
 from gw_kernel.workspace.layout import WorkspaceLayout
 from gw_wiki.repositories.adopt import run_repo_adopt
-from gw_wiki.repositories.commands import Rescan, run_repo_add, run_repo_advance, run_repo_restore
+from gw_wiki.repositories.commands import Rescan, RescanOutcome, run_repo_add, run_repo_advance, run_repo_restore
 from gw_wiki.scan.commands import run_scan
 from gw_wire.repo import repo_add_payload, repo_adopt_payload, repo_advance_payload, repo_restore_payload
 
@@ -38,15 +37,24 @@ repo_app = typer.Typer(
 def _structural_rescan(layout: WorkspaceLayout) -> Rescan:
     """Run a structural scan after advancing a managed repository."""
 
-    def rescan() -> Sequence[str]:
+    def rescan() -> RescanOutcome:
         now = datetime.now(UTC)
         try:
             result = asyncio.run(
-                run_scan(layout, load_workspace_config(layout), today=now.date(), at=now, narrate=False, dry_run=False)
+                run_scan(
+                    layout,
+                    load_workspace_config(layout),
+                    today=now.date(),
+                    at=now,
+                    narrate=False,
+                    dry_run=False,
+                    # The clone is detached at the new tip ahead of the old pin: the one scan allowed to disagree.
+                    check_pins=False,
+                )
             )
         except (OSError, ScanError, ValueError) as exc:
-            return (str(exc),)
-        return tuple(result.errors)
+            return RescanOutcome(errors=(str(exc),))
+        return RescanOutcome(errors=tuple(result.errors), warnings=tuple(result.structural.warnings))
 
     return rescan
 

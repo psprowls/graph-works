@@ -118,9 +118,10 @@ def test_missing_body_is_400(env: Env) -> None:
     assert response.status_code == 400
 
 
-def test_unbalanced_body_plan_is_200_and_apply_422(env: Env) -> None:
+@pytest.mark.parametrize("heading", ["Context", "Trade-offs"])
+def test_unbalanced_body_plan_is_200_and_apply_422(env: Env, heading: str) -> None:
     layout, client, headers = env
-    params = {"id": PAGE, "heading": "Context", "body": "```sh\ncode\n"}
+    params = {"id": PAGE, "heading": heading, "body": "```sh\ncode\n"}
     planned = client.post(PLAN, json=params, headers=headers)
     assert planned.status_code == 200, planned.text
     assert planned.json()["plan"]["refusal"] == "unbalanced-body"

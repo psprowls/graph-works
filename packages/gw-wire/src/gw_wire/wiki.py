@@ -168,6 +168,7 @@ def scan_normal_payload(result: ScanResult, *, work_indexes: dict[str, Any] | No
         "entities_created": list(result.structural.entities.created),
         "entities_updated": list(result.structural.entities.updated),
         "entities_deleted": list(result.structural.entities.deleted),
+        "entities_moved": [list(pair) for pair in result.structural.entities.moved],
         "narrated": result.applied.narrated,
         "sections_filled": result.applied.sections_filled,
         "stamped": result.applied.stamped,
@@ -197,6 +198,7 @@ def scan_emit_payload(
         "entities_created": list(structural.entities.created),
         "entities_updated": list(structural.entities.updated),
         "entities_deleted": list(structural.entities.deleted),
+        "entities_moved": [list(pair) for pair in structural.entities.moved],
         "entity_errors": list(structural.errors),
         "warnings": list(structural.warnings),
         **_mirror_keys(structural),
@@ -222,6 +224,7 @@ def repo_scan_payload(run: RepoScanRun) -> dict[str, object]:
         "entities_created": list(run.structural.entities.created),
         "entities_updated": list(run.structural.entities.updated),
         "entities_deleted": list(run.structural.entities.deleted),
+        "entities_moved": [list(pair) for pair in run.structural.entities.moved],
         "warnings": list(run.structural.warnings),
         **_mirror_keys(run.structural),
         "commit": commit_payload(run.commit),
@@ -343,6 +346,7 @@ def lint_payload(report: LintReport) -> dict[str, object]:
             "ages": dict(backlog.ages),
         },
         "errors": list(report.errors),
+        "diagnostics": list(report.diagnostics),
     }
     coverage = report.source_drain
     if coverage is not None:

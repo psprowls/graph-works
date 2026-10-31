@@ -2,14 +2,17 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field, replace
 from datetime import date, datetime
 from pathlib import Path, PurePosixPath
 from types import MappingProxyType
 
 from code_graph_io import GraphReader
+from okf_ext import moves
 from okf_ext.bundle import SECTIONS_DIRNAME
 from okf_ext.generators import plan_regenerate
+from okf_ext.moves import plan_move_many
 from okf_ext.sections import plan_sections
 from okf_ext.shape import load_sections
 from okf_ext.writing import ApplyResult
@@ -26,6 +29,7 @@ from code_wiki_okf.entities.catalog import (
 )
 from code_wiki_okf.entities.delete import PruneResult, plan_prune_entities, prune_entities
 from code_wiki_okf.entities.indexes import IndexPruneResult, apply_index_prune, bundle_members, plan_index_prune
+from code_wiki_okf.entities.renames import pair_entity_renames
 from code_wiki_okf.entities.sync import (
     EntityPlan,
     EntityWrite,
@@ -47,6 +51,7 @@ from code_wiki_okf.placement import (
     is_code_wiki_type,
 )
 from code_wiki_okf.resources import ResourceIndex, resource_index
+from code_wiki_okf.restamp import restamp_identity
 
 
 @dataclass(frozen=True, slots=True)
@@ -54,6 +59,9 @@ class SyncPlan:
     entities: EntityPlan
     mirrors: tuple[MirrorPlan, ...]
     warnings: tuple[str, ...]
+    #: Old member -> new member for each renamed entity page. The pairing only: the `MovePlan`
+    #: is built against the bundle after the mirrors apply, since their moves rewrite these pages' links.
+    entity_moves: Mapping[str, str] = MappingProxyType({})
 
 
 @dataclass(frozen=True, slots=True)
@@ -62,6 +70,9 @@ class MirrorSummary:
     results: tuple[MirrorResult, ...] = field(default_factory=tuple)
     skipped_repos: tuple[str, ...] = field(default_factory=tuple)
     failed_repos: tuple[tuple[str, str], ...] = field(default_factory=tuple)
+    #: A dry run has no results, so its counts read from the plans. A flag, not
+    #: "no results": a wet run whose every apply raised also has none and reports zeros.
+    dry_run: bool = False
 
     @property
     def ok(self) -> bool:
@@ -69,22 +80,32 @@ class MirrorSummary:
 
     @property
     def created(self) -> int:
+        if self.dry_run:
+            return sum(len(plan.creates) for plan in self.plans)
         return sum(len(result.created) for result in self.results)
 
     @property
     def regenerated(self) -> int:
+        if self.dry_run:
+            return sum(len(plan.updates) for plan in self.plans)
         return sum(len(result.regenerated) for result in self.results)
 
     @property
     def moved(self) -> int:
+        if self.dry_run:
+            return sum(len(plan.moves.moves) for plan in self.plans)
         return sum(len(result.moved) for result in self.results)
 
     @property
     def deleted(self) -> int:
+        if self.dry_run:
+            return sum(len(plan.deletions) for plan in self.plans)
         return sum(len(result.deleted) for result in self.results)
 
     @property
     def declined(self) -> int:
+        if self.dry_run:
+            return sum(len(plan.declined_deletions) for plan in self.plans)
         return sum(len(result.declined_deletions) for result in self.results)
 
     @property
@@ -272,7 +293,14 @@ def plan_sync(
     frozen_mirrors = tuple(mirrors)
     entities = replace(entities, current_resources=frozenset(current_resources))
     _preflight_union(entities, frozen_mirrors)
-    return SyncPlan(entities=entities, mirrors=frozen_mirrors, warnings=tuple(sorted(set(warnings))))
+    entity_moves, rename_warnings = pair_entity_renames(bundle, entities.writes, frozen_mirrors, current_resources)
+    warnings.extend(rename_warnings)
+    return SyncPlan(
+        entities=entities,
+        mirrors=frozen_mirrors,
+        warnings=tuple(sorted(set(warnings))),
+        entity_moves=MappingProxyType(dict(entity_moves)),
+    )
 
 
 def summary_for_entity_plan(
@@ -280,20 +308,27 @@ def summary_for_entity_plan(
     plan: EntityPlan,
     *,
     declarations_dir: Path | None = None,
+    moved: Mapping[str, str] = MappingProxyType({}),
 ) -> SyncSummary:
-    """Preview only entity creates and content-bearing updates."""
+    """Preview only entity creates and content-bearing updates.
+
+    A move destination has no page yet but is not a create: its page arrives by move, so it counts as an update.
+    """
+    destinations = {member.removesuffix(".md") for member in moved.values()}
     declarations_root = bundle.root if declarations_dir is None else declarations_dir
     section_set = load_sections(declarations_root / SECTIONS_DIRNAME)
     created = tuple(
         write.member.removesuffix(".md")
         for write in plan.writes
         if bundle.concept(write.member.removesuffix(".md")) is None
+        and write.member.removesuffix(".md") not in destinations
     )
     existing_ids = {
         write.member.removesuffix(".md")
         for write in plan.writes
         if bundle.concept(write.member.removesuffix(".md")) is not None
     }
+    pending_ids = {write.member.removesuffix(".md") for write in plan.writes} & destinations
     scaffold = plan_sections(bundle, section_set)
     scaffold_updates = {splice.concept_id for splice in scaffold.splices if splice.concept_id in existing_ids}
     content_renders = {
@@ -302,7 +337,7 @@ def summary_for_entity_plan(
         if write.member.removesuffix(".md") in existing_ids
     }
     regeneration = plan_regenerate(bundle, section_set, content_renders)
-    update_ids = scaffold_updates | set(regeneration.concept_ids)
+    update_ids = scaffold_updates | set(regeneration.concept_ids) | pending_ids
     updated = tuple(
         write.member.removesuffix(".md") for write in plan.writes if write.member.removesuffix(".md") in update_ids
     )
@@ -311,6 +346,7 @@ def summary_for_entity_plan(
         updated=updated,
         written=tuple((*created, *updated)),
         warnings=plan.warnings,
+        moved=tuple(moved.items()),
     )
 
 
@@ -339,6 +375,7 @@ def _project_catalog_pages(bundle: Bundle, plan: SyncPlan, prune: PruneResult) -
     pages = {page.context.resource: page for page in actual}
 
     removed_concepts = set(prune.deleted)
+    removed_concepts.update(member.removesuffix(".md") for member in plan.entity_moves)
     for mirror in plan.mirrors:
         removed_concepts.update(move.source.removesuffix(".md") for move in mirror.moves.moves)
         removed_concepts.update(
@@ -436,6 +473,48 @@ def combine_results(
     )
 
 
+def _apply_entity_moves(
+    bundle_root: Path,
+    plan: SyncPlan,
+    *,
+    protected_indexes: tuple[str, ...],
+    failed: list[tuple[str, str]],
+    ignore: tuple[str, ...],
+    prune: tuple[str, ...],
+) -> tuple[tuple[tuple[str, str], ...], tuple[str, ...]]:
+    """Move each paired entity page, restamp its identity, and return the moved pairs and warnings.
+
+    Planned against the bundle as the mirrors left it. A refused plan moves nothing: the pages fall back to
+    create plus guarded prune, with one warning per refusal.
+    """
+    if not plan.entity_moves:
+        return (), ()
+    bundle = load_bundle(bundle_root, ignore=ignore, prune=prune)
+    move_plan = plan_move_many(bundle, dict(plan.entity_moves))
+    if move_plan.refusals:
+        return (), tuple(f"entity move refused: {refusal}" for refusal in move_plan.refusals)
+    move_plan = replace(
+        move_plan, edits=tuple(edit for edit in move_plan.edits if edit.member not in protected_indexes)
+    )
+    move_result = moves.apply(bundle, move_plan)
+    writes = {write.member: write for write in plan.entities.writes}
+    for _old, new in move_result.moved:
+        write = writes[new]
+        restamp_identity(
+            bundle_root,
+            new,
+            {
+                "resource": write.context.resource,
+                "title": write.frontmatter["title"],
+                "path": write.frontmatter["path"],
+            },
+        )
+    for failure in move_result.failed:
+        repository = writes[plan.entity_moves.get(failure.path, failure.path)].context.repository
+        failed.append((repository or "", str(failure.error)))
+    return move_result.moved, ()
+
+
 def sync_bundle(
     bundle_root: Path,
     *,
@@ -468,15 +547,21 @@ def sync_bundle(
         member for member, _reason in plan_index_prune(bundle, repos=eligible_repos, members=()).result.declined
     )
     if dry_run:
-        entities = summary_for_entity_plan(bundle, plan.entities, declarations_dir=config.declarations_dir)
+        entities = summary_for_entity_plan(
+            bundle, plan.entities, declarations_dir=config.declarations_dir, moved=plan.entity_moves
+        )
         raw_prune = plan_prune_entities(
             bundle,
             plan.entities.current_resources,
             declarations_dir=config.declarations_dir,
         )
-        mirror_removed = _mirror_removed_concepts(plan.mirrors)
+        mirror_removed = _mirror_removed_concepts(plan.mirrors) | {
+            member.removesuffix(".md") for member in plan.entity_moves
+        }
         projected_prune = replace(
-            raw_prune, deleted=tuple(item for item in raw_prune.deleted if item not in mirror_removed)
+            raw_prune,
+            deleted=tuple(item for item in raw_prune.deleted if item not in mirror_removed),
+            declined=tuple(item for item in raw_prune.declined if item[0] not in mirror_removed),
         )
         catalog_bundle = _project_mirror_indexes(bundle, plan.mirrors)
         members = set(bundle_members(catalog_bundle))
@@ -515,7 +600,7 @@ def sync_bundle(
                 catalog_declined=catalog_plan.declined,
                 warnings=plan.warnings,
             ),
-            mirror=MirrorSummary(plans=plan.mirrors, skipped_repos=skipped_repos),
+            mirror=MirrorSummary(plans=plan.mirrors, skipped_repos=skipped_repos, dry_run=True),
             warnings=plan.warnings,
             dry_run=True,
             indexes=index_prune.result,
@@ -564,6 +649,10 @@ def sync_bundle(
     )
     # Move plans capture referrer bytes, including entity File maps. Apply
     # them before entity regeneration changes those captured referrers.
+    entity_moved, entity_move_warnings = _apply_entity_moves(
+        bundle_root, plan, protected_indexes=protected_indexes, failed=failed, ignore=ignore, prune=prune
+    )
+    mirror = replace(mirror, failed_repos=tuple(failed))
     entities = apply_entities(
         bundle_root,
         plan.entities,
@@ -572,6 +661,7 @@ def sync_bundle(
         ignore=ignore,
         prune=prune,
     )
+    entities = replace(entities, moved=entity_moved)
     prune_result = prune_entities(
         load_bundle(bundle_root, ignore=ignore, prune=prune),
         plan.entities.current_resources,
@@ -597,7 +687,10 @@ def sync_bundle(
         repos=repos,
     )
     return replace(
-        combine_results(entities, mirror, prune_result, catalogs, catalog_plan, plan.warnings), indexes=indexes
+        combine_results(
+            entities, mirror, prune_result, catalogs, catalog_plan, (*plan.warnings, *entity_move_warnings)
+        ),
+        indexes=indexes,
     )
 
 

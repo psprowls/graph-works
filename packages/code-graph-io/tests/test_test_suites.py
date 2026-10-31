@@ -411,6 +411,96 @@ def test_vanished_suite_pruned_on_incremental_run(tmp_path: Path) -> None:
     assert _suite_rows(conn) == [("new-name-unit-tests", "packages/new-name/tests")]
 
 
+# ---------- cache-only roots are not suites ----------
+
+
+def _git_init(repo: Path) -> None:
+    subprocess.run(["git", "init", "-q", "-b", "main"], cwd=repo, check=True)
+    subprocess.run(["git", "config", "user.email", "test@example.com"], cwd=repo, check=True)
+    subprocess.run(["git", "config", "user.name", "test"], cwd=repo, check=True)
+
+
+def _git_commit_all(repo: Path) -> None:
+    subprocess.run(["git", "add", "."], cwd=repo, check=True)
+    subprocess.run(["git", "commit", "-q", "-m", "c"], cwd=repo, check=True)
+
+
+def _cache_only_pkg(repo: Path, name: str, cache: str = "__pycache__", body: str = "") -> Path:
+    pkg_dir = repo / "packages" / name
+    _write_pyproject(pkg_dir, name=name, body=body)
+    _write_python_pkg(pkg_dir, name)
+    (pkg_dir / "tests" / cache).mkdir(parents=True)
+    (pkg_dir / "tests" / cache / "a.pyc").write_text("")
+    return pkg_dir
+
+
+def test_cache_only_tests_dir_is_not_a_suite(tmp_path: Path) -> None:
+    """A package tests/ dir holding only gitignored caches has no File node
+    beneath it, so it must not become a TestSuite."""
+    _git_init(tmp_path)
+    (tmp_path / ".gitignore").write_text("__pycache__/\n.pytest_cache/\n")
+    _cache_only_pkg(tmp_path, "foo")
+    _cache_only_pkg(tmp_path, "bar", cache=".pytest_cache")
+    _git_commit_all(tmp_path)
+
+    conn = _setup(tmp_path)
+    _run_emit_pipeline(conn, tmp_path)
+
+    assert _suite_rows(conn) == []
+    assert conn.execute("SELECT COUNT(*) FROM edges WHERE kind='tests'").fetchone()[0] == 0
+
+
+def test_tests_dir_with_one_tracked_file_is_still_a_suite(tmp_path: Path) -> None:
+    _git_init(tmp_path)
+    (tmp_path / ".gitignore").write_text("__pycache__/\n")
+    pkg_dir = _cache_only_pkg(tmp_path, "foo")
+    (pkg_dir / "tests" / "conftest.py").write_text("")
+    _git_commit_all(tmp_path)
+
+    conn = _setup(tmp_path)
+    _run_emit_pipeline(conn, tmp_path)
+
+    assert [p for _, p in _suite_rows(conn)] == ["packages/foo/tests"]
+
+
+def test_cache_only_suite_pruned_on_incremental_run(tmp_path: Path) -> None:
+    """A suite stored while its root held a tracked file is pruned once only
+    gitignored caches remain."""
+    _git_init(tmp_path)
+    (tmp_path / ".gitignore").write_text("__pycache__/\n")
+    pkg_dir = _cache_only_pkg(tmp_path, "foo")
+    test_file = pkg_dir / "tests" / "test_a.py"
+    test_file.write_text("")
+    _git_commit_all(tmp_path)
+
+    conn = _setup(tmp_path)
+    _run_emit_pipeline(conn, tmp_path)
+    assert [p for _, p in _suite_rows(conn)] == ["packages/foo/tests"]
+
+    subprocess.run(["git", "rm", "-q", "-f", "packages/foo/tests/test_a.py"], cwd=tmp_path, check=True)
+    # The helper pipeline skips update.run's full-mode purge of untracked File nodes; do it by hand.
+    conn.execute("DELETE FROM nodes WHERE kind='file' AND path='packages/foo/tests/test_a.py'")
+    _run_emit_pipeline(conn, tmp_path)
+
+    assert _suite_rows(conn) == []
+
+
+def test_cache_only_testpaths_root_is_dropped(tmp_path: Path) -> None:
+    _git_init(tmp_path)
+    (tmp_path / ".gitignore").write_text("__pycache__/\n")
+    pkg_dir = tmp_path / "packages" / "foo"
+    _write_pyproject(pkg_dir, name="foo", body='[tool.pytest.ini_options]\ntestpaths = ["spec"]\n')
+    _write_python_pkg(pkg_dir, "foo")
+    (pkg_dir / "spec" / "__pycache__").mkdir(parents=True)
+    (pkg_dir / "spec" / "__pycache__" / "x.pyc").write_text("")
+    _git_commit_all(tmp_path)
+
+    conn = _setup(tmp_path)
+    _run_emit_pipeline(conn, tmp_path)
+
+    assert _suite_rows(conn) == []
+
+
 # ---------- kind classification, config, malformed, idempotency ----------
 
 

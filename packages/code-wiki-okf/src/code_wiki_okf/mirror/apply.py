@@ -33,6 +33,7 @@ from code_wiki_okf.placement import (
     filesystem_member_identity,
 )
 from code_wiki_okf.resources import resource_index
+from code_wiki_okf.restamp import restamp_identity
 
 
 def _thaw(value: object) -> object:
@@ -87,6 +88,13 @@ def _preflight_live(bundle_root: Path, bundle: Bundle, plan: MirrorPlan) -> None
     move_destinations = {move.dest for move in plan.moves.moves}
     must_be_absent = create_members | move_destinations
     must_exist = {f"{concept_id}.md" for concept_id in plan.updates} | {move.source for move in plan.moves.moves}
+
+    for concept_id in plan.move_renders:
+        if f"{concept_id}.md" not in move_destinations:
+            raise PlacementError(
+                resource=f"file:{plan.repo}/{concept_id}",
+                reason=f"planned move render {concept_id} has no planned move",
+            )
 
     for target in plan.targets:
         claimed_members = index.members_by_resource.get(target.resource, ())
@@ -282,6 +290,15 @@ def apply_mirror(
         )
         move_result = moves.apply(bundle, move_plan)
 
+    moved_ids: set[str] = set()
+    for _source, dest in move_result.moved:
+        concept_id = dest.removesuffix(".md")
+        if concept_id not in plan.move_renders:
+            continue
+        frontmatter = plan.move_renders[concept_id][0]
+        restamp_identity(bundle_root, dest, {"resource": frontmatter["resource"], "title": frontmatter["title"]})
+        moved_ids.add(concept_id)
+
     created: list[str] = []
     created_ids: set[str] = set()
     for rel_path, (frontmatter, _render) in plan.creates.items():
@@ -305,6 +322,11 @@ def apply_mirror(
         if render.sections:  # a minimal create has an empty Render -- nothing to regenerate
             renders[concept_id] = _materialize_render(render)
 
+    for concept_id in sorted(moved_ids):
+        render = plan.move_renders[concept_id][1]
+        if render.sections:
+            renders[concept_id] = _materialize_render(render)
+
     regenerated: tuple[str, ...] = ()
     generator_failed: tuple[str, ...] = ()
     if renders:
@@ -313,7 +335,7 @@ def apply_mirror(
         regenerated = tuple(
             member.removesuffix(".md")
             for member in generator_result.written
-            if member.removesuffix(".md") not in created_ids
+            if member.removesuffix(".md") not in created_ids | moved_ids
         )
         generator_failed = tuple(
             f"{failure.path}: {failure.kind}: {failure.error}" for failure in generator_result.failed

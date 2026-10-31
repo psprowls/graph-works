@@ -10,11 +10,15 @@ detector (and repairer) for that gap.
 from __future__ import annotations
 
 import os
+import stat
+import sys
 from pathlib import Path
 
+import gw_wiki.util.commands as commands
 import pytest
+from gw_kernel.workspace.bundle_lock import bundle_lock_held
 from gw_kernel.workspace.layout import layout_for
-from gw_wiki.util.commands import run_line_endings
+from gw_wiki.util.commands import LineEndingSkip, run_line_endings
 
 
 def _layout(tmp_path: Path):
@@ -192,3 +196,155 @@ def test_mixed_bundle_keeps_raw_bytes_and_all_member_kinds(tmp_path):
             data if member == "binary.bin" else data.replace(b"\r\n", b"\n")
         )
     assert run_line_endings(layout, fix=True).findings == ()
+
+
+posix_only = pytest.mark.skipif(sys.platform == "win32", reason="POSIX modes and symlinks")
+
+
+@posix_only
+def test_fix_preserves_an_executable_mode(tmp_path: Path) -> None:
+    layout = _layout(tmp_path)
+    path = layout.bundle_dir / "run.md"
+    path.write_bytes(b"a\r\n")
+    path.chmod(0o755)
+
+    run_line_endings(layout, fix=True)
+
+    assert stat.S_IMODE(path.stat().st_mode) == 0o755
+    assert path.read_bytes() == b"a\n"
+
+
+def test_fix_preserves_a_read_only_file(tmp_path: Path) -> None:
+    layout = _layout(tmp_path)
+    path = layout.bundle_dir / "ro.md"
+    path.write_bytes(b"a\r\n")
+    path.chmod(stat.S_IREAD)
+    try:
+        run_line_endings(layout, fix=True)
+
+        assert path.read_bytes() == b"a\n"
+        assert not path.stat().st_mode & stat.S_IWRITE
+    finally:
+        path.chmod(stat.S_IREAD | stat.S_IWRITE)
+
+
+@posix_only
+def test_fix_repairs_an_in_bundle_symlink_target_and_keeps_the_link(tmp_path: Path) -> None:
+    layout = _layout(tmp_path)
+    real = layout.bundle_dir / "real.md"
+    link = layout.bundle_dir / "link.md"
+    real.write_bytes(b"a\r\n")
+    link.symlink_to(real)
+
+    report = run_line_endings(layout, fix=True)
+
+    assert link.is_symlink()
+    assert link.readlink() == real
+    assert real.read_bytes() == b"a\n"
+    assert report.skipped == ()
+    assert [finding.member for finding in report.findings] == ["link.md", "real.md"]
+
+
+@posix_only
+def test_fix_repairs_a_target_reached_twice_once(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    layout = _layout(tmp_path)
+    real = layout.bundle_dir / "real.md"
+    real.write_bytes(b"a\r\n")
+    (layout.bundle_dir / "a.md").symlink_to(real)
+    (layout.bundle_dir / "b.md").symlink_to(real)
+    calls: list[Path] = []
+    original = commands.atomic_replace
+
+    def recorder(path: Path, data: bytes) -> None:
+        calls.append(path)
+        original(path, data)
+
+    monkeypatch.setattr(commands, "atomic_replace", recorder)
+
+    report = run_line_endings(layout, fix=True)
+
+    assert calls == [real.resolve()]
+    assert report.skipped == ()
+
+
+@posix_only
+def test_fix_skips_a_symlink_outside_the_bundle(tmp_path: Path) -> None:
+    layout = _layout(tmp_path)
+    outside = tmp_path / "outside.md"
+    outside.write_bytes(b"a\r\n")
+    link = layout.bundle_dir / "link.md"
+    link.symlink_to(outside)
+
+    report = run_line_endings(layout, fix=True)
+
+    assert outside.read_bytes() == b"a\r\n"
+    assert link.is_symlink()
+    assert report.skipped == (LineEndingSkip("link.md", "symlink-outside-bundle"),)
+    assert [finding.member for finding in report.findings] == ["link.md"]
+
+
+def test_fix_skips_a_file_changed_during_repair(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    layout = _layout(tmp_path)
+    (layout.bundle_dir / "a.md").write_bytes(b"a\r\n")
+    (layout.bundle_dir / "b.md").write_bytes(b"b\r\n")
+    original = commands._repair_member
+
+    def racing(path: Path, preimage: bytes, bundle_root: Path, repaired: set[Path]):
+        if path.name == "a.md":
+            path.write_bytes(b"edited\r\n")
+        return original(path, preimage, bundle_root, repaired)
+
+    monkeypatch.setattr(commands, "_repair_member", racing)
+
+    report = run_line_endings(layout, fix=True)
+
+    assert (layout.bundle_dir / "a.md").read_bytes() == b"edited\r\n"
+    assert (layout.bundle_dir / "b.md").read_bytes() == b"b\n"
+    assert report.skipped == (LineEndingSkip("a.md", "changed-during-repair"),)
+
+
+def test_fix_holds_the_bundle_lock_while_writing(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    layout = _layout(tmp_path)
+    (layout.bundle_dir / "a.md").write_bytes(b"a\r\n")
+    held: list[bool] = []
+    original = commands.atomic_replace
+
+    def recorder(path: Path, data: bytes) -> None:
+        held.append(bundle_lock_held(layout))
+        original(path, data)
+
+    monkeypatch.setattr(commands, "atomic_replace", recorder)
+
+    run_line_endings(layout, fix=True)
+
+    assert held == [True]
+    assert not bundle_lock_held(layout)
+
+
+def test_detection_does_not_take_the_bundle_lock(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    layout = _layout(tmp_path)
+    (layout.bundle_dir / "a.md").write_bytes(b"a\r\n")
+
+    def boom(*_args: object) -> None:
+        raise AssertionError("detection must not lock")
+
+    monkeypatch.setattr(commands, "held_bundle_lock", boom)
+
+    assert len(run_line_endings(layout).findings) == 1
+
+
+def test_fix_releases_the_lock_when_a_write_fails(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    layout = _layout(tmp_path)
+    path = layout.bundle_dir / "a.md"
+    path.write_bytes(b"a\r\n")
+
+    def fail(_path: Path, _data: bytes) -> None:
+        raise PermissionError("nope")
+
+    monkeypatch.setattr(commands, "atomic_replace", fail)
+
+    with pytest.raises(PermissionError):
+        run_line_endings(layout, fix=True)
+
+    assert not bundle_lock_held(layout)
+    assert path.read_bytes() == b"a\r\n"

@@ -69,6 +69,7 @@ from subagents_io.pool import SubagentPool
 
 from gw_wiki.agent_substrate.agent_tools import truncate_text
 from gw_wiki.agent_substrate.roles import role_binding
+from gw_wiki.scan.pin_guard import pin_drift
 from gw_wiki.scan.prose_refresh import run_prose_refresh
 from gw_wiki.scan.prose_refresher import (
     build_prose_refresh_prompt,
@@ -568,6 +569,7 @@ async def build_scan_worklist(
     at: datetime,
     max_entities: int | None = None,
     dry_run: bool = True,
+    check_pins: bool = True,
 ) -> tuple[ScanWorklist, StructuralSummary]:
     """Refresh the graph, run the structural pass, and decide what needs prose.
 
@@ -587,8 +589,11 @@ async def build_scan_worklist(
     create are absent and adoption remains reported rather than written.
 
     Raises `ScanError` when the graph cannot be built or opened -- environment,
-    not content.
+    not content -- or, unless `check_pins=False`, when a lane clone's HEAD differs
+    from its page's pin.
     """
+    if check_pins and (drifts := pin_drift(layout, config, None)):
+        raise ScanError("; ".join(drift.detail() for drift in drifts))
     target = graph.graph_target(layout)
     build_result = graph.build(target)
     if not build_result.ok:
@@ -975,6 +980,7 @@ async def run_scan(
     model_override: str | None = None,
     graph_tools_for_refresh: Sequence[BaseTool] = (),
     dry_run: bool = True,
+    check_pins: bool = True,
 ) -> ScanResult:
     """Phase 1 -> phase 2 -> phase 3.
 
@@ -994,7 +1000,7 @@ async def run_scan(
     tools alone -- a narrower grounding, not a failure.
     """
     worklist, structural = await build_scan_worklist(
-        layout, config, today=today, at=at, max_entities=max_entities, dry_run=dry_run
+        layout, config, today=today, at=at, max_entities=max_entities, dry_run=dry_run, check_pins=check_pins
     )
     # Both lanes' reported-not-raised failures, so a mirror repo that blew up
     # mid-write exits non-zero exactly as an index refusal already does.

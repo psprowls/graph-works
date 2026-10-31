@@ -29,7 +29,13 @@ from gw_wire import wiki
 from okf_ext.proposals import ApplyResult, DecisionPlan, ProposalPlan, Write, WriteFailure
 
 LAYOUT = ns(root=Path("/ws"), bundle_dir=Path("/ws/okf"), config_dir=Path("/ws/.gw"), cache_dir=Path("/ws/.gw/cache"))
-ENTITIES = ns(written=("packages/a",), created=("packages/a",), updated=(), deleted=("packages/b",))
+ENTITIES = ns(
+    written=("packages/a",),
+    created=("packages/a",),
+    updated=(),
+    deleted=("packages/b",),
+    moved=(("packages/old.md", "packages/a.md"),),
+)
 MIRROR = ns(
     created=1,
     regenerated=2,
@@ -89,6 +95,7 @@ def lint_report(*, oldest: bool) -> object:
         ),
         source_drain=ns(sources=2, drained=1, items=5, landed=1, dropped=2, pending=2) if oldest else None,
         errors=("e",) if oldest else (),
+        diagnostics=("d",) if oldest else (),
     )
 
 

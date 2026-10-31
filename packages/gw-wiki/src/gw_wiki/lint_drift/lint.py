@@ -198,6 +198,7 @@ class LintReport:
     open_proposals: ProposalBacklog = ProposalBacklog()
     source_drain: SourceDrainCoverage | None = None
     errors: tuple[str, ...] = ()
+    diagnostics: tuple[str, ...] = ()
 
     @property
     def ok(self) -> bool:
@@ -205,7 +206,9 @@ class LintReport:
 
         Semantic findings are deliberately not consulted: a judge's verdict is
         advisory, and a run that cannot be reproduced must not be able to fail
-        a gate.
+        a gate. `diagnostics` (notes about the judge's reply, such as a page id
+        the model invented) are the judge's text too, so they never fail it
+        either.
         """
         return not self.errors and all(lane.report.ok for lane in self.mechanical)
 
@@ -232,6 +235,9 @@ class LintReport:
         each lane's findings, `mechanical` is already in lane order, and
         semantic groups follow `SEMANTIC_GROUPS`. Re-sorting here would be one
         more thing that can disagree with the report it renders.
+
+        Diagnostics about the judge's reply get a `## Diagnostics` section
+        right after `## Semantic`, which they explain; it is omitted when empty.
 
         The source-drain coverage line, when present, follows the proposal
         backlog footer -- one more summary line, in the same reading order a
@@ -263,6 +269,9 @@ class LintReport:
                 lines.append(f"### {group} — {models}")
                 lines.extend(_semantic_line(finding) for finding in found)
             blocks.append("\n".join(lines))
+
+        if self.diagnostics:
+            blocks.append("\n".join(["## Diagnostics", *self.diagnostics]))
 
         backlog = self.open_proposals
         if backlog.count or backlog.malformed:
@@ -685,7 +694,7 @@ def _findings_from(
     """Keep judgments, skipping blanks, clean sentinels and fence delimiters.
 
     Parser diagnostics accompany the original finding rather than replacing
-    it; callers surface them through the existing report errors channel.
+    it; callers surface them through the report's non-failing diagnostics.
     """
     found: list[SemanticFinding] = []
     errors: list[str] = []
@@ -708,7 +717,7 @@ async def _semantic_pass(
     adr_directory: str | None,
     trace_dir: Path,
     project_context: str,
-) -> tuple[tuple[SemanticFinding, ...], tuple[str, ...]]:
+) -> tuple[tuple[SemanticFinding, ...], tuple[str, ...], tuple[str, ...]]:
     """Fan the three groups out, capturing each one's failure on its own.
 
     An empty group is dropped **before** the fan-out rather than short-circuited
@@ -719,7 +728,7 @@ async def _semantic_pass(
     grouped = _group_pages(bundle, today=today, adr_directory=adr_directory)
     items = [(name, systems[name], grouped[name]) for name in SEMANTIC_GROUPS if grouped[name]]
     if not items:
-        return (), ()
+        return (), (), ()
 
     async def judge(item: tuple[str, str, tuple[tuple[str, Document], ...]]) -> TaskResult:
         _name, system, pages = item
@@ -744,13 +753,14 @@ async def _semantic_pass(
         lookup.setdefault(_page_key(concept_id), []).append(concept_id)
     findings: list[SemanticFinding] = []
     errors = [f"{failure.item[0]}: {failure.exception}" for failure in fan.errors]
+    notes: list[str] = []
     for item, reply in fan.successes:
         parsed, diagnostics = _findings_from(
             reply, group=item[0], model=binding.spec.model_id, bundle=bundle, lookup=lookup
         )
         findings.extend(parsed)
-        errors.extend(diagnostics)
-    return tuple(findings), tuple(errors)
+        notes.extend(diagnostics)
+    return tuple(findings), tuple(errors), tuple(notes)
 
 
 async def run_lint(
@@ -800,7 +810,7 @@ async def run_lint(
     except (KeyError, ValueError) as exc:
         return _with(mechanical, errors=(*mechanical.errors, f"{LINTER_ROLE}: {exc}"))
 
-    findings, errors = await _semantic_pass(
+    findings, errors, diagnostics = await _semantic_pass(
         bundle,
         binding,
         today=today,
@@ -808,7 +818,12 @@ async def run_lint(
         trace_dir=layout.cache_dir / "traces",
         project_context=render_project_context(layout),
     )
-    return _with(mechanical, semantic=findings, errors=mechanical.errors + errors)
+    return _with(
+        mechanical,
+        semantic=findings,
+        errors=mechanical.errors + errors,
+        diagnostics=diagnostics,
+    )
 
 
 def _with(
@@ -816,6 +831,7 @@ def _with(
     *,
     semantic: tuple[SemanticFinding, ...] = (),
     errors: tuple[str, ...] | None = None,
+    diagnostics: tuple[str, ...] = (),
 ) -> LintReport:
     """A copy of *report* with the semantic half filled in. `LintReport` is
     frozen, and `dataclasses.replace` on a slotted frozen dataclass is the
@@ -826,6 +842,7 @@ def _with(
         open_proposals=report.open_proposals,
         source_drain=report.source_drain,
         errors=report.errors if errors is None else errors,
+        diagnostics=diagnostics,
     )
 
 

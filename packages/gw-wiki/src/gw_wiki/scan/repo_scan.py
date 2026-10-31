@@ -26,8 +26,9 @@ from gw_kernel.workspace.commits import CommitOutcome, WorkspaceCommit
 from gw_kernel.workspace.layout import WorkspaceLayout
 
 from gw_wiki.scan.commands import StructuralSummary, open_scan_reader
+from gw_wiki.scan.pin_guard import pin_drift
 
-RepoScanRefusal = Literal["unknown-repository", "graph-build-failed"]
+RepoScanRefusal = Literal["unknown-repository", "pin-drift", "graph-build-failed"]
 
 #: One file's identity for change detection: a rewrite moves at least one of these.
 _Stat = tuple[int, int, int]
@@ -97,10 +98,14 @@ def _changed(before: dict[str, _Stat], after: dict[str, _Stat]) -> tuple[str, ..
     return tuple(sorted(member for member in before.keys() | after.keys() if before.get(member) != after.get(member)))
 
 
-def _refused(layout: WorkspaceLayout, config: Config, repo: str, target: graph.GraphTarget) -> RepoScanRun | None:
-    """Refuse an undeclared repository before building; otherwise rebuild its graph alone."""
+def _refused(
+    layout: WorkspaceLayout, config: Config, repo: str, target: graph.GraphTarget, *, check_pins: bool
+) -> RepoScanRun | None:
+    """Refuse an undeclared or pin-drifted repository before building; otherwise rebuild its graph alone."""
     if repo not in {declared.name for declared in config.repos}:
         return RepoScanRun(repo, StructuralSummary(), "unknown-repository", f"{repo!r} is not a declared repository")
+    if check_pins and (drifts := pin_drift(layout, config, frozenset({repo}))):
+        return RepoScanRun(repo, StructuralSummary(), "pin-drift", "; ".join(drift.detail() for drift in drifts))
     built = graph.build(target, only=repo)
     if not built.ok:
         return RepoScanRun(repo, StructuralSummary(), "graph-build-failed", built.error or "code graph build failed")
@@ -116,6 +121,7 @@ def run_repo_scan(
     today: date,
     dry_run: bool = True,
     before_apply: Callable[[RepoScanRun], None] | None = None,
+    check_pins: bool = True,
 ) -> RepoScanRun:
     """Plan (default) or apply the structural scan of declared repository *repo*.
 
@@ -131,10 +137,13 @@ def run_repo_scan(
     exactly the members the sync changed, under `workflow.workspace_commits`,
     subject `workspace: scan <repo>`.
 
+    A lane clone whose HEAD differs from its page's pin is refused (`pin-drift`), plans included;
+    `check_pins=False` is the advance rescan's bypass, which scans a clone it just detached ahead of the pin.
+
     Raises `ScanError` when the rebuilt graph cannot be opened.
     """
     target = graph.graph_target(layout)
-    refusal = _refused(layout, config, repo, target)
+    refusal = _refused(layout, config, repo, target, check_pins=check_pins)
     if refusal is not None:
         if not dry_run and before_apply is not None:
             before_apply(refusal)

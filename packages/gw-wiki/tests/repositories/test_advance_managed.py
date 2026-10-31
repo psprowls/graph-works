@@ -13,7 +13,7 @@ from gw_kernel.workspace.commits import CommitOutcome
 from gw_kernel.workspace.config import load_workspace_config
 from gw_kernel.workspace.layout import WorkspaceLayout
 from gw_wiki.repositories import commands
-from gw_wiki.repositories.commands import run_repo_add, run_repo_advance
+from gw_wiki.repositories.commands import RescanOutcome, run_repo_add, run_repo_advance
 from okf_io import load
 from repositories_okf.git import GitFailure
 from repositories_okf.lifecycle import scan_config_hash
@@ -52,17 +52,17 @@ def _merge_on_track(layout: WorkspaceLayout, text: str = "a = 2\n") -> str:
     return git(_checkout(layout), "rev-parse", "HEAD")
 
 
-def _fake_scan(layout: WorkspaceLayout, *, errors: Sequence[str] = ()):
+def _fake_scan(layout: WorkspaceLayout, *, errors: Sequence[str] = (), warnings: Sequence[str] = ()):
     calls: list[str] = []
 
-    def rescan() -> Sequence[str]:
+    def rescan() -> RescanOutcome:
         calls.append(git(_clone(layout), "rev-parse", "HEAD"))
         page = layout.bundle_dir / "code-graph" / "demo.md"
         page.parent.mkdir(parents=True, exist_ok=True)
         page.write_text(
             f"---\ntype: Repository\ntitle: demo\n---\n\nscanned at {calls[-1]}\n", encoding="utf-8", newline=""
         )
-        return tuple(errors)
+        return RescanOutcome(tuple(errors), tuple(warnings))
 
     return rescan, calls
 
@@ -112,7 +112,7 @@ def test_a_scan_that_raises_is_a_scan_failure(layout: WorkspaceLayout) -> None:
     old = git(_clone(layout), "rev-parse", "HEAD")
     _merge_on_track(layout)
 
-    def rescan() -> Sequence[str]:
+    def rescan() -> RescanOutcome:
         raise OSError("graph dir unwritable")
 
     result = run_repo_advance(layout, "demo", now=LATER, rescan=rescan)
@@ -194,7 +194,7 @@ def test_scan_rollback_preserves_a_writer_waiting_for_the_bundle_lock(layout: Wo
             human_page.write_text("human edit\n", encoding="utf-8", newline="")
         written.set()
 
-    def rescan() -> Sequence[str]:
+    def rescan() -> RescanOutcome:
         nonlocal worker
         scan_page.parent.mkdir(parents=True, exist_ok=True)
         scan_page.write_text("scan output\n", encoding="utf-8", newline="")
@@ -202,7 +202,7 @@ def test_scan_rollback_preserves_a_writer_waiting_for_the_bundle_lock(layout: Wo
         worker.start()
         assert attempted.wait(2)
         early_writes.append(written.wait(0.2))
-        return ("scan failed",)
+        return RescanOutcome(errors=("scan failed",))
 
     result = run_repo_advance(layout, "demo", now=LATER, rescan=rescan)
     assert worker is not None
@@ -288,14 +288,22 @@ def test_failed_advance_restores_real_graph_queries(layout: WorkspaceLayout, mon
     assert build(graph_target(layout)).ok
     _merge_on_track(layout, "def after_advance():\n    pass\n")
 
-    def rescan() -> Sequence[str]:
+    def rescan() -> RescanOutcome:
         result = asyncio.run(
-            run_scan(layout, load_workspace_config(layout), today=LATER.date(), at=LATER, narrate=False, dry_run=False)
+            run_scan(
+                layout,
+                load_workspace_config(layout),
+                today=LATER.date(),
+                at=LATER,
+                narrate=False,
+                dry_run=False,
+                check_pins=False,
+            )
         )
         assert not result.errors
         with open_reader(graph_dir=layout.cache_dir) as reader:
             assert reader.find(name="after_advance", kind="function")
-        return result.errors
+        return RescanOutcome(errors=tuple(result.errors))
 
     def fail_log(*_args: object, **_kwargs: object) -> str | None:
         raise OSError("disk full")
@@ -344,3 +352,14 @@ def test_rollback_failure_is_explicit(layout: WorkspaceLayout, monkeypatch: pyte
     assert f"{failure} recovery failed" in result.refusal.detail
     if failure != "clone":
         assert git(_clone(layout), "rev-parse", "HEAD") == old
+
+
+def test_advance_surfaces_rescan_warnings(layout: WorkspaceLayout) -> None:
+    _merge_on_track(layout)
+    warning = "code-graph/demo/entities/packages/old.md: retained entity: prose-edited"
+    rescan, _ = _fake_scan(layout, warnings=(warning,))
+
+    result = run_repo_advance(layout, "demo", now=LATER, rescan=rescan)
+
+    assert result.outcome == "advanced"
+    assert warning in result.warnings

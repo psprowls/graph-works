@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import sys
 from pathlib import Path
 
 import pytest
@@ -79,3 +80,31 @@ def test_line_endings_appears_in_describe_surface() -> None:
     assert result.exit_code == 0
     payload = json.loads(result.stdout)
     assert "util line-endings" in json.dumps(payload)
+
+
+def _outside_symlink(workspace: Path) -> None:
+    outside = workspace.parent / "outside.md"
+    outside.write_bytes(b"a\r\nb\r\n")
+    (_bundle_dir(workspace) / "link.md").symlink_to(outside)
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="symlinks need a privilege on Windows")
+def test_fix_reports_a_skipped_symlink_and_exits_nonzero(initialized_workspace: Path) -> None:
+    _outside_symlink(initialized_workspace)
+
+    result = runner.invoke(app, ["util", "line-endings", "--fix", "--workspace", str(initialized_workspace)])
+
+    assert result.exit_code != exit_codes.SUCCESS
+    assert "skipped: 1" in result.stdout
+    assert "link.md (symlink-outside-bundle)" in result.stdout
+    assert (initialized_workspace.parent / "outside.md").read_bytes() == b"a\r\nb\r\n"
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="symlinks need a privilege on Windows")
+def test_fix_json_carries_skipped(initialized_workspace: Path) -> None:
+    _outside_symlink(initialized_workspace)
+
+    result = runner.invoke(app, ["util", "line-endings", "--fix", "--json", "--workspace", str(initialized_workspace)])
+
+    assert result.exit_code != exit_codes.SUCCESS
+    assert json.loads(result.stdout)["skipped"] == [{"member": "link.md", "reason": "symlink-outside-bundle"}]

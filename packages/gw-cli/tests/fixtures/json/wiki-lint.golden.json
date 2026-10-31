@@ -23,6 +23,7 @@
     }
   },
   "errors": [],
+  "diagnostics": [],
   "source_drain": {
     "sources": 0,
     "drained": 0,

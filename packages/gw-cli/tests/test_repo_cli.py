@@ -394,3 +394,38 @@ def test_repo_adopt_passes_explicit_track(workspace: Path, url: str) -> None:
     assert payload["track"] == "feature"
     assert payload["checkout"] == ".gw/worktrees/demo/feature"
     assert git(source, "branch", "--show-current") == "feature"
+
+
+def test_structural_rescan_bypasses_the_pin_guard(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """The advance rescan scans a clone detached ahead of its old pin, so it alone passes `check_pins=False`."""
+    from types import SimpleNamespace
+
+    from gw_cli.repo_cli import main as repo_main
+    from gw_kernel.workspace.layout import layout_for
+    from gw_wiki.repositories.commands import RescanOutcome
+
+    seen: dict[str, object] = {}
+
+    async def fake_run_scan(*_args: object, **kwargs: object) -> SimpleNamespace:
+        seen.update(kwargs)
+        return SimpleNamespace(errors=(), structural=SimpleNamespace(warnings=()))
+
+    monkeypatch.setattr(repo_main, "run_scan", fake_run_scan)
+    monkeypatch.setattr(repo_main, "load_workspace_config", lambda _layout: object())
+    assert repo_main._structural_rescan(layout_for(tmp_path / ".works"))() == RescanOutcome()
+    assert seen["check_pins"] is False
+
+
+def test_structural_rescan_returns_errors_and_warnings(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    from types import SimpleNamespace
+
+    from gw_cli.repo_cli import main as repo_main
+    from gw_kernel.workspace.layout import layout_for
+    from gw_wiki.repositories.commands import RescanOutcome
+
+    async def fake_run_scan(*_args: object, **_kwargs: object) -> SimpleNamespace:
+        return SimpleNamespace(errors=("e",), structural=SimpleNamespace(warnings=("w",)))
+
+    monkeypatch.setattr(repo_main, "run_scan", fake_run_scan)
+    monkeypatch.setattr(repo_main, "load_workspace_config", lambda _layout: object())
+    assert repo_main._structural_rescan(layout_for(tmp_path / ".works"))() == RescanOutcome(("e",), ("w",))

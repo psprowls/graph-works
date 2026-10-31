@@ -902,10 +902,10 @@ async def _semantic_reply(tmp_path, ids, reply):
 )
 async def test_semantic_page_spelling_variants_preserve_attribution(tmp_path, head):
     key = "adrs/0027-member-identity-is-raw-disk-bytes-matched-nfc-insensitively"
-    findings, errors = await _semantic_reply(tmp_path, [key], f"{head}: No description provided.")
+    findings, errors, diagnostics = await _semantic_reply(tmp_path, [key], f"{head}: No description provided.")
     assert findings
     assert {(f.page, f.message) for f in findings} == {(key, "No description provided.")}
-    assert errors == ()
+    assert errors == diagnostics == ()
 
 
 @pytest.mark.parametrize(
@@ -923,9 +923,9 @@ async def test_semantic_page_spelling_variants_preserve_attribution(tmp_path, he
     ],
 )
 async def test_semantic_page_resolution_preserves_raw_and_exact_keys(tmp_path, keys, head, expected):
-    findings, errors = await _semantic_reply(tmp_path, keys, f"{head}: concern: details")
+    findings, errors, diagnostics = await _semantic_reply(tmp_path, keys, f"{head}: concern: details")
     assert [(f.page, f.message) for f in findings] == [(expected, "concern: details")]
-    assert errors == ()
+    assert errors == diagnostics == ()
 
 
 @pytest.mark.parametrize(
@@ -942,12 +942,13 @@ async def test_semantic_page_resolution_preserves_raw_and_exact_keys(tmp_path, k
 )
 async def test_unresolved_semantic_pages_retain_text_and_report_reason(tmp_path, keys, head, reason, candidates):
     line = f"{head}: concern"
-    findings, errors = await _semantic_reply(tmp_path, keys, line)
+    findings, errors, diagnostics = await _semantic_reply(tmp_path, keys, line)
     assert [(f.page, f.message) for f in findings] == [(None, line)]
-    assert len(errors) == 1
-    assert all(value in errors[0] for value in ["page_quality", "fake.model.v1", head, reason])
+    assert errors == ()
+    assert len(diagnostics) == 1
+    assert all(value in diagnostics[0] for value in ["page_quality", "fake.model.v1", head, reason])
     if candidates:
-        assert ", ".join(candidates) in errors[0]
+        assert ", ".join(candidates) in diagnostics[0]
 
 
 @pytest.mark.parametrize(
@@ -962,25 +963,25 @@ async def test_unresolved_semantic_pages_retain_text_and_report_reason(tmp_path,
     ],
 )
 async def test_global_semantic_prose_remains_whole(tmp_path, line):
-    findings, errors = await _semantic_reply(tmp_path, ["root"], line)
+    findings, errors, diagnostics = await _semantic_reply(tmp_path, ["root"], line)
     assert [(f.page, f.message) for f in findings] == [(None, line)]
-    assert errors == ()
+    assert errors == diagnostics == ()
 
 
 @pytest.mark.parametrize("fence", ["```", "````", "```text", "``` markdown", "~~~", "~~~~json"])
 async def test_semantic_fences_are_skipped_but_contents_survive(tmp_path, fence):
-    findings, errors = await _semantic_reply(tmp_path, ["root"], f"  {fence}  \nroot: concern\n{fence}\n")
+    findings, errors, diagnostics = await _semantic_reply(tmp_path, ["root"], f"  {fence}  \nroot: concern\n{fence}\n")
     assert [(f.page, f.message) for f in findings] == [("root", "concern")]
-    assert errors == ()
+    assert errors == diagnostics == ()
 
 
 async def test_all_clean_sentinels_and_blank_lines_are_skipped(tmp_path):
-    findings, errors = await _semantic_reply(
+    findings, errors, diagnostics = await _semantic_reply(
         tmp_path,
         ["root"],
         "\n  \nNo page quality issues found.\nNo ADR chain issues found.\nNo stale claim issues found.\n",
     )
-    assert findings == errors == ()
+    assert findings == errors == diagnostics == ()
 
 
 async def test_parser_errors_propagate_without_losing_other_groups_or_mechanical_findings(curated, monkeypatch):
@@ -998,14 +999,14 @@ async def test_parser_errors_propagate_without_losing_other_groups_or_mechanical
     assert report.mechanical == _run(curated).mechanical
     assert any(f.group == "stale_claims" and f.page == "concepts/cited" for f in report.semantic)
     assert any(f.page is None and f.message == "concepts/missing: unresolved concern" for f in report.semantic)
-    assert len(report.errors) == 2
-    assert any("unknown page" in e for e in report.errors)
-    assert any("the model refused" in e for e in report.errors)
+    assert len(report.errors) == 1 and "the model refused" in report.errors[0]
+    assert len(report.diagnostics) == 1 and "unknown page" in report.diagnostics[0]
     assert not report.ok
+    assert "## Diagnostics" in report.render()
 
 
-@pytest.mark.parametrize(("head", "ok"), [("/ROOT.MD", True), ("/missing.md", False)])
-async def test_page_parser_errors_alone_fail_an_otherwise_clean_lint(workspace, monkeypatch, head, ok):
+@pytest.mark.parametrize(("head", "noted"), [("/ROOT.MD", False), ("/missing.md", True)])
+async def test_page_parser_diagnostics_never_fail_an_otherwise_clean_lint(workspace, monkeypatch, head, noted):
     (workspace.layout.bundle_dir / "root.md").write_text(
         "---\ntype: Tutorial\ntitle: Root\ndescription: A root page.\n---\nBody.\n",
         encoding="utf-8",
@@ -1016,13 +1017,16 @@ async def test_page_parser_errors_alone_fail_an_otherwise_clean_lint(workspace, 
     assert _run(workspace).ok
     assert report.mechanical == _run(workspace).mechanical
     assert report.semantic
-    if ok:
-        assert report.errors == ()
-        assert all(f.page == "root" for f in report.semantic)
-    else:
-        assert len(report.errors) == 1 and "unknown page" in report.errors[0]
+    assert report.errors == ()
+    if noted:
+        assert len(report.diagnostics) == 1 and "unknown page" in report.diagnostics[0]
         assert all(f.page is None and f.message == f"{head}: concern" for f in report.semantic)
-    assert report.ok is ok
+        assert "## Diagnostics" in report.render()
+    else:
+        assert report.diagnostics == ()
+        assert all(f.page == "root" for f in report.semantic)
+        assert "## Diagnostics" not in report.render()
+    assert report.ok
 
 
 def _git(cwd, *args):

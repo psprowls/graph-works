@@ -294,6 +294,16 @@ def plan_mirror(
             sha=sha,
         )
 
+    # --- moved pages: each destination is restamped and regenerated after the move ---
+    move_renders: dict[str, tuple[dict[str, Any], Render]] = {}
+    for new_path in sorted(rename_map.values()):
+        move_renders[desired[new_path].member.removesuffix(".md")] = render_file(
+            reader,
+            context_from_resource("File", desired[new_path].resource),
+            at=at,
+            sha=sha,
+        )
+
     # --- updates: rich pages already present, present in both sets ---
     # Keyed by the page's *actual* concept_id from the resource index, not a
     # reconstruction of the conventional mirrored path -- pages are found by
@@ -338,6 +348,8 @@ def plan_mirror(
         updates=updates,
         deletions=tuple(deletions),
         declined_deletions=tuple(declined),
+        move_renders=move_renders,
+        renames=rename_map,
     )
 
 

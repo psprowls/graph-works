@@ -309,6 +309,18 @@ def emit(
     config_dirs = _pytest_config_dirs(repo_root, skip_dirs, ignore)
     roots = _discover_test_roots(repo_root, skip_dirs, pkg_rows, ignore, config_dirs=config_dirs)
 
+    # A root with no File node beneath it (only gitignored caches such as
+    # __pycache__/.pytest_cache) is not a suite: discovery checks the
+    # filesystem, the graph's File nodes come from tracked files.
+    file_paths = [
+        row[0]
+        for row in conn.execute(
+            "SELECT path FROM nodes WHERE kind='file' AND (repo = ? OR repo IS NULL)", (member_repo,)
+        ).fetchall()
+        if row[0] is not None
+    ]
+    roots = [r for r in roots if any(p == r.rel_path or p.startswith(r.rel_path + "/") for p in file_paths)]
+
     # Map each TestRoot's rel_path -> list of test File rel-paths it owns.
     root_files: dict[str, list[str]] = {r.rel_path: [] for r in roots}
 

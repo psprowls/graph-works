@@ -664,3 +664,49 @@ def test_read_index_enabled_defaults_true_and_honours_local(tmp_path):
     assert checked_bool(layout, "read_index.enabled") is True
     layout.local_manifest_path.write_text("read_index:\n  enabled: false\n", encoding="utf-8", newline="\n")
     assert checked_bool(layout, "read_index.enabled") is False
+
+
+@pytest.mark.parametrize(
+    ("text", "key"),
+    [
+        ("version: 1\nlayuot:\n  bundle_dir: wiki\n", "layuot.bundle_dir"),
+        ("version: 1\nrepositories:\n  r:\n    pth: x\n", "repositories.r.pth"),
+        ("version: 1\nroles:\n  y:\n    regoin: us\n", "roles.y.regoin"),
+        ("version: 1\ntoolchan:\n  git: git\n", "toolchan.git"),
+        ("version: 1\nworkspace:\n  dir: /x\n", "workspace.dir"),
+    ],
+)
+def test_an_unknown_manifest_key_is_refused_naming_file_and_key(tmp_path, text, key):
+    path = _write(tmp_path, text)
+    with pytest.raises(WorkspaceError, match=f"workspace.yaml: unknown key {key}"):
+        read(path)
+
+
+def test_an_unknown_key_in_the_local_layer_is_refused(tmp_path):
+    path = _write(tmp_path, "version: 1\n")
+    (tmp_path / "workspace.local.yaml").write_text("toolchan:\n  git: git\n", encoding="utf-8")
+    with pytest.raises(WorkspaceError, match=r"workspace\.local\.yaml: unknown key toolchan\.git"):
+        read(path)
+
+
+def test_the_refusal_suggests_a_near_miss(tmp_path):
+    with pytest.raises(WorkspaceError, match=r"did you mean: toolchain\.git"):
+        read(_write(tmp_path, "version: 1\ntoolchain:\n  gti: git\n"))
+
+
+def test_wildcard_and_list_keys_pass(tmp_path):
+    text = (
+        "version: 1\nignore: [a]\nrepositories:\n  myrepo:\n    path: p\n    ignore: [x]\n"
+        "    gate:\n      full: just\n      scoped:\n        roots: r\nroles:\n  y:\n    region: us\n"
+    )
+    read(_write(tmp_path, text))
+
+
+def test_a_workflow_leaf_keeps_the_legacy_message(tmp_path):
+    with pytest.raises(WorkspaceError, match=r"workflow\.\* keys no longer live"):
+        read(_write(tmp_path, "version: 1\nworkflow:\n  auto_drive:\n    max_attended: 2\n"))
+
+
+@pytest.mark.parametrize("text", ["version: 1\nrepositories:\n", "version: 1\nrepositories:\n  r: {finish: 7}\n"])
+def test_a_known_key_with_a_misshapen_value_is_left_to_the_value_checks(tmp_path, text):
+    read(_write(tmp_path, text))

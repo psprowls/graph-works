@@ -12,7 +12,10 @@ from pathlib import Path
 
 from okf_io import Document, document_headings, document_links, read_member, walk
 from okf_io.bundle import Member, MemberStat, Unreadable, canonical_id
+from okf_io.links import is_external, parse_destination, resolve_path
 
+from okf_ext.body import document_wikilinks
+from okf_ext.locate import document_destinations, document_reference_definitions
 from okf_ext.readindex._sql import bindings, execute
 from okf_ext.readindex.model import IndexBusy, Reconcile
 from okf_ext.readindex.project import _columns, _tags, fm_json
@@ -57,12 +60,39 @@ class _Prepared:
     tags: tuple[tuple[object, ...], ...]
     headings: tuple[tuple[object, ...], ...]
     links: tuple[tuple[object, ...], ...]
+    refs: tuple[tuple[object, ...], ...] = ()
+
+
+def _refs(member: Member, doc: Document) -> tuple[tuple[object, ...], ...]:
+    """Every reference form the move planner reads, keyed by raw member id."""
+    found: list[tuple[str, str]] = []
+    for link in document_links(doc, source_id=member.id[:-3]):
+        if not link.external and link.target is not None:
+            found.append(("link", canonical_id(link.target)))
+    for candidate in document_destinations(doc):
+        path = parse_destination(candidate.text)[0]
+        if is_external(candidate.text) or not path:
+            continue
+        resolved = resolve_path(path, source_id=member.id)
+        if resolved is not None:
+            found.append(("destination", canonical_id(resolved)))
+    for definition in document_reference_definitions(doc):
+        if is_external(definition.href):
+            continue
+        resolved = resolve_path(parse_destination(definition.href)[0], source_id=member.id)
+        if resolved is not None:
+            found.append(("definition", canonical_id(resolved)))
+    for occurrence in document_wikilinks(doc):
+        if occurrence.target is not None:
+            found.append(("wikilink", canonical_id(occurrence.target)))
+    return tuple(bindings((member.id, n, form, target)) for n, (form, target) in enumerate(found))
 
 
 def _prepare(member: Member, row: list[object], doc: Document | None) -> _Prepared:
     tags: tuple[tuple[object, ...], ...] = ()
     headings: tuple[tuple[object, ...], ...] = ()
     links: tuple[tuple[object, ...], ...] = ()
+    refs: tuple[tuple[object, ...], ...] = ()
     if doc is not None:
         _project(row, doc)
         tags = tuple(bindings((member.id, tag)) for tag in _tags(doc))
@@ -87,7 +117,9 @@ def _prepare(member: Member, row: list[object], doc: Document | None) -> _Prepar
                 )
                 for n, link in enumerate(document_links(doc, source_id=member.id[:-3]))
             )
-    return _Prepared(member.id, bindings(row), tags, headings, links)
+        if member.kind in {"concept", "index", "log"}:
+            refs = _refs(member, doc)
+    return _Prepared(member.id, bindings(row), tags, headings, links, refs)
 
 
 def _stored(conn: sqlite3.Connection) -> dict[str, _Stored]:
@@ -170,6 +202,7 @@ def _delete_children(conn: sqlite3.Connection, member_id: str) -> None:
     execute(conn, "DELETE FROM tags WHERE member=?", (member_id,))
     execute(conn, "DELETE FROM headings WHERE member=?", (member_id,))
     if member_id.endswith(".md"):
+        execute(conn, "DELETE FROM refs WHERE member=?", (member_id,))
         execute(conn, "DELETE FROM links WHERE source=?", (member_id[:-3],))
 
 
@@ -290,6 +323,7 @@ def reconcile(index: ReadIndex, *, documents: MutableMapping[tuple[str, str], Do
                 conn.executemany("INSERT INTO tags VALUES (?, ?)", prepared.tags)
                 conn.executemany("INSERT INTO headings VALUES (?, ?, ?, ?, ?, ?)", prepared.headings)
                 conn.executemany("INSERT INTO links VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)", prepared.links)
+                conn.executemany("INSERT INTO refs VALUES (?, ?, ?, ?)", prepared.refs)
             conn.executemany("UPDATE members SET size=?, mtime_ns=?, ino=?, ctime_ns=?, racy=? WHERE id=?", refreshes)
             for table, values in prepared_replacements.items():
                 execute(conn, f"DELETE FROM {table}")
@@ -319,6 +353,7 @@ def reconcile(index: ReadIndex, *, documents: MutableMapping[tuple[str, str], Do
         tuple(unsettled),
         tuple(sorted(key for key, entry in state.items() if entry.racy)),
         published,
+        walked,
     )
 
 

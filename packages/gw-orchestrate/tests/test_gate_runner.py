@@ -28,7 +28,8 @@ LATER = fake_clock_at(NOW + timedelta(minutes=5))
 
 
 class FakeProc:
-    pass
+    def wait(self) -> int:
+        return 0
 
 
 def write_record(tmp_path: Path) -> Path:
@@ -843,3 +844,32 @@ def test_failed_setup_preserves_reused_entries_and_records_planned_checks_red(un
     assert run.exit != 0 and run.units[0].ran and run.units[0].exit == 5
     assert not run.units[1].ran and run.units[1].reused_from.owner == "work/x"
     assert not run.repo_wide.ran and run.repo_wide.reused_from.owner == "work/x"
+
+
+def test_spawn_runner_reaps_the_child(tmp_path, monkeypatch):
+    import json as _json
+    import subprocess as _sp
+    import sys as _sys
+    import time as _time
+
+    import gw_orchestrate.gate as gate_mod
+
+    record = tmp_path / "r.json"
+    record.write_text(
+        _json.dumps({"log_path": str(tmp_path / "l.log"), "worktree": str(tmp_path), "runner_started": True}),
+        encoding="utf-8",
+    )
+    handles = []
+    real = _sp.Popen
+
+    def spy(argv, **options):
+        proc = real([_sys.executable, "-c", "pass"], **options)
+        handles.append(proc)
+        return proc
+
+    monkeypatch.setattr(gate_mod.subprocess, "Popen", spy)
+    gate_mod.spawn_runner(record)
+    deadline = _time.monotonic() + 10
+    while handles[0].returncode is None and _time.monotonic() < deadline:
+        _time.sleep(0.05)
+    assert handles[0].returncode is not None

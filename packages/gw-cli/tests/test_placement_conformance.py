@@ -85,9 +85,6 @@ def test_prune_after_archive_is_a_no_op(auto_driven: tuple[Fixture, RunLog]) -> 
     assert {repo: observe(fx.repos[repo]) for repo in REPOS} == before
 
 
-@pytest.mark.xfail(
-    strict=True, reason="the cleanup plan names a --repo-name command `place` refuses for a tagged owner"
-)
 def test_cleanup_plan_commands_are_all_accepted(attended: tuple[Fixture, RunLog]) -> None:
     _, log = attended
     assert log.refused_cleanup == []

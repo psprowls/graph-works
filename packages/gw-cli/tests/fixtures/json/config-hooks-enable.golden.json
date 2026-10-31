@@ -7,5 +7,6 @@
   "removed": [],
   "skipped": [
     "some-other-hook.sh"
-  ]
+  ],
+  "updated": []
 }

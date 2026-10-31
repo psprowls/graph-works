@@ -87,3 +87,55 @@ def test_read_rolls_back_on_exception_and_rows_are_immutable(tmp_path: Path) -> 
         assert not index.connection.in_transaction
         with read(index) as view:
             assert view.member("a/one.md").fm["phase"] == "plan"
+
+
+def _refs_index(tmp_path: Path, files: dict[str, str]):
+    index = open_index(tmp_path / "i.db", tree(tmp_path / "b", files))
+    reconcile(index)
+    return index
+
+
+def test_referrers_match_subtree_prefix_exactly(tmp_path: Path) -> None:
+    files = {
+        "p1.md": "[x](/work/a.md)\n",
+        "p2.md": "[x](/work/a/references/01-design.md)\n",
+        "p3.md": "[[work/a]]\n",
+        "p4.md": "[x](/work/ab.md)\n",
+        "p5.md": "[x](/work/a-b.md)\n",
+        "p6.md": "[x](/work/bug\\-a.md)\n",
+        "work/a.md": "A",
+    }
+    with _refs_index(tmp_path, files) as index, read(index) as view:
+        assert view.referrers(["work/a"]) == {"p1.md", "p2.md", "p3.md"}
+        # a backslash-escaped referrer is found through the decoded `link` form row
+        assert view.referrers(["work/bug-a"]) == {"p6.md"}
+
+
+def test_referrers_match_nfd_spelled_roots(tmp_path: Path) -> None:
+    import unicodedata
+
+    nfc = unicodedata.normalize("NFC", "work/café")
+    nfd = unicodedata.normalize("NFD", nfc)
+    with _refs_index(tmp_path, {"p.md": f"[x](/{nfc}.md)\n"}) as index, read(index) as view:
+        assert view.referrers([nfd]) == {"p.md"}
+
+
+def test_mentions_decode_percent_nfc_and_yaml_escapes(tmp_path: Path) -> None:
+    import unicodedata
+
+    nfc = unicodedata.normalize("NFC", "café")
+    nfd = unicodedata.normalize("NFD", nfc)
+    files = {
+        "m1.md": '---\nresource: "/work/%61.md"\n---\n',
+        "m2.md": '---\npath: "work/bug\\x2dx"\n---\n',
+        "m3.md": f"---\ntitle: {nfd}\n---\n",
+        "m4.md": "---\ntitle: unrelated\n---\n",
+    }
+    with _refs_index(tmp_path, files) as index, read(index) as view:
+        assert view.mentions(["a.md", "bug-x", nfc]) == {"m1.md", "m2.md", "m3.md"}
+
+
+def test_mentions_admit_inexact_frontmatter_rows(tmp_path: Path) -> None:
+    files = {"odd.md": "---\nodd: .nan\n---\n", "plain.md": "---\ntitle: z\n---\n"}
+    with _refs_index(tmp_path, files) as index, read(index) as view:
+        assert view.mentions(["needle"]) == {"odd.md"}

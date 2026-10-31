@@ -425,9 +425,17 @@ def _insert_workflow_pointer(text: str) -> str:
     return text[:index] + insertion + text[index:]
 
 
+def _workflow_name(path: Path, root: Path) -> str:
+    """*path* relative to the workspace root, posix-style; its bare filename when it lies outside the root."""
+    try:
+        return path.resolve().relative_to(root.resolve()).as_posix()
+    except ValueError:
+        return path.name
+
+
 def _workflow_init_writes(
     layout: WorkspaceLayout, manifest_text: str | None
-) -> tuple[list[PlannedWrite], Mapping[Path, Fingerprint | None], str | None, tuple[str, ...]]:
+) -> tuple[list[PlannedWrite], Mapping[Path, Fingerprint | None], str | None, tuple[str, ...], tuple[str, str]]:
     """The manifest pointer, the workflow-file seed, and the root `.gitignore` line for its `.local` sibling."""
     store = workspace_store(layout)
     base = YAML(typ="safe").load(manifest_text) if manifest_text is not None else store.read_base_explicit()
@@ -457,6 +465,7 @@ def _workflow_init_writes(
     if config.source_fingerprints[config.shared_path] is None:
         label = os.path.relpath(config.shared_path, layout.root)
         writes.append(PlannedWrite(label, config.shared_path, SEED_DISPATCH_TEXT, "create"))
+    names = (_workflow_name(config.shared_path, layout.root), _workflow_name(config.local_path, layout.root))
     try:
         relative = config.local_path.resolve().relative_to(layout.root.resolve())
     except ValueError:
@@ -464,8 +473,8 @@ def _workflow_init_writes(
             f"! Local dispatch path: {config.local_path}; add /{config.local_path.name} "
             f"to {config.local_path.parent / '.gitignore'} (not edited)."
         )
-        return writes, config.source_fingerprints, None, (notice,)
-    return writes, config.source_fingerprints, "/" + relative.as_posix(), ()
+        return writes, config.source_fingerprints, None, (notice,), names
+    return writes, config.source_fingerprints, "/" + relative.as_posix(), (), names
 
 
 def _workspace_relative(target: Path, root: Path) -> str:
@@ -482,7 +491,9 @@ def _workspace_relative(target: Path, root: Path) -> str:
     return Path(os.path.relpath(target, start=root)).as_posix()
 
 
-def _context_writes(layout: WorkspaceLayout, *, topic: str | None, initialized_at: str) -> list[PlannedWrite]:
+def _context_writes(
+    layout: WorkspaceLayout, *, topic: str | None, initialized_at: str, workflow_names: tuple[str, str]
+) -> list[PlannedWrite]:
     """`<root>/AGENTS.md` and `<root>/CLAUDE.md` -- at `layout.root`, never
     the repo root: gw regenerates the whole gw region of `AGENTS.md`, and that
     is only safe on a file gw owns (D-001 of the unified-context-files item).
@@ -508,6 +519,8 @@ def _context_writes(layout: WorkspaceLayout, *, topic: str | None, initialized_a
         initialized_at=initialized_at,
         bundle_dir=layout.bundle_dir.name,
         config_dir=layout.config_dir.name,
+        workflow_file=workflow_names[0],
+        workflow_local_file=workflow_names[1],
     )
     if content != existing:
         writes.append(PlannedWrite(label=AGENTS_FILENAME, path=agents_path, content=content, mode="create"))
@@ -594,7 +607,9 @@ def plan_init(
         manifest_text = render_initial(
             today=today, topic=topic, repositories=repositories, ignore=layout.scanner_excludes
         )
-    workflow_writes, workflow_inputs, local_entry, workflow_notices = _workflow_init_writes(layout, manifest_text)
+    workflow_writes, workflow_inputs, local_entry, workflow_notices, workflow_names = _workflow_init_writes(
+        layout, manifest_text
+    )
 
     writes: list[PlannedWrite] = []
     gitignore = _gitignore_write(layout)
@@ -615,6 +630,7 @@ def plan_init(
             layout,
             topic=manifest.topic if layout.manifest_path.exists() else topic,
             initialized_at=manifest.initialized_at if layout.manifest_path.exists() else today.isoformat(),
+            workflow_names=workflow_names,
         )
     )
     writes.extend(_stale_bundle_context_deletes(layout))

@@ -60,7 +60,7 @@ from okf_ext.moves.plan import (
     stranded_summary,
     stranded_warning,
 )
-from okf_ext.moves.touched import TouchedScan, scan_touched
+from okf_ext.moves.touched import TouchedScan, scan_touched, subtree_members
 from okf_ext.writing import FailureKind, WriteFailure
 
 #: `FailureKind` and `WriteFailure` are re-exported from the shared
@@ -73,7 +73,7 @@ from okf_ext.writing import FailureKind, WriteFailure
 #: `moves` has no `Skipped`/`SkipReason`/`ApplyResult` in its return types, so
 #: those stay unexported here.
 #:
-#: `okf_ext.moves.locate`'s `Candidate`, `RefDef`, `destinations` and
+#: `okf_ext.locate`'s (shim: `okf_ext.moves.locate`) `Candidate`, `RefDef`, `destinations` and
 #: `reference_definitions` are deliberately **not** re-exported here. They are
 #: internal machinery `plan.py` uses to build `RefEdit`s -- nothing in
 #: `MovePlan` or `MoveResult` ever hands one back to a caller, unlike
@@ -116,4 +116,5 @@ __all__ = [
     "stranded",
     "stranded_summary",
     "stranded_warning",
+    "subtree_members",
 ]

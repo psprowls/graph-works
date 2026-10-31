@@ -114,7 +114,7 @@ def test_finish_inspection_tracks_incomplete_accepted_and_unexpected_receipts(tm
         if mode == "accepted"
         else (entry, finish.VerifiedIntegration("other", "s", "a" * 40, "m", "b" * 40))
     )
-    monkeypatch.setattr(finish, "resolve_finish_targets", lambda *args: finish.FinishPlan((target,), ()))
+    monkeypatch.setattr(finish, "resolve_finish_targets", lambda *args, **kwargs: finish.FinishPlan((target,), ()))
     monkeypatch.setattr(finish, "read_finish_receipt", lambda *args: (None, entries, None))
     monkeypatch.setattr(finish, "verify_integration", lambda *args: None)
     result = finish.inspect_finish(layout, item.path)
@@ -125,3 +125,20 @@ def test_finish_inspection_tracks_incomplete_accepted_and_unexpected_receipts(tm
         assert result.accepted == ("code",)
     else:
         assert "unexpected repository" in result.blockers[-1]
+
+
+def test_resolve_finish_targets_checkouts_keyword_gates_only_the_checkout_blockers(tmp_path):
+    from gw_pipeline.test_support.finish_repos import OWNER, code_repo, git, workspace
+
+    repo, source = code_repo(tmp_path)
+    layout = workspace(tmp_path, repo, source)
+    items = finish.load_items(finish.load_work_bundle(layout))
+    git(repo, "worktree", "remove", "--force", str(source))
+
+    strict = finish.resolve_finish_targets(layout, items, OWNER)
+    loose = finish.resolve_finish_targets(layout, items, OWNER, checkouts="ignored")
+
+    assert strict.targets == () and strict.blockers
+    assert not loose.blockers and [t.repo.name for t in loose.targets] == ["code"]
+    git(repo, "branch", "-D", "feature")
+    assert finish.resolve_finish_targets(layout, items, OWNER, checkouts="ignored").blockers

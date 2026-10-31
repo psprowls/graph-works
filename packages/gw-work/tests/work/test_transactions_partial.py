@@ -246,10 +246,11 @@ def test_postcondition_selection_excludes_moved_written_deleted_and_dirty_reuse(
     assert reuse["work/destination.md"] is baseline.concepts["work/destination"]
 
 
+@pytest.mark.parametrize("arm", ["index", "scan"])
 @pytest.mark.parametrize(
     "name,kwargs", fixtures.CASES, ids=[f"{name}-{i}" for i, (name, _) in enumerate(fixtures.CASES)]
 )
-def test_shipped_fixtures_match_real_partial_transaction(tmp_path, monkeypatch, name, kwargs):
+def test_shipped_fixtures_match_real_partial_transaction(tmp_path, monkeypatch, name, kwargs, arm):
     """Pin F2 against actual writes, failures, notes and both scoped reports."""
     original_compare = fixtures._postcondition_comparison
 
@@ -293,7 +294,7 @@ def test_shipped_fixtures_match_real_partial_transaction(tmp_path, monkeypatch, 
         assert findings[0] == findings[1]
 
     monkeypatch.setattr(fixtures, "_postcondition_comparison", durable_comparison)
-    fixtures.test_existing_fixtures_match_partial_planning_and_validation(tmp_path, monkeypatch, name, kwargs)
+    fixtures.test_existing_fixtures_match_partial_planning_and_validation(tmp_path, monkeypatch, name, kwargs, arm)
     # Refused fixtures intentionally have no durable application.
 
 

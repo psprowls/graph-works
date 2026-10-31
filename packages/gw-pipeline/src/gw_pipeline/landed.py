@@ -126,16 +126,47 @@ class LandedSince:
         return tuple(entry.sibling.path for entry in self.entries if entry.overlaps)
 
 
-def landed_since(layout: WorkspaceLayout, items: Sequence[WorkItem], item: WorkItem) -> LandedSince:
+class LandedMemo:
+    """A caller-owned memo of `landed_since` results for one command call.
+
+    Keyed on the function's real inputs (item, code baseline, affects and the
+    landed candidates), so a changed input is a miss. Never module-global: Git
+    state changes between invocations.
+    """
+
+    def __init__(self) -> None:
+        self._results: dict[tuple[str, str, tuple[str, ...], tuple[LandedSibling, ...]], LandedSince] = {}
+
+
+def landed_since(
+    layout: WorkspaceLayout, items: Sequence[WorkItem], item: WorkItem, *, memo: LandedMemo | None = None
+) -> LandedSince:
     """Verified candidate commits not ancestral to the baseline.
 
-    No code baseline or candidates means no repository or Git probes.
+    No code baseline or candidates means no repository or Git probes. With a
+    *memo*, identical inputs reuse the first result instead of re-probing Git.
     """
     baseline = item.spec_baseline
     code = baseline.code if baseline is not None else None
     candidates = landed_siblings(items, item)
     if code is None or not candidates:
         return LandedSince(code, None)
+    if memo is None:
+        return _landed_since(layout, items, item, code, candidates)
+    key = (item.path, code, tuple(item.affects), candidates)
+    cached = memo._results.get(key)
+    if cached is None:
+        cached = memo._results[key] = _landed_since(layout, items, item, code, candidates)
+    return cached
+
+
+def _landed_since(
+    layout: WorkspaceLayout,
+    items: Sequence[WorkItem],
+    item: WorkItem,
+    code: str,
+    candidates: tuple[LandedSibling, ...],
+) -> LandedSince:
     by_path = {candidate.path: candidate for candidate in items}
     try:
         repo = resolve_item_repo(layout, item, by_path).path
@@ -171,22 +202,24 @@ def landed_since(layout: WorkspaceLayout, items: Sequence[WorkItem], item: WorkI
     return LandedSince(code, repo, tuple(entries), tuple(warnings))
 
 
-def stale_spec_for(layout: WorkspaceLayout, items: Sequence[WorkItem], item: WorkItem) -> tuple[str, ...]:
+def stale_spec_for(
+    layout: WorkspaceLayout, items: Sequence[WorkItem], item: WorkItem, *, memo: LandedMemo | None = None
+) -> tuple[str, ...]:
     """Routing fact: empty off plan, otherwise overlapping landed entries."""
     if item.phase != "plan":
         return ()
-    return landed_since(layout, items, item).stale
+    return landed_since(layout, items, item, memo=memo).stale
 
 
 def stale_by_path(
-    layout: WorkspaceLayout, items: Sequence[WorkItem], paths: Iterable[str]
+    layout: WorkspaceLayout, items: Sequence[WorkItem], paths: Iterable[str], *, memo: LandedMemo | None = None
 ) -> Mapping[str, tuple[str, ...]]:
     """Compute staleness for requested items, keeping non-empty results."""
     by_path = {candidate.path: candidate for candidate in items}
     result: dict[str, tuple[str, ...]] = {}
     for path in paths:
         item = by_path.get(path)
-        if item is not None and (stale := stale_spec_for(layout, items, item)):
+        if item is not None and (stale := stale_spec_for(layout, items, item, memo=memo)):
             result[path] = stale
     return result
 
@@ -194,6 +227,7 @@ def stale_by_path(
 __all__ = [
     "BaselineComparison",
     "LandedEntry",
+    "LandedMemo",
     "LandedSibling",
     "LandedSince",
     "compare_to_baseline",

@@ -65,9 +65,14 @@ def test_gate_wait_payload() -> None:
         "receipt_path": "/r.md",
         "units": [{"name": "a", "exit": 0}],
         "repo_wide_exit": 0,
+        "tree_changed": None,
         "warnings": [],
         "refusal": None,
     }
+    from dataclasses import replace
+
+    assert work.gate_wait_payload(replace(GATE_WAIT_FINISHED, tree_changed=True), "work/a")["tree_changed"] is True
+    assert work.gate_wait_payload(replace(GATE_WAIT_FINISHED, tree_changed=False), "work/a")["tree_changed"] is False
     clamped = work.gate_wait_payload(GATE_WAIT_FINISHED, "work/a", warnings=("raised",))
     assert clamped["warnings"] == ["raised"]
     assert work.gate_wait_payload(GATE_WAIT_REFUSED, "work/a")["refusal"] == {"reason": "no-run", "detail": "d"}

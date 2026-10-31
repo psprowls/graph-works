@@ -197,3 +197,18 @@ def test_the_scan_never_parses_and_preserves_pruned_inventory(tmp_path, monkeypa
 def test_a_missing_root_is_a_caller_error(tmp_path):
     with pytest.raises(FileNotFoundError):
         scan_touched(tmp_path / "missing", [SRC])
+
+
+def test_subtree_members_matches_nfd_root_and_skips_siblings(tmp_path):
+    from okf_ext.moves import subtree_members
+    from okf_io.bundle import walk
+
+    nfc = unicodedata.normalize("NFC", "work/café")
+    nfd = unicodedata.normalize("NFD", nfc)
+    root = write_tree(
+        tmp_path / "b",
+        {f"{nfd}.md": "x", f"{nfd}/references/x.md": "x", "work/caf.md": "x", f"{nfc}b.md": "x", "work/other.md": "x"},
+    )
+    inventory = walk(root)
+    picked = subtree_members(inventory, [nfc])
+    assert {unicodedata.normalize("NFC", m) for m in picked} == {f"{nfc}.md", f"{nfc}/references/x.md"}

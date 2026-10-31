@@ -5,7 +5,7 @@ The inventory closure is the single place to widen when an equivalence test dive
 
 from __future__ import annotations
 
-from collections.abc import Collection, Iterable, Sequence
+from collections.abc import Callable, Collection, Iterable, Sequence
 
 from okf_io import Bundle
 
@@ -20,6 +20,19 @@ def _subtree_mapping(items: Sequence[WorkItem], source_path: str, destination: s
     for item in _subtree_items(items, (source_path,)):
         mapping[item.path] = f"{destination}{item.path[len(source_path) :]}"
     return mapping
+
+
+def dependency_closure(seeds: Iterable[str], edges: Callable[[str], Sequence[str]]) -> frozenset[str]:
+    """Every item path reachable from *seeds* through *edges*, seeds included; cycles terminate."""
+    seen: set[str] = set()
+    stack = list(seeds)
+    while stack:
+        path = stack.pop()
+        if path in seen:
+            continue
+        seen.add(path)
+        stack.extend(edges(path))
+    return frozenset(seen)
 
 
 def _parent_refusals(parent: WorkItem | None, parent_path: str) -> list[MutationRefusal]:
@@ -221,4 +234,4 @@ def plan_release_adoption(
     )
 
 
-__all__ = ["plan_release_adoption", "plan_reparent", "plan_reparent_many", "reparent_load_set"]
+__all__ = ["dependency_closure", "plan_release_adoption", "plan_reparent", "plan_reparent_many", "reparent_load_set"]

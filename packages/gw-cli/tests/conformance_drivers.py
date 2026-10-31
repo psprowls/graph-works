@@ -294,11 +294,6 @@ class AttendedDriver:
             assert row["action"] == "remove", f"[{step}] cleanup row not removable: {row}"
             removed = self._gw(fx, "work", "place", path, "--remove", "--repo-name", row["repo"], ok=False)
             self.log.place_modes.add("--remove")
-            if removed["_exit"] != 0 and "conflicts with repo" in removed["error"]["message"]:
-                # Known product defect: the plan's own command for an owner's foreign-repository
-                # row is refused when the owner carries `repo:`. The row stays until prune.
-                self.log.refused_cleanup.append(row["command"])
-                continue
             assert removed["_exit"] == 0, f"[{step}] remove failed: {removed}"
             assert removed["refusal"] is None, f"[{step}] remove refused: {removed['refusal']}"
             oracle.remove(path, row["repo"])

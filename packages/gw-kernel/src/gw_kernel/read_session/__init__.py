@@ -13,6 +13,7 @@ from gw_kernel.read_session.model import (
     index_revision,
     reconciled_document,
 )
+from gw_kernel.read_session.moves import MoveSelection, move_selection
 from gw_kernel.read_session.open import borrow_read_session, open_read_session
 from gw_kernel.read_session.snapshot import SnapshotSession, materialize
 
@@ -23,6 +24,7 @@ __all__ = [
     "FallbackReason",
     "IndexRevision",
     "IndexSession",
+    "MoveSelection",
     "PageContent",
     "ReadSession",
     "SnapshotSession",
@@ -31,6 +33,7 @@ __all__ = [
     "fingerprint",
     "index_revision",
     "materialize",
+    "move_selection",
     "open_read_session",
     "reconciled_document",
 ]

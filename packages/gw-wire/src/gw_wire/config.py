@@ -61,6 +61,7 @@ def hooks_payload(result: HooksResult) -> dict[str, object]:
         "added": list(result.added),
         "removed": list(result.removed),
         "skipped": list(result.skipped),
+        "updated": list(result.updated),
     }
 
 

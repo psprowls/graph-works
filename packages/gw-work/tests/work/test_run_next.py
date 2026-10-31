@@ -11,11 +11,13 @@ import pytest
 from gw_kernel import apply_init, plan_init
 from gw_kernel.testing.transactions import assert_workspace_commit
 from gw_kernel.testing.transactions import init_git as _init_git
+from gw_kernel.workspace.bundle import load_workspace_bundle
 from gw_kernel.workspace.commits import CommitOutcome
 from gw_pipeline import transactions
 from gw_work import commands as work
 from okf_io import load
 from work_tracker_okf import compose
+from work_tracker_okf.items import IGNORE, load_items
 
 TODAY = date(2026, 8, 23)
 
@@ -360,6 +362,31 @@ def test_a_plan_item_with_an_overlapping_landed_sibling_routes_to_reconciling_sp
     assert result.dispatch_resolution.profile.skill == "gw:reconciling-spec"
     assert result.route.on_complete == Transition(phase="plan", stamp_baseline=True)
     assert result.artifact is None
+
+
+@pytest.mark.parametrize("dry_run", [True, False])
+def test_run_next_evaluates_landed_since_once_per_call(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, dry_run: bool
+) -> None:
+    import gw_pipeline.landed as landed
+    from gw_pipeline.landed import landed_since
+
+    layout, _, _, _ = _landed_plan(tmp_path)
+    calls: list[str] = []
+    original = landed.compare_to_baseline
+
+    def compare(repo, ref, code):
+        calls.append(ref)
+        return original(repo, ref, code)
+
+    monkeypatch.setattr(landed, "compare_to_baseline", compare)
+    items = load_items(load_workspace_bundle(layout, ignore=IGNORE))
+    landed_since(layout, items, next(i for i in items if i.path == CHILD))
+    single = len(calls)
+    assert single > 0
+    calls.clear()
+    work.run_next(layout, CHILD, dry_run=dry_run)
+    assert len(calls) == single
 
 
 def test_without_overlap_it_routes_to_writing_plans(tmp_path: Path) -> None:

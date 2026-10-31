@@ -92,5 +92,6 @@ def render_hooks(result: HooksResult, *, json_output: bool) -> str:
     lines = [f"[ok] {result.settings_path}"]
     lines.extend(f"  added: {script}" for script in result.added)
     lines.extend(f"  removed: {script}" for script in result.removed)
+    lines.extend(f"  updated: {script}" for script in result.updated)
     lines.extend(f"  already registered: {script}" for script in result.skipped)
     return "\n".join(lines)

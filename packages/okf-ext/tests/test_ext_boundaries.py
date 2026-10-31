@@ -37,7 +37,7 @@ SRC = Path(__file__).resolve().parents[1] / "src" / "okf_ext"
 #: The shared layer. Everything else is a capability. `shape` is a package
 #: rather than a single module, which is why `shared_modules()` expands a
 #: directory entry instead of assuming every name here is a file.
-SHARED = {"__init__.py", "body.py", "context.py", "locking.py", "shape", "splice.py", "writing.py"}
+SHARED = {"__init__.py", "body.py", "context.py", "locate.py", "locking.py", "shape", "splice.py", "writing.py"}
 
 
 def shared_modules() -> list[Path]:
@@ -788,3 +788,19 @@ def test_readindex_is_a_primitive() -> None:
     assert not hasattr(readindex, "CODES")
     for name in ("open_index", "reconcile", "read", "verify", "IndexBusy", "IndexUnavailable"):
         assert callable(getattr(readindex, name))
+
+
+def test_the_documented_locate_surface_is_present() -> None:
+    """The move locator is shared so `readindex` can read it; `moves.locate` is a shim."""
+    import okf_ext.locate as m
+    from okf_ext.moves import locate as shim
+
+    assert {
+        "Candidate",
+        "RefDef",
+        "destinations",
+        "document_destinations",
+        "reference_definitions",
+        "document_reference_definitions",
+    } <= set(dir(m))
+    assert shim.document_destinations is m.document_destinations

@@ -35,8 +35,11 @@ SOURCES = tuple(f"work/epic-00000/children/feature-{i:05d}" for i in range(1, 4)
 
 
 @contextmanager
-def _audited_counting():
-    """Cold class-parser audit, retaining objects so identity cannot be recycled."""
+def _audited_counting(allow_standalone=0):
+    """Cold class-parser audit, retaining objects so identity cannot be recycled.
+
+    *allow_standalone* admits that many body-less parses: the planner re-reads a parse-error page's raw text.
+    """
     _md.parse_body.cache_clear()
     body._skeleton.cache_clear()
     # An instance method shadow would bypass counting()'s class-level spy.
@@ -81,7 +84,7 @@ def _audited_counting():
         patch.setattr(MarkdownIt, "parse", md)
         yield counts, documents, revisions, profiles, table_bodies
         assert sum(profiles.values()) == counts.markdown_parses
-        assert profiles["standalone"] == 0, profiles
+        assert profiles["standalone"] <= allow_standalone, profiles
         assert all(event[2] == 1 for event in revisions.values()), [
             (document.path, n) for document, _revision, n in revisions.values() if n != 1
         ]
@@ -107,9 +110,70 @@ def corpus_for(tmp_path_factory):
     def make(items):
         if items not in corpora:
             corpora[items] = generate(root / str(items), items=items, wiki_pages=100)
+            # These exact counts describe the touched-scan path (the index-off arm).
+            corpora[items].layout.local_manifest_path.write_text(
+                "read_index:\n  enabled: false\n", encoding="utf-8", newline="\n"
+            )
         return corpora[items]
 
     return make
+
+
+def _index_layout(corpus, root):
+    """A copy of the corpus with the read index on and warmed outside any counting."""
+    from gw_kernel.read_session import open_read_session
+
+    layout = _copy_layout(corpus, root)
+    layout.local_manifest_path.unlink()
+    with open_read_session(layout):
+        pass
+    return layout
+
+
+# batch -> (selection candidates, parsed members), identical at 100 and 1,000 items; pinned from the first green run.
+# The parsed set is the whole load set (subtree, candidates, lane and ancestor context, dependency closure).
+INDEX_COUNTS = {1: (5, 12), 3: (13, 18)}
+
+
+@pytest.mark.parametrize("batch", (1, 3))
+def test_index_reparent_parses_a_size_independent_set(corpus_for, tmp_path, monkeypatch, batch):
+    from okf_ext.readindex import store  # noqa: F401  (import keeps the capability's layer explicit)
+
+    seen = []
+    for items in SIZES:
+        layout = _index_layout(corpus_for(items), tmp_path / f"index-{items}")
+        selections, loads = [], []
+        real_selection, real_load = commands.move_selection, commands.load_partial_bundle
+
+        def spy(session, roots, real_selection=real_selection, selections=selections):
+            result = real_selection(session, roots)
+            selections.append(result)
+            return result
+
+        def load(*args, real_load=real_load, loads=loads, **kwargs):
+            loads.append(kwargs)
+            return real_load(*args, **kwargs)
+
+        monkeypatch.setattr(commands, "move_selection", spy)
+        monkeypatch.setattr(commands, "load_partial_bundle", load)
+        with _audited_counting(allow_standalone=1) as (counts, documents, _revisions, profiles, _tables):
+            bundle, plan = commands._plan_reparent_partial(layout, SOURCES[:batch], PARENT)
+        monkeypatch.undo()
+        assert plan.ok, plan.refusals
+        (selection,) = selections
+        assert not isinstance(selection, str), selection
+        assert not [
+            w for w in plan.warnings if w.startswith(("read index ", "dependency context reaches unloaded members;"))
+        ]
+        assert bundle.partial is not None
+        only = loads[0]["only"]
+        fresh = set(only) - set(selection.documents)
+        parsed = Counter(doc.path.relative_to(bundle.root).as_posix() for doc in documents)
+        assert set(parsed) == fresh and set(parsed.values()) == {1}
+        assert counts.files_parsed == len(fresh)
+        seen.append((len(selection.candidates), counts.files_parsed, counts.markdown_parses, dict(profiles)))
+    assert seen[0] == seen[1]
+    assert seen[0][:2] == INDEX_COUNTS[batch]
 
 
 @pytest.mark.parametrize("items", SIZES)

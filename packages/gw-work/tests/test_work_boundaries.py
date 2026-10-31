@@ -95,6 +95,32 @@ def manifest_reads(tree: ast.AST, aliases: dict[str, str]) -> list[str]:
     def target_names(target: ast.AST) -> set[str]:
         return {node.id for node in ast.walk(target) if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store)}
 
+    def tainted(target: ast.AST, values: list[ast.AST] | None) -> set[str]:
+        """Names in ``target`` bound to a manifest; ``values`` are the candidate values, ``None`` when opaque."""
+        if isinstance(target, ast.Name):
+            return {target.id} if values is None or any(is_manifest(value) for value in values) else set()
+        if not isinstance(target, (ast.Tuple, ast.List)):
+            return target_names(target)
+        width = len(target.elts)
+        rows = values
+        if rows is not None and (
+            any(isinstance(element, ast.Starred) for element in target.elts)
+            or not all(
+                isinstance(row, (ast.Tuple, ast.List))
+                and len(row.elts) == width
+                and not any(isinstance(element, ast.Starred) for element in row.elts)
+                for row in rows
+            )
+        ):
+            rows = None
+        names: set[str] = set()
+        for position, element in enumerate(target.elts):
+            column = (
+                None if rows is None else [row.elts[position] for row in rows if isinstance(row, (ast.Tuple, ast.List))]
+            )
+            names |= tainted(element, column)
+        return names
+
     def function_locals(node: ast.FunctionDef | ast.AsyncFunctionDef) -> set[str]:
         names = argument_names(node.args)
         external: set[str] = set()
@@ -158,10 +184,12 @@ def manifest_reads(tree: ast.AST, aliases: dict[str, str]) -> list[str]:
                         self.visit(generator.iter)
                     manifest = is_manifest(generator.iter) if index else first_manifest
                     names = target_names(generator.target)
+                    scopes[-1][1].difference_update(names)
                     if manifest:
-                        scopes[-1][1].update(names)
-                    else:
-                        scopes[-1][1].difference_update(names)
+                        display = (
+                            generator.iter.elts if isinstance(generator.iter, (ast.List, ast.Tuple, ast.Set)) else None
+                        )
+                        scopes[-1][1].update(tainted(generator.target, display))
                     self.visit(generator.target)
                     for condition in generator.ifs:
                         self.visit(condition)
@@ -375,6 +403,29 @@ def test_comprehension_tuple_targets_and_later_iterables_use_local_bindings():
     )
     assert offenders(source, module="gw_work.commands") == []
     assert offenders(source + "manifest.read_text()\n", module="gw_work.commands") == ["manifest.read_text()"]
+
+
+UNPACKED = (
+    # (target, iterable, read, forbidden)
+    ("manifest, other", '[(Path("workspace.yaml"), Path("notes.md"))]', "other", False),
+    ("manifest, other", '[(Path("workspace.yaml"), Path("notes.md"))]', "manifest", True),
+    ("a, (b, c)", '[(Path("notes.md"), (Path("workspace.yaml"), Path("x.md")))]', "b", True),
+    ("a, (b, c)", '[(Path("notes.md"), (Path("workspace.yaml"), Path("x.md")))]', "a", False),
+    ("a, (b, c)", '[(Path("notes.md"), (Path("workspace.yaml"), Path("x.md")))]', "c", False),
+    ("a, b", "rows", "a", True),
+    ("a, b", "rows", "b", True),
+    ("a, b", '[(Path("workspace.yaml"), Path("n.md"), 1)]', "b", True),
+    ("a, *b", '[(Path("workspace.yaml"), Path("n.md"))]', "b", True),
+    ("a, b", '[(Path("n.md"), Path("workspace.yaml")), x]', "a", True),
+)
+
+
+@pytest.mark.parametrize("template", COMPREHENSIONS)
+@pytest.mark.parametrize("target,items,read,forbidden", UNPACKED)
+def test_unpacked_comprehension_targets_are_attributed_per_position(template, target, items, read, forbidden):
+    expression = template.replace("for manifest", f"for {target}").format(read=f"{read}.read_text()", items=items)
+    source = f"from pathlib import Path\nrows = [Path('workspace.yaml')]\nnotes = {expression}\n"
+    assert bool(offenders(source, module="gw_work.commands")) is forbidden
 
 
 def test_shipped_source_and_tests_obey_boundary():

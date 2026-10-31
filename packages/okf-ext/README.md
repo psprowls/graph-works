@@ -47,7 +47,7 @@ v0.2.0 declares three unconditional dependencies:
 
   `moves` adds **no dependency of its own**. It needs `markdown-it-py>=3`,
   which `tables` already declares for `okf_ext.body`, and which
-  `okf_ext.moves.locate` also imports directly for `reference_definitions` —
+  `okf_ext.locate` (formerly `okf_ext.moves.locate`) also imports directly for `reference_definitions` —
   reaching into `okf_io._md` would couple this package to a private module of
   the one it sits above, the same reason `okf_ext.body` parses headings and
   code-block ranges itself rather than reusing the core's parse.
@@ -63,7 +63,7 @@ v0.2.0 declares three unconditional dependencies:
   okf-io floors it.
 
   **This one is the documented exception to the extras rule above**, and the
-  exception is narrow. Only `body`, `render` and `moves.locate` import it, so
+  exception is narrow. Only `body`, `render` and `locate` import it, so
   the rule says it should be an extra with an `ImportError` naming that extra
   — but okf-io *hard-depends* on `markdown-it-py`, so no installation of
   okf-ext can be missing it and the guard could never fire. An extra whose
@@ -291,6 +291,8 @@ and `okf_ext.writing` in the `layers` contract and is listed in `SHARED` in
 needs nothing at all" list above: it is not a capability, and it adds no
 dependency, no extra, and no `ImportError` guard -- its `fcntl` and `msvcrt`
 imports are both branch-local, inside `locked()`, never at module scope.
+
+`okf_ext.locate` is the sixth hoist: the move locator moved out of `moves` into the shared layer because the read index (schema v2, which stores each document's link and reference-definition targets in a `refs` table) needs the same scan; `okf_ext.moves.locate` re-exports it for one minor version, and `locate.py` is listed in `SHARED`. The raw-text touched scan in `moves` (percent decoding, NFC, conservative admission of backslash, ampersand and doubled single quote) now serves only the reparent fallback path when the read index is unusable; the index path selects candidates from stored targets and admits no escape syntax.
 
 **Honest weakness:** CI is deferred until the repository has a remote, so both
 checks run from `just check` — a gate a human or agent must invoke, not one a

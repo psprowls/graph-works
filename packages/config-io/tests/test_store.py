@@ -198,10 +198,86 @@ def test_write_preserves_insertion_order(tmp_path):
 )
 def test_the_four_reformatted_scalars_round_trip_to_the_same_value(tmp_path, value):
     # These four emit differently than PyYAML did. All four must read back
-    # identical -- the reformat is cosmetic, the value is the contract.
+    # identical -- on a fresh file the reformat is cosmetic, the value is the contract.
     store = PlainYamlStore(tmp_path / "config.yaml")
     store.write({"k": value})
     assert store.read() == {"k": value}
+
+
+_AUTHORED = """\
+# Header comment.
+topic: "repro"  # inline note
+workflow:
+  rules:
+    - match: {stage: finish}
+      prompt_tail: |-
+        line one
+        line two
+  other: 'single'
+ignore:
+  - "ws/**"
+  - ".."
+"""
+
+
+def _authored(tmp_path, text=_AUTHORED):
+    store = _store(tmp_path, text)
+    return store, store.read()
+
+
+def test_write_over_an_existing_file_changes_only_the_mutated_line(tmp_path):
+    store, data = _authored(tmp_path)
+    data["topic"] = "other"  # same width: ruamel pins an inline comment to its original column
+    store.write(data)
+    assert store.path.read_text(encoding="utf-8") == _AUTHORED.replace('"repro"', '"other"')
+
+
+def test_write_appends_an_added_nested_key_and_leaves_existing_text_alone(tmp_path):
+    store, data = _authored(tmp_path)
+    data["auto_drive"] = {"max_parallel": 3}
+    store.write(data)
+    assert store.path.read_text(encoding="utf-8") == _AUTHORED + "auto_drive:\n  max_parallel: 3\n"
+    assert store.read() == data
+
+
+def test_write_removing_a_key_keeps_the_surrounding_comments(tmp_path):
+    store, data = _authored(tmp_path)
+    del data["workflow"]["other"]
+    store.write(data)
+    assert store.path.read_text(encoding="utf-8") == _AUTHORED.replace("  other: 'single'\n", "")
+
+
+@pytest.mark.parametrize(
+    "text",
+    ["items:\n  - a\n  - b\n", "items:\n- a\n- b\n"],
+    ids=["offset-2", "flush"],
+)
+def test_write_keeps_the_sequence_style_it_found(tmp_path, text):
+    store, data = _authored(tmp_path, text)
+    data["n"] = 1
+    store.write(data)
+    assert store.path.read_text(encoding="utf-8") == text + "n: 1\n"
+
+
+def test_write_replaces_a_sequence_whose_length_changed(tmp_path):
+    store, data = _authored(tmp_path)
+    data["ignore"] = ["x"]
+    store.write(data)
+    assert store.read()["ignore"] == ["x"]
+    assert store.path.read_text(encoding="utf-8").startswith(_AUTHORED.split("ignore:")[0])
+
+
+def test_write_replaces_a_node_whose_type_changed(tmp_path):
+    store, data = _authored(tmp_path)
+    data["topic"] = {"a": 1}
+    store.write(data)
+    assert store.read() == data
+
+
+def test_write_to_an_empty_file_uses_the_plain_dump(tmp_path):
+    store = _store(tmp_path, "")
+    store.write({"a": 1, "b": {"c": [1, 2]}})
+    assert store.path.read_text(encoding="utf-8") == "a: 1\nb:\n  c:\n  - 1\n  - 2\n"
 
 
 # --- LayeredYamlStore ------------------------------------------------------

@@ -138,6 +138,7 @@ def test_gate_wait_collects_a_finished_result(env):
     assert gate_wait_facts(env.layout, LATER)["term_a"]["state"] == "wake_failed"
     done = run_gate_wait(env.layout, env.path, run_id=rid, timeout=0, clock=CLOCK, sleep=no_sleep, today=TODAY)
     assert done.status == "finished"
+    assert done.tree_changed is False
     assert record_of(env, rid)["waiters"][0]["woken"]["status"] == "collected"
     assert gate_wait_facts(env.layout, LATER)["term_a"]["state"] == "woken"
 
@@ -183,3 +184,16 @@ def test_a_running_wait_collects_nothing(env):
     done = run_gate_wait(env.layout, env.path, run_id=rid, timeout=0, clock=CLOCK, sleep=no_sleep, today=TODAY)
     assert done.status in ("running", "queued")
     assert record_of(env, rid)["waiters"][0]["woken"] is None
+
+
+def test_gate_wait_reports_a_changed_tree(env):
+    rid = notified(env)
+    record = runs_dir(env.layout) / f"{rid}.json"
+    gate_runner.execute(
+        record, wall=lambda: NOW, monotonic=iter([0.0, 1.0]).__next__, sleep=no_sleep, wake=lambda t, line: None
+    )
+    data = json.loads(record.read_text(encoding="utf-8"))
+    data["result"]["tree_changed"] = True
+    record.write_text(json.dumps(data), encoding="utf-8")
+    done = run_gate_wait(env.layout, env.path, run_id=rid, timeout=0, clock=CLOCK, sleep=no_sleep, today=TODAY)
+    assert done.status == "finished" and done.tree_changed is True

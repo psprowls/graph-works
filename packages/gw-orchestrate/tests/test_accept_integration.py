@@ -130,3 +130,15 @@ def test_accept_on_own_decision_owner_leaf(tmp_path):
     assert "decisions" in page and "finish-receipt" in page
     assert page.count("[^finish-receipt]:") == 1
     assert read_finish_receipt(layout, OWNER)[1][0].evidence == "accepted"
+
+
+def test_accept_and_inspect_survive_a_removed_item_worktree(tmp_path):
+    repo, source, sha = hand_integrated(tmp_path)
+    layout = workspace(tmp_path, repo, source)
+    git(repo, "worktree", "remove", "--force", str(source))
+
+    result = accept(layout, sha)
+
+    assert (result.refusal, result.applied) == (None, True)
+    verification = inspect_finish(layout, OWNER)
+    assert verification.complete and verification.accepted == ("code",) and verification.resolved_in == sha

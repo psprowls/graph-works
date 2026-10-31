@@ -65,7 +65,7 @@ ADR 2026-08-02-quality-gates-enforced) and not part of `just check`'s default pa
 invoking it — actually it *is* listed in `just check`'s dependency chain, so
 running `just` / `just check` does exercise it. What it enforces:
 
-- A `layers` contract: the shared layer (`okf_ext.context`, `okf_ext.body`,
+- A `layers` contract: the shared layer (`okf_ext.context`, `okf_ext.body`, `okf_ext.locate`,
   `okf_ext.splice`/`okf_ext.writing`, `okf_ext.shape`) never imports a
   capability.
 - An `independence` contract: capabilities never import each other (stated
@@ -190,6 +190,7 @@ directly:
   commits writes in the order given and `okf_ext.moves` depends on that
   single order for its no-dangling-reference invariant — two engines would
   mean two orders with no way to interleave them.
+- `okf_ext.locate` — the move locator (`destinations`, `reference_definitions` and their document variants), hoisted out of `moves` when the read index needed the same scan to store reference targets; `okf_ext.moves.locate` is a re-export shim kept for one minor version.
 - `okf_ext.splice` — five generic line-list primitives (dominant newline,
   trailing-newline state, assembly, insertion, the separating blank),
   hoisted out of `tables/splice.py` when `sections` needed the same five.
@@ -255,7 +256,9 @@ failure modes with no signal at the API level:
   and NFC, also ignoring whitespace for folded/wrapped YAML scalars. Any
   backslash, ampersand or doubled single quote admits a candidate conservatively
   because Markdown/YAML escapes can hide the basename. Extra candidates cost
-  parses; exact full/partial equivalence is pinned end to end.
+  parses; exact full/partial equivalence is pinned end to end. This scan now
+  serves only the reparent fallback path (no usable read index): the index path
+  selects candidates from stored link targets and admits no escape syntax.
 
 Do not attempt to "fix" any of these opportunistically inside an unrelated
 change — each is deliberate-and-documented with an explicit reason closing it

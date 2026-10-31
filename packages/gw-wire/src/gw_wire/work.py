@@ -735,6 +735,7 @@ def gate_wait_payload(result: GateWaitResult, path: str, *, warnings: Sequence[s
         "receipt_path": result.receipt_path,
         "units": [{"name": name, "exit": exit_value} for name, exit_value in result.units],
         "repo_wide_exit": result.repo_wide_exit,
+        "tree_changed": result.tree_changed,
         "warnings": list(warnings),
         "refusal": _gate_refusal(result.refusal, result.detail),
     }

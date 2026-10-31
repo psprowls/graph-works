@@ -18,10 +18,11 @@ from pathlib import Path, PurePosixPath
 from sys import platform
 from types import MappingProxyType
 
+from okf_ext.moves import subtree_members
 from okf_ext.readindex import Diagnostics, MemberRow, PageContent, ReadIndex, StoredContent, member_row, read_content
 from okf_ext.readindex.view import IndexView
 from okf_io import Document, Heading, Link, Unreadable, resolve_member
-from okf_io.bundle import MemberKind, canonical_id
+from okf_io.bundle import MemberKind, Walk, canonical_id
 from work_tracker_okf.items import IGNORE
 from work_tracker_okf.paths import parse_item_path
 from work_tracker_okf.snapshot import WorkSnapshot
@@ -29,6 +30,7 @@ from work_tracker_okf.snapshot import WorkSnapshot
 from gw_kernel.read_session.bundle_backend import BundleSession
 from gw_kernel.read_session.location import warn_fallback
 from gw_kernel.read_session.model import Backend, FallbackReason
+from gw_kernel.read_session.moves import MoveSelection, needles
 from gw_kernel.workspace.bundle import ignored_by
 
 
@@ -50,12 +52,14 @@ class IndexSession:
         root: Path,
         db_path: Path,
         documents: Mapping[tuple[str, str], Document] | None = None,
+        inventory: Walk | None = None,
     ) -> None:
         self._index = index
         self._view = view
         self._root = root
         self._db_path = db_path
         self._documents: dict[tuple[str, str], Document] = dict(documents or {})
+        self._inventory = inventory
         self._bundle: BundleSession | None = None
         self._served = False
         self._unreadable: frozenset[str] | None = None
@@ -281,6 +285,34 @@ class IndexSession:
 
     def release_documents(self) -> None:
         self._documents = {}
+        self._inventory = None
+
+    def move_selection(self, roots: Sequence[str]) -> MoveSelection | str:
+        """The walk, candidate names and reconcile Documents for moving *roots*, or a fallback reason."""
+        if self._bundle is not None:
+            return self._bundle.fallback or "unavailable"
+        inventory = self._inventory
+        if inventory is None:
+            return "unavailable"
+        if inventory.unreadable_dirs:
+            return "unreadable directories"
+
+        def on_index() -> MoveSelection | str:
+            candidates = (
+                subtree_members(inventory, roots)
+                | self._view.referrers(roots)
+                | self._view.mentions(needles(roots))
+                | frozenset(self._view.diagnostics().parse_errors)
+                | self._unreadable_files()
+            )
+            return MoveSelection(
+                inventory, candidates, MappingProxyType({mid: doc for (mid, _), doc in self._documents.items()})
+            )
+
+        def on_bundle(bundle: BundleSession) -> MoveSelection | str:
+            return bundle.fallback or "unavailable"
+
+        return self._guard(on_index, on_bundle)
 
     def _outlinks(self, cid: str, ignore: Sequence[str]) -> tuple[Link, ...]:
         return () if ignored_by(cid + ".md", ignore) else self._view.outlinks(cid)

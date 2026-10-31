@@ -69,7 +69,7 @@ def item(workspace, stage):
 def rules(workspace):
     manifest = workspace / "workspace.yaml"
     with manifest.open("a", encoding="utf-8", newline="") as stream:
-        stream.write("\nroles: {research: {model_id: preserved-model}}\ncustom: {keep: true}\n")
+        stream.write("\nroles: {research: {model_id: preserved-model}}\nread_index: {enabled: true}\n")
     (workspace / "workflow.yaml").write_text(
         "workflow:\n  auto_drive: {max_parallel: 3, supervise_merges: false}\n"
         "pipeline:\n  rules:\n  - name: shared-model\n    match: {}\n"
@@ -123,7 +123,7 @@ def test_synced_workspace_cli_profile_reaches_orca_and_durable_receipt(workspace
     assert sync.exit_code == 0, sync.output
     projection = json.loads((workspace / ".gw/cache/config.json").read_text())
     assert projection["roles"]["research"]["model_id"] == "preserved-model"
-    assert projection["custom"] == {"keep": True}
+    assert projection["read_index"] == {"enabled": True}
     assert projection["workflow"]["auto_drive"]["max_parallel"] == 3
     assert projection["workflow"]["auto_drive"]["supervise_merges"] is False
     next_result = invoke(workspace, "work", "next", path)

@@ -28,6 +28,7 @@ topic: Seam
 layout:
   bundle_dir: okf
   config_dir: .gw/config
+  worktrees_dir: yes
 repositories:
   gw:
     path: ../code
@@ -43,7 +44,6 @@ roles:
   librarian:
     model_id: some-model
 workflow_config: dispatch.yaml
-quirk: yes
 """
 
 
@@ -109,13 +109,13 @@ def test_the_projection_agrees_with_the_store(tmp_path: Path) -> None:
 
 
 def test_a_yaml_1_1_flavoured_scalar_reads_as_a_string_through_every_reader(tmp_path: Path) -> None:
-    # The defect this item removes, as a property. `quirk: yes` was `True`
+    # The defect this item removes, as a property. `layout.worktrees_dir: yes` was `True`
     # through PlainYamlStore (PyYAML, YAML 1.1) and `'yes'` through
     # `load_config` (ruamel, YAML 1.2). After D-001 there is one answer.
     layout = _workspace(tmp_path)
 
-    assert manifest.manifest_store(layout.manifest_path).read_explicit()["quirk"] == "yes"
-    assert manifest.workspace_store(layout).read_explicit()["quirk"] == "yes"
+    assert manifest.manifest_store(layout.manifest_path).read_explicit()["layout"]["worktrees_dir"] == "yes"
+    assert manifest.workspace_store(layout).read_explicit()["layout"]["worktrees_dir"] == "yes"
     # `state_gate.enabled` is the reachable boolean key, and it is a real
     # boolean here, so the catalog accepts it through the checked resolver.
     assert manifest.resolve_checked_key(layout, "state_gate.enabled", environ={}).value is True

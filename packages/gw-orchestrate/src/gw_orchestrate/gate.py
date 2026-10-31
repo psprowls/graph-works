@@ -9,6 +9,7 @@ import re
 import shlex
 import subprocess
 import sys
+import threading
 import time
 from collections.abc import Callable, Mapping, Sequence
 from contextlib import suppress
@@ -1129,7 +1130,8 @@ def spawn_runner(record_path: Path) -> None:
             options["creationflags"] = WINDOWS_DETACHED_FLAGS
         else:
             options["start_new_session"] = True
-        subprocess.Popen(argv, **options)
+        proc = subprocess.Popen(argv, **options)
+    threading.Thread(target=proc.wait, name="gate-runner-reaper", daemon=True).start()
     _await_runner_started(record_path, RUNNER_START_TIMEOUT)
 
 
@@ -1157,6 +1159,7 @@ class GateWaitResult:
     units: tuple[tuple[str, int], ...] = ()
     repo_wide_exit: int | None = None
     position: int | None = None
+    tree_changed: bool | None = None
 
 
 def _wait_refusal(detail: str) -> GateWaitResult:
@@ -1347,6 +1350,7 @@ def _gate_wait(
                 return GateWaitResult(
                     "finished", None, detail, rid, code, recorded, log_path, tail if isinstance(tail, str) else None,
                     f"{path}/references/03-gate-receipts.md" if mine else None, units, wide_exit,
+                    tree_changed=entry.tree_changed,
                 )  # fmt: skip
         elif not alive:
             return GateWaitResult("orphaned", None, "runner is not alive and left no result", rid, None, False,

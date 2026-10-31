@@ -148,6 +148,27 @@ def test_finish_inspection_refuses_missing_receipt_and_guard_tracks_raw_preimage
     assert finish.finish_read_guard(layout, "work/missing") != first
 
 
+def test_finish_guard_tracks_the_workflow_file_pair(tmp_path):
+    layout = workspace(tmp_path)
+    member = _page(layout)
+    shared = layout.root / "dispatch.yaml"
+    first = finish.finish_read_guard(layout, member)
+    shared.write_text("workflow: {}\n", encoding="utf-8", newline="\n")
+    second = finish.finish_read_guard(layout, member)
+    assert second != first
+    shared.with_name("dispatch.local.yaml").write_text("workflow: {}\n", encoding="utf-8", newline="\n")
+    assert finish.finish_read_guard(layout, member) != second
+
+
+def test_finish_guard_survives_a_workspace_without_a_workflow_file(tmp_path):
+    layout = workspace(tmp_path)
+    member = _page(layout)
+    layout.manifest_path.write_text("version: 1\n", encoding="utf-8", newline="\n")
+    first = finish.finish_read_guard(layout, member)
+    layout.manifest_path.write_text("version: 1\nworkflow_config: dispatch.yaml\n", encoding="utf-8", newline="\n")
+    assert finish.finish_read_guard(layout, member) != first
+
+
 def _receipt(layout, member, entries):
     path = artifact_ref(member, MANAGED_ARTIFACTS["finish-receipt"]).path(layout.bundle_dir)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -167,7 +188,7 @@ def test_finish_inspection_accepts_attributed_evidence_and_rejects_extra_reposit
     target = finish.FinishTarget(
         ItemRepo("code", layout.root, "sole"), str(layout.root), "main", "main", str(layout.root)
     )
-    monkeypatch.setattr(finish, "resolve_finish_targets", lambda *_: finish.FinishPlan((target,), ()))
+    monkeypatch.setattr(finish, "resolve_finish_targets", lambda *_, **__: finish.FinishPlan((target,), ()))
     entry = finish.VerifiedIntegration(
         "code", "main", sha, "main", sha, "attested", "accepted", accepted_by="pat", reason="reviewed"
     )

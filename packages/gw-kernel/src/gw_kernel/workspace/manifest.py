@@ -27,6 +27,7 @@ come for free, and roughly 250 lines of bespoke checking does not get written.
 
 from __future__ import annotations
 
+import difflib
 import json
 import os
 from collections.abc import Mapping, Sequence
@@ -475,6 +476,64 @@ def dispatch_store(path: str | Path) -> LayeredYamlStore:
     return LayeredYamlStore(base=PlainYamlStore(shared_path), overlay=PlainYamlStore(local_path))
 
 
+def _unknown_manifest_leaves(layer: Mapping[str, object]) -> list[str]:
+    """Dotted leaves of *layer* that match no stored catalog entry, in document order.
+
+    Walks the mapping against the catalog's key segments, so a `*` segment
+    matches exactly one mapping key whatever characters it holds. `workflow.*`
+    leaves are left to `check_legacy_workflow_keys`, which owns their message,
+    and an `env-only` entry is never read from a file, so it counts as unknown.
+    """
+    patterns = [entry.key.split(".") for entry in CATALOG if entry.kind != "env-only"]
+    unknown: list[str] = []
+
+    def walk(node: Mapping[str, object], depth: int, live: list[list[str]], prefix: str) -> None:
+        for raw_key, child in node.items():
+            key = str(raw_key)
+            dotted_key = f"{prefix}.{key}" if prefix else key
+            if depth == 0 and key == "workflow":
+                continue
+            matching = [p for p in live if len(p) > depth and p[depth] in ("*", key)]
+            if not matching:
+                unknown.extend(_leaf_paths(child, dotted_key))
+            elif isinstance(child, Mapping) and not any(len(p) == depth + 1 for p in matching):
+                walk(child, depth + 1, matching, dotted_key)
+            # Otherwise the key is known and only its value's shape is in question
+            # (a leaf holding a mapping, a block left null): `checked`'s concern, not the key guard's.
+
+    walk(layer, 0, patterns, "")
+    return unknown
+
+
+def _leaf_paths(value: object, prefix: str) -> list[str]:
+    if isinstance(value, Mapping) and value:
+        return [leaf for key, child in value.items() for leaf in _leaf_paths(child, f"{prefix}.{key}")]
+    return [prefix]
+
+
+def check_unknown_manifest_keys(
+    *,
+    manifest_path: Path,
+    base: Mapping[str, object],
+    local_manifest_path: Path,
+    overlay: Mapping[str, object],
+) -> None:
+    """Refuse a manifest layer carrying a key outside the config catalog.
+
+    A hand-edited manifest bypasses config-io's set-time key check, so a
+    misspelled key would otherwise be accepted and its setting silently never
+    applied. Reject rather than warn, as the workflow file does.
+    """
+    for path, layer in ((manifest_path, base), (local_manifest_path, overlay)):
+        unknown = _unknown_manifest_leaves(layer)
+        if not unknown:
+            continue
+        key = unknown[0]
+        near = difflib.get_close_matches(key, [e.key for e in CATALOG if e.kind != "env-only"], n=3, cutoff=0.4)
+        hint = f"; did you mean: {', '.join(near)}" if near else ""
+        raise WorkspaceError(f"{path}: unknown key {key}{hint}")
+
+
 def read(path: str | Path, *, environ: Mapping[str, str] | None = None) -> Manifest:
     """Read and resolve *path*.
 
@@ -499,6 +558,12 @@ def read(path: str | Path, *, environ: Mapping[str, str] | None = None) -> Manif
         store = manifest_store(path)
         resolved = resolve_all(CATALOG, store=store, environ={} if environ is None else environ)
         check_legacy_workflow_keys(
+            manifest_path=path,
+            base=store.read_base_explicit(),
+            local_manifest_path=store.overlay.path,
+            overlay=store.read_overlay_explicit(),
+        )
+        check_unknown_manifest_keys(
             manifest_path=path,
             base=store.read_base_explicit(),
             local_manifest_path=store.overlay.path,
@@ -600,6 +665,12 @@ def _manifest_layers(layout: WorkspaceLayout) -> tuple[LayeredYamlStore, dict[st
     except StoreValidationError as exc:
         raise WorkspaceError(str(exc)) from exc
     check_legacy_workflow_keys(
+        manifest_path=layout.manifest_path,
+        base=base,
+        local_manifest_path=layout.local_manifest_path,
+        overlay=overlay,
+    )
+    check_unknown_manifest_keys(
         manifest_path=layout.manifest_path,
         base=base,
         local_manifest_path=layout.local_manifest_path,

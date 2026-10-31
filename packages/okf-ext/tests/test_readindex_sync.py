@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 from ext_helpers import write
-from okf_ext.readindex import IndexBusy, open_index, reconcile, sync
+from okf_ext.readindex import IndexBusy, open_index, read, reconcile, sync
 from okf_io import Document
 from readindex_helpers import age, tree
 
@@ -521,3 +521,73 @@ def test_documents_sink_update_error_propagates_after_publication(tmp_path: Path
         ]
         result = reconcile(index)
         assert result.generation == 1 and result.parsed == 0 and not result.published
+
+
+def _refs(index) -> list[tuple[str, str, str]]:
+    return index.connection.execute(
+        "SELECT member, form, target_canonical FROM refs ORDER BY member, ordinal"
+    ).fetchall()
+
+
+def test_refs_store_every_planner_reference_form(tmp_path: Path) -> None:
+    root = tree(
+        tmp_path / "b",
+        {
+            "docs/r.md": (
+                "---\ntitle: R\ntype: Thing\n---\n"
+                "[a](/work/a.md) [pct](/work/%61.md) [esc](/work/bug\\-x.md)\n\n"
+                "[r]: /work/b.md\n\n[[work/c]]\n"
+            ),
+            "work/index.md": "# Work\n[a](a.md)\n",
+            "work/a.md": "A",
+        },
+    )
+    with open_index(tmp_path / "i.db", root) as index:
+        reconcile(index)
+        rows = _refs(index)
+    assert ("docs/r.md", "link", "work/a.md") in rows
+    assert ("docs/r.md", "destination", "work/a.md") in rows
+    # parse_destination does not unescape `\\-`; the unescaped target is the graph's `link` form.
+    assert ("docs/r.md", "link", "work/bug-x.md") in rows
+    assert ("docs/r.md", "definition", "work/b.md") in rows
+    assert ("docs/r.md", "wikilink", "work/c") in rows
+    assert ("work/index.md", "link", "work/a.md") in rows
+
+
+def test_refs_are_replaced_and_removed_with_their_member(tmp_path: Path) -> None:
+    root = tree(tmp_path / "b", {"docs/r.md": "[a](/work/a.md)\n", "work/a.md": "A"})
+    with open_index(tmp_path / "i.db", root) as index:
+        reconcile(index)
+        assert _refs(index) == [("docs/r.md", "link", "work/a.md"), ("docs/r.md", "destination", "work/a.md")]
+        write(root / "docs/r.md", "[c](/work/c.md)\n")
+        reconcile(index)
+        assert {t for _, _, t in _refs(index)} == {"work/c.md"} or {t for _, _, t in _refs(index)} == {"work/c"}
+        (root / "docs/r.md").unlink()
+        reconcile(index)
+        assert _refs(index) == []
+
+
+def test_index_and_log_refs_do_not_change_backlinks_or_broken(tmp_path: Path) -> None:
+    files = {"work/a.md": "A", "docs/r.md": "[x](/work/a.md)\n"}
+    without = tree(tmp_path / "without", dict(files))
+    with_index = tree(tmp_path / "with", {**files, "work/index.md": "# W\n[a](a.md) [z](zz.md)\n"})
+    seen = []
+    for n, root in enumerate((without, with_index)):
+        with open_index(tmp_path / f"i{n}.db", root) as index:
+            reconcile(index)
+            with read(index) as view:
+                seen.append((view.backlinks("work/a"), view.broken()))
+    assert seen[0] == seen[1]
+
+
+def test_reconcile_returns_the_walk_it_verified(tmp_path: Path) -> None:
+    from okf_io.bundle import walk
+
+    root = tree(tmp_path / "b", {"a.md": "A", "d/b.md": "B"})
+    with open_index(tmp_path / "i.db", root) as index:
+        expected = sorted(m.id for m in walk(root).members)
+        result = reconcile(index)
+        assert sorted(m.id for m in result.inventory.members) == expected  # type: ignore[union-attr]
+        from dataclasses import replace
+
+        assert replace(result, inventory=None) == result

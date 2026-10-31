@@ -24,6 +24,7 @@ from okf_io.bundle import walk
 from work_tracker_okf import load_items
 from work_tracker_okf.cli import _apply_mutation
 from work_tracker_okf.items import ARCHIVE_IGNORE, IGNORE
+from workspace_fixture import index_arm
 
 FIXTURES = Path(__file__).resolve().parents[3] / "work-tracker-okf" / "tests"
 CASES = [
@@ -104,13 +105,15 @@ def _postcondition_comparison(layout, partial, plan, scratch):
         assert (scratch / write.member).read_bytes() == write.after
 
 
+@pytest.mark.parametrize("arm", ["index", "scan"])
 @pytest.mark.parametrize("name,kwargs", CASES, ids=[f"{name}-{i}" for i, (name, _) in enumerate(CASES)])
-def test_existing_fixtures_match_partial_planning_and_validation(tmp_path, monkeypatch, name, kwargs):
+def test_existing_fixtures_match_partial_planning_and_validation(tmp_path, monkeypatch, name, kwargs, arm):
     monkeypatch.syspath_prepend(str(FIXTURES))
     spec = importlib.util.spec_from_file_location("reparent_oracle_fixtures", FIXTURES / "test_reparent.py")
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     validation_layout = _workspace(tmp_path / "metadata")
+    index_arm(validation_layout, arm)
     original_load = module.load_bundle
     lens = []
     metadata_overrides = {}
@@ -135,7 +138,12 @@ def test_existing_fixtures_match_partial_planning_and_validation(tmp_path, monke
             source, parent = source_path, parent_path
             oracle = planner(bundle, items, source, parent)
             layout = replace(validation_layout, bundle_dir=bundle.root)
-            partial, _ = commands._plan_reparent_partial(layout, [source], parent)
+            partial, partial_plan = commands._plan_reparent_partial(layout, [source], parent)
+            notes = [w for w in partial_plan.warnings if w.startswith("read index ")]
+            if arm == "index":
+                assert not notes, notes
+            else:
+                assert len(notes) == 1 and notes[0].startswith("read index disabled"), notes
             selected = loaders.reclassify_ignored(partial, lens)
             selected = replace(selected, **metadata_overrides)
             plan = planner(selected, load_items(selected), source, parent)

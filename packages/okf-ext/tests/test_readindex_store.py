@@ -93,7 +93,17 @@ def test_schema_contains_all_projection_tables_and_no_body(tmp_path: Path) -> No
         assert conn.isolation_level is None
         assert conn.execute("PRAGMA synchronous").fetchone() == (1,)
         tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
-        assert tables == {"meta", "members", "tags", "links", "headings", "unreadable_dirs", "pruned", "collisions"}
+        assert tables == {
+            "meta",
+            "members",
+            "tags",
+            "links",
+            "refs",
+            "headings",
+            "unreadable_dirs",
+            "pruned",
+            "collisions",
+        }
         columns = {row[1] for row in conn.execute("PRAGMA table_info(members)")}
         assert columns == {
             "id",
@@ -315,3 +325,17 @@ def test_close_keeps_sidecars_while_another_connection_is_open(tmp_path: Path) -
     assert Path(f"{db}-wal").exists()
     second.close()
     assert [p.name for p in db.parent.iterdir()] == ["i.sqlite"]
+
+
+def test_v1_database_rebuilds_with_refs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from okf_ext.readindex import store
+
+    db = tmp_path / "i.sqlite"
+    root = tree(tmp_path / "b", {})
+    monkeypatch.setattr(store, "SCHEMA_VERSION", 1)
+    open_index(db, root).close()
+    monkeypatch.setattr(store, "SCHEMA_VERSION", 2)
+    with open_index(db, root) as index:
+        assert index.rebuilt_reason == "schema"
+        tables = {r[0] for r in index.connection.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        assert "refs" in tables

@@ -62,12 +62,14 @@ def _open(layout: WorkspaceLayout, *, reconcile: bool, stack: ExitStack) -> Read
         if index.rebuilt_reason is not None:
             location.logger.warning("read index rebuilt (%s): %s", index.rebuilt_reason, db_path)
         documents: dict[tuple[str, str], Document] = {}
+        inventory = None
         if reconcile or index.rebuilt_reason is not None:
             result = readindex.reconcile(index, documents=documents)
+            inventory = result.inventory
             if result.unsettled:
                 raise readindex.IndexUnavailable(f"unsettled members: {result.unsettled}")
         view = stack.enter_context(readindex.read(index))
-        session = IndexSession(index, view, root=root, db_path=db_path, documents=documents)
+        session = IndexSession(index, view, root=root, db_path=db_path, documents=documents, inventory=inventory)
         stack.callback(session.release_documents)
         return session
     except readindex.IndexBusy as exc:

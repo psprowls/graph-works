@@ -121,8 +121,6 @@ def _target(
     target = next((t for t in plan.targets if t.repo.name == repo_name), None)
     if target is None:
         raise _Refused("no-target", f"{repo_name}: not an owned finish target of {path}")
-    if target.target_worktree is None:
-        raise _Refused("no-target", f"{repo_name}: {target.target_branch!r} is not checked out in any worktree")
     return item, target, Path(target.target_worktree), plan
 
 

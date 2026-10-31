@@ -8,7 +8,7 @@ from dataclasses import replace
 from datetime import date
 
 import pytest
-from gw_kernel.testing.transactions import workspace as _workspace
+from gw_kernel.testing.transactions import workspace as _base_workspace
 from gw_kernel.workspace import bundle as loaders
 from gw_pipeline import transactions
 from gw_work import commands
@@ -17,6 +17,7 @@ from test_reparent_fixture_equivalence import _postcondition_comparison
 from work_tracker_okf import load_items
 from work_tracker_okf.items import IGNORE
 from work_tracker_okf.reparent import plan_reparent_many
+from workspace_fixture import index_arm
 
 
 def _write(layout, path, *, kind="Bug", target=None, terminal=False, needs="resolved"):
@@ -30,6 +31,41 @@ def _write(layout, path, *, kind="Bug", target=None, terminal=False, needs="reso
         encoding="utf-8",
         newline="",
     )
+
+
+_ARM = {"mode": "index"}
+# Tests that pin behavior only the touched-scan path has.
+SCAN_ONLY = {
+    "test_unreadable_directory_uses_full_walk_fallback",
+    "test_dependency_context_matches_full_findings",
+    "test_dependency_fallback_reuses_seed_documents_and_parses_every_admitted_member_once",
+    "test_dependency_on_loaded_sibling_also_completes_remote_context",
+}
+# Tests that choose their own arm (they build the fallback themselves).
+ARM_FREE = {
+    "test_index_dependency_context_matches_full_findings",
+    "test_index_fallback_arms_match_full_plan",
+    "test_first_reparent_after_v1_database_matches_full_plan",
+}
+
+
+def pytest_generate_tests(metafunc):
+    if "arm" in metafunc.fixturenames:
+        name = metafunc.function.__name__
+        arms = ["index"] if name in ARM_FREE else ["scan"] if name in SCAN_ONLY else ["index", "scan"]
+        metafunc.parametrize("arm", arms, indirect=True)
+
+
+@pytest.fixture(autouse=True)
+def arm(request):
+    _ARM["mode"] = request.param
+    return request.param
+
+
+def _workspace(path):
+    layout = _base_workspace(path)
+    index_arm(layout, _ARM["mode"])
+    return layout
 
 
 def _shape(plan):
@@ -49,16 +85,34 @@ def _findings(layout, bundle, plan):
     )
 
 
-def _compare(layout, sources, parent):
+def _strict_read_index_warnings(plan, expected):
+    """The index arm warns nothing; every other arm warns exactly once, naming *expected*."""
+    notes = [w for w in plan.warnings if w.startswith("read index ")]
+    if expected is None:
+        assert not notes, notes
+    else:
+        assert len(notes) == 1 and notes[0].startswith(f"read index {expected}"), notes
+
+
+def _sans_read_index(plan):
+    return replace(plan, warnings=tuple(w for w in plan.warnings if not w.startswith("read index ")))
+
+
+def _compare(layout, sources, parent, *, expected=...):
+    if expected is ...:
+        expected = None if _ARM["mode"] == "index" else "disabled"
     full = loaders.load_workspace_bundle(layout, ignore=())
     oracle = plan_reparent_many(full, load_items(full), sources, parent)
     partial, plan = commands._plan_reparent_partial(layout, sources, parent)
     assert _shape(plan) == _shape(oracle)
+    _strict_read_index_warnings(plan, expected)
     assert (
         tuple(
             w
             for w in plan.warnings
-            if not w.startswith(("dependency context reaches unloaded members;", "touched scan could not read "))
+            if not w.startswith(
+                ("dependency context reaches unloaded members;", "touched scan could not read ", "read index ")
+            )
         )
         == oracle.warnings
     )
@@ -78,6 +132,18 @@ REFERRERS = {
     "depends-on": "---\ntype: Bug\ntitle: R\nwork_status: open\ndepends_on:\n- path: work/a\n---\n",
     "wikilink": "see [[work/a]]\n",
     "parse-error": "---\ntitle: [x\n---\n[x](/work/a.md)\n",
+    "index-body": "# Work\n\n- [a](/work/a.md) - an item\n",
+    "log-body": "## 2026-08-01\n\n- **note** moved [a](/work/a.md)\n",
+    "nfd-referrer": "[x](/work/a.md)\n",
+    "folded-frontmatter": (
+        "---\ntitle: R\nsources:\n- id: d\n  resource: >-\n    /work/a/references/01-design.md\n---\n"
+    ),
+    "title-mention": "---\ntitle: about a\n---\nnothing links here\n",
+}
+REFERRER_MEMBERS = {
+    "index-body": "work/index.md",
+    "log-body": "log.md",
+    "nfd-referrer": "docs/r\u0065\u0301-nfd.md",
 }
 
 
@@ -86,8 +152,8 @@ def test_partial_plan_matches_full_for_referrer_forms(tmp_path, form):
     layout = _workspace(tmp_path)
     _write(layout, "work/e", kind="Epic")
     _write(layout, "work/a")
-    page = layout.bundle_dir / "docs" / f"r-{form}.md"
-    page.parent.mkdir()
+    page = layout.bundle_dir / REFERRER_MEMBERS.get(form, f"docs/r-{form}.md")
+    page.parent.mkdir(exist_ok=True)
     page.write_text(REFERRERS[form], encoding="utf-8", newline="")
     _bundle, plan = _compare(layout, ["work/a"], "work/e")
     if form == "wikilink":
@@ -326,7 +392,7 @@ def test_escaped_references_match_full_plan_findings_and_durable_outcome(tmp_pat
     oracle = plan_reparent_many(full, load_items(full), ["work/bug-x"], "work/destination")
     bundle, plan = _compare(layout, ["work/bug-x"], "work/destination")
     assert "docs/r.md" not in bundle.unloaded
-    assert plan == oracle  # Includes every rendered write byte and full MovePlan.
+    assert _sans_read_index(plan) == oracle  # Includes every rendered write byte and full MovePlan.
     successful = form.startswith("yaml-")
     assert plan.ok == successful
     if successful:
@@ -382,7 +448,7 @@ def test_escaped_references_match_full_plan_findings_and_durable_outcome(tmp_pat
     assert outcomes[0] == outcomes[1]
 
     public = commands.run_reparent(layout, "work/bug-x", "work/destination", dry_run=False)
-    assert public.plan == oracle
+    assert _sans_read_index(public.plan) == oracle
     if successful:
         assert public.application is not None and public.application.ok
         assert _snapshot(layout.bundle_dir) == outcomes[0][0]
@@ -407,3 +473,133 @@ def test_reparent_leaves_source_and_destination_indexes(tmp_path):
     assert result.application is not None and result.application.ok, result.application
     for member, content in before.items():
         assert (layout.bundle_dir / member).read_bytes() == content
+
+
+def test_index_path_skips_escape_syntax_pages(tmp_path, arm):
+    layout = _workspace(tmp_path)
+    _write(layout, "work/e", kind="Epic")
+    _write(layout, "work/a")
+    noise = layout.bundle_dir / "docs/noise.md"
+    noise.parent.mkdir()
+    noise.write_text(
+        "---\ntitle: N\n---\nback\\slash & amp and ''quotes'' but no reference\n", encoding="utf-8", newline=""
+    )
+    partial, _plan = _compare(layout, ["work/a"], "work/e")
+    # The index arm never admits escape syntax; the touched scan does, by design.
+    assert ("docs/noise.md" in partial.unloaded) == (arm == "index")
+
+
+def test_index_path_loads_dependency_closure_without_fallback(tmp_path, arm):
+    layout = _workspace(tmp_path)
+    for root in ["e", "far"]:
+        _write(layout, f"work/{root}", kind="Epic")
+    _write(layout, "work/a", target="work/far/children/b")
+    _write(layout, "work/far/children/b", target="work/c")
+    _write(layout, "work/c")
+    _partial, plan = _compare(layout, ["work/a"], "work/e")
+    if arm == "index":
+        assert not [w for w in plan.warnings if w.startswith("dependency context reaches unloaded members;")]
+
+
+@pytest.mark.parametrize(
+    "variant", ["remote", "cycle", "terminal", "phase-compatible", "absent", "unreadable", "archived", "nfd"]
+)
+def test_index_dependency_context_matches_full_findings(tmp_path, arm, variant):
+    import unicodedata
+
+    layout = _workspace(tmp_path)
+    for root in ["left", "far", "third", "destination"]:
+        _write(layout, f"work/{root}", kind="Epic")
+    a = "work/left/children/bug-a"
+    b = "work/far/children/bug-b"
+    c = "work/third/children/bug-c"
+    cycle = variant in {"cycle", "terminal", "phase-compatible"}
+    target = b
+    if variant == "archived":
+        target = "work/_archive/bug-b"
+        _write(layout, target, terminal=True)
+    elif variant == "nfd":
+        target = unicodedata.normalize("NFD", "work/far/children/bug-café")
+        _write(layout, "work/far/children/bug-café")
+    _write(layout, a, target=target)
+    if variant not in {"absent", "archived", "nfd"}:
+        _write(layout, b, target=c if cycle else None, terminal=variant == "terminal")
+    if cycle:
+        _write(layout, c, target=a, needs="design" if variant == "phase-compatible" else "resolved")
+    if variant == "unreadable":
+        (layout.bundle_dir / f"{b}.md").write_bytes(b"\xffnot UTF-8")
+    _bundle, plan = _compare(layout, [a], "work/destination")
+    assert not [w for w in plan.warnings if w.startswith("dependency context reaches unloaded members;")]
+
+
+def _sans_root(plan):
+    return replace(_sans_read_index(plan), root=None, move_plan=replace(plan.move_plan, root=None))
+
+
+def _fallback_layout(tmp_path, inexact=False):
+    layout = _base_workspace(tmp_path)
+    for root in ["e", "far"]:
+        _write(layout, f"work/{root}", kind="Epic")
+    _write(layout, "work/a", target="work/far/children/b")
+    _write(layout, "work/far/children/b")
+    docs = layout.bundle_dir / "docs"
+    docs.mkdir()
+    (docs / "r.md").write_text("[x](/work/a.md)\n", encoding="utf-8", newline="")
+    if inexact:
+        page = layout.bundle_dir / "work/a.md"
+        text = page.read_text(encoding="utf-8")
+        page.write_text(text.replace("---\n\n", "payload: !!binary YWJj\n---\n\n", 1), encoding="utf-8", newline="")
+    return layout
+
+
+@pytest.mark.parametrize("reason", ["disabled", "busy", "unsettled", "unavailable", "inexact"])
+def test_index_fallback_arms_match_full_plan(tmp_path, arm, monkeypatch, reason):
+    from gw_kernel.read_session import open as opener
+    from okf_ext import readindex
+
+    layout = _fallback_layout(tmp_path / "fallback", inexact=reason == "inexact")
+    expected = reason
+    if reason == "disabled":
+        index_arm(layout, "scan")
+    elif reason == "busy":
+
+        def busy(*args, **kwargs):
+            raise readindex.IndexBusy("held")
+
+        monkeypatch.setattr(opener.readindex, "open_index", busy)
+    elif reason == "unsettled":
+        real = readindex.reconcile
+
+        def unsettled(index, **kwargs):
+            return replace(real(index, **kwargs), unsettled=("work/a.md",))
+
+        monkeypatch.setattr(opener.readindex, "reconcile", unsettled)
+        expected = "unavailable"
+    elif reason == "unavailable":
+
+        def unavailable(*args, **kwargs):
+            raise readindex.IndexUnavailable("gone")
+
+        monkeypatch.setattr(opener.readindex, "open_index", unavailable)
+    else:
+        expected = "unavailable"
+    _bundle, plan = _compare(layout, ["work/a"], "work/e", expected=expected)
+    monkeypatch.undo()
+    # The same corpus on a healthy index must plan identically.
+    layout2 = _fallback_layout(tmp_path / "healthy", inexact=reason == "inexact")
+    index_arm(layout2, "index")
+    healthy_expected = "unavailable" if reason == "inexact" else None
+    _bundle2, healthy = _compare(layout2, ["work/a"], "work/e", expected=healthy_expected)
+    assert _sans_root(plan) == _sans_root(healthy)
+
+
+def test_first_reparent_after_v1_database_matches_full_plan(tmp_path, arm, monkeypatch):
+    from gw_kernel.read_session import open_read_session
+    from okf_ext.readindex import store
+
+    layout = _fallback_layout(tmp_path)
+    monkeypatch.setattr(store, "SCHEMA_VERSION", 1)
+    with open_read_session(layout):
+        pass
+    monkeypatch.setattr(store, "SCHEMA_VERSION", 2)
+    _compare(layout, ["work/a"], "work/e", expected=None)

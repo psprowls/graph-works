@@ -20,9 +20,9 @@ from the skill-doc-routing hook, never from here.
 
 - `workspace.yaml` — the workspace manifest, committed. `layout.bundle_dir` (here:
   `{{BUNDLE_DIR}}`) and the scanned `repositories:` and their `ignore:` globs.
-- `workflow.yaml` — the workflow file, committed, named by the top-level `workflow_config` in `workspace.yaml` (an older workspace may name `dispatch.yaml` instead). It holds exactly two sections. `workflow:` carries `auto_drive.max_parallel`, `auto_drive.max_attend` and `auto_drive.supervise_merges`, `gate.unit_jobs` and `gate.max_concurrent`, and `workspace_commits`. `pipeline:` holds `rules` (per-stage skill, mode, agent, model, `reasoning_effort` and `prompt_tail`, including the seeded `{stage: finish}` relay tail), `path` (which stages an item walks), `artifacts` (each stage's artifact file) and an optional `attributes` match vocabulary. Unknown keys in either section are refused. `gw config get|set|list` read and write the `workflow.*` keys there.
+- `{{WORKFLOW_FILE}}` — the workflow file, committed, which the top-level `workflow_config` key in `workspace.yaml` points at. It holds exactly two sections. `workflow:` carries `auto_drive.max_parallel`, `auto_drive.max_attend` and `auto_drive.supervise_merges`, `gate.unit_jobs` and `gate.max_concurrent`, and `workspace_commits`. `pipeline:` holds `rules` (per-stage skill, mode, agent, model, `reasoning_effort` and `prompt_tail`, including the seeded `{stage: finish}` relay tail), `path` (which stages an item walks), `artifacts` (each stage's artifact file) and an optional `attributes` match vocabulary. Unknown keys in either section are refused. `gw config get|set|list` read and write the `workflow.*` keys there.
 - `workspace.local.yaml` — an optional, gitignored sibling of `workspace.yaml` for per-machine values: a `repositories.<name>.path` that differs on this machine. Mappings deep-merge over `workspace.yaml`; lists and scalars replace; local wins. Born by `gw config set --local <key> <value>`; `gw config get` / `gw config list` report which layer a value came from. `gw bootstrap` keeps its line in the workspace-root `.gitignore`.
-- `workflow.local.yaml` — an optional, gitignored sibling of the workflow file for per-machine values and dispatch rules (e.g. a different agent or model, or `workflow.auto_drive` / `workflow.gate.max_concurrent` limits that suit this box; `gw config set --local workflow.<key> <value>` writes it). Its `workflow:` block deep-merges over the shared file's (local wins); `pipeline:` is not deep-merged: its `pipeline.rules` and `pipeline.path` are appended after the shared file's (later matches win), `pipeline.artifacts` replaces per stage, and `pipeline.attributes` replaces wholesale. A missing file adds nothing; `gw bootstrap` never creates it.
+- `{{WORKFLOW_LOCAL_FILE}}` — an optional, gitignored sibling of the workflow file for per-machine values and dispatch rules (e.g. a different agent or model, or `workflow.auto_drive` / `workflow.gate.max_concurrent` limits that suit this box; `gw config set --local workflow.<key> <value>` writes it). Its `workflow:` block deep-merges over the shared file's (local wins); `pipeline:` is not deep-merged: its `pipeline.rules` and `pipeline.path` are appended after the shared file's (later matches win), `pipeline.artifacts` replaces per stage, and `pipeline.attributes` replaces wholesale. A missing file adds nothing; `gw bootstrap` never creates it.
 - `{{CONFIG_DIR}}/schema/` — per-type JSON Schema (`Bug.schema.json`,
   `Package.schema.json`, …) plus the shared `_base.schema.json` /
   `_base-diataxis.schema.json`. Defines the frontmatter each `type:` requires.
@@ -73,8 +73,8 @@ to the filesystem root.
 <workspace>/
 ├── workspace.yaml            manifest (committed)
 ├── workspace.local.yaml      per-machine overrides (gitignored, optional)
-├── workflow.yaml             workflow settings, dispatch rules, stage path, artifacts (committed)
-├── workflow.local.yaml       per-machine workflow overlay (gitignored, optional)
+├── {{WORKFLOW_FILE}} workflow settings, dispatch rules, stage path, artifacts (committed)
+├── {{WORKFLOW_LOCAL_FILE}} per-machine workflow overlay (gitignored, optional)
 ├── AGENTS.md, CLAUDE.md      this file and its one-line pointer
 ├── scratch/                  handoffs; not bundle content
 ├── {{CONFIG_DIR}}/           schema/, sections/, tags.yaml, cache/, worktrees/
@@ -177,7 +177,7 @@ switches to the next actionable child when a parent is waiting on its subtree.
 
 Frontmatter carries the live state: `phase`, `work_status`, `repo`, `start_sha`, `affects`, `depends_on`, `sources`. An item's branch and worktree are computed from its path, never stored; `gw work place <path>` creates and refreshes them.
 
-Unattended runs go through `/gw:auto-drive`, which dispatches each ready stage as an Orca-supervised worker using the agent and model its dispatch rules in `workflow.yaml` (and `workflow.local.yaml`) resolve, within the `workflow.auto_drive` limits in that file's `workflow:` block. Re-running the same command is the resume path.
+Unattended runs go through `/gw:auto-drive`, which dispatches each ready stage as an Orca-supervised worker using the agent and model its dispatch rules in `{{WORKFLOW_FILE}}` (and `{{WORKFLOW_LOCAL_FILE}}`) resolve, within the `workflow.auto_drive` limits in that file's `workflow:` block. Re-running the same command is the resume path.
 
 ## Frontmatter
 
@@ -275,7 +275,7 @@ For writes no gw verb commits (scan, ingest, page edits, hand edits to work item
 `git commit --only -m "<subject>" -- <paths>`), one commit per logical change, with a
 single-line `workspace:` subject — no body and no trailers.
 
-Never commit `workspace.local.yaml`, `workflow.local.yaml`, or `{{CONFIG_DIR}}/cache/`
+Never commit `workspace.local.yaml`, `{{WORKFLOW_LOCAL_FILE}}`, or `{{CONFIG_DIR}}/cache/`
 (all gitignored by `gw bootstrap`).
 
 If the workspace lives inside the code repository, gw commits nothing under the default

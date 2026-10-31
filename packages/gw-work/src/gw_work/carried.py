@@ -32,7 +32,7 @@ from typing import Final
 
 from gw_kernel.workspace import provenance
 from gw_kernel.workspace.layout import WorkspaceLayout
-from gw_pipeline.landed import landed_since
+from gw_pipeline.landed import LandedMemo, landed_since
 from gw_pipeline.members import confined_member
 from okf_io import Bundle
 from work_tracker_okf.affects import code_affects
@@ -54,6 +54,7 @@ class SlotInput:
     items: tuple[WorkItem, ...]
     item: WorkItem
     stage: str
+    landed_memo: LandedMemo | None = None
 
 
 def _no_data() -> Mapping[str, JsonValue]:
@@ -105,7 +106,7 @@ def _short(sha: str | None) -> str:
 
 def _landed_since(inp: SlotInput) -> SlotFill:
     """Render baseline evidence for `feature-spec-baseline-and-sibling-context`."""
-    result = landed_since(inp.layout, inp.items, inp.item)
+    result = landed_since(inp.layout, inp.items, inp.item, memo=inp.landed_memo)
     if result.code_baseline is None:
         return SlotFill(
             lines=("No spec baseline recorded; landed-since unavailable.",),

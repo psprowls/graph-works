@@ -76,9 +76,14 @@ and `CANONICAL_SCRIPTS_DIR` in `hooks.py`.
 
 The command `gw config hooks enable` writes binds the interpreter that ran
 it as the first argv token (no shell, no `VAR=value` prefix) and renders it
-with `subprocess.list2cmdline` on win32 or `shlex`-equivalent quoting
-elsewhere (`gw_kernel.hooks._quote_command`) — never hand-roll a
-shell-syntax command string here.
+with `subprocess.list2cmdline` plus forced quoting of `& | < > ^ ( )` tokens
+on win32 (a token containing `%` raises `HooksError`: cmd expands it even
+inside quotes) or `shlex`-equivalent quoting elsewhere
+(`gw_kernel.hooks._quote_command`) — never hand-roll a shell-syntax command
+string here. The interpreter path is frozen at enable time, so re-running
+enable compares each registered command to the freshly computed one and
+rewrites a drifted one in place (`HooksResult.updated`); an identical one
+stays in `skipped` and nothing is written.
 
 ## Architecture
 
@@ -95,6 +100,8 @@ or the full load; display reads only, never mutation, lint or guidance paths.
 It defines the protocol and cache location helpers, the lazy `BundleSession`
 and pinned `IndexSession` backends, and the opener's admission and fallback logic.
 An `IndexSession` opened with reconciliation also retains the Documents that reconcile parsed, keyed by (raw member id, sha256), until the session closes; read them through `read_session.reconciled_document(session, …)`, which returns `None` for any session lacking the accessor.
+
+`read_session.move_selection(session, roots)` is the optional reparent capability, the one exception to this package's display-only reads (epic D-108): it returns the reconcile's verified walk, the candidate member names for moving `roots` (subtree, referrers, frontmatter mentions, parse errors, unreadable files) and the reconcile-parsed Documents, or a fallback reason string when the index is not usable. It reads no body. The index it consults is schema v2, which stores each document's link and reference-definition targets in a `refs` table (including index and log members) so referrers are selected without parsing bodies.
 `materialize(session)` copies an open session into a connection-free `SnapshotSession`
 that preserves display reads and ignore overlays after the source closes.
 Display `run_*` reads take `session: ReadSession | None = None` and open through
@@ -159,7 +166,7 @@ pointer naming the workflow file), and the six `workflow.*` keys
 (`auto_drive.max_parallel`/`max_attend`/`supervise_merges`,
 `gate.unit_jobs`/`gate.max_concurrent`, `workspace_commits`), which the catalog
 declares but whose values are homed in the workflow file (`workflow:` block), not
-the manifest; a `workflow.*` key in either manifest layer is refused. A
+the manifest; a `workflow.*` key in either manifest layer is refused. So is any key outside the catalog (`manifest.check_unknown_manifest_keys`, a structural walk where `*` matches one mapping key): a hand-edited typo in `workspace.yaml` or `workspace.local.yaml` fails the read naming the file, the key and near misses, instead of its setting silently never applying; `workspace.dir` is `env-only` and refused in a file too. A
 manifest with no `workflow_config` refuses with "run `gw bootstrap`"; a
 workspace with no `workspace.yaml` at all reads those keys as catalog defaults. `graph_dir` and
 `declarations_dir` are **not** stored in the manifest — they're resolved from
@@ -291,7 +298,7 @@ hand. `today` is always injected; nothing in this package reads the clock.
   `<root>/AGENTS.md` above `## Local Conventions` is lost on the next
   `gw bootstrap`; prose belongs beneath that heading. `CLAUDE.md` at the root
   is always replaced by the `@AGENTS.md` pointer. The renderer is pure and
-  varies on nothing run to run (`initialized_at` comes from the manifest), so
+  varies on nothing run to run (`initialized_at` and the configured workflow file pair come from the manifest, the pair passed in by `plan_init` as `workflow_file` / `workflow_local_file`), so
   a second plan is empty — if it is not, something in the template is
   reading a run-to-run input.
 

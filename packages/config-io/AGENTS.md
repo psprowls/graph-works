@@ -52,8 +52,11 @@ and covers this package too — no separate per-package invocation.
   the only module that imports `yaml`; `LayeredYamlStore` composes two plain
   stores and parses nothing itself. `PlainYamlStore` reads and writes
   **YAML 1.2** through `ruamel.yaml` `typ="safe"` — so `yes`/`no`/`on`/`off`
-  are strings, `012` is twelve, and `1:30` is a string. Writes disable the
-  representer's key sorting, so a one-key `set` does not reorder the file.
+  are strings, `012` is twelve, and `1:30` is a string. Writes to an existing
+  file round-trip it through `typ="rt"` and merge the new data into the loaded
+  tree, so comments, quote styles, block scalars and sequence indentation
+  survive and only the changed keys' lines move; a missing or empty file gets
+  the safe dump, with key sorting disabled so a one-key `set` does not reorder.
 - `registry.py` — resolution (`resolve_key`, `resolve_all`, `expand_wildcards`)
   and the write path (`set_key`, `unset_key`).
 - `projection.py` — `write_projection()`, atomic JSON rendering of a store's

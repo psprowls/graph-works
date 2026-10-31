@@ -158,7 +158,7 @@ gw config set roles.<role>.max_concurrency <n>
 ```
 
 Dispatch rules select skill, mode, prompt_tail, agent, model and reasoning_effort
-with a `match` mapping (for example, `{variant: planned}`). Shared rules apply
+with a `match` mapping (for example, `{stage: execute}`). Shared rules apply
 first; the `.local` sibling of the workflow file (`workflow.local.yaml` by default) appends machine-local rules. Permissions remain the selected agent's existing settings;
 configure them in that agent's settings. See
 `../auto-drive/references/dispatch-configuration.md` for the dispatch guide.

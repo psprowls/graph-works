@@ -12,7 +12,7 @@ markers: the boundary is a heading a reader already understands, and the gw
 body mentions it only as inline code, never as a line of its own.
 
 Nothing in the rendered body varies run to run. `initialized_at` comes from
-the manifest, the two directory names from the layout, the topic from the
+the manifest, the two directory names from the layout, the workflow file pair from the manifest, the topic from the
 manifest -- so a second render is a no-op and `plan_init` stays idempotent.
 
 `CLAUDE.md` is not rendered here at all: it is the one-line pointer
@@ -30,14 +30,25 @@ _TEMPLATE_PATH = Path(__file__).resolve().parent / "assets" / "AGENTS.md.templat
 _UNSET_TOPIC = "(unset)"
 
 
-def _render_body(*, topic: str | None, initialized_at: str, bundle_dir: str, config_dir: str) -> str:
-    """The gw region: the template with its four placeholders filled, ending
+def _render_body(
+    *,
+    topic: str | None,
+    initialized_at: str,
+    bundle_dir: str,
+    config_dir: str,
+    workflow_file: str,
+    workflow_local_file: str,
+) -> str:
+    """The gw region: the template with its six placeholders filled, ending
     in exactly one newline."""
     text = _TEMPLATE_PATH.read_text(encoding="utf-8")
     text = text.replace("{{TOPIC}}", topic if topic is not None else _UNSET_TOPIC)
     text = text.replace("{{INITIALIZED_AT}}", initialized_at)
     text = text.replace("{{BUNDLE_DIR}}", bundle_dir)
     text = text.replace("{{CONFIG_DIR}}", config_dir)
+    # The local name first: neither contains the other, but keep it explicit.
+    text = text.replace("{{WORKFLOW_LOCAL_FILE}}", workflow_local_file)
+    text = text.replace("{{WORKFLOW_FILE}}", workflow_file)
     return text.rstrip("\n") + "\n"
 
 
@@ -61,6 +72,8 @@ def render_context_file(
     initialized_at: str,
     bundle_dir: str,
     config_dir: str,
+    workflow_file: str,
+    workflow_local_file: str,
 ) -> str:
     """Render the full text `AGENTS.md` should hold, given its *existing* text
     (`None` when the file does not yet exist).
@@ -71,7 +84,14 @@ def render_context_file(
     writing. Never raises on content -- a heading on the first line simply
     means the gw region was empty and is replaced whole.
     """
-    body = _render_body(topic=topic, initialized_at=initialized_at, bundle_dir=bundle_dir, config_dir=config_dir)
+    body = _render_body(
+        topic=topic,
+        initialized_at=initialized_at,
+        bundle_dir=bundle_dir,
+        config_dir=config_dir,
+        workflow_file=workflow_file,
+        workflow_local_file=workflow_local_file,
+    )
     return body + "\n" + _local_tail(existing)
 
 

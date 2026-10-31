@@ -41,6 +41,30 @@ def test_set_writes_a_workflow_key_into_the_workflow_file(tmp_path: Path) -> Non
     assert projection["workflow"] == {"auto_drive": {"max_parallel": 3}}
 
 
+def test_set_preserves_the_authored_form_of_the_files_it_writes(tmp_path: Path) -> None:
+    root = _workspace(tmp_path)
+    workflow = (
+        "# guide comment\n"
+        "pipeline:\n"
+        "  rules:\n"
+        "    - match: {stage: finish}\n"
+        "      prompt_tail: |-\n"
+        "        a\n"
+        "        b\n"
+    )
+    manifest = 'version: 1\nworkflow_config: dispatch.yaml\ntopic: "repro"\n'
+    (root / "dispatch.yaml").write_text(workflow, encoding="utf-8")
+    (root / "workspace.yaml").write_text(manifest, encoding="utf-8")
+
+    runner.invoke(config_app, ["set", "workflow.auto_drive.max_parallel", "3", "--workspace", str(root)])
+    runner.invoke(config_app, ["set", "topic", "other", "--workspace", str(root)])
+
+    assert (root / "dispatch.yaml").read_text(
+        encoding="utf-8"
+    ) == workflow + "workflow:\n  auto_drive:\n    max_parallel: 3\n"
+    assert (root / "workspace.yaml").read_text(encoding="utf-8") == manifest.replace('"repro"', '"other"')
+
+
 def test_unset_removes_explicit_value_refreshes_projection_and_reports_default(tmp_path: Path) -> None:
     root = _workspace(tmp_path)
     runner.invoke(config_app, ["set", "workflow.auto_drive.max_parallel", "3", "--workspace", str(root)])

@@ -17,7 +17,7 @@ from config_io import StoreValidationError
 from gw_kernel.workspace.bundle import load_work_bundle, load_workspace_bundle
 from gw_kernel.workspace.errors import WorkspaceConfigError, WorkspaceError
 from gw_kernel.workspace.layout import WorkspaceLayout
-from gw_kernel.workspace.manifest import workspace_store
+from gw_kernel.workspace.manifest import workflow_store, workspace_store
 from gw_kernel.workspace.provenance import (
     GitExecutable,
     GitFailure,
@@ -201,12 +201,20 @@ def resolve_finish_targets(
     path: str,
     *,
     repo_contexts: Mapping[str, RepositoryContext] = MappingProxyType({}),
+    checkouts: Literal["required", "ignored"] = "required",
 ) -> FinishPlan:
     """One target per code repository the item finishes into, from computed placement; no Git mutation.
 
     The orchestration shell may supply its already-observed `repo_contexts` to
     avoid probing those repositories twice.
+
+    `checkouts="ignored"` is for ref-only consumers (inspecting or accepting
+    evidence): it suppresses the "not a usable checkout" and "unique holder"
+    blockers, so a removed or pruned worktree still yields a target carrying the
+    computed paths. The source and target branch refs must still exist.
+    Mutating consumers keep the default `"required"`.
     """
+    strict = checkouts == "required"
     by_path = {item.path: item for item in items}
     item = by_path[path]
     targets: list[FinishTarget] = []
@@ -245,7 +253,7 @@ def resolve_finish_targets(
         if not context.branches_known or p.branch not in context.branches:
             blockers.append(f"{path}: source branch {p.branch!r} is missing in {name!r}; {place_fix}")
             continue
-        if (
+        if strict and (
             not context.identity_known
             or not context.inventory_known
             or context.inventory.get(p.branch) != (worktree,)
@@ -260,7 +268,7 @@ def resolve_finish_targets(
         if target not in context.branches:
             blockers.append(f"{path}: target branch {target!r} is missing in {name!r}")
             continue
-        if holders != (parent,):
+        if strict and holders != (parent,):
             if p.owner_path is not None:
                 fix = f"run gw work place {p.owner_path}"
                 blockers.append(
@@ -589,7 +597,7 @@ def inspect_finish(layout: WorkspaceLayout, path: str) -> FinishVerification:
     by_path = {item.path: item for item in items}
     if path not in by_path:
         return FinishVerification(False, None, (f"{path}: unknown finish owner",), ())
-    plan = resolve_finish_targets(layout, items, path)
+    plan = resolve_finish_targets(layout, items, path, checkouts="ignored")
     _doc, entries, error = read_finish_receipt(layout, path)
     blockers = list(plan.blockers)
     if error:
@@ -622,9 +630,17 @@ def finish_read_guard(layout: WorkspaceLayout, path: str, *, bundle: Bundle | No
     for member in members:
         doc = bundle.concepts.get(member)
         digest.update(repr((member, doc.serialize() if doc is not None else None)).encode("utf-8"))
+    try:
+        store = workflow_store(layout)
+        workflow_files: tuple[Path, ...] = (store.base.path, store.overlay.path)
+    except WorkspaceError as exc:
+        # The guard is a digest, not a validator: an unresolvable workflow file digests its refusal.
+        digest.update(repr(("workflow", str(exc))).encode("utf-8"))
+        workflow_files = ()
     paths = (
         layout.manifest_path,
         layout.manifest_path.with_name("workspace.local.yaml"),
+        *workflow_files,
         artifact_ref(path, MANAGED_ARTIFACTS["finish-receipt"]).path(bundle.root),
     )
     for filename in paths:

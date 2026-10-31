@@ -15,7 +15,9 @@ from gw_kernel.workspace.repos import ItemRepo, resolve_item_repo
 from gw_pipeline import place as engine
 from gw_pipeline.place import PlaceContext, PlaceMode, PlaceRefusal, PlaceResult, PruneCandidate
 from gw_pipeline.placement import Placement, PlacementNotifier, active_path, placement_chain
+from gw_pipeline.placement_resolve import item_placement
 from work_tracker_okf.affects import code_affects, touches_workspace
+from work_tracker_okf.hierarchy import declared_repo
 from work_tracker_okf.items import WorkItem, load_items
 
 
@@ -129,6 +131,14 @@ def run_place(
     if mode == "prune":
         return _prune(ctx, path, items, repo_name)
     assert item is not None
+    declared_name = declared_repo(item, items)[0]
+    if mode == "remove" and repo_name is not None and declared_name is not None and declared_name != repo_name:
+        # The cleanup plan names a repository the owner finished in, not only the one `repo:` declares; only
+        # removal takes that foreign name, resolved by the rule the plan used to find the worktree.
+        placement = item_placement(layout, item, items, repo_name=repo_name)
+        if placement is None:
+            return _empty(path, mode, dry_run, warnings=(f"no-repo: {path} has no placement in {repo_name}",))
+        return engine.remove(ctx, placement)
     own = _repository(layout, item, items, repo_name)
     if own.name is None:
         return _empty(path, mode, dry_run, warnings=(_no_repo(item, own),))

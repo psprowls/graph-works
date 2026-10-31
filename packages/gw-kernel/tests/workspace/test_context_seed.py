@@ -18,7 +18,14 @@ _CLAUDE_TEMPLATE_PATH = (
 
 
 def _render(existing: str | None = None, **overrides):
-    kwargs = {"topic": "Demo", "initialized_at": "2026-08-20", "bundle_dir": "okf", "config_dir": ".gw"}
+    kwargs = {
+        "topic": "Demo",
+        "initialized_at": "2026-08-20",
+        "bundle_dir": "okf",
+        "config_dir": ".gw",
+        "workflow_file": "workflow.yaml",
+        "workflow_local_file": "workflow.local.yaml",
+    }
     kwargs.update(overrides)
     return render_context_file(existing, **kwargs)
 
@@ -49,6 +56,23 @@ def test_a_custom_layout_is_named_not_assumed():
     text = _render(bundle_dir="content", config_dir="control")
     assert "content/" in text
     assert "control/" in text
+
+
+def test_a_configured_workflow_file_is_named_not_assumed():
+    text = _render(workflow_file="dispatch.yaml", workflow_local_file="dispatch.local.yaml")
+    assert "dispatch.yaml" in text
+    assert "dispatch.local.yaml" in text
+    assert "workflow.yaml" not in text
+    assert "workflow.local.yaml" not in text
+    assert "{{" not in text
+
+
+def test_a_subdirectory_workflow_file_is_named_in_every_mention():
+    text = _render(workflow_file="config/flow.yaml", workflow_local_file="config/flow.local.yaml")
+    assert "config/flow.yaml" in text
+    assert "config/flow.local.yaml" in text
+    assert "workflow.yaml" not in text
+    assert "workflow.local.yaml" not in text
 
 
 def test_the_body_carries_no_machine_path_no_marker_and_no_legacy_skill_name():

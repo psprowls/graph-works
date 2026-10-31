@@ -37,6 +37,19 @@ def _compact(text: str) -> str:
     return canonical_id("".join(text.split()))
 
 
+def subtree_members(inventory: Walk, sources: Sequence[str]) -> frozenset[str]:
+    """Raw ids of every inventory member that is, or lies beneath, a moved root (NFC-compared)."""
+    subtree = tuple(canonical_id(source) for source in sources)
+    return frozenset(
+        member.id
+        for member in inventory.members
+        if any(
+            (member_id := canonical_id(member.id)) == f"{source}.md" or member_id.startswith(f"{source}/")
+            for source in subtree
+        )
+    )
+
+
 def scan_touched(
     root: Path,
     sources: Sequence[str],
@@ -54,14 +67,12 @@ def scan_touched(
     inventory = walk(root, ignore=ignore, prune=prune)
     needles = {_normal(PurePosixPath(source).name) for source in sources}
     compact_needles = {_compact(needle) for needle in needles}
-    subtree = tuple(canonical_id(source) for source in sources)
-    members = set(extra)
+    # A caller may spell an NFD disk root in NFC. Keep the selected id raw,
+    # but compare canonically so moved files need not cite their own name.
+    subtree = subtree_members(inventory, sources)
+    members = set(extra) | subtree
     for member in inventory.members:
-        # A caller may spell an NFD disk root in NFC. Keep the selected id raw,
-        # but compare canonically so moved files need not cite their own name.
-        member_id = canonical_id(member.id)
-        if any(member_id == f"{source}.md" or member_id.startswith(f"{source}/") for source in subtree):
-            members.add(member.id)
+        if member.id in subtree:
             continue
         if member.kind not in _MARKDOWN:
             continue

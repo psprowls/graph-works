@@ -356,3 +356,42 @@ def test_prune_precommits_only_called_subtree(tmp_path):
 def test_path_required_for_non_prune(tmp_path, mode):
     with pytest.raises(ValueError, match="path"):
         _run(_workspace(tmp_path), None, mode=mode)
+
+
+def _owner_in_foreign_repo(tmp_path):
+    layout = _workspace(tmp_path, ("code", "other"))
+    _item(layout, EPIC)
+    _item(layout, repo="other")
+    placed = _run(layout)
+    assert placed.ok
+    owner = placed.chain[0].placement
+    assert owner.repo_name == "other"
+    return layout, owner
+
+
+def test_remove_accepts_a_foreign_repo_name_for_a_tagged_owner(tmp_path):
+    layout, owner = _owner_in_foreign_repo(tmp_path)
+    _receipt(layout, owner)
+    removed = _run(layout, EPIC, mode="remove", repo_name="other")
+    assert removed.ok and removed.chain[0].action == "removed"
+    assert not owner.worktree.exists()
+
+
+@pytest.mark.parametrize("mode", ["ensure", "start"])
+def test_foreign_repo_name_is_still_refused_outside_remove(tmp_path, mode):
+    layout, _ = _owner_in_foreign_repo(tmp_path)
+    with pytest.raises(WorkspaceError, match="conflicts"):
+        _run(layout, EPIC, mode=mode, repo_name="other")
+
+
+def test_remove_refuses_an_undeclared_repo_name(tmp_path):
+    layout, _ = _owner_in_foreign_repo(tmp_path)
+    with pytest.raises(WorkspaceError, match="not declared"):
+        _run(layout, EPIC, mode="remove", repo_name="nowhere")
+
+
+def test_remove_with_the_declared_repo_name_is_unchanged(tmp_path):
+    layout, owner, _ = _placed_family(tmp_path)
+    _receipt(layout, owner)
+    removed = _run(layout, EPIC, mode="remove", repo_name="code")
+    assert removed.ok and not owner.worktree.exists()

@@ -405,3 +405,11 @@ def test_decision_context_is_reloaded_after_the_merge(tmp_path, monkeypatch):
 
     assert (result.refusal, result.outcome, result.applied) == (None, "integrated", True)
     assert inspect_finish(layout, OWNER).complete
+
+
+def test_integrate_still_refuses_when_the_item_worktree_is_removed(tmp_path):
+    repo, source = code_repo(tmp_path)
+    layout = workspace(tmp_path, repo, source)
+    git(repo, "worktree", "remove", "--force", str(source))
+
+    assert run(layout, "ff").refusal == "no-target"

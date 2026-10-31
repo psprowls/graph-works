@@ -14,7 +14,7 @@ import okf_io
 from okf_ext.readindex._sql import bindings, configure, execute
 from okf_ext.readindex.model import IndexBusy, IndexUnavailable, RebuildReason
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 PROJECTION_VERSION = 2
 
 _SCHEMA = """
@@ -37,6 +37,11 @@ CREATE TABLE links (
 ) WITHOUT ROWID;
 CREATE INDEX links_target ON links(target);
 CREATE INDEX links_target_canonical ON links(target_canonical);
+CREATE TABLE refs (
+  member TEXT NOT NULL, ordinal INTEGER NOT NULL, form TEXT NOT NULL, target_canonical TEXT NOT NULL,
+  PRIMARY KEY (member, ordinal)
+) WITHOUT ROWID;
+CREATE INDEX refs_target_canonical ON refs(target_canonical);
 CREATE TABLE headings (
   member TEXT NOT NULL, ordinal INTEGER NOT NULL, level INTEGER NOT NULL, text TEXT NOT NULL,
   line INTEGER NOT NULL, quoted INTEGER NOT NULL, PRIMARY KEY (member, ordinal)

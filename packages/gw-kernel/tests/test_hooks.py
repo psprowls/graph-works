@@ -423,6 +423,8 @@ def test_enable_over_a_legacy_sh_registration_replaces_it(tmp_path):
 def test_enable_when_current_already_present_ignores_a_stale_legacy_entry(tmp_path):
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
+    scripts = _transcript_scripts_dir(tmp_path)
+    current = hooks._hook_command(scripts / "session-end-transcript-capture.py")
     _seed_settings(
         repo_root,
         {
@@ -434,13 +436,12 @@ def test_enable_when_current_already_present_ignores_a_stale_legacy_entry(tmp_pa
                     },
                     {
                         "matcher": "",
-                        "hooks": [{"type": "command", "command": "python /x/session-end-transcript-capture.py"}],
+                        "hooks": [{"type": "command", "command": current}],
                     },
                 ]
             }
         },
     )
-    scripts = _transcript_scripts_dir(tmp_path)
 
     result = apply("enable", "transcript", repo_root, scripts_dir=scripts)
 
@@ -495,6 +496,56 @@ def test_quote_command_renders_per_platform(platform_name, expected):
         argv = ["/usr/bin/python3", "/repo/hook script.py"]
 
     assert hooks._quote_command(argv, platform_name=platform_name) == expected
+
+
+@pytest.mark.parametrize("char", list("&|<>^()"))
+def test_win32_quoting_force_quotes_cmd_metacharacters(char):
+    argv = [f"C:\\a{char}b\\py.exe", "C:\\repo\\hook.py"]
+
+    assert hooks._quote_command(argv, platform_name="win32") == f'"C:\\a{char}b\\py.exe" C:\\repo\\hook.py'
+
+
+def test_win32_quoting_refuses_percent():
+    with pytest.raises(hooks.HooksError, match="%"):
+        hooks._quote_command(["C:\\100%\\py.exe", "x.py"], platform_name="win32")
+
+
+def test_posix_quoting_is_unchanged_for_metacharacters():
+    assert hooks._quote_command(["/a&b/py", "x"], platform_name="linux") == "'/a&b/py' x"
+
+
+def test_reenable_repairs_a_stale_interpreter_path(tmp_path):
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    scripts = _transcript_scripts_dir(tmp_path)
+    apply("enable", "transcript", repo_root, scripts_dir=scripts)
+    data = _settings(repo_root)
+    hook = data["hooks"]["SessionEnd"][0]["hooks"][0]
+    hook["command"] = "/gone/venv/bin/python " + hook["command"].split(" ", 1)[1]
+    _settings_file(repo_root).write_text(json.dumps(data), encoding="utf-8")
+
+    result = apply("enable", "transcript", repo_root, scripts_dir=scripts)
+
+    assert result.changed is True
+    assert result.updated == ("session-end-transcript-capture.py",)
+    assert result.added == () and result.skipped == ()
+    session_end = _settings(repo_root)["hooks"]["SessionEnd"]
+    assert len(session_end) == 1
+    assert session_end[0]["hooks"][0]["command"] == hooks._hook_command(scripts / "session-end-transcript-capture.py")
+
+
+def test_reenable_with_identical_command_writes_nothing(tmp_path):
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    scripts = _transcript_scripts_dir(tmp_path)
+    apply("enable", "transcript", repo_root, scripts_dir=scripts)
+    before = _settings_file(repo_root).read_bytes()
+
+    result = apply("enable", "transcript", repo_root, scripts_dir=scripts)
+
+    assert result.changed is False
+    assert result.updated == ()
+    assert _settings_file(repo_root).read_bytes() == before
 
 
 def test_hook_command_binds_the_running_interpreter_and_quotes_for_this_platform(tmp_path):

@@ -37,3 +37,15 @@ def bundle_bytes(layout: WorkspaceLayout) -> dict[str, bytes]:
         if path.is_file() and "/references/git/" not in f"/{rel}/":
             files[rel] = path.read_bytes()
     return files
+
+
+def index_arm(layout: WorkspaceLayout, mode: str) -> None:
+    """Pin a layout to the read-index arm (`index`, warmed once) or the touched-scan arm (`scan`)."""
+    assert mode in {"index", "scan"}, mode
+    if mode == "scan":
+        layout.local_manifest_path.write_text("read_index:\n  enabled: false\n", encoding="utf-8", newline="\n")
+        return
+    from gw_kernel.read_session import open_read_session
+
+    with open_read_session(layout):
+        pass

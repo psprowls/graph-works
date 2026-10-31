@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 from gw_kernel.workspace import provenance
 from gw_kernel.workspace.layout import layout_for
-from gw_pipeline.landed import landed_siblings, landed_since, stale_by_path, stale_spec_for
+from gw_pipeline.landed import LandedMemo, landed_siblings, landed_since, stale_by_path, stale_spec_for
 from okf_io import load_bundle
 from work_tracker_okf.items import IGNORE, SpecBaseline, load_items
 
@@ -188,3 +188,63 @@ def test_landed_since_has_no_workspace_baseline():
     from gw_pipeline.landed import LandedSince
 
     assert "workspace_baseline" not in {f.name for f in fields(LandedSince)}
+
+
+def _count_probes(monkeypatch) -> list[tuple[str, ...]]:
+    calls: list[tuple[str, ...]] = []
+    original = provenance.probe_git
+
+    def probe(repo, *args, **kwargs):
+        calls.append(args)
+        return original(repo, *args, **kwargs)
+
+    monkeypatch.setattr(provenance, "probe_git", probe)
+    return calls
+
+
+def test_a_memo_reuses_the_result_for_identical_inputs(evidence, monkeypatch):
+    layout, items, subject, *_ = evidence
+    calls = _count_probes(monkeypatch)
+    landed_since(layout, items, subject)
+    single = len(calls)
+    assert single > 0
+    calls.clear()
+    memo = LandedMemo()
+    first = landed_since(layout, items, subject, memo=memo)
+    second = landed_since(layout, items, subject, memo=memo)
+    assert first is second
+    assert len(calls) == single
+    assert stale_spec_for(layout, items, subject, memo=memo) == (SIBLING,)
+    assert stale_by_path(layout, items, (SUBJECT,), memo=memo) == {SUBJECT: (SIBLING,)}
+    assert len(calls) == single
+
+
+def test_without_a_memo_every_call_probes_git(evidence, monkeypatch):
+    layout, items, subject, *_ = evidence
+    calls = _count_probes(monkeypatch)
+    landed_since(layout, items, subject)
+    single = len(calls)
+    landed_since(layout, items, subject)
+    assert len(calls) == 2 * single
+
+
+def test_a_changed_input_misses_the_memo(evidence):
+    layout, items, subject, _, c0, c1 = evidence
+    memo = LandedMemo()
+    base = landed_since(layout, items, subject, memo=memo)
+    moved = replace(subject, spec_baseline=SpecBaseline(code=c1))
+    assert landed_since(layout, items, moved, memo=memo).entries == ()
+    other_affects = replace(subject, affects=("packages/b",))
+    assert landed_since(layout, items, other_affects, memo=memo) is not base
+    resolved = tuple(replace(i, resolved_in=c0) if i.path == SIBLING else i for i in items)
+    assert landed_since(layout, resolved, subject, memo=memo) is not base
+
+
+def test_a_warning_bearing_result_is_memoised_with_its_warnings(evidence, monkeypatch):
+    layout, items, subject, *_ = evidence
+    items = tuple(replace(i, resolved_in="f" * 40) if i.path == SIBLING else i for i in items)
+    memo = LandedMemo()
+    first = landed_since(layout, items, subject, memo=memo)
+    calls = _count_probes(monkeypatch)
+    second = landed_since(layout, items, subject, memo=memo)
+    assert second is first and first.warnings and calls == []

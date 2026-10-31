@@ -1,11 +1,11 @@
 """Read-index lifecycle errors and rebuild reasons."""
 
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Literal
 
 from okf_io import ParseError
-from okf_io.bundle import MemberKind
+from okf_io.bundle import MemberKind, Walk
 
 
 class IndexBusy(Exception):
@@ -31,6 +31,7 @@ class Reconcile:
     unsettled: tuple[str, ...]
     racy: tuple[str, ...]
     published: bool
+    inventory: Walk | None = field(default=None, compare=False, repr=False)
 
 
 @dataclass(frozen=True, slots=True)

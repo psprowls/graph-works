@@ -82,7 +82,7 @@ def _observe(
         raise _Refused("unknown-path", f"unknown work item {path!r}")
     if item.phase != "finish" or item.work_status in TERMINAL_STATUSES:
         raise _Refused("not-at-finish", f"{path} is at {item.phase!r} ({item.work_status})")
-    plan = resolve_finish_targets(layout, context_items, path)
+    plan = resolve_finish_targets(layout, context_items, path, checkouts="ignored")
     if plan.blockers:
         raise _Refused("no-target", "; ".join(plan.blockers))
     target = next((t for t in plan.targets if t.repo.name == repo_name), None)

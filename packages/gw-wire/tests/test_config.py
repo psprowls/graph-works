@@ -184,7 +184,14 @@ def test_upstream_field_lists_are_the_ones_the_projections_spell_out() -> None:
         "write_policy",
         "write_hint",
     ]
-    assert [f.name for f in fields(HooksResult)] == ["settings_path", "changed", "added", "removed", "skipped"]
+    assert [f.name for f in fields(HooksResult)] == [
+        "settings_path",
+        "changed",
+        "added",
+        "removed",
+        "skipped",
+        "updated",
+    ]
 
 
 _RULE = DispatchRule(

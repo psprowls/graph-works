@@ -75,7 +75,10 @@ class HookWiring:
 class HooksResult:
     """Outcome of one `apply()` call.
 
-    `skipped` is enable-only (scripts already registered). `added`/`removed`
+    `skipped` and `updated` are enable-only: `skipped` is a script already
+    registered with the current command, `updated` one whose registered
+    command had drifted (a recreated venv, a moved install) and was rewritten
+    in place. `added`/`removed`
     may repeat a filename -- one entry per matching settings entry, not per
     unique script. Disabling a feature that was never enabled yields all
     three tuples empty and `changed=False` (and writes nothing).
@@ -86,6 +89,7 @@ class HooksResult:
     added: tuple[str, ...] = ()
     removed: tuple[str, ...] = ()
     skipped: tuple[str, ...] = ()
+    updated: tuple[str, ...] = ()
 
 
 # Where the opt-in hook scripts live in a source checkout: the `gw` plugin's
@@ -109,6 +113,26 @@ def _settings_path(repo_root: Path) -> Path:
     return repo_root / ".claude" / "settings.local.json"
 
 
+_CMD_METACHARACTERS = frozenset("&|<>^()")
+
+
+def _win32_token(token: str) -> str:
+    """Make *token* survive `cmd.exe`: quoted when it carries a metacharacter.
+
+    `list2cmdline` quotes only on whitespace, so a metacharacter-only token is
+    force-quoted here (a token with an embedded `"` keeps list2cmdline's escaping). `%` is refused: `cmd` expands
+    `%VAR%` even inside double quotes and no portable escape exists.
+    """
+    if "%" in token:
+        raise HooksError(
+            f"cannot quote {token!r} for cmd.exe: '%' is expanded inside quotes; enable from a path without '%'"
+        )
+    rendered = subprocess.list2cmdline([token])
+    if rendered == token and any(c in _CMD_METACHARACTERS for c in token):
+        return f'"{token}"'
+    return rendered
+
+
 def _quote_command(argv: Sequence[str], *, platform_name: str = sys.platform) -> str:
     """Render *argv* the way *platform_name*'s shell actually quotes.
 
@@ -117,7 +141,7 @@ def _quote_command(argv: Sequence[str], *, platform_name: str = sys.platform) ->
     `shlex.join` (POSIX single-quoting).
     """
     if platform_name == "win32":
-        return subprocess.list2cmdline(list(argv))
+        return " ".join(_win32_token(token) for token in argv)
     return shlex.join(argv)
 
 
@@ -262,6 +286,7 @@ def apply(
     added: list[str] = []
     removed: list[str] = []
     skipped: list[str] = []
+    updated: list[str] = []
     changed = False
 
     hooks_block: dict[str, Any] = data.setdefault("hooks", {})
@@ -269,11 +294,18 @@ def apply(
     for wiring in wirings:
         arr: list[dict[str, Any]] = hooks_block.setdefault(wiring.event, [])
         if action == "enable":
-            current_present = any(
-                wiring.script in h.get("command", "") for entry in arr for h in entry.get("hooks", [])
-            )
-            if current_present:
-                skipped.append(wiring.script)
+            present = [h for entry in arr for h in entry.get("hooks", []) if wiring.script in h.get("command", "")]
+            if present:
+                assert scripts is not None
+                fresh = _hook_command(scripts / wiring.script)
+                stale = [h for h in present if h.get("command") != fresh]
+                if stale:
+                    for h in stale:
+                        h["command"] = fresh
+                    updated.append(wiring.script)
+                    changed = True
+                else:
+                    skipped.append(wiring.script)
                 continue
             if wiring.legacy_scripts:
                 kept: list[dict[str, Any]] = []
@@ -332,6 +364,7 @@ def apply(
         added=tuple(added),
         removed=tuple(removed),
         skipped=tuple(skipped),
+        updated=tuple(updated),
     )
     if changed:
         _write_settings(target, data)

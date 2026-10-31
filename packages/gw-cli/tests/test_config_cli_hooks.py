@@ -73,6 +73,7 @@ def test_disable_uses_git_walk_up_and_renders_json(tmp_path: Path, monkeypatch) 
         "added": [],
         "removed": ["session-end-transcript-capture.sh"],
         "skipped": [],
+        "updated": [],
     }
 
 

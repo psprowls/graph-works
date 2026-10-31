@@ -943,7 +943,7 @@ def test_init_preserves_trailing_commas_in_authored_flow_maps(tmp_path, authored
 
 @pytest.mark.parametrize("separator", ["", ",", ", # trailing separator\n"])
 def test_init_preserves_flow_mapping_with_aliased_last_value(tmp_path, separator):
-    authored = "{version: 1, settings: &settings {max_parallel: 3}, extra: *settings" + separator + "}\n"
+    authored = "{version: 1, state_gate: &gate {enabled: true}, read_index: *gate" + separator + "}\n"
     root = tmp_path / "works"
     root.mkdir()
     manifest = root / "workspace.yaml"
@@ -1233,3 +1233,18 @@ def test_an_insertion_that_would_change_authored_settings_is_refused(tmp_path: P
     with pytest.raises(WorkspaceError, match="cannot insert workflow_config without changing authored settings"):
         plan_init(root, today=TODAY)
     assert (root / "workspace.yaml").read_text(encoding="utf-8") == authored
+
+
+def test_agents_md_names_the_configured_workflow_file_and_a_second_plan_is_empty(tmp_path):
+    root = tmp_path / "works"
+    root.mkdir()
+    (root / "workspace.yaml").write_text("version: 1\nworkflow_config: dispatch.yaml\n", encoding="utf-8", newline="")
+
+    apply_init(plan_init(root, today=TODAY))
+
+    agents = (root / "AGENTS.md").read_text(encoding="utf-8")
+    assert "dispatch.yaml" in agents
+    assert "dispatch.local.yaml" in agents
+    assert "workflow.yaml" not in agents
+    assert "workflow.local.yaml" not in agents
+    assert plan_init(root, today=TODAY).is_empty

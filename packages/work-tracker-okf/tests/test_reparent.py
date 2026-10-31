@@ -724,3 +724,17 @@ def test_reparenting_a_parent_creates_no_archive_lane(tmp_path: Path) -> None:
     assert plan.ok, plan.refusals
     touched = {write.member for write in plan.writes} | set(plan.mkdirs)
     assert not any("children/_archive" in member for member in touched)
+
+
+def test_dependency_closure_follows_chains_and_cycles() -> None:
+    from work_tracker_okf.reparent import dependency_closure
+
+    graph = {"a": ["b"], "b": ["c"], "c": ["a"], "d": ["a"]}
+    assert dependency_closure(["a"], lambda p: graph.get(p, ())) == {"a", "b", "c"}
+
+
+def test_dependency_closure_tolerates_unknown_targets() -> None:
+    from work_tracker_okf.reparent import dependency_closure
+
+    graph = {"a": ["missing"]}
+    assert dependency_closure(["a"], lambda p: graph.get(p, ())) == {"a", "missing"}

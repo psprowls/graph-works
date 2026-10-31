@@ -58,7 +58,7 @@ from typing import Literal, Protocol
 
 from code_wiki_okf.config import Config
 from doc_wiki_okf.sources import SOURCE_TYPE, normalize_origin
-from gw_kernel.read_session import ReadSession, borrow_read_session, open_read_session
+from gw_kernel.read_session import ReadSession, borrow_read_session, move_selection, open_read_session
 from gw_kernel.workspace import provenance
 from gw_kernel.workspace.bundle import (
     load_partial_bundle,
@@ -106,7 +106,7 @@ from gw_pipeline.decision_owner import write_plan as _write_plan
 from gw_pipeline.execute_return import pending_return
 from gw_pipeline.finish import FinishTarget, resolve_finish_targets
 from gw_pipeline.guidance.assembly import Guidance, assemble_guidance, write_guidance
-from gw_pipeline.landed import stale_spec_for
+from gw_pipeline.landed import LandedMemo, stale_spec_for
 from gw_pipeline.placement import EffectivePlacement, effective_placement
 from gw_pipeline.transactions import (
     MutationApplication,
@@ -120,7 +120,7 @@ from okf_ext.schemas import SchemaError
 from okf_ext.shape import load_sections
 from okf_io import Bundle, Unreadable, build_frontmatter, parse
 from okf_io import validate as okf_validate
-from okf_io.bundle import canonical_id
+from okf_io.bundle import Walk, canonical_id
 from okf_io.validate import Finding, Report
 from repositories_okf.repository import repository_rule
 from work_tracker_okf import decisions as _decisions
@@ -154,7 +154,7 @@ from work_tracker_okf.mutation import (
 from work_tracker_okf.paths import ArtifactRef, checkpoint_ref, child_lane, item_page, parse_item_path, references_dir
 from work_tracker_okf.pipeline import PACKAGED_DEFINITION, PipelineDefinition
 from work_tracker_okf.projection import ResumeSelection, Rollup, rollup, select_resume
-from work_tracker_okf.reparent import plan_release_adoption, plan_reparent_many, reparent_load_set
+from work_tracker_okf.reparent import dependency_closure, plan_release_adoption, plan_reparent_many, reparent_load_set
 from work_tracker_okf.snapshot import WorkSnapshot
 from work_tracker_okf.sources import upsert
 from work_tracker_okf.vocabulary import PARENT_TYPES, SPEC_SOURCE_ID, TERMINAL_STATUSES
@@ -772,6 +772,7 @@ def _plan_route(
     definition: PipelineDefinition,
     planned: WorkSnapshot | None = None,
     body_of: ArtifactBody | None = None,
+    landed_memo: LandedMemo | None = None,
 ) -> tuple[NextResult, WorkItem]:
     """The dry-run routing preview for *path* over already-read items.
 
@@ -807,7 +808,7 @@ def _plan_route(
         planned_items,
         selected_path,
         hold=hold_for(planned_items, root, selected_path),
-        stale_spec=stale_spec_for(layout, planned_items, selected),
+        stale_spec=stale_spec_for(layout, planned_items, selected, memo=landed_memo),
     )
     assert state is not None
     computed = route(state, definition=definition)
@@ -832,13 +833,25 @@ def _plan_route(
 
 
 def _plan_next(
-    layout: WorkspaceLayout, path: str, *, descend: bool, definition: PipelineDefinition
+    layout: WorkspaceLayout,
+    path: str,
+    *,
+    descend: bool,
+    definition: PipelineDefinition,
+    landed_memo: LandedMemo | None = None,
 ) -> tuple[NextResult, Bundle, WorkItem]:
     """Load the bundle once and plan *path* over it (`_plan_route`)."""
     bundle = load_workspace_bundle(layout, ignore=IGNORE)
     items = load_items(bundle)
     preview, selected = _plan_route(
-        layout, bundle.root, bundle.unreadable, items, path, descend=descend, definition=definition
+        layout,
+        bundle.root,
+        bundle.unreadable,
+        items,
+        path,
+        descend=descend,
+        definition=definition,
+        landed_memo=landed_memo,
     )
     if preview.route.dispatch is not None and preview.route.dispatch.stage == "finish":
         finish = resolve_finish_targets(layout, items, preview.selected_path)
@@ -903,6 +916,7 @@ def _with_carried(
     result: NextResult,
     bundle: Bundle,
     items: Sequence[WorkItem],
+    landed_memo: LandedMemo | None = None,
 ) -> NextResult:
     """Attach the carried-context frame for the selected leaf at the dispatched
     stage -- under `_with_guidance`'s usable-dispatch test, on every call
@@ -917,7 +931,9 @@ def _with_carried(
     item = next((candidate for candidate in items if candidate.path == result.selected_path), None)
     if item is None:
         return result
-    inp = SlotInput(layout=layout, bundle=bundle, items=tuple(items), item=item, stage=dispatch.stage)
+    inp = SlotInput(
+        layout=layout, bundle=bundle, items=tuple(items), item=item, stage=dispatch.stage, landed_memo=landed_memo
+    )
     return replace(result, carried=_carried.assemble_carried(inp, slots=_carried.SLOTS))
 
 
@@ -964,7 +980,10 @@ def run_next(
     """
     config = _load_config(layout)
     definition = _definition_of(config)
-    preview, bundle, selected = _plan_next(layout, path, descend=descend, definition=definition)
+    landed_memo = LandedMemo()
+    preview, bundle, selected = _plan_next(
+        layout, path, descend=descend, definition=definition, landed_memo=landed_memo
+    )
     if dry_run:
         resolution, preflight = _resolve_dispatch_with(config, preview.state, preview.route)
         resolved = replace(
@@ -972,7 +991,7 @@ def run_next(
         )
         items: Sequence[WorkItem] = load_items(bundle)
         guided = _with_guidance(layout, resolved, bundle, items if guidance else (), guidance)
-        result = _with_repository_notes(layout, _with_carried(layout, guided, bundle, items), items)
+        result = _with_repository_notes(layout, _with_carried(layout, guided, bundle, items, landed_memo), items)
         return replace(result, path=None, artifacts=()) if isinstance(config, WorkspaceError) else result
 
     application, warnings = _apply_normalizations(layout, preview.normalizations, bundle=bundle)
@@ -982,7 +1001,10 @@ def run_next(
         persisted_items,
         preview.selected_path,
         stale_spec=stale_spec_for(
-            layout, persisted_items, next(item for item in persisted_items if item.path == preview.selected_path)
+            layout,
+            persisted_items,
+            next(item for item in persisted_items if item.path == preview.selected_path),
+            memo=landed_memo,
         ),
         hold=hold_for(
             persisted_items,
@@ -1012,7 +1034,7 @@ def run_next(
     )
     items = tuple(persisted_items)
     guided = _with_guidance(layout, applied, persisted_bundle, items, guidance)
-    result = _with_repository_notes(layout, _with_carried(layout, guided, persisted_bundle, items), items)
+    result = _with_repository_notes(layout, _with_carried(layout, guided, persisted_bundle, items, landed_memo), items)
     return replace(result, path=None, artifacts=()) if isinstance(config, WorkspaceError) else result
 
 
@@ -1409,10 +1431,43 @@ class PathMutationResult:
     application: MutationApplication | None = None
 
 
-def _plan_reparent_partial(
-    layout: WorkspaceLayout, source_paths: Sequence[str], parent_path: str
+def _complete_dependency_context(
+    layout: WorkspaceLayout, bundle: Bundle, inventory: Walk, warnings: tuple[str, ...]
+) -> tuple[Bundle, tuple[str, ...]]:
+    """Admit the whole inventory when a loaded edge reaches a member the partial load left out."""
+    items = load_items(bundle)
+    by_path = item_index(list(items))
+    unloaded = frozenset(canonical_id(member) for member in bundle.unloaded)
+    if not any(
+        edge.path not in by_path and canonical_id(f"{edge.path}.md") in unloaded
+        for item in items
+        for edge in item.dependency_edges
+    ):
+        return bundle, warnings
+    # Names cannot supply a target's terminal state or outgoing edges.
+    # Admit the whole inventory, reusing clean parsed seed Documents;
+    # never expand the pure name closure by inspecting dependencies.
+    reuse = {f"{cid}.md": doc for cid, doc in bundle.concepts.items()}
+    for directory, doc in bundle.indexes.items():
+        reuse[f"{directory}/index.md" if directory else "index.md"] = doc
+    for directory, doc in bundle.logs.items():
+        reuse[f"{directory}/log.md" if directory else "log.md"] = doc
+    bundle = load_partial_bundle(
+        layout.bundle_dir,
+        only=frozenset(m.id for m in inventory.members if m.id.endswith(".md")),
+        inventory=inventory,
+        reuse=reuse,
+    )
+    if bundle.unloaded:
+        raise ValueError("dependency fallback did not admit the complete Markdown inventory")
+    bundle = replace(bundle, partial=None)
+    return bundle, (*warnings, "dependency context reaches unloaded members; using a full load from the inventory")
+
+
+def _plan_reparent_scan(
+    layout: WorkspaceLayout, source_paths: Sequence[str], parent_path: str, warnings: tuple[str, ...]
 ) -> tuple[Bundle, WorkMutationPlan]:
-    """Scan names, close context, load once and plan; complete unsafe graph context."""
+    """The touched-scan path: scan names, close context, load once and plan."""
     lanes = {location.lane for path in (*source_paths, parent_path) if (location := parse_item_path(path)) is not None}
     scan = scan_touched(
         layout.bundle_dir,
@@ -1421,38 +1476,50 @@ def _plan_reparent_partial(
         prune=with_clone_prune(),
         extra={"work/index.md", *(f"{lane}/index.md" for lane in lanes)},
     )
-    warnings = scan.warnings
+    warnings = (*warnings, *scan.warnings)
     if not scan.complete:
         bundle = load_workspace_bundle(layout, ignore=())
     else:
         only = reparent_load_set((m.id for m in scan.inventory.members), scan.members, source_paths, parent_path)
         bundle = load_partial_bundle(layout.bundle_dir, only=only, inventory=scan.inventory)
-        items = load_items(bundle)
-        by_path = item_index(list(items))
-        unloaded = frozenset(canonical_id(member) for member in bundle.unloaded)
-        if any(
-            edge.path not in by_path and canonical_id(f"{edge.path}.md") in unloaded
-            for item in items
-            for edge in item.dependency_edges
-        ):
-            # Names cannot supply a target's terminal state or outgoing edges.
-            # Admit the whole inventory, reusing clean parsed seed Documents;
-            # never expand the pure name closure by inspecting dependencies.
-            reuse = {f"{cid}.md": doc for cid, doc in bundle.concepts.items()}
-            for directory, doc in bundle.indexes.items():
-                reuse[f"{directory}/index.md" if directory else "index.md"] = doc
-            for directory, doc in bundle.logs.items():
-                reuse[f"{directory}/log.md" if directory else "log.md"] = doc
-            bundle = load_partial_bundle(
-                layout.bundle_dir,
-                only=frozenset(m.id for m in scan.inventory.members if m.id.endswith(".md")),
-                inventory=scan.inventory,
-                reuse=reuse,
-            )
-            if bundle.unloaded:
-                raise ValueError("dependency fallback did not admit the complete Markdown inventory")
-            bundle = replace(bundle, partial=None)
-            warnings = (*warnings, "dependency context reaches unloaded members; using a full load from the inventory")
+        bundle, warnings = _complete_dependency_context(layout, bundle, scan.inventory, warnings)
+    plan = plan_reparent_many(bundle, load_items(bundle), source_paths, parent_path)
+    return bundle, replace(plan, warnings=(*plan.warnings, *warnings))
+
+
+def _plan_reparent_partial(
+    layout: WorkspaceLayout, source_paths: Sequence[str], parent_path: str
+) -> tuple[Bundle, WorkMutationPlan]:
+    """Plan from the reconciled read index when usable, else from a touched-set scan."""
+    lanes = {location.lane for path in (*source_paths, parent_path) if (location := parse_item_path(path)) is not None}
+    with open_read_session(layout) as session:
+        selection = move_selection(session, source_paths)
+        if isinstance(selection, str):
+            reason = selection
+        else:
+            reason = None
+            inventory = selection.inventory
+            names = tuple(m.id for m in inventory.members)
+            by_canonical = {canonical_id(name): name for name in names}
+            extra = {"work/index.md", *(f"{lane}/index.md" for lane in lanes)}
+            only = reparent_load_set(names, selection.candidates | (extra & set(names)), source_paths, parent_path)
+
+            def edges(path: str) -> tuple[str, ...]:
+                row = session.member(f"{path}.md")
+                if row is None or row.fm is None:
+                    return ()
+                return tuple(edge.path for edge in parse_dependencies(row.fm.get("depends_on")).edges)
+
+            seeds = [m[:-3] for m in only if m.endswith(".md") and parse_item_path(m[:-3]) is not None]
+            closure = dependency_closure(seeds, edges)
+            only = only | {raw for path in closure if (raw := by_canonical.get(canonical_id(f"{path}.md"))) is not None}
+            reuse = {m: d for m, d in selection.documents.items() if m in only}
+    if reason is not None:
+        return _plan_reparent_scan(
+            layout, source_paths, parent_path, (f"read index {reason}: planning from a touched-set scan",)
+        )
+    bundle = load_partial_bundle(layout.bundle_dir, only=only, inventory=inventory, reuse=reuse)
+    bundle, warnings = _complete_dependency_context(layout, bundle, inventory, ())
     plan = plan_reparent_many(bundle, load_items(bundle), source_paths, parent_path)
     return bundle, replace(plan, warnings=(*plan.warnings, *warnings))
 

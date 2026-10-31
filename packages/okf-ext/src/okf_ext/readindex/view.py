@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from collections.abc import Iterator
+from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
 from types import MappingProxyType
 from typing import cast
+from urllib.parse import unquote
 
 from okf_io import Heading, Link, ParseError, resolve_member
 from okf_io.bundle import MemberKind, canonical_id
@@ -33,6 +34,17 @@ def _link(row: tuple[object, ...]) -> Link:
         bool(image),
         cast(int | None, line),
     )
+
+
+def _strings(value: object) -> Iterator[str]:
+    if isinstance(value, str):
+        yield value
+    elif isinstance(value, dict):
+        for item in value.values():
+            yield from _strings(item)
+    elif isinstance(value, list):
+        for item in value:
+            yield from _strings(item)
 
 
 class IndexView:
@@ -166,6 +178,38 @@ class IndexView:
             )
         )
         return tuple(link for link in links if link.target is None or self.resolve(link.target) is None)
+
+    def referrers(self, roots: Sequence[str]) -> frozenset[str]:
+        """Raw ids of members holding a reference form that names a root or anything beneath it."""
+        found: set[str] = set()
+        for root in roots:
+            r = canonical_id(root)
+            rows = execute(
+                self._conn,
+                "SELECT member, target_canonical FROM refs WHERE target_canonical >= ? AND target_canonical < ?",
+                (r, r + "\U0010ffff"),
+            )
+            found.update(m for m, t in rows if t == r or t == r + ".md" or t.startswith(r + "/"))
+        return frozenset(found)
+
+    def mentions(self, needles: Sequence[str]) -> frozenset[str]:
+        """Raw ids of readable members whose frontmatter strings contain a needle, plus every inexact row."""
+        wanted = tuple(canonical_id(n) for n in needles)
+        found: set[str] = set()
+        rows = execute(
+            self._conn,
+            "SELECT id, fm_json, fm_exact FROM members "
+            "WHERE unreadable IS NULL AND (fm_json IS NOT NULL OR fm_exact=0)",
+        )
+        for mid, text, exact in rows:
+            if not exact or text is None:
+                found.add(mid)
+                continue
+            if text.isascii() and "%" not in text and "\\" not in text and not any(n in text for n in wanted):
+                continue
+            if any(n in canonical_id(unquote(s)) for s in _strings(json.loads(text)) for n in wanted):
+                found.add(mid)
+        return frozenset(found)
 
     def headings(self, member_id: str) -> tuple[Heading, ...]:
         return tuple(

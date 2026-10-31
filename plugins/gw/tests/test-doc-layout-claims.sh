@@ -826,6 +826,11 @@ else
     pass "package docs carry no retired worktree action vocabulary"
 fi
 
+# Routing variants are retired: gw-kernel refuses a `variant` match attribute, so the
+# onboard skill must not offer one as an example dispatch-rule match.
+assert_not_matches "skills/onboard/SKILL.md" '\{ *variant *:' \
+    "the onboard skill's dispatch-rule example uses no retired variant match attribute"
+
 if [[ "$FAILURES" -gt 0 ]]; then
     echo "STATUS: FAILED ($FAILURES failure(s))"
     exit 1

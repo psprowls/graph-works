@@ -38,7 +38,9 @@ from pathlib import Path
 from typing import Protocol, runtime_checkable
 
 from ruamel.yaml import YAML
+from ruamel.yaml.comments import CommentedMap, CommentedSeq
 from ruamel.yaml.error import YAMLError
+from ruamel.yaml.util import load_yaml_guess_indent
 
 from config_io import dotted
 from config_io.errors import StoreValidationError
@@ -46,6 +48,27 @@ from config_io.errors import StoreValidationError
 # YAML 1.2 is the workspace's dialect (D-001). Construct readers and writers
 # per call: ruamel's YAML instances hold mutable parser/serializer state that
 # cannot be shared by concurrent watcher and request threads.
+
+
+def _merge_mapping(tree: CommentedMap, data: Mapping[str, object]) -> None:
+    for key in [k for k in tree if k not in data]:
+        del tree[key]
+    for key, value in data.items():
+        tree[key] = _merge_node(tree[key], value) if key in tree else value
+
+
+def _merge_node(node: object, value: object) -> object:
+    if isinstance(node, CommentedMap) and isinstance(value, Mapping):
+        _merge_mapping(node, value)
+        return node
+    if isinstance(node, CommentedSeq) and isinstance(value, list) and len(node) == len(value):
+        for index, item in enumerate(value):
+            node[index] = _merge_node(node[index], item)
+        return node
+    # An equal value keeps its node, so its quote style and block form survive.
+    if type(node).__mro__[-2] is type(value).__mro__[-2] and node == value:
+        return node
+    return value
 
 
 @dataclass(frozen=True, slots=True)
@@ -113,15 +136,49 @@ class PlainYamlStore:
         return self._load()
 
     def write(self, data: Mapping[str, object]) -> None:
+        """Write `data`, keeping the existing file's comments and formatting.
+
+        When the file already holds a mapping, it is loaded in ruamel's
+        round-trip mode and `data` is merged into that tree, so only the
+        changed keys' lines move. A sequence whose length changed is replaced
+        whole, and inline comments inside it may be lost. A missing, empty or
+        unloadable file gets a plain safe dump: the value contract outranks
+        the form.
+        """
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        buffer = io.StringIO()
-        writer = YAML(typ="safe")
-        writer.default_flow_style = False
-        # Preserve insertion order (D-003); the safe representer sorts by default.
-        writer.representer.sort_base_mapping_type_on_output = False
-        # Keep ruamel's default width to preserve the existing output formatting.
-        writer.dump(dict(data), buffer)
-        self.path.write_text(buffer.getvalue(), encoding="utf-8", newline="")
+        text = self._round_trip(data)
+        if text is None:
+            buffer = io.StringIO()
+            writer = YAML(typ="safe")
+            writer.default_flow_style = False
+            # Preserve insertion order (D-003); the safe representer sorts by default.
+            writer.representer.sort_base_mapping_type_on_output = False
+            # Keep ruamel's default width to preserve the existing output formatting.
+            writer.dump(dict(data), buffer)
+            text = buffer.getvalue()
+        self.path.write_text(text, encoding="utf-8", newline="")
+
+    def _round_trip(self, data: Mapping[str, object]) -> str | None:
+        if not self.path.exists():
+            return None
+        raw = self.path.read_bytes()
+        if not raw.strip():
+            return None
+        try:
+            _, sequence_indent, block_seq_indent = load_yaml_guess_indent(raw)
+            writer = YAML(typ="rt")
+            writer.preserve_quotes = True
+            writer.default_flow_style = False
+            writer.indent(mapping=2, sequence=sequence_indent or 2, offset=block_seq_indent or 0)
+            tree = writer.load(raw)
+            if not isinstance(tree, CommentedMap):
+                return None
+            _merge_mapping(tree, data)
+            buffer = io.StringIO()
+            writer.dump(tree, buffer)
+        except YAMLError:
+            return None
+        return buffer.getvalue()
 
     def snapshot(self) -> bytes | None:
         return self.path.read_bytes() if self.path.exists() else None

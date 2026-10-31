@@ -31,8 +31,8 @@ from okf_io import Bundle, Document, build_link_graph
 from okf_io.bundle import INDEX_NAME, LOG_NAME, canonical_id
 from okf_io.links import is_external, parse_destination, resolve_path, resolve_reference
 
+import okf_ext.locate as locate
 from okf_ext.body import document_wikilinks
-from okf_ext.moves import locate
 from okf_ext.moves.model import FrontmatterPath, Move, MovePlan, RefEdit, ReferenceField, Refusal, Stranded, Unrebased
 from okf_ext.writing import body_digest
 

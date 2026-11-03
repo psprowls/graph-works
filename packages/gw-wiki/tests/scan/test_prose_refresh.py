@@ -12,8 +12,8 @@ from gw_wiki.scan.prose_refresh import (
     run_prose_refresh,
 )
 from gw_wiki.scan.scan_contract import ProseRefreshTask
-from ingest_helpers import FakeLLM, FakeResponse
 from langchain_core.tools import tool
+from scan_helpers import FakeLLM, FakeResponse
 
 
 @pytest.fixture

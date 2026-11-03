@@ -28,6 +28,7 @@ doc-wiki-okf = { workspace = true }
 repositories-okf = { workspace = true }
 gw-kernel = { workspace = true }
 gw-wiki = { workspace = true }
+gw-serve = { workspace = true }
 gw-pipeline = { workspace = true }
 gw-work = { workspace = true }
 gw-wire = { workspace = true }
@@ -65,6 +66,7 @@ dev = [
     "doc-wiki-okf",
     "gw-kernel",
     "gw-wiki",
+    "gw-serve",
     "gw-pipeline",
     "gw-work",
     "workflow-local",

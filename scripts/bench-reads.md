@@ -1,13 +1,13 @@
 # Read benchmarks
 
-This harness measures the seven graph-works display reads: work status, list, item detail and queue, wiki tree, page detail and citations. Structural counts are the host-independent evidence for the [data and UI performance design](/work/epic-data-and-ui-performance/references/01-design.md), decision D-004. Latencies are evidence, never a test gate.
+This harness measures the seven graph-works display reads: work status, list, item detail and queue, wiki tree, page detail and citations, plus six gw-serve sidecar GET routes reported in the same table. Structural counts are the host-independent evidence for the [data and UI performance design](/work/epic-data-and-ui-performance/references/01-design.md), decision D-004. Latencies are evidence, never a test gate.
 
-Run under gw-wiki's environment after provisioning workspace dependencies with `uv sync --all-packages`:
+Run under gw-serve's environment after provisioning workspace dependencies with `uv sync --all-packages`:
 
 ```bash
-uv run --package gw-wiki python scripts/bench_reads.py run --json out.json --markdown out.md
-uv run --package gw-wiki python scripts/bench_reads.py run --no-synthetic --workspace "$GRAPH_WORKS_DIR"
-uv run --package gw-wiki python scripts/bench_reads.py generate /tmp/corpus --items 1000 --wiki-pages 1000
+uv run --package gw-serve python scripts/bench_reads.py run --json out.json --markdown out.md
+uv run --package gw-serve python scripts/bench_reads.py run --no-synthetic --workspace "$GRAPH_WORKS_DIR"
+uv run --package gw-serve python scripts/bench_reads.py generate /tmp/corpus --items 1000 --wiki-pages 1000
 ```
 
 `--matrix` accepts comma-separated `ITEMSxWIKI` or `ITEMSxWIKI@WARM/COLD` entries. The default matrix is `100x1000,1000x1000,10000x1000@3/2,1000x100,1000x5000`: the first three isolate work scaling at fixed wiki size; the last two isolate unrelated wiki growth at fixed work size. Defaults are five warm repeats and three cold repeats; the largest size uses three and two. Cold zero skips cold runs. `--workspace-repeats 3/2` sets the live workspace repetitions independently.
@@ -21,6 +21,18 @@ Warm mode discards one initial read, then times and counts each read in the same
 p50 and p95 use nearest rank. With fewer than 20 samples p95 is the maximum; the table always displays n. JSON also records source revision and dirty state, workspace revision, generator version, platform, architecture, Python version, CPU count, load before and after, and idle detection. These fields must accompany comparisons.
 
 `--max-load` defaults to a one-minute load per CPU of 0.5; `--idle-wait` waits up to 600 seconds for that threshold before measurement. `idle: false` means the host remained contended and the numbers must be labelled accordingly; `idle: null` means load information is unavailable. Idle detection is a pre-run observation, so also inspect load afterward and record other known host activity. An idle baseline is recorded evidence, not a guarantee of isolation throughout the run.
+
+## Sidecar
+
+Six `serve.*` reads time the sidecar's GET routes: `serve.work.status` (`/v1/work/status`), `serve.work.list` (`/v1/work/list`), `serve.work.item` (`/v1/work/item?path=`), `serve.work.queue` (`/v1/work/queue`), `serve.wiki.page` (`/v1/wiki/page?id=`) and `serve.wiki.tree` (`/v1/wiki/tree`). They use the same rows, counters and table as the CLI reads. Under gw-wiki's environment, which lacks gw-serve, every `serve.*` row is a `sidecar unavailable` error row and the CLI reads still run.
+
+Each read sends one GET as an ASGI request to an in-process `gw_serve.app.build_app(...)` app (`scripts/read_bench_serve.py`), so the guard, routing, handler and JSON encode and decode are timed and the socket and uvicorn are not. No lifespan event is sent, so no watcher starts and the read generation stays fixed: warm rows measure the sidecar's reused snapshot for that generation.
+
+Cold rows use the same fresh-interpreter one-shot as the CLI reads, so they include app construction and the first snapshot build that a just-started sidecar pays once.
+
+The error vocabulary is `LookupError: sidecar unavailable in this environment` (gw-serve not importable), `LookupError: sidecar route unavailable in this revision: <path>` (a plain 404 that is not a JSON envelope) and `SidecarError` (a JSON refusal such as an unknown item, never reported as a timing). `scripts/read_perf_report.py` renders the first two as `n/a` with an `Unavailable:` note when they appear in the before run, and refuses them in the after run; `SidecarError` rows are refused in either.
+
+Warm `serve.work.list` currently counts one Git call per request (the `default_base` probe in `board_rows`, `packages/gw-work/src/gw_work/commands.py:342`), which the report lists as an invariant violation with no exemption; it is tracked by [/work/tech-debt-sidecar-work-board-spawns-git-on.md](/work/tech-debt-sidecar-work-board-spawns-git-on.md).
 
 ## Search
 

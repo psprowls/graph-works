@@ -59,6 +59,11 @@ def test_git_unavailable_is_one_lane_error_only_when_the_lane_has_pages(
 ) -> None:
     (tmp_path / "empty").mkdir()
     empty = make_workspace(tmp_path / "empty")
+    second = tmp_path / "up2"
+    second.mkdir()
+    other = make_upstream(second)
+    other.commit({"README.md": "# other\n"}, "c1")
+    assert run_repo_add(layout, other.url, name="other", managed=True, now=NOW).ok
     monkeypatch.setenv("GW_GIT", str(tmp_path / "no-git"))
     monkeypatch.setenv("PATH", "")
     report = run_mechanical(layout, load_workspace_config(layout), today=TODAY)

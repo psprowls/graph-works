@@ -220,6 +220,21 @@ def assert_refreshed(fx: Fixture, path: str, payload: dict[str, Any]) -> None:
         assert proc.returncode == 0, f"{path}: {step['branch']} does not contain {parent}"
 
 
+def assert_dispatch_ancestry(path: str, planned: dict[str, Any], launched: dict[str, Any]) -> None:
+    """D-003 for auto-drive: the dispatch payload carries no chain, so read the plan entry and git.
+
+    The worker launched on the planned branch, and that branch contains its planned parent branch.
+    """
+    branch = planned["branch"]
+    assert launched["branch"] == branch, f"{path}: launched {launched['branch']}, planned {branch}"
+    proc = subprocess.run(
+        ["git", "merge-base", "--is-ancestor", planned["parent_branch"], branch],
+        cwd=planned["parent_worktree"],
+        capture_output=True,
+    )
+    assert proc.returncode == 0, f"{path}: {branch} does not contain {planned['parent_branch']}"
+
+
 def _repo_of(fx: Fixture, step: dict[str, Any]) -> Path:
     worktree = Path(step["worktree"]).resolve()
     for repo, checkout in fx.repos.items():

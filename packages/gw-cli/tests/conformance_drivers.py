@@ -25,6 +25,7 @@ from conformance_fixture import (
     Fixture,
     Oracle,
     assert_conforms,
+    assert_dispatch_ancestry,
     assert_refreshed,
     gw,
     item_type,
@@ -365,6 +366,7 @@ class AutoDriveDriver(AttendedDriver):
         oracle.place(path, entry["repo"]["name"])
         assert dispatched["placement"]["path"] == entry["placement"]["worktree"], f"[{step}] launched elsewhere"
         assert_conforms(fx, oracle, f"{step}:dispatched")
+        assert_dispatch_ancestry(path, entry["placement"], dispatched["placement"])
         self.log.refreshes.append((path, "dispatch"))
         if phase == "execute" and not self.retried and slug_of(path) == "feature-child-a":
             # The worker dies without advancing; the coordinator relaunches the same key.

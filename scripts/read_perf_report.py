@@ -92,10 +92,18 @@ def _load(path: Path, *, before: bool = False) -> dict:
         if not isinstance(probe, str) or not probe or size is None or mode not in ("warm", "cold"):
             raise Refusal(f"{path}: malformed probe, size or mode")
         label = f"{probe} at {size} ({mode})"
-        if (
-            before
-            and probe == "search.lexical-cold-sync"
-            and raw.get("error") == "LookupError: lexical store unavailable in this revision"
+        error = raw.get("error")
+        if before and (
+            (
+                probe == "search.lexical-cold-sync"
+                and error == "LookupError: lexical store unavailable in this revision"
+            )
+            or (
+                isinstance(probe, str)
+                and probe.startswith("serve.")
+                and isinstance(error, str)
+                and error.startswith(("LookupError: sidecar unavailable", "LookupError: sidecar route unavailable"))
+            )
         ):
             unavailable.append(f"before {label}: {raw['error']}")
             continue

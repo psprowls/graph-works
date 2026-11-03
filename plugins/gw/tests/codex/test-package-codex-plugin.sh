@@ -186,7 +186,16 @@ assert_equals "$tar_metadata_times" "[0]" "tar.gz archive normalizes entry times
 monorepo_root="$(git -C "$REPO_ROOT" rev-parse --show-toplevel)"
 repo_prefix="$(git -C "$REPO_ROOT" rev-parse --show-prefix)"
 dirty_repo="$TEST_ROOT/dirty-repo"
-git clone -q --no-local "$monorepo_root" "$dirty_repo"
+# Build the fixture from `git archive`, not `git clone --no-local`: in a
+# workspace-managed partial clone (blob:none) a --no-local clone makes the
+# source's upload-pack serve blobs it does not have and dies with "could not
+# fetch <blob> from promisor remote". `git archive` lazy-fetches normally.
+mkdir -p "$dirty_repo"
+git -C "$monorepo_root" archive HEAD | tar -x -C "$dirty_repo"
+git -C "$dirty_repo" init -q
+git -C "$dirty_repo" add -A
+git -C "$dirty_repo" -c user.name=fixture -c user.email=fixture@example.invalid \
+  -c commit.gpgsign=false commit -q -m "fixture"
 dirty_plugin_root="$dirty_repo/$repo_prefix"
 printf '\n# dirty fixture\n' >>"$dirty_plugin_root/tests/test-entry-point-skills.sh"
 set +e

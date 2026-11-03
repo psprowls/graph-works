@@ -297,6 +297,35 @@ def test_baseline_unavailable_cold_sync_renders_na_but_after_error_is_refused(tm
     assert report(tmp_path, aggregate([unavailable]))[0] == 1
 
 
+@pytest.mark.parametrize(
+    "error",
+    [
+        "LookupError: sidecar unavailable in this environment",
+        "LookupError: sidecar route unavailable in this revision: /v1/work/queue",
+    ],
+)
+def test_baseline_without_the_sidecar_renders_na_but_after_error_is_refused(tmp_path: Path, error: str) -> None:
+    unavailable = row(read="serve.work.queue", error=error, p50_ms=None, p95_ms=None, counts={})
+    code, text = report(tmp_path, aggregate([row(read="serve.work.queue")]), aggregate([unavailable]))
+    assert code == 0
+    assert "| serve.work.queue | synthetic: 100x20 | warm | n/a | n/a | 0.123 | 0.456 |" in text
+    assert "before serve.work.queue" in text
+    assert report(tmp_path, aggregate([unavailable]))[0] == 1
+
+
+def test_other_sidecar_errors_in_a_baseline_are_still_refused(tmp_path: Path) -> None:
+    broken = row(
+        read="serve.work.item", error="SidecarError: GET /v1/work/item -> 404: {}", p50_ms=None, p95_ms=None, counts={}
+    )
+    assert report(tmp_path, aggregate([row(read="serve.work.item")]), aggregate([broken]))[0] == 1
+
+
+def test_warm_sidecar_git_calls_are_invariant_violations(tmp_path: Path) -> None:
+    counts = {"files_parsed": 0, "link_graph_builds": 0, "git_calls": 1}
+    code, text = report(tmp_path, aggregate([row(read="serve.work.list", counts=counts)]))
+    assert code == 2 and "serve.work.list at synthetic: 100x20 (warm): git_calls=1" in text
+
+
 def test_cosine_scan_auxiliary_counts_do_not_claim_display_counts(tmp_path: Path) -> None:
     code, text = report(tmp_path, aggregate([row(read="search.cosine-scan", counts={"vectors": 20})]))
     assert code == 0

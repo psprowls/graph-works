@@ -38,9 +38,9 @@ DEPENDENCY_URI = "dependency:acme/demo/pypi/httpx"
 
 
 class FakeResponse:
-    def __init__(self, content: Any) -> None:
+    def __init__(self, content: Any, tool_calls: list[dict[str, Any]] | None = None) -> None:
         self.content = content
-        self.tool_calls: list[dict[str, Any]] = []
+        self.tool_calls: list[dict[str, Any]] = tool_calls or []
 
 
 class FakeLLM:

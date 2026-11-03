@@ -4,11 +4,11 @@ Evidence, not a gate (D-004): timings are recorded and reported, never asserted.
 The counts (files parsed, link graphs built, git processes) are host-independent;
 the before-and-after report child asserts invariants over them.
 
-Run under gw-wiki's environment:
+Run under gw-serve's environment:
 
-    uv run --package gw-wiki python scripts/bench_reads.py run --json out.json --markdown out.md
-    uv run --package gw-wiki python scripts/bench_reads.py run --no-synthetic --workspace "$GRAPH_WORKS_DIR"
-    uv run --package gw-wiki python scripts/bench_reads.py generate /tmp/corpus --items 1000 --wiki-pages 1000
+    uv run --package gw-serve python scripts/bench_reads.py run --json out.json --markdown out.md
+    uv run --package gw-serve python scripts/bench_reads.py run --no-synthetic --workspace "$GRAPH_WORKS_DIR"
+    uv run --package gw-serve python scripts/bench_reads.py generate /tmp/corpus --items 1000 --wiki-pages 1000
 
 See scripts/bench-reads.md.
 """
@@ -34,6 +34,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import read_bench_corpus  # noqa: E402
 import read_bench_search  # noqa: E402
+import read_bench_serve  # noqa: E402
 from gw_wiki.wiki_page.citations import run_wiki_citations  # noqa: E402
 from gw_wiki.wiki_page.commands import run_page_read, run_wiki_tree  # noqa: E402
 from gw_work import commands as work  # noqa: E402
@@ -73,6 +74,7 @@ READS: dict[str, Callable[[Target], object]] = {
 }
 
 READS.update(read_bench_search.SEARCH_READS)
+READS.update(read_bench_serve.SERVE_READS)
 
 
 @dataclass(slots=True)

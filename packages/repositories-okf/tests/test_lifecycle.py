@@ -98,6 +98,22 @@ def test_managed_page_text_is_a_valid_managed_page_linking_its_code_graph_page()
     assert "## Summary" in text and "(/code-graph/demo.md)" in text
 
 
+def test_the_managed_page_validates_against_the_owned_schema_and_sections(tmp_path: Path) -> None:
+    pin = Pin(commit="b" * 40, fetched_at="2026-09-29T20:40:00Z", ref="main")
+    text = managed_page_text(name="demo", url="https://example.com/demo.git", track="main", pin=pin)
+    root = tmp_path / "bundle"
+    (root / "repositories").mkdir(parents=True)
+    (root / "index.md").write_text("---\nokf_version: 0.2\n---\n\n# b\n", encoding="utf-8", newline="")
+    (root / "repositories" / "demo.md").write_text(text, encoding="utf-8", newline="")
+    rules = [
+        schema_rule(load_schemas(str(ASSETS / "schema")), severity="error"),
+        section_rule(load_sections(str(ASSETS / "sections")), severity="error"),
+    ]
+    report = okf_validate(load_bundle(root), today=date(2026, 9, 29), extra_rules=rules)
+    assert report.errors == ()
+    assert read_pin(parse(text)) == pin
+
+
 def test_scan_config_hash_is_stable_and_sensitive() -> None:
     base = scan_config_hash("okf/repositories/demo/references/git", ["*.lock", "dist/"])
     assert base == scan_config_hash("okf/repositories/demo/references/git", ["*.lock", "dist/"])

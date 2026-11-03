@@ -217,3 +217,34 @@ def test_scoped_plan_writes_only_the_scoped_repository(tmp_path: Path) -> None:
     # Repository two's existing page is kept current, so pruning never sees it.
     assert "file:acme/two/lib/old.py" in plan.entities.current_resources
     assert "file:acme/two/lib/old.py" not in unscoped.entities.current_resources
+
+
+def test_scoped_sync_refreshes_only_the_scoped_repositorys_dependency_pages(tmp_path: Path) -> None:
+    """Repo one gains a dependency page for `requests`; repo two, also changed, keeps none and is untouched."""
+    bundle_root, config = _two_repo_synced(tmp_path)
+    one_dependencies = bundle_root / "code-graph/one/entities/dependencies"
+    two_dependencies = bundle_root / "code-graph/two/entities/dependencies"
+    assert not one_dependencies.exists() or not any(one_dependencies.rglob("requests.md"))
+    two_before = _repository_bytes(bundle_root, "two")
+    _change_both(config)
+
+    result = _sync(bundle_root, config, repos=frozenset({"one"}))
+
+    assert result.ok
+    page = one_dependencies / "pypi" / "requests.md"
+    assert page.is_file()
+    assert "code-graph/one/entities/dependencies/pypi/requests" in {*result.entities.written, *result.entities.created}
+    dependency_paths = [
+        path
+        for path in (
+            *result.entities.written,
+            *result.entities.created,
+            *result.entities.updated,
+            *result.entities.catalog,
+        )
+        if "/dependencies/" in path
+    ]
+    assert dependency_paths
+    assert all(path.startswith("code-graph/one/") for path in dependency_paths)
+    assert not two_dependencies.exists() or not any(two_dependencies.rglob("requests.md"))
+    assert _repository_bytes(bundle_root, "two") == two_before

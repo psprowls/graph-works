@@ -53,7 +53,15 @@ _SPEC = "work_tracker_okf._rules.decisions"
 #: exists to catch. The known cost, recorded rather than solved, is that a
 #: document *about* the ledger format trips on its own illustrative ids — loud,
 #: rare, and confined to documents about the ledger itself.
+#: A `D-nnn` is resolved against the ancestor ledgers, or against any ledger
+#: linked on the same spec line (see `_LEDGER_LINK_RE`): the link is the
+#: qualified form, so a citation of an unrelated or archived epic's decision
+#: needs no new id grammar.
 _ID_RE = re.compile(r"\bD-\d+\b")
+
+#: A root-absolute markdown link to a decisions ledger. The target's item path
+#: is captured; it is only trusted once it names a known item.
+_LEDGER_LINK_RE = re.compile(r"\]\(\s*/([^)\s#]+?)/references/" + re.escape(MANAGED_ARTIFACTS["decisions"]) + r"\s*\)")
 
 #: Parser warnings the explicit sub-checks already surface at `error`. Filtered
 #: out of the `warn` passthrough, so one bad entry is one root cause and one
@@ -294,11 +302,25 @@ def _spec_text(ctx: RuleContext, item: WorkItem) -> str | None:
     return None
 
 
-def citations(ctx: RuleContext) -> Iterable[Finding]:
-    """34: a design spec citing a `D-nnn` absent from its ancestor ledgers.
+def _linked_ledgers(line: str, by_path: dict[str, WorkItem]) -> list[str]:
+    """Item paths whose ledger the line links, in order, unknown items ignored
+    (a broken link is the links topic's finding, not this rule's)."""
+    found: list[str] = []
+    for match in _LEDGER_LINK_RE.finditer(line):
+        path = match.group(1)
+        if path in by_path and path not in found:
+            found.append(path)
+    return found
 
-    Runs over any item with a design source. Lookup checks its own ledger when
-    it can own one, then parent-capable ancestors in nearest-first order.
+
+def citations(ctx: RuleContext) -> Iterable[Finding]:
+    """34: a design spec citing a `D-nnn` absent from its reachable ledgers.
+
+    Runs over any item with a design source. Lookup checks, per occurrence,
+    the ledgers linked on the same spec line (no `PARENT_TYPES` filter: an
+    explicit link may name an archived or unrelated item), then the item's own
+    ledger when it can own one, then parent-capable ancestors in nearest-first
+    order. A cite is missing only when no occurrence resolves.
     Resolution walks the whole item set, archived included; only active items
     are reported on, matching `graph.references`.
 
@@ -323,26 +345,42 @@ def citations(ctx: RuleContext) -> Iterable[Finding]:
         ]
         if not candidates:
             continue
-        for path in candidates:
-            if path not in known:
-                ref = _ledger_ref(path)
-                known[path] = frozenset(entry.number for entry in load(ref.path(ctx.bundle.root)).entries)
-        refs = {path: _ledger_ref(path).rel for path in candidates}
-        resolved: list[str] = []
-        missing: list[str] = []
-        for cite in sorted({match.group(0) for match in _ID_RE.finditer(text)}):
-            try:
-                number = id_number(cite)
-            except ValueError:
-                continue
-            winner = next((path for path in candidates if number in known[path]), None)
-            if winner is not None:
-                resolved.append(f"{cite} -> {refs[winner]}")
-            else:
-                missing.append(cite)
-        searched = ", ".join(refs[path] for path in candidates)
-        resolved_detail = f"; resolved citations: {', '.join(resolved)}" if resolved else ""
-        for cite in missing:
+        resolved: dict[str, str] = {}
+        unresolved: set[str] = set()
+        linked_searched: list[str] = []
+        for line in text.splitlines():
+            linked = _linked_ledgers(line, by_path)
+            for path in linked:
+                if path not in linked_searched:
+                    linked_searched.append(path)
+            for cite in _ID_RE.findall(line):
+                try:
+                    number = id_number(cite)
+                except ValueError:
+                    continue
+                if cite in resolved:
+                    continue
+                winner = None
+                for path in (*linked, *candidates):
+                    if path not in known:
+                        known[path] = frozenset(
+                            entry.number for entry in load(_ledger_ref(path).path(ctx.bundle.root)).entries
+                        )
+                    if number in known[path]:
+                        winner = path
+                        break
+                if winner is not None:
+                    resolved[cite] = f"{cite} -> {_ledger_ref(winner).rel}"
+                    unresolved.discard(cite)
+                else:
+                    unresolved.add(cite)
+        searched = ", ".join(
+            _ledger_ref(path).rel for path in (*candidates, *(p for p in linked_searched if p not in candidates))
+        )
+        resolved_detail = (
+            f"; resolved citations: {', '.join(resolved[cite] for cite in sorted(resolved))}" if resolved else ""
+        )
+        for cite in sorted(unresolved):
             yield _finding(
                 "decisions.cite-missing",
                 "error",

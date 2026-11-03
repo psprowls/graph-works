@@ -130,12 +130,16 @@ WAIT_LINE = (
 #: registered into `sources[]` by the advance, and no transition is gated on
 #: its contents. A gate that read a worker's self-report would be trusting the
 #: exact judgement the defect this tail exists for shows a model getting wrong.
-#: Its wait sentence is `WAIT_LINE`; see that constant for its mirrors. The rest of
-#: the gate paragraph is not mirrored: attended execute sessions receive this tail
-#: through the workflow skill's verbatim `prompt_tail` append.
-#: The deferral sentence is mirrored verbatim in the workflow skill's
-#: execute-stage deferral bullet (`<work-path>` there, `{path}` here);
-#: unchecked coverage lines need no instruction -- the `execute -> finish`
+#: Its wait sentence is `WAIT_LINE`; see that constant for its mirrors. Neither the
+#: rest of the gate paragraph nor the deferral sentence is mirrored: attended
+#: execute sessions receive this tail through the workflow skill's verbatim
+#: `prompt_tail` append. The deferral sentence is pinned by
+#: `tests/workspace/test_pipeline.py` (the full sentence, ordered before the gate)
+#: and by the plugin's `test-finish-obligations-docs.sh` (its first source line).
+#: Its plan-side counterpart, not a mirror, is the writing-plans rider's
+#: `-- Deferred to finish` heading rule in the workflow skill's
+#: `references/brief-riders.md`, which names the steps this sentence records.
+#: Unchecked coverage lines need no instruction -- the `execute -> finish`
 #: advance records them as `finish_obligations` itself (D-001).
 #: `{execute_artifact}` is the configured execute artifact filename, substituted
 #: by orchestrate's `_prompt`.

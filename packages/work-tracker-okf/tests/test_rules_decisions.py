@@ -569,3 +569,74 @@ def test_ledger_missing_fires_exactly_at_ledger_phases(tmp_path: Path) -> None:
     report = lane_report(tmp_path)
     flagged = {f.path for f in report.by_code("decisions.ledger-missing")}
     assert flagged == {f"work/{t.lower()}-{p}.md" for t, p in pairs if p in ledger_phases()}
+
+
+_OTHER = "work/epic-unrelated-owner"
+_ARCHIVED = "work/_archive/epic-archived-owner"
+
+
+def _other_epic(root: Path, path: str, ledger: str) -> None:
+    write_item(
+        root,
+        path,
+        "type: Epic\nstatus: stable\nwork_status: resolved\nowner: fixture\n"
+        "phase: done\neffort: large\nopened: 2026-07-01\nupdated: 2026-08-01\n",
+    )
+    _ledger(root, ledger, owner=path)
+
+
+def _link(path: str) -> str:
+    return f"[ledger](/{path}/references/00-decisions.md)"
+
+
+def test_a_same_line_link_to_an_unrelated_ledger_resolves_the_citation(tmp_path: Path) -> None:
+    _epic(tmp_path)
+    _ledger(tmp_path, "## D-001 — q\nstatus: answered\n")
+    _other_epic(tmp_path, _OTHER, "## D-003 — other choice\nstatus: answered\n")
+    _child_with_spec(tmp_path, f"# Spec\n\nPer D-003 in {_link(_OTHER)}.\n")
+    assert _codes(tmp_path, "decisions.cite-missing") == []
+
+
+def test_a_same_line_link_to_an_archived_ledger_resolves_the_citation(tmp_path: Path) -> None:
+    _epic(tmp_path)
+    _ledger(tmp_path, "## D-001 — q\nstatus: answered\n")
+    _other_epic(tmp_path, _ARCHIVED, "## D-003 — archived choice\nstatus: answered\n")
+    _child_with_spec(tmp_path, f"# Spec\n\nPer D-003 in {_link(_ARCHIVED)}.\n")
+    assert _codes(tmp_path, "decisions.cite-missing") == []
+
+
+def test_the_same_id_on_an_unlinked_line_still_errors(tmp_path: Path) -> None:
+    _epic(tmp_path)
+    _ledger(tmp_path, "## D-001 — q\nstatus: answered\n")
+    _other_epic(tmp_path, _OTHER, "## D-003 — other choice\nstatus: answered\n")
+    _child_with_spec(tmp_path, f"# Spec\n\nSee {_link(_OTHER)}.\n\nAlso D-003 here.\n")
+    (message,) = _codes(tmp_path, "decisions.cite-missing")
+    assert "D-003" in message
+
+
+def test_a_link_to_a_ledger_lacking_the_number_errors_and_names_that_ledger(tmp_path: Path) -> None:
+    _epic(tmp_path)
+    _ledger(tmp_path, "## D-001 — q\nstatus: answered\n")
+    _other_epic(tmp_path, _OTHER, "## D-001 — other choice\nstatus: answered\n")
+    _child_with_spec(tmp_path, f"# Spec\n\nPer D-009 in {_link(_OTHER)}.\n")
+    (message,) = _codes(tmp_path, "decisions.cite-missing")
+    assert "D-009" in message
+    assert f"{_OTHER}/references/00-decisions.md" in message
+
+
+def test_a_link_to_a_nonexistent_item_is_ignored(tmp_path: Path) -> None:
+    _epic(tmp_path)
+    _ledger(tmp_path, "## D-001 — q\nstatus: answered\n")
+    _child_with_spec(tmp_path, f"# Spec\n\nPer D-003 in {_link('work/epic-ghost')}.\n")
+    (message,) = _codes(tmp_path, "decisions.cite-missing")
+    assert "D-003" in message
+    assert "epic-ghost" not in message
+
+
+def test_a_linked_ledger_resolution_is_named_in_the_resolved_detail(tmp_path: Path) -> None:
+    _epic(tmp_path)
+    _ledger(tmp_path, "## D-001 — q\nstatus: answered\n")
+    _other_epic(tmp_path, _OTHER, "## D-003 — other choice\nstatus: answered\n")
+    _child_with_spec(tmp_path, f"# Spec\n\nPer D-003 in {_link(_OTHER)}; also D-009.\n")
+    (message,) = _codes(tmp_path, "decisions.cite-missing")
+    assert f"D-003 -> {_OTHER}/references/00-decisions.md" in message

@@ -452,3 +452,43 @@ def test_error_message_names_each_path(tmp_path):
         with pytest.raises(StoreValidationError) as info:
             PlainYamlStore(p).read()
         assert str(info.value).startswith(str(p))
+
+
+def _rewrite(tmp_path, text, key_path, value):
+    path = tmp_path / "c.yaml"
+    path.write_text(text, encoding="utf-8", newline="")
+    store = PlainYamlStore(path)
+    data = store.read()
+    node = data
+    for part in key_path[:-1]:
+        node = node[part]
+    node[key_path[-1]] = value
+    store.write(data)
+    return path.read_text(encoding="utf-8")
+
+
+@pytest.mark.parametrize(
+    ("text", "key_path", "value", "expected"),
+    [
+        ("a: 4  # c\n", ["a"], 1000, "a: 1000  # c\n"),
+        ("a: a-long-string-value  # c\n", ["a"], 4, "a: 4  # c\n"),
+        ("a: 4      # c\n", ["a"], 4000, "a: 4000      # c\n"),
+        ("a: 4  # c\n", ["a"], "has: colon", "a: 'has: colon'  # c\n"),
+        ("a:\n  b: 4  # c\n", ["a", "b"], 123456, "a:\n  b: 123456  # c\n"),
+        ("a:\n  - 4  # c\n  - 5\n", ["a", 0], 1000, "a:\n  - 1000  # c\n  - 5\n"),
+        ("a: 4  # c\nb: 5  # d\n", ["a"], 1000, "a: 1000  # c\nb: 5  # d\n"),
+        ("a: 4\nb: 5\n", ["a"], 1000, "a: 1000\nb: 5\n"),
+    ],
+    ids=["wider", "narrower", "custom-gap", "quoting", "nested", "sequence", "neighbour", "no-comment"],
+)
+def test_write_keeps_the_gap_before_an_inline_comment(tmp_path, text, key_path, value, expected):
+    assert _rewrite(tmp_path, text, key_path, value) == expected
+
+
+def test_write_comment_gap_helper_never_raises_on_unreadable_tokens():
+    from config_io.store import _keep_comment_gap
+
+    class Bad:
+        ca = None
+
+    _keep_comment_gap(Bad(), "a", 1, 2, [])

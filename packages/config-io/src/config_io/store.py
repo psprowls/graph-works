@@ -52,25 +52,78 @@ from config_io.errors import StoreValidationError
 # cannot be shared by concurrent watcher and request threads.
 
 
-def _merge_mapping(tree: CommentedMap, data: Mapping[str, object]) -> None:
+def _scalar_width(value: object) -> int | None:
+    """Rendered width of a single-line scalar, or None when it is not one."""
+    if isinstance(value, (Mapping, list)) or value is None:
+        return None
+    buffer = io.StringIO()
+    writer = YAML(typ="rt")
+    writer.preserve_quotes = True
+    writer.dump(value, buffer)
+    rendered = buffer.getvalue().removesuffix("...\n").rstrip("\n")
+    return None if "\n" in rendered else len(rendered)
+
+
+def _keep_comment_gap(
+    container: CommentedMap | CommentedSeq, key: object, old: object, new: object, lines: list[str]
+) -> None:
+    """Keep the gap between a replaced scalar and its trailing comment.
+
+    ruamel pins an inline comment to an absolute column, so a value of a
+    different width moves the comment's gap. Move the column by the width
+    delta instead. Never raises: anything unreadable keeps ruamel's default.
+    """
+    try:
+        entry = container.ca.items.get(key)
+        if not entry:
+            return
+        token = entry[2] if isinstance(container, CommentedMap) else entry[0]
+        old_width, new_width = _scalar_width(old), _scalar_width(new)
+        if token is None or old_width is None or new_width is None:
+            return
+        line = lines[token.start_mark.line]
+        column = token.start_mark.column
+        gap = column - len(line[:column].rstrip())
+        if gap < 1:
+            return
+        value_start = column - gap - old_width
+        if value_start < 0:
+            return
+        token.column = value_start + new_width + gap
+    except (AttributeError, IndexError, TypeError):
+        return
+
+
+def _merge_mapping(tree: CommentedMap, data: Mapping[str, object], lines: list[str]) -> None:
     for key in [k for k in tree if k not in data]:
         del tree[key]
     for key, value in data.items():
-        tree[key] = _merge_node(tree[key], value) if key in tree else value
+        if key not in tree:
+            tree[key] = value
+            continue
+        old = tree[key]
+        merged = _merge_node(old, value, lines)
+        tree[key] = merged
+        if merged is not old:
+            _keep_comment_gap(tree, key, old, tree[key], lines)
 
 
-def _merge_node(node: object, value: object) -> object:
+def _merge_node(node: object, value: object, lines: list[str]) -> object:
     if isinstance(node, CommentedMap) and isinstance(value, Mapping):
-        _merge_mapping(node, value)
+        _merge_mapping(node, value, lines)
         return node
     if isinstance(node, CommentedSeq) and isinstance(value, list):
         # Resize in place: replacing the node would drop its flow flag and item comments.
         del node[len(value) :]
         for index, item in enumerate(value):
-            if index < len(node):
-                node[index] = _merge_node(node[index], item)
-            else:
+            if index >= len(node):
                 node.append(item)
+                continue
+            old = node[index]
+            merged = _merge_node(old, item, lines)
+            node[index] = merged
+            if merged is not old:
+                _keep_comment_gap(node, index, old, node[index], lines)
         return node
     # An equal value keeps its node, so its quote style and block form survive.
     if type(node).__mro__[-2] is type(value).__mro__[-2] and node == value:
@@ -187,7 +240,7 @@ class PlainYamlStore:
             tree = writer.load(raw)
             if not isinstance(tree, CommentedMap):
                 return None
-            _merge_mapping(tree, data)
+            _merge_mapping(tree, data, raw.decode("utf-8").splitlines())
             buffer = io.StringIO()
             writer.dump(tree, buffer)
         except YAMLError:

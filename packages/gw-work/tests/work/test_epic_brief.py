@@ -319,3 +319,32 @@ def test_data_is_json_serialisable(tmp_path: Path, monkeypatch: pytest.MonkeyPat
     layout, items, child = _world(tmp_path, baseline=True)
     _no_git(monkeypatch)
     json.dumps(dict(eb.epic_brief(layout, items, child).data))
+
+
+def test_a_shared_memo_probes_each_distinct_ref_once_and_leaves_the_brief_unchanged(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import gw_pipeline.landed as landed
+
+    layout, items, child = _world(tmp_path, baseline=True)
+    monkeypatch.setattr(eb, "_code_repo", lambda layout, items, item: Path("/repo"))
+    monkeypatch.setattr(
+        landed, "resolve_item_repo", lambda layout, item, by_path: type("R", (), {"path": Path("/repo")})()
+    )
+    calls: list[tuple[Path, str, str]] = []
+
+    def probe(repo: Path, ref: str, base: str) -> BaselineComparison:
+        calls.append((repo, ref, base))
+        return BaselineComparison(True)
+
+    monkeypatch.setattr(landed, "compare_to_baseline", probe)
+    monkeypatch.setattr(eb, "compare_to_baseline", probe)
+    plain = eb.epic_brief(layout, items, child)
+    plain_calls = len(calls)
+    assert plain_calls > 0
+    calls.clear()
+    memo = landed.LandedMemo()
+    landed.landed_since(layout, items, child, memo=memo)
+    memoised = eb.epic_brief(layout, items, child, memo=memo)
+    assert memoised == plain
+    assert len(calls) == len(set(calls))

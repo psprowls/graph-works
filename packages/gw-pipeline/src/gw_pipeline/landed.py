@@ -136,6 +136,15 @@ class LandedMemo:
 
     def __init__(self) -> None:
         self._results: dict[tuple[str, str, tuple[str, ...], tuple[LandedSibling, ...]], LandedSince] = {}
+        self._comparisons: dict[tuple[Path, str, str], BaselineComparison] = {}
+
+    def compare(self, repo: Path, ref: str, baseline: str) -> BaselineComparison:
+        """`compare_to_baseline`, probing Git once per distinct `(repo, ref, baseline)`."""
+        key = (repo, ref, baseline)
+        cached = self._comparisons.get(key)
+        if cached is None:
+            cached = self._comparisons[key] = compare_to_baseline(repo, ref, baseline)
+        return cached
 
 
 def landed_since(
@@ -152,11 +161,11 @@ def landed_since(
     if code is None or not candidates:
         return LandedSince(code, None)
     if memo is None:
-        return _landed_since(layout, items, item, code, candidates)
+        return _landed_since(layout, items, item, code, candidates, None)
     key = (item.path, code, tuple(item.affects), candidates)
     cached = memo._results.get(key)
     if cached is None:
-        cached = memo._results[key] = _landed_since(layout, items, item, code, candidates)
+        cached = memo._results[key] = _landed_since(layout, items, item, code, candidates, memo)
     return cached
 
 
@@ -166,6 +175,7 @@ def _landed_since(
     item: WorkItem,
     code: str,
     candidates: tuple[LandedSibling, ...],
+    memo: LandedMemo | None,
 ) -> LandedSince:
     by_path = {candidate.path: candidate for candidate in items}
     try:
@@ -181,7 +191,8 @@ def _landed_since(
     for sibling in candidates:
         ref = sibling.resolved_in or ""
         if ref not in comparisons:
-            comparisons[ref] = compare_to_baseline(repo, ref, code)
+            probe = memo.compare if memo is not None else compare_to_baseline
+            comparisons[ref] = probe(repo, ref, code)
         comparison = comparisons[ref]
         if comparison.missing:
             warnings.append(f"landed-since: {sibling.path} resolved_in {ref!r} is not a commit in {repo}; skipped")

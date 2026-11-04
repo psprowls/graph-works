@@ -74,3 +74,26 @@ def test_a_commit_reachable_only_from_a_tag_is_new(tmp_path: Path) -> None:
     _git(repo, "tag", "keep", tagged)
     _git(repo, "branch", "-q", "-D", "tagged")
     assert compare_to_baseline(repo, tagged, later) == BaselineComparison(True)
+
+
+def test_a_memo_compare_probes_once_per_repo_ref_baseline(tmp_path: Path, monkeypatch) -> None:
+    import gw_pipeline.landed as landed
+
+    repo, first, second = _repo(tmp_path)
+    calls: list[tuple[Path, str, str]] = []
+    original = landed.compare_to_baseline
+
+    def counting(r: Path, ref: str, base: str) -> BaselineComparison:
+        calls.append((r, ref, base))
+        return original(r, ref, base)
+
+    monkeypatch.setattr(landed, "compare_to_baseline", counting)
+    memo = landed.LandedMemo()
+    assert memo.compare(repo, first, second) is memo.compare(repo, first, second)
+    assert len(calls) == 1
+    memo.compare(repo, second, first)
+    assert len(calls) == 2
+    other = tmp_path / "other"
+    other.mkdir()
+    memo.compare(other, first, second)
+    assert len(calls) == 3

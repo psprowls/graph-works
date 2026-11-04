@@ -173,7 +173,7 @@ def _finish_obligations(inp: SlotInput) -> SlotFill:
 
 def _epic_brief(inp: SlotInput) -> SlotFill:
     """Owned by `feature-epic-brief` (its ledger D-001): see `work/epic_brief.py`."""
-    brief = epic_brief(inp.layout, inp.items, inp.item)
+    brief = epic_brief(inp.layout, inp.items, inp.item, memo=inp.landed_memo)
     return SlotFill(lines=brief.lines, data=MappingProxyType(dict(brief.data)), warnings=brief.warnings)
 
 

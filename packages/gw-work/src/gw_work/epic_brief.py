@@ -27,7 +27,7 @@ from gw_kernel.workspace.errors import WorkspaceError
 from gw_kernel.workspace.layout import WorkspaceLayout
 from gw_kernel.workspace.repos import resolve_item_repo
 from gw_pipeline.guidance.assembly import covered_epic
-from gw_pipeline.landed import compare_to_baseline, has_landed
+from gw_pipeline.landed import LandedMemo, compare_to_baseline, has_landed
 from work_tracker_okf import decisions as _decisions
 from work_tracker_okf.affects import code_affects
 from work_tracker_okf.decisions import Decision, ledger_ref, prose_block
@@ -126,7 +126,9 @@ def _short(sha: str) -> str:
     return sha[:12]
 
 
-def epic_brief(layout: WorkspaceLayout, items: Sequence[WorkItem], item: WorkItem) -> EpicBrief:
+def epic_brief(
+    layout: WorkspaceLayout, items: Sequence[WorkItem], item: WorkItem, *, memo: LandedMemo | None = None
+) -> EpicBrief:
     epic = covered_epic(items, item)
     if epic is None:
         return EpicBrief()
@@ -184,7 +186,7 @@ def epic_brief(layout: WorkspaceLayout, items: Sequence[WorkItem], item: WorkIte
         new: bool | None = None
         unreachable = False
         if code is not None and repo is not None:
-            comparison = compare_to_baseline(repo, ref, code)
+            comparison = memo.compare(repo, ref, code) if memo is not None else compare_to_baseline(repo, ref, code)
             new = comparison.new
             unreachable = comparison.unreachable
             if comparison.missing:

@@ -32,6 +32,7 @@ from gw_orchestrate import delivery
 from gw_orchestrate import dispatch_record as dr
 from gw_orchestrate.orca_port import OrcaPort
 from gw_orchestrate.placing import Refused, realize, resolve
+from gw_orchestrate.stage_advance import run_stage_advance
 
 _CODE_PHASES: frozenset[str] = code_phases()
 
@@ -642,6 +643,31 @@ def _realize(c: _Dispatch, *, verify_only: bool) -> tuple[dict[str, Any], tuple[
     return placed, notes
 
 
+def _enter_execute(c: _Dispatch) -> None:
+    """Apply the dispatch transition for an execute dispatch of a phase-null item, before placement.
+
+    An item whose path enters at execute (a small TestGap) is stored at phase
+    null until its dispatch transition runs; the engine's `start` refuses
+    `wrong-phase` against a stored null. The attended flow applies the
+    transition before placing, so the coordinator does too. The advance is
+    guarded on the observed null phase and runs `on_dispatch` only (never the
+    completion that would land the item at `finish`); an item already past null
+    is left alone, so a retry never re-applies it.
+    """
+    resolved = resolve(c.layout, c.item["path"], repo_name=_repo_hint(c))
+    if isinstance(resolved, Refused):
+        raise _Stop("placement-refused", resolved.detail, refusal=resolved.kind)
+    item = resolved.items.get(c.item["path"])
+    if item is None or item.phase is not None:
+        return
+    advanced = run_stage_advance(
+        c.layout, c.item["path"], today=c.today, expected_phase="none", owner=c.item["agent"], dry_run=False
+    )
+    plan = advanced.outcome.plan
+    if plan.refusal is not None:
+        raise _Stop("recovery-inspection", f"dispatch transition refused ({plan.refusal}): {plan.detail}")
+
+
 def _place(c: _Dispatch) -> tuple[dict[str, Any], tuple[str, ...]]:
     """Make the planned placement so through the engine, before any Orca call.
 
@@ -651,6 +677,8 @@ def _place(c: _Dispatch) -> tuple[dict[str, Any], tuple[str, ...]]:
     c.step = "place"
     if _computed(c) is None:
         return _root_placed(c), ()
+    if c.item["phase"] == "execute":
+        _enter_execute(c)
     return _realize(c, verify_only=False)
 
 

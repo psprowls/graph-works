@@ -1964,3 +1964,64 @@ def test_retry_of_a_null_placement_relaunches_in_the_same_root(env, monkeypatch,
     assert result.ok, result.failure
     assert calls == [] and result.dispatch_id == "ctx_2"
     assert record(env).attempts[-1].placement["path"] == target
+
+
+# --- a phase-null item entering at execute ----------------------------------
+
+
+def write_null_phase_item(env, path="work/x"):
+    """A small TestGap whose path enters at execute, stored phase still null; re-plans its placement."""
+    layout, plan, port, *_ = env
+    page = layout.bundle_dir / f"{path}.md"
+    page.write_text(
+        "---\ntype: TestGap\ntitle: X\ndescription: d\nstatus: stable\n"
+        "work_status: open\neffort: small\nopened: 2026-09-26\nupdated: 2026-09-26\n"
+        "affects: []\n---\n\n## Summary\nd\n",
+        encoding="utf-8",
+        newline="\n",
+    )
+    plan["dispatches"][0] = entry(layout, path)
+    port.worktrees["id:wt1"] = row(computed(layout, path).worktree, plan["dispatches"][0]["placement"]["branch"])
+
+
+def test_a_phase_null_execute_dispatch_applies_the_dispatch_transition_before_placing(env):
+    write_null_phase_item(env)
+    result = run(env)
+    assert result.ok, result.failure
+    text = item_text(env)
+    assert "phase: execute" in text and "phase: finish" not in text
+    assert "work_status: in-progress" in text
+    assert f"start_sha: {result.placement.start_sha}" in text
+
+
+def test_a_retried_phase_null_dispatch_does_not_reapply_the_transition(env):
+    write_null_phase_item(env)
+    assert run(env).ok
+    text = item_text(env)
+    assert run(env).ok
+    assert item_text(env) == text
+
+
+def test_a_phase_changed_since_planning_stops_without_advancing(env):
+    write_null_phase_item(env)
+    page = env[0].bundle_dir / "work/x.md"
+    page.write_text(
+        page.read_text(encoding="utf-8").replace("effort: small\n", "effort: small\nphase: finish\n"),
+        encoding="utf-8",
+        newline="\n",
+    )
+    before = item_text(env)
+    result = run(env)
+    assert not result.ok
+    assert item_text(env) == before
+    assert env[2].calls == []
+
+
+def test_a_phase_null_design_entry_dispatch_is_untouched(env, monkeypatch):
+    calls = fake_realize(monkeypatch, placing.Refused("occupied", "held"))
+    write_item(env[0], "work/x", phase="null")
+    env[1]["dispatches"][0]["phase"] = "design"
+    before = item_text(env)
+    run(env)
+    assert item_text(env) == before
+    assert [(c["phase"], c["verify_only"]) for c in calls] == [("design", False)]

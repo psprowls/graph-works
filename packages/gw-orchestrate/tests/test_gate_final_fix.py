@@ -128,7 +128,7 @@ def test_manifest_command_state_change_refuses_before_acceptance_or_planning(
         result = gate.run_gate_check(env.layout, env.path)
         assert result.refusal == expected, result
     else:
-        result = stage.run_stage_advance(env.layout, env.path, today=TODAY, repo=env.repo, dry_run=False)
+        result = stage.run_stage_advance(env.layout, env.path, today=TODAY, repo=env.main, dry_run=False)
         assert result.outcome.plan.refusal == expected, result.outcome.plan
         assert not result.outcome.written and env.page_unchanged()
     if mutation == "commit":

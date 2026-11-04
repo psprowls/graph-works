@@ -6,10 +6,12 @@ from datetime import date
 
 from gw_cli.cli import app
 from gw_kernel import apply_init, plan_init
+from gw_pipeline.placement import branch_name
 from typer.testing import CliRunner
 
 runner = CliRunner()
 OWNER = "work/feature-x"
+FEATURE = branch_name(OWNER, "Feature")
 
 
 def git(root, *args):
@@ -25,8 +27,10 @@ def setup(tmp_path):
     (repo / "a.txt").write_text("base\n", encoding="utf-8", newline="\n")
     git(repo, "add", "a.txt")
     git(repo, "commit", "-m", "base")
-    source = tmp_path / "code-source"
-    git(repo, "worktree", "add", "-b", "feature", str(source))
+    # Where placement computes OWNER's checkout in the workspace rooted at `tmp_path / "ws"`.
+    source = tmp_path / "ws" / ".gw" / "worktrees" / "code" / FEATURE
+    source.parent.mkdir(parents=True)
+    git(repo, "worktree", "add", "-b", FEATURE, str(source))
     (source / "b.txt").write_text("feature\n", encoding="utf-8", newline="\n")
     git(source, "add", "b.txt")
     git(source, "commit", "-m", "source")
@@ -41,7 +45,7 @@ def setup(tmp_path):
     page.write_text(
         "---\ntype: Feature\ntitle: Example feature\ndescription: d\nstatus: stable\nwork_status: in-progress\n"
         "phase: finish\neffort: medium\nopened: 2026-09-28\nupdated: 2026-09-28\n"
-        f"repo: code\nworktree: {source}\nbranch: feature\naffects: [b.txt]\n---\n",
+        "repo: code\naffects: [b.txt]\n---\n",
         encoding="utf-8",
         newline="\n",
     )
@@ -62,7 +66,9 @@ def test_integrate_plan_apply_replay_and_refusals(tmp_path):
         "default",
     )
     human = runner.invoke(app, args)
-    assert human.exit_code == 0 and "would integrate feature into main in code (squash, from default)" in human.stdout
+    assert (
+        human.exit_code == 0 and f"would integrate {FEATURE} into main in code (squash, from default)" in human.stdout
+    )
 
     applied = runner.invoke(app, [*args, "--strategy", "merge", "--apply", "--json"])
     assert applied.exit_code == 0, applied.output
@@ -103,7 +109,7 @@ def test_integrate_reports_workspace_and_io_errors(tmp_path, monkeypatch):
 
 def test_accept_integration_plan_apply_and_refusal(tmp_path):
     layout, repo = setup(tmp_path)
-    git(repo, "merge", "--squash", "feature")
+    git(repo, "merge", "--squash", FEATURE)
     (repo / "b.txt").write_text("edited in review\n", encoding="utf-8", newline="\n")
     git(repo, "add", "b.txt")
     git(repo, "commit", "-m", "squash with review edits")

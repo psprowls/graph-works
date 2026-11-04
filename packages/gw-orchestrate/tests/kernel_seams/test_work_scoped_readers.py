@@ -10,8 +10,10 @@ from gw_kernel import apply_init, plan_init
 from gw_kernel.workspace import bundle as bundle_mod
 from gw_orchestrate import asks, gate, integrate
 from gw_orchestrate import commands as orchestrate
+from gw_pipeline.placement_resolve import item_placement
+from okf_io import load_bundle
 from work_tracker_okf import asks as pure_asks
-from work_tracker_okf.items import IGNORE
+from work_tracker_okf.items import IGNORE, load_items
 
 TODAY = date(2026, 10, 2)
 
@@ -72,11 +74,6 @@ def _init_git(repo):
 def layout(tmp_path):
     code = tmp_path / "code"
     _init_git(code)
-    source = tmp_path / "source"
-    _git(code, "worktree", "add", "-b", "feature", str(source))
-    _write(source / "feature.txt", "feature\n")
-    _git(source, "add", ".")
-    _git(source, "commit", "-m", "feature")
     layout = apply_init(plan_init(tmp_path / "workspace", today=TODAY, topic="Scope")).layout
     _write(
         layout.manifest_path,
@@ -128,9 +125,18 @@ def _phase(layout, phase, *, stamped=False):
     page = layout.bundle_dir / f"{ITEM}.md"
     text = page.read_text(encoding="utf-8").replace("phase: plan", f"phase: {phase}")
     if stamped:
-        stamp = f"worktree: {layout.root.parent / 'source'}\nbranch: feature\naffects: [feature.txt]"
-        text = text.replace("affects: []", stamp)
+        text = text.replace("affects: []", "affects: [feature.txt]")
     _write(page, text)
+    if stamped:
+        # The item's computed checkout, carrying one commit past the base.
+        items = load_items(load_bundle(layout.bundle_dir)).by_path
+        placement = item_placement(layout, items[ITEM], items)
+        assert placement is not None
+        code = layout.root.parent / "code"
+        _git(code, "worktree", "add", "-b", placement.branch, str(placement.worktree))
+        _write(placement.worktree / "feature.txt", "feature\n")
+        _git(placement.worktree, "add", ".")
+        _git(placement.worktree, "commit", "-m", "feature")
 
 
 def test_orchestrate_plan_matches_legacy(layout, monkeypatch):

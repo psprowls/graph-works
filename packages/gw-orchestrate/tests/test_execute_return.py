@@ -142,7 +142,6 @@ def test_return_writes_coverage_to_primary_bundle(ws, tmp_path):
     retired = tmp_path / "retired-worktree"
     retired.mkdir()
     doc = document(layout)
-    doc.set("repo_stamps", {"_workspace": {"worktree": str(retired), "branch": "retired"}})
     doc.save()
     commit(layout.root)
     result = advance(layout)
@@ -740,21 +739,21 @@ def test_changed_canonical_plan_refuses_completion(ws, damage):
 
 
 def code_gate(layout, tmp_path, *, receipt=True):
-    from _gate_helpers import gate_ready
+    from _gate_helpers import gate_ready, place_item
 
-    code = tmp_path / "code"
-    code.mkdir()
-    write(code / "src/a.py", "old\n")
-    _init_git(code)
-    baseline = git(code, "rev-parse", "HEAD")
-    git(code, "checkout", "-qb", "feat")
-    write(code / "src/a.py", "new\n")
-    commit(code)
-    gate_ready(layout, code, PATH)
+    declared = tmp_path / "code"
+    declared.mkdir()
+    write(declared / "src/a.py", "old\n")
+    _init_git(declared)
     doc = document(layout)
     doc.set("repo", "code")
-    doc.set("worktree", str(code))
-    doc.set("branch", "feat")
+    doc.save()
+    code = place_item(layout, declared, PATH, commit=False)
+    baseline = git(code, "rev-parse", "HEAD")
+    write(code / "src/a.py", "new\n")
+    commit(code)
+    gate_ready(layout, declared, PATH, tree_of=code)
+    doc = document(layout)
     doc.set("start_sha", baseline)
     doc.set("affects", ["src/a.py"])
     doc.save()
@@ -928,9 +927,7 @@ def test_reported_completion_supports_optional_plan_and_canonical_destination(ws
     if destination == "no-plan":
         (layout.bundle_dir / PLAN).unlink()
     elif destination == "unstamped":
-        doc = document(layout)
-        doc.delete("repo_stamps")
-        doc.save()
+        pass
     else:
         write((layout.root / "workflow.local.yaml"), "workflow:\n  workspace_commits: off\n")
     if destination != "disabled":
@@ -1024,9 +1021,6 @@ def local_publication_case(ws, kind):
         def invoke():
             return complete(layout, dry_run=False)
     else:
-        doc = document(layout)
-        doc.delete("repo_stamps")
-        doc.save()
         commit(layout.root)
 
         def invoke():
@@ -1129,9 +1123,6 @@ def test_local_return_publication_preserves_noncommitting_modes(ws, kind, mode):
     if kind == "completion":
         _, content = ws
         write(layout.bundle_dir / COVERAGE, (content / "okf" / COVERAGE).read_text(encoding="utf-8"))
-        doc = document(layout)
-        doc.delete("repo_stamps")
-        doc.save()
     if mode == "off":
         write((layout.root / "workflow.local.yaml"), "workflow:\n  workspace_commits: off\n")
     else:

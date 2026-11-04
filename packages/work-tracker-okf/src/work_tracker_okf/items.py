@@ -5,7 +5,6 @@ from __future__ import annotations
 import re
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
-from types import MappingProxyType
 from typing import TYPE_CHECKING, Any
 
 from okf_ext.schemas import DEFAULT_IGNORE as _SCHEMA_IGNORE
@@ -85,26 +84,6 @@ def spec_baseline_of(value: object) -> tuple[SpecBaseline | None, bool]:
 
 
 @dataclass(frozen=True, slots=True)
-class Stamp:
-    """One `repo_stamps` entry: where an item runs in a repository other than its own,
-    and the commit that placement's work started from (`None` for a stamp that predates baselines)."""
-
-    worktree: str
-    branch: str
-    start_sha: str | None = None
-
-
-@dataclass(frozen=True, slots=True)
-class LegacyPlacement:
-    """The retired stored placement: the optional scalar `worktree`/`branch` pair for the
-    item's own repository and the per-repository `repo_stamps` map."""
-
-    worktree: str | None
-    branch: str | None
-    repos: Mapping[str, Stamp]
-
-
-@dataclass(frozen=True, slots=True)
 class WorkItem:
     """Tolerant item view, retaining lossy phase/effort projection failures.
 
@@ -115,10 +94,7 @@ class WorkItem:
     may omit it; vocabulary validation still checks their supplied values.
 
     `invalid_optional_fields` also names a malformed `repo` (anything but
-    null or non-empty text) and a malformed `repo_stamps` (a non-mapping,
-    or any entry that is not exactly `{worktree, branch}` of non-empty
-    text). The malformed parts project as absent, and well-formed
-    `repo_stamps` entries are kept.
+    null or non-empty text).
 
     `start_sha` is the scalar placement's execute baseline; a value that is
     not a full lowercase commit OID projects as `None` and names `start_sha`
@@ -173,7 +149,6 @@ class WorkItem:
     finish_obligations: tuple[Obligation, ...] = ()
     spec_baseline: SpecBaseline | None = None
     execute_return: ExecuteReturn | None = None
-    legacy_placement: LegacyPlacement | None = None
 
 
 def _text(value: object) -> str:
@@ -188,30 +163,6 @@ def _text_tuple(value: object) -> tuple[str, ...]:
     if isinstance(value, str) or not isinstance(value, list):
         return ()
     return tuple(entry for entry in value if isinstance(entry, str))
-
-
-def _repo_stamps(value: object) -> tuple[Mapping[str, Stamp], bool]:
-    """`(well-formed entries, whether anything was malformed)`. Never raises."""
-    if value is None:
-        return MappingProxyType({}), False
-    if not isinstance(value, dict):
-        return MappingProxyType({}), True
-    stamps: dict[str, Stamp] = {}
-    malformed = False
-    for name, entry in value.items():
-        if (
-            isinstance(name, str)
-            and name
-            and isinstance(entry, dict)
-            and set(entry) in ({"worktree", "branch"}, {"worktree", "branch", "start_sha"})
-            and _optional_text(entry["worktree"]) is not None
-            and _optional_text(entry["branch"]) is not None
-            and ("start_sha" not in entry or is_commit_oid(entry["start_sha"]))
-        ):
-            stamps[name] = Stamp(entry["worktree"], entry["branch"], entry.get("start_sha"))
-        else:
-            malformed = True
-    return MappingProxyType(stamps), malformed
 
 
 def _project(
@@ -235,9 +186,6 @@ def _project(
     """
     source_ids = {source.id for source in sources if source.id is not None}
     dependencies = parse_dependencies(data.get("depends_on"))
-    repo_stamps, stamps_malformed = _repo_stamps(data.get("repo_stamps"))
-    worktree = _optional_text(data.get("worktree"))
-    branch = _optional_text(data.get("branch"))
     spec_baseline, baseline_malformed = spec_baseline_of(data.get("spec_baseline"))
     obligations, obligations_malformed = parse_obligations(data.get("finish_obligations"))
     if "finish_obligations" in data and data["finish_obligations"] is None:
@@ -269,9 +217,6 @@ def _project(
         dependency_issues=dependencies.issues,
         owner=_optional_text(data.get("owner")),
         resolved_in=_optional_text(data.get("resolved_in")),
-        legacy_placement=(
-            LegacyPlacement(worktree, branch, repo_stamps) if worktree or branch or repo_stamps else None
-        ),
         superseded_by=_optional_text(data.get("superseded_by")),
         tags=tags,
         sources=sources,
@@ -292,7 +237,6 @@ def _project(
                 if data.get(field) is not None and _optional_text(data[field]) is None
             ),
             *(("spec_baseline",) if baseline_malformed else ()),
-            *(("repo_stamps",) if stamps_malformed else ()),
             *(("finish_obligations",) if obligations_malformed else ()),
             *((RETURN_KEY,) if return_malformed else ()),
             *(("start_sha",) if data.get("start_sha") is not None and not is_commit_oid(data.get("start_sha")) else ()),
@@ -327,9 +271,7 @@ __all__ = [
     "COMMIT_OID",
     "IGNORE",
     "WORK_DIR",
-    "LegacyPlacement",
     "SpecBaseline",
-    "Stamp",
     "WorkItem",
     "is_commit_oid",
     "item_index",

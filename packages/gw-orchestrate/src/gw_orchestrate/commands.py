@@ -58,7 +58,7 @@ from gw_pipeline.decision_owner import HoldReport, holds_by_path, open_holds
 from gw_pipeline.execute_return import pending_return
 from gw_pipeline.finish import FinishPlan, FinishTarget, resolve_finish_targets
 from gw_pipeline.landed import stale_by_path
-from gw_pipeline.placement import Placement, _stable_stem, branch_name, enclosing_owner, stamp_row, stamped_worktrees
+from gw_pipeline.placement import Placement, _stable_stem, branch_name, enclosing_owner
 from gw_pipeline.repo_context import RepositoryContext, observe_repository, repository_identity
 from subagents_io.dispatch import PlannedDispatch, WorktreePlacement
 from work_tracker_okf import decisions as _decisions
@@ -766,11 +766,6 @@ def plan(
                 or any(target.target_worktree is None for target in live_finish.targets)
             ):
                 uncertain_finish_owners.add(item.path)
-        if live_finish is not None and (not live_finish.targets or live_finish.blockers) and live_phase == "finish":
-            owner = enclosing_owner(item, by_path)
-            if owner is not None:
-                for known in stamped_worktrees(owner):
-                    live_worktree_owners.setdefault(known, set()).add(item.path)
     # A live item already consumes a slot and holds its claims. Re-proposing
     # it would either dispatch a duplicate (owner self-exclusion lets its own
     # claims through) or report it blocked by itself; it is neither.
@@ -1316,18 +1311,8 @@ def run_orchestrate(
     for key, selected_items in selected_by_identity.items():
         checkout = selected_items[0][1].path
         assert checkout is not None
-        selected_paths = {item_path for item_path, _ in selected_items}
         context = observe_repository(
             checkout,
-            paths=(
-                Path(worktree)
-                for item in items
-                if item.path in selected_paths
-                for row in [stamp_row(item, None)]
-                if row is not None
-                for worktree in [row.worktree]
-                if worktree
-            ),
             checkouts=(selected.path for _, selected in selected_items if selected.path is not None),
             identity=proven_identities[key],
         )

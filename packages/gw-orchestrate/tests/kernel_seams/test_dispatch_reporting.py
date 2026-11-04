@@ -7,7 +7,10 @@ from pathlib import Path
 import pytest
 from gw_kernel import apply_init, plan_init
 from gw_orchestrate.commands import run_orchestrate
+from gw_pipeline.placement_resolve import item_placement
 from gw_work.commands import run_next
+from okf_io import load_bundle
+from work_tracker_okf.items import load_items
 
 TODAY = date(2026, 8, 23)
 
@@ -83,15 +86,22 @@ def _git_worktree(layout, target: Path, branch: str) -> Path:
 )
 def test_next_and_orchestrate_share_resolution(tmp_path: Path, kind, phase, spec, rule_name):
     layout = _layout(tmp_path)
-    worktree = _git_worktree(layout, tmp_path / "feature-worktree", "feature/a")
     path = "work/feature-a"
     _write(layout, path, type=kind, phase=phase)
     page = layout.bundle_dir / f"{path}.md"
     page.write_text(
-        page.read_text().replace(
-            "effort: medium", f"effort: medium\nblast_radius: package\nworktree: {worktree}\nbranch: feature/a"
-        ),
-        encoding="utf-8",
+        page.read_text().replace("effort: medium", "effort: medium\nblast_radius: package"), encoding="utf-8"
+    )
+    repo = _init_git_repo(layout)
+    items = load_items(load_bundle(layout.bundle_dir)).by_path
+    placement = item_placement(layout, items[path], items)
+    assert placement is not None
+    subprocess.run(
+        ["git", "worktree", "add", "-b", placement.branch, str(placement.worktree)],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+        text=True,
     )
     if spec:
         _spec(layout, path)

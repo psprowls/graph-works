@@ -116,8 +116,7 @@ managed-artifact and dependency-graph code from inventing ad hoc path joins.
 - `repo:` names the item's code repository and is inherited down the physical
   chain (`hierarchy.declared_repo`: the item, then `reversed(ancestor_paths)`,
   nearest wins). This package returns names only; `gw_kernel.workspace.repos.resolve_item_repo`
-  maps them to paths. `repo_stamps[name]` holds `{worktree, branch}` for a
-  repository other than the item's own — the scalar pair keeps meaning "own".
+  maps them to paths.
   `plan_placement(repo=)` is passed a name only for a foreign repository.
 - Placement stamps describe code/integration checkouts only, and are observations recorded after a worker launches into its computed placement. The existing `plan_placement` API permits root anchor recording at any dispatchable phase and descendant recording only at `execute`/`finish`; detached `HEAD` remains an invalid branch. There is no reader receipt: design and plan run in the item's own worktree and record nothing.
 
@@ -134,7 +133,7 @@ factories (state, plan, graph, structure, targets, decisions — see
 `_rules/`) into one `extra_rules=` tuple for `okf_io.validate()`. It's a
 **factory per capability**, not a module-level tuple, because `RuleContext`
 carries no filesystem and two codes need to know about a repository.
-The catalog has 48 codes across six topics; `targets` declares three:
+The catalog has 47 codes across six topics; `targets` declares three:
 `targets.affects-missing`, `targets.affects-empty`, and
 `targets.source-id-mismatch`. `targets.affects-empty` warns on an active,
 non-terminal nested leaf with no `affects`, even without a repository root.

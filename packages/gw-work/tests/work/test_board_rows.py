@@ -33,15 +33,6 @@ def test_board_row_computed_placement(tmp_path: Path) -> None:
     assert placement.repo_name == "repo"
 
 
-def test_board_row_legacy_placement(tmp_path: Path) -> None:
-    layout = _layout(tmp_path)
-    _write(layout, PATH)
-    _stamp(layout, PATH, "worktree: /legacy/wt\nbranch: legacy-branch\n")
-    placement = _row(layout).placement
-    assert placement is not None
-    assert (placement.source, placement.worktree, placement.branch) == ("legacy", "/legacy/wt", "legacy-branch")
-
-
 def test_board_row_workspace_only_item_null(tmp_path: Path) -> None:
     layout = _layout(tmp_path)
     _write(layout, PATH)

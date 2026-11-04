@@ -129,17 +129,6 @@ def test_the_four_conditional_requirements_stay_rules_not_schema_if_then() -> No
     assert schema["else"]["required"] == ["effort", "affects"]
 
 
-def test_the_two_provenance_keys_are_declared() -> None:
-    """`worktree` and `branch` are optional and never enumerated; both are now
-    deprecated (retired placement stamps, cleaned up by `gw work migrate-placement`)."""
-    properties = _base_schema()["properties"]
-    required = _base_schema()["required"]
-    for key in ("worktree", "branch"):
-        assert properties[key]["type"] == "string", key
-        assert properties[key]["minLength"] == 1, key
-        assert key not in required
-
-
 def test_contributed_tags_are_exactly_w_ks_two() -> None:
     """W-K retired `security` and `perf` as *kinds* and made them `Bug` tags.
     This constant is the only place either string is declared, so a human

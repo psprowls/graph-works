@@ -13,6 +13,7 @@ from gw_pipeline.finish import (
     verify_integration,
 )
 from gw_pipeline.test_support.finish_repos import (
+    FEATURE,
     OWNER,
     code_repo,
     commit_file,
@@ -27,7 +28,7 @@ from work_tracker_okf.items import IGNORE, load_items
 
 
 def entry(source_sha, result, strategy, before):
-    return VerifiedIntegration("code", "feature", source_sha, "main", result, strategy, "verified", before)
+    return VerifiedIntegration("code", FEATURE, source_sha, "main", result, strategy, "verified", before)
 
 
 def test_squash_verifies_unmoved_and_after_the_target_moves(tmp_path):
@@ -82,7 +83,7 @@ def test_squash_whose_merge_tree_conflicts_is_unverified(tmp_path):
 def test_strategy_shape_mismatch_is_unverified(tmp_path):
     repo, source = code_repo(tmp_path)
     before = commit_file(repo, "c.txt", "main\n", "main moves")
-    git(repo, "merge", "--no-ff", "--no-edit", "feature")
+    git(repo, "merge", "--no-ff", "--no-edit", FEATURE)
     merge_commit = git(repo, "rev-parse", "HEAD")
     source_sha = git(source, "rev-parse", "HEAD")
     t = target(repo, source)
@@ -101,7 +102,7 @@ def test_strategy_shape_mismatch_is_unverified(tmp_path):
 def test_ff_verifies_when_the_result_is_the_source(tmp_path):
     repo, source = code_repo(tmp_path)
     before = git(repo, "rev-parse", "HEAD")
-    git(repo, "merge", "--ff-only", "feature")
+    git(repo, "merge", "--ff-only", FEATURE)
     source_sha = git(source, "rev-parse", "HEAD")
 
     assert verify_integration(target(repo, source), entry(source_sha, source_sha, "ff", before)) is None
@@ -110,7 +111,7 @@ def test_ff_verifies_when_the_result_is_the_source(tmp_path):
 def test_moved_source_branch_is_unverified(tmp_path):
     repo, source = code_repo(tmp_path)
     before = git(repo, "rev-parse", "HEAD")
-    git(repo, "merge", "--ff-only", "feature")
+    git(repo, "merge", "--ff-only", FEATURE)
     source_sha = git(source, "rev-parse", "HEAD")
     commit_file(source, "late.txt", "late\n", "late work")
 
@@ -123,7 +124,7 @@ def test_attested_entry_needs_only_reachability(tmp_path):
     repo, source = code_repo(tmp_path)
     tip = commit_file(repo, "c.txt", "main\n", "hand-integrated elsewhere")
     attested = VerifiedIntegration(
-        "code", "feature", git(source, "rev-parse", "HEAD"), "main", tip, "attested", "accepted", None, "pat", "rebased"
+        "code", FEATURE, git(source, "rev-parse", "HEAD"), "main", tip, "attested", "accepted", None, "pat", "rebased"
     )
 
     assert verify_integration(target(repo, source), attested) is None
@@ -180,13 +181,13 @@ def test_update_ref_compare_and_delete_refuses_a_moved_branch(tmp_path):
     git(repo, "worktree", "remove", str(source))
 
     refused = subprocess.run(
-        ["git", "-C", str(repo), "update-ref", "-d", "refs/heads/feature", stale],
+        ["git", "-C", str(repo), "update-ref", "-d", f"refs/heads/{FEATURE}", stale],
         capture_output=True,
         text=True,
         check=False,
     )
 
-    assert refused.returncode != 0 and git(repo, "rev-parse", "refs/heads/feature") != stale
+    assert refused.returncode != 0 and git(repo, "rev-parse", f"refs/heads/{FEATURE}") != stale
 
 
 def test_finish_refused_carries_its_code_detail_and_conflicts():
@@ -199,8 +200,8 @@ def test_finish_refused_carries_its_code_detail_and_conflicts():
 def test_receipt_naming_a_repository_twice_is_malformed(tmp_path):
     repo, source = code_repo(tmp_path)
     layout = workspace(tmp_path, repo, source)
-    sha = git(source, "rev-parse", "HEAD")
-    write_receipt(layout, [VerifiedIntegration("code", "feature", sha, "main", sha)] * 2)
+    sha = git(repo, "rev-parse", "HEAD")
+    write_receipt(layout, [VerifiedIntegration("code", FEATURE, sha, "main", sha)] * 2)
 
     assert read_finish_receipt(layout, OWNER)[2] == "duplicate finish receipt repository"
 

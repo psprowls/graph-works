@@ -42,13 +42,10 @@ def _setup(env: GateEnv, tmp_path: Path) -> Path:
     (env.repo / "units.json").write_text(json.dumps(manifest), encoding="utf-8", newline="\n")
     git(env.repo, "add", "-A")
     git(env.repo, "commit", "-qm", "units")
-    worktree = tmp_path / "feature-wt"
-    git(env.repo, "worktree", "add", "-q", "-b", "feature", str(worktree))
     env.state["start_sha"] = git(env.repo, "rev-parse", "HEAD")
-    env.set_worktree(worktree, "feature")
     env.page_text = env.page_text.replace("owner: someone", f"owner: someone\nstart_sha: {env.state['start_sha']}")
     (env.layout.bundle_dir / f"{env.path}.md").write_text(env.page_text, encoding="utf-8", newline="\n")
-    return worktree
+    return env.repo
 
 
 def _gate(env: GateEnv, *, ran: set[str]) -> GateRun:
@@ -83,7 +80,7 @@ def _gate(env: GateEnv, *, ran: set[str]) -> GateRun:
 
 
 def _counted(env: GateEnv) -> Counter[str]:
-    return Counter((env.repo / ".git" / "gw-count").read_text(encoding="utf-8").splitlines())
+    return Counter((env.main / ".git" / "gw-count").read_text(encoding="utf-8").splitlines())
 
 
 def _touch(worktree: Path, name: str) -> None:
@@ -102,7 +99,7 @@ def test_only_the_changed_unit_reruns_and_advance_accepts_mixed_evidence(env: Ga
     reused = {unit.name: unit.reused_from for unit in second.units if not unit.ran}
     assert reused == dict.fromkeys(("a", "b"), Reuse(env.path, first.run_id))
     assert run_gate_check(env.layout, env.path).status == "satisfied"
-    result = stage.run_stage_advance(env.layout, env.path, today=TODAY, repo=env.repo, dry_run=False)
+    result = stage.run_stage_advance(env.layout, env.path, today=TODAY, repo=env.main, dry_run=False)
     assert result.outcome.written, result.outcome.plan.detail
     assert result.gate_receipt is not None
     assert {unit.name: (unit.owner, unit.run_id) for unit in result.gate_receipt.units} == {

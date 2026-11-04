@@ -25,21 +25,21 @@ class E2E:
     env: GateEnv
     main: Path
     worktree: Path
+    branch: str
 
 
 @pytest.fixture
 def e2e(env: GateEnv, tmp_path: Path) -> E2E:
     env.set_manifest(gate=COUNTER_GATE)
-    main = env.repo
-    worktree = tmp_path / "feature-wt"
-    git(main, "worktree", "add", "-q", "-b", "feature", str(worktree))
+    main = env.main
+    worktree = env.repo  # the item's computed worktree, on its computed branch
+    branch = git(worktree, "branch", "--show-current")
     env.state["start_sha"] = git(main, "rev-parse", "HEAD")
-    env.set_worktree(worktree, "feature")
     page = env.layout.bundle_dir / f"{env.path}.md"
     text = env.page_text.replace("owner: someone", f"owner: someone\nstart_sha: {env.state['start_sha']}")
     page.write_text(text, encoding="utf-8", newline="\n")
     env.page_text = text
-    return E2E(env, main, worktree)
+    return E2E(env, main, worktree, branch)
 
 
 def commit_under_affects(root: Path) -> None:
@@ -54,9 +54,7 @@ def commit_elsewhere(root: Path) -> None:
     git(root, "commit", "-qm", "elsewhere")
 
 
-def run_and_wait(e: E2E, *, worktree: Path | None = None):
-    if worktree is not None:
-        e.env.set_worktree(worktree, "main")
+def run_and_wait(e: E2E):
     started = run_gate_run(
         e.env.layout,
         e.env.path,
@@ -74,7 +72,6 @@ def run_and_wait(e: E2E, *, worktree: Path | None = None):
 
 
 def _check_main(e: E2E):
-    e.env.set_worktree(e.main, "main")
     return run_gate_check(e.env.layout, e.env.path)
 
 
@@ -95,9 +92,9 @@ def test_one_gate_per_distinct_tree_across_execute_and_finish(e2e: E2E) -> None:
     adv = advance(e)
     assert adv.outcome.written, adv.outcome.plan  # execute -> finish passes on the receipt
     assert run_gate_check(e.env.layout, e.env.path).status == "satisfied"  # relay R1: no rerun
-    git(e.main, "merge", "--ff-only", "feature")  # fast-forward in the target worktree
+    git(e.main, "merge", "--ff-only", e.branch)  # fast-forward in the target worktree
     assert _check_main(e).status == "satisfied"  # R4: no rerun
-    assert git(e.worktree, "log", "main..feature") == ""  # zero-commit finish: R2 settles
+    assert git(e.worktree, "log", f"main..{e.branch}") == ""  # zero-commit finish: R2 settles
     assert gate_count(e) == 1
 
 
@@ -107,8 +104,9 @@ def test_a_true_merge_gates_the_new_tree_once(e2e: E2E) -> None:
     commit_under_affects(e.worktree)
     run_and_wait(e)
     commit_elsewhere(e.main)  # target moved
-    git(e.main, "merge", "--no-ff", "feature", "-m", "merge")
+    git(e.main, "merge", "--no-ff", e.branch, "-m", "merge")
+    git(e.worktree, "merge", "--ff-only", "main")  # the item's checkout now holds the merged tree
     assert _check_main(e).status == "unsatisfied"
-    run_and_wait(e, worktree=e.main)
+    run_and_wait(e)
     assert gate_count(e) == 2
     assert _check_main(e).status == "satisfied"

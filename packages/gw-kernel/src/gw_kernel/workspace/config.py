@@ -61,10 +61,6 @@ def load_workspace_config(layout: WorkspaceLayout) -> WorkspaceConfig:
         )
     except ConfigError as exc:
         raise WorkspaceConfigError(str(exc)) from exc
-    # `_workspace` names the workspace's own repository in `repo_stamps`;
-    # a declared repository may not shadow it.
-    if any(entry.name == "_workspace" for entry in config.repos):
-        raise WorkspaceConfigError(f"{path}: repository name '_workspace' is reserved for the workspace itself")
     return config
 
 

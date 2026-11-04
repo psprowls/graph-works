@@ -8,9 +8,8 @@ from pathlib import Path
 import pytest
 from gw_kernel.workspace.repos import ItemRepo
 from gw_orchestrate import commands as orchestrate
-from gw_pipeline.finish import FinishPlan, FinishTarget
-from test_orchestrate_plan import _branch_tail_rules, _item, _plan, _restamp
-from work_tracker_okf.items import Stamp
+from gw_pipeline.finish import FinishOccupancy, FinishPlan, FinishTarget
+from test_orchestrate_plan import _branch_tail_rules, _item, _plan
 
 ROOT = "work/epic-x"
 A, B = f"{ROOT}/children/feature-a", f"{ROOT}/children/feature-b"
@@ -67,7 +66,8 @@ def test_live_finish_blocks_only_the_candidate_on_the_same_target() -> None:
 @pytest.mark.parametrize("current_phase", ["finish", "execute", "done"])
 def test_a_live_finish_keeps_its_target_after_revalidation_fails(current_phase) -> None:
     plans = {
-        A: FinishPlan((), ("enclosing anchor dirty",)),
+        # Failed admission keeps the occupancy computed placement observed before it failed.
+        A: FinishPlan((), ("enclosing anchor dirty",), FinishOccupancy(("/epic",), True)),
         B: FinishPlan((_target("/wt/b", "feature/b"),), ()),
     }
     items = _items()
@@ -82,10 +82,14 @@ def test_a_live_finish_keeps_its_target_after_revalidation_fails(current_phase) 
 
 def test_a_live_finish_keeps_failed_target_when_another_repo_still_validates() -> None:
     items = _items()
-    items = (_restamp(items[0], repo_stamps={"ui": Stamp("/ui/epic", "epic/x")}), *items[1:])
+    items = (items[0], *items[1:])
     ui = ItemRepo("ui", Path("/ui"), "frontmatter")
     plans = {
-        A: FinishPlan((FinishTarget(ui, "/ui/a", "feature/a", "epic/x", "/ui/epic"),), ("core anchor dirty",)),
+        A: FinishPlan(
+            (FinishTarget(ui, "/ui/a", "feature/a", "epic/x", "/ui/epic"),),
+            ("core anchor dirty",),
+            FinishOccupancy(("/epic", "/ui/epic"), True),
+        ),
         B: FinishPlan((_target("/wt/b", "feature/b"),), ()),
     }
     result = _run(plans, items=items, live=(orchestrate.session_name(A, "Feature", "finish"),))

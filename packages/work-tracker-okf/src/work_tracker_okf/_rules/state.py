@@ -10,7 +10,7 @@ turned a rename of `work_io.lifecycle_lint` into a split.
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable
 
 from okf_io import Finding, Rule, RuleContext, Severity
 
@@ -42,7 +42,6 @@ CODES: tuple[str, ...] = (
     "state.archive-eligible",
     "state.spec-baseline-malformed",
     "state.phase-off-path",
-    "state.retired-placement",
 )
 
 #: `Finding.spec` is "the thing that says so". None of these cites an OKF
@@ -183,36 +182,6 @@ def baselines(ctx: RuleContext) -> Iterable[Finding]:
             )
 
 
-def _mapping_keys(value: object) -> frozenset[str]:
-    return frozenset(str(key) for key in value) if isinstance(value, Mapping) else frozenset()
-
-
-def retired_placement(ctx: RuleContext) -> Iterable[Finding]:
-    """One warning per retired placement key an active item still carries.
-
-    Every `repo_stamps` entry is retired, the legacy workspace one included: workspace writes land on the
-    primary checkout, so no writer records a workspace stamp any more.
-    """
-    for item, document in with_documents(ctx):
-        if item.archived:
-            continue
-        raw = document.fm_raw
-        retired = [key for key in ("worktree", "branch") if key in raw]
-        if _mapping_keys(raw.get("repo_stamps")) or (
-            "repo_stamps" in raw and not isinstance(raw.get("repo_stamps"), Mapping)
-        ):
-            retired.append("repo_stamps")
-        if "workspace" in _mapping_keys(raw.get("spec_baseline")):
-            retired.append("spec_baseline.workspace")
-        for key in retired:
-            yield _finding(
-                "state.retired-placement",
-                "warn",
-                item,
-                f"retired placement field {key}; run gw work migrate-placement",
-            )
-
-
 def _candidates(definition: PipelineDefinition, item: WorkItem) -> tuple[PathCandidate, ...]:
     """Enumerate every possible path; lint cannot know whether a spec is stale."""
     return tuple(
@@ -258,4 +227,4 @@ def _off_path(definition: PipelineDefinition) -> Rule:
 
 def rules(config: LaneConfig) -> tuple[Rule, ...]:
     """The state rules, including a path check using the supplied definition."""
-    return (coherence, companions, staleness, terminal, baselines, retired_placement, _off_path(config.definition))
+    return (coherence, companions, staleness, terminal, baselines, _off_path(config.definition))

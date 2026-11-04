@@ -13,7 +13,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from _gate_helpers import TODAY
+from _gate_helpers import TODAY, place_item
 from gw_kernel import apply_init, plan_init
 from gw_kernel.testing import (
     code_layout as code_layout,
@@ -56,10 +56,13 @@ def make_repo(path: Path) -> Path:
 
 @dataclass
 class GateEnv:
+    """`repo` is the item's computed worktree on its own branch; `main` is the declared repository checkout."""
+
     layout: WorkspaceLayout
     root: Path
     repo: Path
     path: str
+    main: Path
     spawned: list[Path] = field(default_factory=list)
     stack: ExitStack = field(default_factory=ExitStack)
     state: dict[str, object] = field(default_factory=dict)
@@ -89,9 +92,6 @@ class GateEnv:
             "owner: someone",
             "repo: code",
         ]
-        if self.state["worktree"] is not None:
-            lines.append(f"worktree: {self.state['worktree']}")
-            lines.append(f"branch: {self.state.get('branch', 'main')}")
         lines.append("affects:")
         lines.extend(f"  - {entry}" for entry in self.state["affects"])  # type: ignore[attr-defined]
         self.page_text = "---\n" + "\n".join(lines) + "\n---\n\nBody.\n"
@@ -101,15 +101,8 @@ class GateEnv:
         self.state["affects"] = affects
         self._write_page()
 
-    def set_worktree(self, worktree: Path | None, branch: str = "main") -> None:
-        self.state["worktree"] = None if worktree is None else str(worktree)
-        self.state["branch"] = branch
-        self._write_page()
-
-    def branch_off(self, branch: str = "feat") -> None:
-        """Check the item's branch out in the declared repo, so its commits lie beyond the parent `main`."""
-        git(self.repo, "checkout", "-qb", branch)
-        self.set_worktree(self.repo, branch)
+    def branch_off(self) -> None:
+        """The item's own branch already lies beyond the parent `main`; kept so call sites read the same."""
 
     def set_status(self, status: str) -> None:
         self.state["work_status"] = status
@@ -136,10 +129,11 @@ def env(tmp_path: Path) -> Iterator[GateEnv]:
     root.mkdir()
     layout = apply_init(plan_init(root, today=TODAY, topic="Gate")).layout
     repo = make_repo(tmp_path / "code")
-    made = GateEnv(layout, root, repo, ITEM)
+    made = GateEnv(layout, root, repo, ITEM, repo)
     made.set_manifest(gate=GATE)
-    made.state.update(work_status="in-progress", phase="execute", worktree=str(repo), affects=["packages/a"])
+    made.state.update(work_status="in-progress", phase="execute", affects=["packages/a"])
     (layout.bundle_dir / "work").mkdir(parents=True, exist_ok=True)
     made._write_page()
+    made.repo = place_item(layout, repo, ITEM, commit=False, declare=False)
     yield made
     made.stack.close()

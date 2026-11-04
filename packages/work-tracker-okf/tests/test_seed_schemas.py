@@ -179,7 +179,6 @@ def _find_depends_on_path_pattern(schema: dict[str, Any]) -> str:
 
 
 def test_depends_on_path_pattern_rejects_a_nested_archive() -> None:
-    import json
     import re
     from importlib.resources import files
 
@@ -192,24 +191,15 @@ def test_depends_on_path_pattern_rejects_a_nested_archive() -> None:
     assert not pattern.match("work/epic-a/children/_archive/bug-b")
 
 
-_REPO_FIELDS = "repo: graph-works\nrepo_stamps:\n  gw-ui:\n    worktree: /wt/gw-ui-epic-x\n    branch: epic/x\n"
-
-
-def test_base_schema_accepts_repo_and_repo_stamps(tmp_path: Path) -> None:
-    assert _findings(tmp_path, _COMPLETE + "status: draft\n" + _REPO_FIELDS) == []
-
-
 @pytest.mark.parametrize(
     "fields",
     [
         "repo: ''\n",
         "repo: 3\n",
-        "repo_stamps: [gw-ui]\n",
-        "repo_stamps:\n  gw-ui:\n    worktree: /wt/ui\n",
-        "repo_stamps:\n  gw-ui:\n    branch: epic/x\n",
-        "repo_stamps:\n  gw-ui:\n    worktree: /wt/ui\n    branch: epic/x\n    extra: 1\n",
-        "repo_stamps:\n  gw-ui:\n    worktree: ''\n    branch: epic/x\n",
-        "repo_stamps:\n  gw-ui: /wt/ui\n",
+        "worktree: /wt/ui\n",
+        "branch: epic/x\n",
+        "repo_stamps:\n  gw-ui:\n    worktree: /wt/ui\n    branch: epic/x\n",
+        f"spec_baseline:\n  workspace: {'b' * 40}\n",
     ],
 )
 def test_base_schema_rejects_malformed_repo_fields(tmp_path: Path, fields: str) -> None:
@@ -246,15 +236,3 @@ def test_seeded_work_types_accept_valid_finish_obligations(tmp_path: Path, type_
 )
 def test_seeded_schema_rejects_malformed_finish_obligations(tmp_path: Path, obligations: str) -> None:
     assert _findings(tmp_path, _COMPLETE + "status: draft\n" + obligations) != []
-
-
-def test_retired_keys_deprecated() -> None:
-    base = json.loads(
-        (importlib.resources.files("work_tracker_okf") / "assets" / "schema" / "_base.schema.json").read_text(
-            encoding="utf-8"
-        )
-    )
-    for key in ("worktree", "branch", "repo_stamps"):
-        prop = base["properties"][key]
-        assert prop["deprecated"] is True
-        assert "gw work migrate-placement" in prop["description"]

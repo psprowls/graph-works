@@ -36,18 +36,16 @@ def test_retired_placement_verbs_are_gone() -> None:
 
 
 def test_advance_has_no_placement_flags() -> None:
-    # `--no-infer-worktree` survives as a hidden, warned no-op until the legacy-placement
-    # cleanup (feature-retire-placement-fields design §5); the other two are gone.
     options = _commands()["gw work advance"]
-    assert options & {"--worktree", "--branch"} == set()
+    assert options & {"--worktree", "--branch", "--no-infer-worktree"} == set()
 
 
-def test_base_schema_keeps_stored_placement_only_as_deprecated(workspace: Path) -> None:
+def test_base_schema_declares_no_stored_placement(workspace: Path) -> None:
     schema = json.loads((workspace / ".gw" / "schema" / "_base.schema.json").read_text(encoding="utf-8"))
-    # The keys stay only as deprecated, so unmigrated pages keep validating (D-014).
     properties = schema.get("properties", {})
     for key in ("worktree", "branch", "repo_stamps"):
-        assert key not in properties or properties[key].get("deprecated") is True, key
+        assert key not in properties, key
+    assert "workspace" not in properties["spec_baseline"]["properties"]
 
 
 def test_branch_name_is_the_pipeline_function() -> None:

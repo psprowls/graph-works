@@ -185,10 +185,10 @@ def test_advance_declares_the_return_flag() -> None:
     assert "--return" in opts
 
 
-def test_advance_declares_the_inference_opt_out() -> None:
+def test_advance_has_no_inference_opt_out() -> None:
     payload = json.loads(runner.invoke(app, ["help", "work", "advance", "--json"]).stdout)
     opts = {opt for option in payload["options"] for opt in option["opts"]}
-    assert "--no-infer-worktree" in opts
+    assert "--no-infer-worktree" not in opts
 
 
 def test_retired_verbs_absent() -> None:

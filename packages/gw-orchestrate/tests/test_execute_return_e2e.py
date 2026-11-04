@@ -4,7 +4,7 @@ from datetime import date
 from hashlib import sha256
 from pathlib import Path
 
-from _gate_helpers import gate_ready
+from _gate_helpers import gate_ready, place_item
 from gw_kernel import apply_init, plan_init
 from gw_kernel.testing.transactions import git as _git
 from gw_kernel.testing.transactions import init_git as _init_git
@@ -65,13 +65,12 @@ def test_new_plan_task_reaches_returned_worker_and_requires_reported_content(tmp
     layout, code = workspace(tmp_path, (LONE, "Feature", "in-progress"))
     page = layout.bundle_dir / f"{LONE}.md"
     plan = layout.bundle_dir / PLAN
+    declared = code
+    code = place_item(layout, declared, LONE, commit=False)
     baseline = git(code, "rev-parse", "HEAD")
-    git(code, "checkout", "-qb", "feat")
     write(code / "src/example.py", "original = True\n")
     commit(code, "implement original plan")
     doc = load(page)
-    doc.set("worktree", str(code))
-    doc.set("branch", "feat")
     doc.set("start_sha", baseline)
     doc.set("affects", ["src/example.py"])
     doc.save()
@@ -79,7 +78,7 @@ def test_new_plan_task_reaches_returned_worker_and_requires_reported_content(tmp
     original_coverage = "# Execute coverage\n\n- [x] Original acceptance delivered\n"
     write(plan, original_plan)
     write(layout.bundle_dir / COVERAGE, original_coverage)
-    gate_ready(layout, code, LONE)
+    gate_ready(layout, declared, LONE, tree_of=code)
     commit(layout.root, "record original plan and passing code receipt")
 
     content = layout.root
@@ -142,7 +141,7 @@ def test_new_plan_task_reaches_returned_worker_and_requires_reported_content(tmp
     reported = reported.replace(f"- [ ] R1: {SCOPE}", f"- [x] R1: {SCOPE} -- implemented and verified")
     write(coverage, reported)
     commit(content, "report returned scope implementation")
-    gate_ready(layout, code, LONE)
+    gate_ready(layout, declared, LONE, tree_of=code)
     commit(layout.root, "record passing receipt for Task 4 code tree")
     completed = run_stage_advance(layout, LONE, today=TODAY, expected_phase="execute", dry_run=False)
     assert completed.outcome.plan.refusal is None, completed
@@ -154,4 +153,4 @@ def test_new_plan_task_reaches_returned_worker_and_requires_reported_content(tmp
     assert final["phase"] == "finish"
     assert final["execute_return"] == {**record, "state": "completed"}
     assert not final.get("finish_obligations")
-    assert all(git(root, "status", "--porcelain") == "" for root in (layout.root, content, code))
+    assert all(git(root, "status", "--porcelain") == "" for root in (layout.root, content, code, declared))

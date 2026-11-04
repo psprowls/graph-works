@@ -8,14 +8,13 @@ items is what keeps it to the stale units plus repo-wide.
 from __future__ import annotations
 
 import json
-import re
 import sys
 import time
 from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
-from _gate_helpers import NOW, TODAY
+from _gate_helpers import NOW, TODAY, place_item
 from conftest import GateEnv, git
 from gw_orchestrate import stage_advance as stage
 from gw_orchestrate.gate import run_gate_check, run_gate_run, run_gate_wait, spawn_runner
@@ -39,11 +38,9 @@ def manifest(depends: dict[str, list[str]]) -> str:
     return json.dumps({"version": 1, "jobs": 2, "repo_wide": {"command": COUNT.format(name="rw")}, "units": units})
 
 
-def item(
-    env: GateEnv, path: str, worktree: Path, *, affects: list[str], start_sha: str | None = None, branch: str = "main"
-) -> None:
+def item(env: GateEnv, path: str, *, affects: list[str], start_sha: str | None = None) -> None:
     lines = ["type: Feature", f"title: {path}", "work_status: in-progress", "phase: execute", "owner: someone"]
-    lines += ["repo: code", f"worktree: {worktree}", f"branch: {branch}"]
+    lines += ["repo: code"]
     if start_sha is not None:
         lines.append(f"start_sha: {start_sha}")
     lines += ["affects:", *(f"  - {entry}" for entry in affects)]
@@ -52,12 +49,23 @@ def item(
     page.write_text("---\n" + "\n".join(lines) + "\n---\n\nBody.\n", encoding="utf-8", newline="\n")
 
 
-def restamp(env: GateEnv, path: str, worktree: Path, branch: str) -> None:
-    """Point the item's stamp at *worktree* (on *branch*): the gate measures the item's own placement."""
-    page = env.layout.bundle_dir / f"{path}.md"
-    text = re.sub(r"^worktree: .*$", f"worktree: {worktree}", page.read_text(encoding="utf-8"), flags=re.M)
-    text = re.sub(r"^branch: .*$", f"branch: {branch}", text, flags=re.M)
-    page.write_text(text, encoding="utf-8", newline="\n")
+def worktree_of(env: GateEnv, path: str) -> Path:
+    """The item's computed worktree, created on first use."""
+    from gw_pipeline.placement_resolve import item_placement
+    from okf_io import load_bundle
+    from work_tracker_okf.items import IGNORE, load_items
+
+    items = {i.path: i for i in load_items(load_bundle(env.layout.bundle_dir, ignore=IGNORE))}
+    placement = item_placement(env.layout, items[path], items, repo_name="code")
+    assert placement is not None
+    if not placement.worktree.exists():
+        place_item(env.layout, env.main, path, commit=False, declare=False)
+    return placement.worktree
+
+
+def restamp(env: GateEnv, path: str, ref: str) -> None:
+    """The gate measures the item's computed checkout: make it hold *ref*'s commit."""
+    git(worktree_of(env, path), "reset", "-q", "--hard", git(env.main, "rev-parse", ref))
 
 
 def commit(root: Path, relative: str, text: str) -> None:
@@ -67,14 +75,14 @@ def commit(root: Path, relative: str, text: str) -> None:
 
 
 def counted(env: GateEnv) -> list[str]:
-    path = env.repo / ".git" / "gw-count"
+    path = env.main / ".git" / "gw-count"
     return path.read_text(encoding="utf-8").split() if path.exists() else []
 
 
-def gate(env: GateEnv, path: str, worktree: Path | None = None, branch: str = "main") -> list[str]:
+def gate(env: GateEnv, path: str, ref: str | None = None) -> list[str]:
     """Run one gate to a recorded green result; return the sorted names it actually executed."""
-    if worktree is not None:
-        restamp(env, path, worktree, branch)
+    if ref is not None:
+        restamp(env, path, ref)
     before = len(counted(env))
     token = f"{time.monotonic_ns() % 10**8:08x}"
     started = run_gate_run(env.layout, path, now=NOW, token=token, spawn=spawn_runner)
@@ -88,12 +96,12 @@ def gate(env: GateEnv, path: str, worktree: Path | None = None, branch: str = "m
 
 
 def advance(env: GateEnv, path: str) -> None:
-    result = stage.run_stage_advance(env.layout, path, today=TODAY, repo=env.repo, dry_run=False)
+    result = stage.run_stage_advance(env.layout, path, today=TODAY, repo=env.main, dry_run=False)
     assert result.outcome.written, result.outcome.plan
 
 
-def owners(env: GateEnv, path: str, worktree: Path, branch: str) -> dict[str, str]:
-    restamp(env, path, worktree, branch)
+def owners(env: GateEnv, path: str, ref: str) -> dict[str, str]:
+    restamp(env, path, ref)
     check = run_gate_check(env.layout, path)
     assert check.status == "satisfied", check
     assert check.match is not None
@@ -111,48 +119,51 @@ def through_anchor(env: GateEnv, tmp_path: Path, shape: str) -> Anchor:
     """Design §3 steps 1-5: base gate, two children, both landed on the epic anchor."""
     depends = SHAPES[shape]
     env.set_manifest(gate=GATE)
+    main = env.main
     for name in "abc":
-        (env.repo / "packages" / name).mkdir(parents=True, exist_ok=True)
-        (env.repo / "packages" / name / "m.py").write_text(name, encoding="utf-8", newline="\n")
-    (env.repo / "units.json").write_text(manifest(depends), encoding="utf-8", newline="\n")
-    git(env.repo, "add", "-A")
-    git(env.repo, "commit", "-qm", "units")
-    item(env, BASE, env.repo, affects=["packages"])
-    item(env, EPIC, env.repo, affects=["packages"])
+        (main / "packages" / name).mkdir(parents=True, exist_ok=True)
+        (main / "packages" / name / "m.py").write_text(name, encoding="utf-8", newline="\n")
+    (main / "units.json").write_text(manifest(depends), encoding="utf-8", newline="\n")
+    git(main, "add", "-A")
+    git(main, "commit", "-qm", "units")
+    item(env, BASE, affects=["packages"])
+    item(env, EPIC, affects=["packages"])
 
     # 1. Base: a full gate on main records every unit plus repo-wide.
-    assert gate(env, BASE) == ["a", "b", "c", "rw"]
+    assert gate(env, BASE, "main") == ["a", "b", "c", "rw"]
 
     # 2. Epic anchor, and two children branched from it.
     anchor = tmp_path / "epic-wt"
-    git(env.repo, "worktree", "add", "-q", "-b", "epic", str(anchor))
+    git(main, "worktree", "add", "-q", "-b", "epic", str(anchor))
     start = git(anchor, "rev-parse", "HEAD")
-    child_a, child_b = tmp_path / "child-a", tmp_path / "child-b"
-    git(env.repo, "worktree", "add", "-q", "-b", "child-a", str(child_a), "epic")
-    git(env.repo, "worktree", "add", "-q", "-b", "child-b", str(child_b), "epic")
-    item(env, CHILD_A, child_a, affects=["packages/a"], start_sha=start, branch="child-a")
-    item(env, CHILD_B, child_b, affects=["packages/c"], start_sha=start, branch="child-b")
+    item(env, CHILD_A, affects=["packages/a"], start_sha=start)
+    item(env, CHILD_B, affects=["packages/c"], start_sha=start)
+    restamp(env, CHILD_A, "epic")
+    restamp(env, CHILD_B, "epic")
+    child_a, child_b = worktree_of(env, CHILD_A), worktree_of(env, CHILD_B)
 
     # 3. Child B executes (c plus its reverse closure plus repo-wide) and fast-forwards onto the anchor.
     commit(child_b, "packages/c/m.py", "c2")
     assert gate(env, CHILD_B) == (["a", "c", "rw"] if depends else ["c", "rw"])
     advance(env, CHILD_B)
-    git(anchor, "merge", "--ff-only", "child-b")
+    git(anchor, "merge", "--ff-only", git(child_b, "rev-parse", "HEAD"))
+    git(main, "branch", "-f", "child-b", git(child_b, "rev-parse", "HEAD"))
     before = counted(env)
-    assert owners(env, CHILD_B, anchor, "epic")["c"] == CHILD_B
+    assert owners(env, CHILD_B, "epic")["c"] == CHILD_B
     assert counted(env) == before  # a check runs nothing
 
     # 4. Child A executes on a tree without B: a plus its reverse closure plus repo-wide.
     commit(child_a, "packages/a/m.py", "a2")
+    child_a_head = git(child_a, "rev-parse", "HEAD")
     assert gate(env, CHILD_A) == ["a", "rw"]
     advance(env, CHILD_A)
 
     # 5. A merges onto the anchor (a new tree): only what both children together made stale re-runs.
-    git(anchor, "merge", "--no-ff", "child-a", "-m", "merge child-a")
-    restamp(env, CHILD_A, anchor, "epic")
+    git(anchor, "merge", "--no-ff", child_a_head, "-m", "merge child-a")
+    restamp(env, CHILD_A, "epic")
     assert run_gate_check(env.layout, CHILD_A).status == "unsatisfied"
-    assert gate(env, CHILD_A, anchor, "epic") == (["a", "rw"] if depends else ["rw"])
-    assert owners(env, CHILD_A, anchor, "epic") == {"a": CHILD_A, "b": BASE, "c": CHILD_B}
+    assert gate(env, CHILD_A, "epic") == (["a", "rw"] if depends else ["rw"])
+    assert owners(env, CHILD_A, "epic") == {"a": CHILD_A, "b": BASE, "c": CHILD_B}
     return Anchor(env, anchor, depends)
 
 
@@ -165,7 +176,8 @@ def test_children_and_the_anchor_merge_run_only_stale_units(env: GateEnv, tmp_pa
 def test_epic_finish_onto_unmoved_main_runs_nothing(env: GateEnv, tmp_path: Path, shape: str) -> None:
     through_anchor(env, tmp_path, shape)
     before = counted(env)
-    git(env.repo, "merge", "--ff-only", "epic")  # 6. main unmoved: a fast-forward to the anchor's tree
+    git(env.main, "merge", "--ff-only", "epic")
+    restamp(env, EPIC, "main")  # 6. main unmoved: a fast-forward to the anchor's tree
     check = run_gate_check(env.layout, EPIC)
     assert check.status == "satisfied" and check.match is not None, check
     assert {unit.name: unit.owner for unit in check.match.units} == {"a": CHILD_A, "b": BASE, "c": CHILD_B}
@@ -179,8 +191,9 @@ def test_epic_finish_onto_moved_main_reruns_only_what_main_staled(
     env: GateEnv, tmp_path: Path, shape: str, moved: str
 ) -> None:
     scenario = through_anchor(env, tmp_path, shape)
-    commit(env.repo, f"packages/{moved}/main.py", "moved")  # 7. main moves under one unit
-    git(env.repo, "merge", "--no-ff", "epic", "-m", "merge epic")
+    commit(env.main, f"packages/{moved}/main.py", "moved")  # 7. main moves under one unit
+    git(env.main, "merge", "--no-ff", "epic", "-m", "merge epic")
+    restamp(env, EPIC, "main")
     assert run_gate_check(env.layout, EPIC).status == "unsatisfied"
     dependents = [name for name, deps in scenario.depends.items() if moved in deps]
-    assert gate(env, EPIC, env.repo) == sorted([moved, *dependents, "rw"])
+    assert gate(env, EPIC, "main") == sorted([moved, *dependents, "rw"])

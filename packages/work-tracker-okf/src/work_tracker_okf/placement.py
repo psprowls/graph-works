@@ -1,7 +1,7 @@
 """The pure planner for the one stamp that survives computed placement.
 
 Computed placement (the placement engine, `gw work place`) made every
-`worktree`/`branch`/`repo_stamps` stamp redundant, and workspace writes land on
+stored `worktree`/`branch`/`repo_stamps` stamp redundant (now deleted), and workspace writes land on
 the primary checkout, so no workspace stamp is recorded either. One pure
 planner remains, and it reads no git, Orca, clock or filesystem:
 `plan_baseline` / `apply_baseline` decide and write the scalar `start_sha` the

@@ -298,9 +298,6 @@ def test_root_repo_flag_does_not_override_foreign_child_assignment(two_repos: tu
         text=True,
     ).stdout.strip()
     assert len(sha) == 40
-    document = load(owner)
-    document.set("repo_stamps", {"ui": {"worktree": str(anchor.resolve()), "branch": "epic/root"}})
-    document.save()
     child = root / "okf/work/epic-root/children/feature-ui.md"
     child.parent.mkdir(parents=True)
     child.write_text(

@@ -14,11 +14,13 @@ from gw_kernel.workspace.layout import WorkspaceLayout
 from gw_orchestrate.finish_receipt import run_record_finish
 from gw_orchestrate.stage_advance import run_stage_advance
 from gw_pipeline.finish import inspect_finish
+from gw_pipeline.placement import branch_name
 from okf_io import load_bundle
 from work_tracker_okf.items import load_items
 
 TODAY = date(2026, 9, 23)
 OWNER = "work/epic-example"
+FEATURE = branch_name(OWNER, "Epic")
 
 
 def git(path, *args):
@@ -65,6 +67,13 @@ def setup(tmp_path, seed):
         repos[name] = (repo, worktree)
     copy_tree_into(seed.layout.root, tmp_path / "workspace")
     layout = rebase_layout(seed.layout, seed.root, tmp_path)
+    # Placement is computed: the owner's checkout lives at worktrees_dir/<repo>/<computed branch>.
+    for name, (repo, worktree) in list(repos.items()):
+        computed = layout.worktrees_dir / name / FEATURE
+        computed.parent.mkdir(parents=True, exist_ok=True)
+        git(repo, "worktree", "move", str(worktree), str(computed))
+        git(computed, "branch", "-m", "feature", FEATURE)
+        repos[name] = (repo, computed)
     # apply_init's disposable config projection names the seed root; nothing here reads it.
     (layout.cache_dir / "config.json").unlink(missing_ok=True)
     layout.manifest_path.write_text(
@@ -76,8 +85,7 @@ def setup(tmp_path, seed):
     page.parent.mkdir(parents=True, exist_ok=True)
     page.write_text(
         "---\ntype: Epic\ntitle: Example\nwork_status: in-progress\nphase: finish\nrepo: code\naffects: [packages]\n"
-        f"worktree: {repos['code'][1]}\nbranch: feature\nrepo_stamps:\n"
-        f"  ui: {{worktree: {repos['ui'][1]}, branch: feature}}\n---\n\nAuthored content.\n",
+        "---\n\nAuthored content.\n",
         encoding="utf-8",
     )
     # A resolved child that finished into ui makes ui a finish target of the epic (design section 5).
@@ -92,7 +100,7 @@ def setup(tmp_path, seed):
     receipt.parent.mkdir(parents=True, exist_ok=True)
     receipt.write_text(
         f"---\ntype: Explanation\nreceipt_version: 2\nowner: {OWNER}/children/feature-ui\nintegrations:\n"
-        f"  - repo: ui\n    source_branch: feature\n    source_commit: {tip}\n    target_branch: main\n"
+        f"  - repo: ui\n    source_branch: {FEATURE}\n    source_commit: {tip}\n    target_branch: main\n"
         f"    result_commit: {tip}\n    strategy: attested\n    evidence: accepted\n"
         "    accepted_by: Reviewer\n    reason: Reviewed\n---\n",
         encoding="utf-8",
@@ -108,7 +116,7 @@ def record(layout, repo):
 def test_finish_receipt_commits_owned_files(tmp_path, receipt_seed):
     layout, repos = setup(tmp_path, receipt_seed)
     _init_git(layout.root)
-    git(repos["code"][0], "merge", "feature")
+    git(repos["code"][0], "merge", FEATURE)
 
     result = record(layout, "code")
 
@@ -122,7 +130,7 @@ def test_finish_receipt_commits_owned_files(tmp_path, receipt_seed):
 def test_failed_workspace_commit_preserves_receipt_and_warning(tmp_path, receipt_seed):
     layout, repos = setup(tmp_path, receipt_seed)
     _init_git(layout.root)
-    git(repos["code"][0], "merge", "feature")
+    git(repos["code"][0], "merge", FEATURE)
     (layout.root / ".git/index.lock").write_text("held\n", encoding="utf-8", newline="\n")
 
     result = record(layout, "code")
@@ -141,7 +149,7 @@ def advance(layout, sha, **kwargs):
 
 def test_partial_retry_and_final_advance(tmp_path, receipt_seed):
     layout, repos = setup(tmp_path, receipt_seed)
-    git(repos["code"][0], "merge", "feature")
+    git(repos["code"][0], "merge", FEATURE)
     first = record(layout, "code")
     assert first.refusal is None and first.changed
     observed = inspect_finish(layout, OWNER)
@@ -153,7 +161,7 @@ def test_partial_retry_and_final_advance(tmp_path, receipt_seed):
         refused = advance(layout, sha, dry_run=dry_run)
         assert refused.outcome.plan.refusal == "finish-incomplete"
     assert load_items(load_bundle(layout.bundle_dir))[0].phase == "finish"
-    git(repos["ui"][0], "merge", "feature")
+    git(repos["ui"][0], "merge", FEATURE)
     assert record(layout, "ui").refusal is None
     verified = inspect_finish(layout, OWNER)
     assert verified.complete and verified.resolved_in == sha
@@ -169,7 +177,7 @@ def receipt_path(layout):
 
 def merge_all(repos):
     for repo, _ in repos.values():
-        git(repo, "merge", "feature")
+        git(repo, "merge", FEATURE)
 
 
 def test_merge_then_failed_receipt_is_recoverable_without_remerge(tmp_path, receipt_seed, monkeypatch):
@@ -177,7 +185,7 @@ def test_merge_then_failed_receipt_is_recoverable_without_remerge(tmp_path, rece
     from gw_orchestrate import finish_receipt
 
     layout, repos = setup(tmp_path, receipt_seed)
-    git(repos["code"][0], "merge", "feature")
+    git(repos["code"][0], "merge", FEATURE)
     original = finish_receipt.apply_mutation
 
     def refuse(*args, **kwargs):
@@ -208,7 +216,7 @@ def test_new_source_and_rewritten_target_invalidate_history(tmp_path, receipt_se
     # Recording the other repository preserves the stale evidence as history.
     assert record(layout, "ui").refusal is None
     assert receipt_path(layout).read_bytes() == initial
-    git(repos["code"][0], "merge", "feature")
+    git(repos["code"][0], "merge", FEATURE)
     assert record(layout, "code").changed
     assert inspect_finish(layout, OWNER).complete
     git(repos["ui"][0], "reset", "--hard", "HEAD~1")
@@ -310,7 +318,7 @@ def test_foreign_only_owner_resolves_to_first_verified_entry(tmp_path, receipt_s
     layout, repos = setup(tmp_path, receipt_seed)
     page = layout.bundle_dir / (OWNER + ".md")
     page.write_bytes(page.read_bytes().replace(b"affects: [packages]\n", b"affects: [gw:workspace]\n", 1))
-    git(repos["ui"][0], "merge", "feature")
+    git(repos["ui"][0], "merge", FEATURE)
     assert record(layout, "code").refusal
     assert advance(layout, "false-claim", dry_run=True).outcome.plan.refusal == "finish-incomplete"
     assert record(layout, "ui").changed
@@ -322,12 +330,19 @@ def test_foreign_only_owner_resolves_to_first_verified_entry(tmp_path, receipt_s
 
 def test_resolved_in_mismatch_and_release_date_remain_gates(tmp_path, receipt_seed):
     layout, repos = setup(tmp_path, receipt_seed)
-    merge_all(repos)
+    # A Release computes a different branch and checkout; move the owner's placement there before recording.
+    page = layout.bundle_dir / (OWNER + ".md")
+    page.write_bytes(page.read_bytes().replace(b"type: Epic", b"type: Release"))
+    release = branch_name(OWNER, "Release")
+    for name, (repo, worktree) in list(repos.items()):
+        moved = layout.worktrees_dir / name / release
+        moved.parent.mkdir(parents=True, exist_ok=True)
+        git(repo, "worktree", "move", str(worktree), str(moved))
+        git(moved, "branch", "-m", FEATURE, release)
+        git(repo, "merge", release)
     record(layout, "code")
     record(layout, "ui")
     assert advance(layout, "incorrect", dry_run=False).outcome.plan.refusal == "finish-incomplete"
-    page = layout.bundle_dir / (OWNER + ".md")
-    page.write_bytes(page.read_bytes().replace(b"type: Epic", b"type: Release"))
     sha = git(repos["code"][0], "rev-parse", "HEAD")
     assert advance(layout, sha, dry_run=True).outcome.plan.refusal == "released-at-required"
 
@@ -364,7 +379,7 @@ def test_squash_is_rediscovered_as_integration(tmp_path, receipt_seed):
     (source / "change.txt").write_text("content", encoding="utf-8")
     git(source, "add", "change.txt")
     git(source, "commit", "-m", "source change")
-    git(repo, "merge", "--squash", "feature")
+    git(repo, "merge", "--squash", FEATURE)
     git(repo, "commit", "-m", "squashed change")
     assert record(layout, "code").refusal is None
     assert "strategy: squash\n" in receipt_path(layout).read_text(encoding="utf-8")
@@ -390,7 +405,7 @@ def test_receipt_and_stamp_preimage_races_refuse(tmp_path, receipt_seed, monkeyp
 
     def stamp_change(*args, **kwargs):
         page = layout.bundle_dir / (OWNER + ".md")
-        page.write_bytes(page.read_bytes().replace(b"branch: feature}", b"branch: changed}"))
+        page.write_bytes(page.read_bytes().replace(b"Authored content.", b"Changed content."))
         return original(*args, **kwargs)
 
     monkeypatch.setattr(finish_receipt, "apply_mutation", stamp_change)
@@ -427,8 +442,8 @@ def test_invalid_commit_config_rejects_valid_finish_before_lock_and_preserves_pr
     from gw_kernel.workspace.errors import WorkspaceError
 
     layout, repos = setup(tmp_path, receipt_seed)
-    git(repos["code"][0], "merge", "feature")
-    git(repos["ui"][0], "merge", "feature")
+    git(repos["code"][0], "merge", FEATURE)
+    git(repos["ui"][0], "merge", FEATURE)
     (layout.root / "workflow.local.yaml").write_text(
         "workflow:\n  workspace_commits: invalid\n", encoding="utf-8", newline="\n"
     )
@@ -443,11 +458,11 @@ def test_invalid_commit_config_rejects_valid_finish_before_lock_and_preserves_pr
 
 def test_first_v2_write_upgrades_a_v1_receipt_without_rewriting_other_entries(tmp_path, receipt_seed):
     layout, repos = setup(tmp_path, receipt_seed)
-    git(repos["code"][0], "merge", "feature")
-    code_source = git(repos["code"][0], "rev-parse", "refs/heads/feature")
+    git(repos["code"][0], "merge", FEATURE)
+    code_source = git(repos["code"][0], "rev-parse", "refs/heads/" + FEATURE)
     code_tip = git(repos["code"][0], "rev-parse", "refs/heads/main")
     code_lines = (
-        "  - repo: code\n    source_branch: feature\n"
+        f"  - repo: code\n    source_branch: {FEATURE}\n"
         f"    source_commit: {code_source}\n    target_branch: main\n    result_commit: {code_tip}\n"
     )
     receipt_path(layout).parent.mkdir(parents=True, exist_ok=True)
@@ -456,7 +471,7 @@ def test_first_v2_write_upgrades_a_v1_receipt_without_rewriting_other_entries(tm
         encoding="utf-8",
         newline="\n",
     )
-    git(repos["ui"][0], "merge", "feature")
+    git(repos["ui"][0], "merge", FEATURE)
 
     assert record(layout, "ui").refusal is None
 
@@ -474,7 +489,7 @@ def test_copied_worktree_is_detached_from_seed(tmp_path, receipt_seed):
     git(worktree, "commit", "--allow-empty", "-m", "private")
     assert git(receipt_seed.root / "code-source", "rev-parse", "HEAD") == seed_head
     listed = [Path(line.split()[0]).resolve() for line in git(repo, "worktree", "list").splitlines()]
-    assert (tmp_path / "code-source").resolve() in listed
+    assert worktree.resolve() in listed
 
 
 def test_receipt_copy_contains_no_seed_path(tmp_path, receipt_seed):

@@ -397,9 +397,9 @@ sibling behind it can still dispatch in the same cycle. Live dispatches always
 reserve. A dispatch the coordinator chooses not to launch after planning is
 outside `plan()`'s view: it still reserved in that plan.
 
-**Placement is computed, never recorded.** `gw work record-placement` and `record-baseline` are gone: dispatch writes no stamp (its journal `record` step is a no-op kept for Runs that straddle the upgrade). No writer survives: workspace writes land on the primary checkout, so nothing records a workspace stamp either. A legacy `repo_stamps._workspace` entry is read only by `gw work migrate-placement`, and the manifest still refuses a repository named `_workspace` until that legacy read path is deleted.
+**Placement is computed, never recorded.** `gw work record-placement` and `record-baseline` are gone: dispatch writes no stamp (its journal `record` step is a no-op kept for Runs that straddle the upgrade). No writer survives: workspace writes land on the primary checkout, so nothing records a workspace stamp either. The stored `worktree`, `branch` and `repo_stamps` keys are no longer read by anything but `gw work migrate-placement`, which works on raw frontmatter; the schema refuses them on a page.
 `run_stage_advance` never writes placement: it takes no `worktree`, `branch` or
-`infer_worktree`, and `gw work advance --no-infer-worktree` is a hidden no-op that warns.
+`infer_worktree`.
 The commit gate reads placement through `gw_pipeline.placement.effective_placement`.
 
 **Placement is computed and realized at dispatch.** `plan()` computes where each item's worker runs from the item, its owner chain and the repository (`gw_pipeline.placement.placement_for` / `placement_chain`) and states it on the dispatch: a `placement` block plus `PlannedDispatch.worktree`, a `WorktreePlacement(path, branch, parent_path)`. Every stage, design and plan included, runs in the item's own computed worktree; there is no worktree action vocabulary, no pinned reader checkout and no `preparations[]`. A child's worktree parents on its epic's. A workspace-only item has a null placement and launches in the workspace primary checkout. Every chain step is checked as a write claim against live and accepted claims, so an owner held by a live finish yields `worktree-pending`.

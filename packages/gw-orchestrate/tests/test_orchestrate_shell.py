@@ -1352,11 +1352,6 @@ def test_dirty_foreign_checkout_does_not_withhold_clean_repository_dispatch(tmp_
     from gw_work import commands as work
 
     assert work.run_regen_indexes(layout, dry_run=False).application.ok
-    owner = load(layout.bundle_dir / "work/epic-a.md")
-    owner.set("worktree", str(code))
-    owner.set("branch", "main")
-    owner.set("repo_stamps", {"ui": {"worktree": str(ui), "branch": "main"}})
-    owner.save()
     observed = {}
     real_plan = orchestrate.plan
 
@@ -1402,9 +1397,6 @@ def test_linked_declared_checkouts_keep_separate_eligibility(tmp_path: Path, mon
     child = "work/epic-a/children/feature-a"
     _tag(layout, child, "ui")
     (linked / "dirty.txt").write_text("local\n", encoding="utf-8")
-    owner = load(layout.bundle_dir / "work/epic-a.md")
-    owner.set("repo_stamps", {"ui": {"worktree": str(linked), "branch": "feature/linked"}})
-    owner.save()
     captured = {}
     real_plan = orchestrate.plan
 

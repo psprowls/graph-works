@@ -14,7 +14,7 @@ from gw_pipeline.finish import FinishPlan, FinishTarget
 from gw_pipeline.placement import branch_name
 from gw_pipeline.repo_context import RepositoryContext
 from test_orchestrate_plan import _branch_tail_rules, _item
-from work_tracker_okf.items import Stamp, WorkItem
+from work_tracker_okf.items import WorkItem
 
 ROOT = "work/epic-prop"
 PATHS = (
@@ -74,7 +74,6 @@ def _scenario(seed: int):
         affects=("unrelated/root",),
         worktree="/wt/epic-one",
         branch="epic/one",
-        repo_stamps={"two": Stamp("/wt/epic-two", "epic/two")},
     )
     repos = {ROOT: ItemRepo("one", Path("/repo/one"), "frontmatter")}
     repos.update({path: ItemRepo(repo_of[path], Path(f"/repo/{repo_of[path]}"), "frontmatter") for path in paths})
@@ -126,7 +125,6 @@ def _finish_scenario(seed: int):
         affects=("unrelated/root",),
         worktree="/wt/epic-one",
         branch="epic/one",
-        repo_stamps={"two": Stamp("/wt/epic-two", "epic/two")},
     )
     children = [
         _item(

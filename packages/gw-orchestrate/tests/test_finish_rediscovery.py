@@ -2,7 +2,7 @@
 
 from gw_orchestrate.finish_receipt import run_record_finish
 from gw_pipeline.finish import inspect_finish, read_finish_receipt
-from gw_pipeline.test_support.finish_repos import OWNER, TODAY, code_repo, commit_file, git, squash, workspace
+from gw_pipeline.test_support.finish_repos import FEATURE, OWNER, TODAY, code_repo, commit_file, git, squash, workspace
 
 
 def record(layout):
@@ -19,7 +19,7 @@ def recorded(layout):
 def test_landed_merge_commit_is_rediscovered(tmp_path):
     repo, source = code_repo(tmp_path)
     before = commit_file(repo, "c.txt", "main\n", "main moves")
-    git(repo, "merge", "--no-ff", "--no-edit", "feature")
+    git(repo, "merge", "--no-ff", "--no-edit", FEATURE)
 
     layout = workspace(tmp_path, repo, source)
     assert record(layout).refusal is None
@@ -35,7 +35,7 @@ def test_landed_merge_commit_is_rediscovered(tmp_path):
 
 def test_landed_fast_forward_reads_as_ancestry(tmp_path):
     repo, source = code_repo(tmp_path)
-    git(repo, "merge", "--ff-only", "feature")
+    git(repo, "merge", "--ff-only", FEATURE)
 
     layout = workspace(tmp_path, repo, source)
     assert record(layout).refusal is None
@@ -99,7 +99,7 @@ def test_rerecord_drops_stale_optional_keys(tmp_path):
 
 def test_new_receipts_are_version_2(tmp_path):
     repo, source = code_repo(tmp_path)
-    git(repo, "merge", "--ff-only", "feature")
+    git(repo, "merge", "--ff-only", FEATURE)
 
     layout = workspace(tmp_path, repo, source)
     assert record(layout).refusal is None

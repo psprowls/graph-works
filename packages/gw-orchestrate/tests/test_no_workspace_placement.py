@@ -1,9 +1,8 @@
 """The workspace placement surface is gone: no source names a workspace branch, preparation or merge.
 
 Workspace writes land on the primary checkout (feature-workspace-writes-primary-checkout).
-Two legacy readers keep reading old `repo_stamps._workspace` until `gw work migrate-placement`
-has run (own D-002): the reservation in `gw_kernel/workspace/config.py` and
-`gw_work/migrate_placement.py`. `tech-debt-delete-the-legacy-placement-read-path` deletes them.
+One legacy reader remains: `gw_work/migrate_placement.py` still strips old `repo_stamps._workspace`
+entries, working on raw frontmatter.
 """
 
 from __future__ import annotations
@@ -25,7 +24,6 @@ PATTERN = (
 SCOPE = (":(glob)packages/*/src/**", ":(glob)plugins/gw/**")
 
 LEGACY_READERS = (
-    "packages/gw-kernel/src/gw_kernel/workspace/config.py",
     "packages/gw-work/src/gw_work/migrate_placement.py",
     # The inverted plugin guard names the removed surface in order to forbid it.
     "plugins/gw/tests/test-placement-docs.sh",

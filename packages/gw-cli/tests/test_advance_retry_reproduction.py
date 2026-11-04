@@ -39,7 +39,7 @@ def _file_epic(workspace: Path) -> str:
 
 
 def _advance(workspace: Path, path: str, *extra: str) -> tuple[int, str, str]:
-    result = runner.invoke(app, ["work", "advance", path, "--no-infer-worktree", *extra, "--workspace", str(workspace)])
+    result = runner.invoke(app, ["work", "advance", path, *extra, "--workspace", str(workspace)])
     return result.exit_code, result.stdout, result.stderr
 
 

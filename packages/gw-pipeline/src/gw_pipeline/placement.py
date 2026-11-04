@@ -162,41 +162,7 @@ class EffectivePlacement:
     worktree: str
     branch: str
     start_sha: str | None
-    source: Literal["legacy", "computed"]
-
-
-@dataclass(frozen=True, slots=True)
-class LegacyRow:
-    """One stored legacy placement; `repo_key=None` is the scalar pair (the item's own repository)."""
-
-    repo_key: str | None
-    worktree: str
-    branch: str
-    start_sha: str | None
-
-
-def legacy_rows(item: WorkItem) -> tuple[LegacyRow, ...]:
-    """The item's stored legacy placements: the scalar pair first, then `repo_stamps` by key."""
-    legacy = item.legacy_placement
-    if legacy is None:
-        return ()
-    rows: list[LegacyRow] = []
-    if legacy.worktree or legacy.branch:
-        rows.append(LegacyRow(None, legacy.worktree or "", legacy.branch or "", item.start_sha))
-    rows.extend(
-        LegacyRow(name, stamp.worktree, stamp.branch, stamp.start_sha) for name, stamp in sorted(legacy.repos.items())
-    )
-    return tuple(rows)
-
-
-def stamp_row(item: WorkItem, repo_key: str | None) -> LegacyRow | None:
-    """The item's legacy row for *repo_key* (`None` is the scalar pair), if it has one."""
-    return next((row for row in legacy_rows(item) if row.repo_key == repo_key), None)
-
-
-def stamped_worktrees(item: WorkItem) -> tuple[str, ...]:
-    """Every non-empty worktree the item's legacy stamps name."""
-    return tuple(row.worktree for row in legacy_rows(item) if row.worktree)
+    source: Literal["computed"]
 
 
 def effective_placement(
@@ -208,16 +174,7 @@ def effective_placement(
     worktrees_dir: Path,
     default_base: str,
 ) -> EffectivePlacement | None:
-    """Where *item* lives in *repo*: a legacy stamp when one exists, else the computed placement."""
-    legacy = item.legacy_placement
-    if legacy is not None and repo.name is not None:
-        stamp = legacy.repos.get(repo.name)
-        if stamp is not None:
-            return EffectivePlacement(
-                repo.name, stamp.worktree, stamp.branch, stamp.start_sha or item.start_sha, "legacy"
-            )
-        if repo.name == own_repo_name and legacy.worktree and legacy.branch:
-            return EffectivePlacement(repo.name, legacy.worktree, legacy.branch, item.start_sha, "legacy")
+    """Where *item* lives in *repo*: the computed placement."""
     if repo.name is None or repo.path is None:
         return None
     placement = placement_for(

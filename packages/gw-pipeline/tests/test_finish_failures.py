@@ -128,17 +128,18 @@ def test_finish_inspection_tracks_incomplete_accepted_and_unexpected_receipts(tm
 
 
 def test_resolve_finish_targets_checkouts_keyword_gates_only_the_checkout_blockers(tmp_path):
-    from gw_pipeline.test_support.finish_repos import OWNER, code_repo, git, workspace
+    from gw_pipeline.test_support.finish_repos import OWNER, code_repo, git, placed, workspace
 
     repo, source = code_repo(tmp_path)
     layout = workspace(tmp_path, repo, source)
+    placement = placed(layout)
     items = finish.load_items(finish.load_work_bundle(layout))
-    git(repo, "worktree", "remove", "--force", str(source))
+    git(repo, "worktree", "remove", "--force", str(placement.worktree))
 
     strict = finish.resolve_finish_targets(layout, items, OWNER)
     loose = finish.resolve_finish_targets(layout, items, OWNER, checkouts="ignored")
 
     assert strict.targets == () and strict.blockers
     assert not loose.blockers and [t.repo.name for t in loose.targets] == ["code"]
-    git(repo, "branch", "-D", "feature")
+    git(repo, "branch", "-D", placement.branch)
     assert finish.resolve_finish_targets(layout, items, OWNER, checkouts="ignored").blockers

@@ -218,9 +218,7 @@ def test_overlay_collision_order_recomputes_alias_backlinks(workspace, monkeypat
 
 def test_custom_work_projection_retains_mapping_fields(workspace) -> None:
     (workspace.bundle_dir / "work/mappings.md").write_text(
-        "---\ntype: Bug\ntitle: Mappings\nrepo_stamps:\n"
-        "  code: {worktree: /checkout, branch: topic}\nspec_baseline:\n"
-        f"  code: {'a' * 40}\n---\n",
+        f"---\ntype: Bug\ntitle: Mappings\nspec_baseline:\n  code: {'a' * 40}\n---\n",
         encoding="utf-8",
         newline="\n",
     )
@@ -229,7 +227,6 @@ def test_custom_work_projection_retains_mapping_fields(workspace) -> None:
         snap = materialize(source)
     actual = snap.work_snapshot(ignore=()).by_path["work/mappings"]
     assert actual == expected
-    assert actual.legacy_placement.repos["code"].worktree == "/checkout"
     assert actual.spec_baseline.code == "a" * 40
 
 

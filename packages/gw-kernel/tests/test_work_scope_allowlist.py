@@ -41,6 +41,8 @@ ALLOWED = frozenset(
         ("packages/gw-orchestrate/src/gw_orchestrate/asks.py", "run_ask_answer"),
         ("packages/gw-orchestrate/src/gw_orchestrate/integrate.py", "run_integrate"),
         ("packages/gw-orchestrate/src/gw_orchestrate/placing.py", "resolve"),
+        # Test-only support: resolves OWNER's computed placement for the real-git finish fixtures.
+        ("packages/gw-pipeline/src/gw_pipeline/test_support/finish_repos.py", "placed"),
     }
 )
 

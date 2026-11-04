@@ -12,7 +12,16 @@ from gw_orchestrate.finish_receipt import FinishReceiptResult
 from gw_orchestrate.integrate import IntegrateRefusal, run_integrate
 from gw_pipeline import finish as finish_module
 from gw_pipeline.finish import VerifiedIntegration, inspect_finish, read_finish_receipt
-from gw_pipeline.test_support.finish_repos import OWNER, TODAY, code_repo, commit_file, git, workspace, write_receipt
+from gw_pipeline.test_support.finish_repos import (
+    FEATURE,
+    OWNER,
+    TODAY,
+    code_repo,
+    commit_file,
+    git,
+    workspace,
+    write_receipt,
+)
 
 
 def run(layout, strategy=None, apply=True, repo="code"):
@@ -46,7 +55,7 @@ def test_each_strategy_produces_its_shape_and_a_verified_receipt(tmp_path, strat
         assert result.result_commit == git(source, "rev-parse", "HEAD")
     if strategy == "squash":
         assert git(repo, "log", "-1", "--format=%s") == "Example feature"
-        assert f"Squash of feature ({git(source, 'rev-parse', 'HEAD')}) for {OWNER}" in git(
+        assert f"Squash of {FEATURE} ({git(source, 'rev-parse', 'HEAD')}) for {OWNER}" in git(
             repo, "log", "-1", "--format=%b"
         )
     (entry,) = read_finish_receipt(layout, OWNER)[1]
@@ -104,7 +113,7 @@ def test_conflict_refuses_lists_paths_and_restores(tmp_path, strategy):
 
 def test_already_integrated_source_records_without_merging(tmp_path):
     repo, source = code_repo(tmp_path)
-    git(repo, "merge", "--ff-only", "feature")
+    git(repo, "merge", "--ff-only", FEATURE)
     tip = git(repo, "rev-parse", "HEAD")
     layout = workspace(tmp_path, repo, source)
 
@@ -170,7 +179,7 @@ def test_apply_integrated_discovers_once(tmp_path, monkeypatch):
 
 def test_apply_already_integrated_discovers_once(tmp_path, monkeypatch):
     repo, source = code_repo(tmp_path)
-    git(repo, "merge", "--ff-only", "feature")
+    git(repo, "merge", "--ff-only", FEATURE)
     calls = counted_discovery(monkeypatch)
 
     assert run(workspace(tmp_path, repo, source), "merge").outcome == "already-integrated"
@@ -189,7 +198,7 @@ def test_plan_only_discovers_once(tmp_path, monkeypatch):
 def test_recorder_receives_evidence_on_both_apply_paths(tmp_path, monkeypatch, landed):
     repo, source = code_repo(tmp_path)
     if landed:
-        git(repo, "merge", "--ff-only", "feature")
+        git(repo, "merge", "--ff-only", FEATURE)
     seen = []
     real = integrate_module.record_finish_in
 
@@ -336,7 +345,7 @@ def test_receipt_problems_refuse_before_any_git_mutation(tmp_path, damage):
     else:
         stale = VerifiedIntegration(
             "code" if damage == "stale-entry" else "gone",
-            "old-branch" if damage == "stale-entry" else "feature",
+            "old-branch" if damage == "stale-entry" else FEATURE,
             git(source, "rev-parse", "HEAD"),
             "main",
             before,

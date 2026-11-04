@@ -1,12 +1,13 @@
 from gw_kernel.workspace.layout import layout_for
 from gw_pipeline import finish as finish_module
 from gw_pipeline.finish import resolve_finish_targets
+from gw_pipeline.placement import branch_name
 from gw_pipeline.repo_context import RepositoryContext
 from okf_io import load_bundle
 from work_tracker_okf.items import load_items
 
 
-def setup(tmp_path, monkeypatch, *, scalar=True, nested=False, base_checkout=False):
+def setup(tmp_path, monkeypatch, *, nested=False, base_checkout=False):
     layout = layout_for(tmp_path)
     layout.manifest_path.write_text(
         "version: 1\nworkflow_config: dispatch.yaml\nrepositories:\n  core: {path: /core}\n  ui: {path: /ui}\n",
@@ -22,35 +23,44 @@ def setup(tmp_path, monkeypatch, *, scalar=True, nested=False, base_checkout=Fal
     path = "work/epic-a"
     if nested:
         (root / "epic-parent.md").write_text(
-            "---\ntype: Epic\nrepo: core\nworktree: /core/parent\nbranch: epic/parent\n"
-            "repo_stamps:\n  ui: {worktree: /ui/parent, branch: epic/parent}\n---\n",
+            "---\ntype: Epic\nrepo: core\n---\n",
             encoding="utf-8",
         )
         path = "work/epic-parent/children/epic-a"
     page = layout.bundle_dir / f"{path}.md"
     page.parent.mkdir(parents=True, exist_ok=True)
     page.write_text(
-        "---\ntype: Epic\nrepo: core\nphase: finish\nwork_status: in-progress\naffects: [packages]\n"
-        + ("worktree: /core/epic\nbranch: epic/a\n" if scalar else "")
-        + "repo_stamps:\n  ui: {worktree: /ui/epic, branch: epic/a}\n---\n",
+        "---\ntype: Epic\nrepo: core\nphase: finish\nwork_status: in-progress\naffects: [packages]\n" + "---\n",
         encoding="utf-8",
     )
 
     def observe(repo, **kwargs):
         prefix = str(repo)
-        inventory = {"epic/a": (prefix + "/epic",), "epic/parent": (prefix + "/parent",)}
+        computed = branch_name(path, "Epic")
+        checkout = str((layout.worktrees_dir / prefix.strip("/") / computed).resolve())
+        inventory = {computed: (checkout,)}
+        exists = {checkout: True}
+        usable = {prefix: True, checkout: True}
+        branches = {"main", "trunk", computed}
+        if nested:
+            parent_branch = branch_name("work/epic-parent", "Epic")
+            parent_checkout = str((layout.worktrees_dir / prefix.strip("/") / parent_branch).resolve())
+            inventory[parent_branch] = (parent_checkout,)
+            exists[parent_checkout] = usable[parent_checkout] = True
+            branches.add(parent_branch)
         if base_checkout:
             inventory["main" if prefix == "/core" else "trunk"] = (prefix,)
+            exists[prefix] = True
         return RepositoryContext(
             prefix,
             prefix,
             "main" if prefix == "/core" else "trunk",
             True,
             inventory,
-            {prefix + "/epic": True, prefix + "/parent": True, **({prefix: True} if base_checkout else {})},
+            exists,
             True,
-            {prefix: True, prefix + "/epic": True, prefix + "/parent": True},
-            branches=frozenset({"main", "trunk", "epic/a", "epic/parent"}),
+            usable,
+            branches=frozenset(branches),
         )
 
     monkeypatch.setattr(finish_module, "observe_repository", observe)

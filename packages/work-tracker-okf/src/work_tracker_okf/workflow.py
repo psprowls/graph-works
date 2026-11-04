@@ -70,10 +70,9 @@ class RouteState:
     `stale_spec` names siblings landed since the spec baseline whose `affects` overlap;
     resolved by the caller from git, like `hold`.
 
-    `has_branch` is branch *ownership* only, from the item's scalar `branch:`
-    or `repo_stamps`: a stamped Epic or Release owns the integration branch its descendants merged
-    into, so it finishes like any other branch (D-002). Never a name, never a
-    Git read."""
+    `has_branch` is branch *ownership* only, derived from the item's code `affects`: an Epic or
+    Release that touches code owns the integration branch its descendants merged into, so it
+    finishes like any other branch (D-002). Never a name, never a Git read."""
 
     type: str
     work_status: str

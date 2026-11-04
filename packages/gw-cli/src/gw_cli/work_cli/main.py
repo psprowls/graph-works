@@ -386,12 +386,6 @@ def advance(
     owner: str = typer.Option("", "--owner", help="Handle to record when execution starts."),
     resolved_in: str = typer.Option("", "--resolved-in", help="PR or commit ref."),
     released_at: str = typer.Option("", "--released-at", help="Release date (YYYY-MM-DD)."),
-    no_infer_worktree: bool = typer.Option(
-        False,
-        "--no-infer-worktree",
-        hidden=True,
-        help="Retired; accepted and ignored.",
-    ),
     return_: bool = typer.Option(False, "--return", help="Send an item at `finish` back to `execute`."),
     return_scope: list[str] = typer.Option(  # noqa: B008 - Typer declares options in defaults
         [],
@@ -434,8 +428,6 @@ def advance(
     workers never pass it; a human does.
     """
     warn_if_stale_routing()
-    if no_infer_worktree:
-        rendering.warn("--no-infer-worktree is retired and ignored")
     layout = resolve_workspace(workspace)
     try:
         result = run_stage_advance(

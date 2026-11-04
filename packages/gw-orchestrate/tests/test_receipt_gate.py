@@ -31,7 +31,7 @@ def advance(env: GateEnv, *, dry_run: bool = False, skip_gate: tuple[str, str] |
         env.layout,
         env.path,
         today=TODAY,
-        repo=env.repo,
+        repo=env.main,
         dry_run=dry_run,
         skip_gate=skip_gate[0] if skip_gate else None,
         skip_reason=skip_gate[1] if skip_gate else None,

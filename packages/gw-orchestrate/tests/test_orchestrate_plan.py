@@ -20,23 +20,16 @@ from gw_pipeline.placement import branch_name
 from gw_pipeline.repo_context import RepositoryContext
 from subagents_io.dispatch import WorktreePlacement
 from work_tracker_okf.dependencies import DependencyEdge
-from work_tracker_okf.items import LegacyPlacement, Stamp, WorkItem
+from work_tracker_okf.items import WorkItem
 from work_tracker_okf.pipeline import PACKAGED_DEFINITION, ArtifactSpec
 from work_tracker_okf.workflow import RETURN_TO_EXECUTE, RouteState, route
 
-_KEEP: Any = object()
 
-
-def _restamp(
-    item: WorkItem, *, worktree: Any = _KEEP, branch: Any = _KEEP, repo_stamps: Any = None, **rest: Any
-) -> WorkItem:
-    """`dataclasses.replace` for the retired stored placement, which lives on `legacy_placement`."""
-    old = item.legacy_placement or LegacyPlacement(None, None, {})
-    wt = old.worktree if worktree is _KEEP else worktree
-    br = old.branch if branch is _KEEP else branch
-    stamps = dict(old.repos) if repo_stamps is None else repo_stamps
-    legacy = LegacyPlacement(wt, br, stamps) if (wt or br or stamps) else None
-    return dataclasses.replace(item, legacy_placement=legacy, **rest)
+def _restamp(item: WorkItem, **rest: Any) -> WorkItem:
+    """`dataclasses.replace` for a test item; the retired `worktree`/`branch`/`repo_stamps` keys are ignored."""
+    for retired in ("worktree", "branch", "repo_stamps"):
+        rest.pop(retired, None)
+    return dataclasses.replace(item, **rest)
 
 
 def _item(path: str, **overrides: object) -> WorkItem:
@@ -75,10 +68,8 @@ def _item(path: str, **overrides: object) -> WorkItem:
         "released_at": None,
     }
     base.update(overrides)
-    worktree, branch = base.pop("worktree", None), base.pop("branch", None)
-    stamps = dict(base.pop("repo_stamps", {}))  # type: ignore[call-overload]
-    if "legacy_placement" not in overrides and (worktree or branch or stamps):
-        base["legacy_placement"] = LegacyPlacement(worktree, branch, stamps)  # type: ignore[arg-type]
+    for retired in ("worktree", "branch", "repo_stamps"):  # stored placement is no longer read
+        base.pop(retired, None)
     return WorkItem(**base)  # type: ignore[arg-type]
 
 
@@ -213,9 +204,7 @@ def test_finish_dispatch_places_in_the_items_own_worktree() -> None:
 def test_workspace_only_execute_dispatches_at_workspace_root() -> None:
     """A `gw:workspace` item at execute launches on the primary checkout: no blocker, no worktree claim."""
     path = "work/feature-ws"
-    item = _execute_item(
-        path, worktree=None, branch=None, affects=("gw:workspace",), repo_stamps={"_workspace": Stamp("/ws-wt", "b")}
-    )
+    item = _execute_item(path, worktree=None, branch=None, affects=("gw:workspace",))
     # A live finish whose merge target is the workspace root: a `WorktreeScope("/ws")` claim would block.
     outside, live_key, finish_plans = _live_finish_holding("/ws")
     result = _code_plan((outside, item), path, live=(live_key,), finish_plans=finish_plans)
@@ -497,9 +486,7 @@ def test_distinct_repositories_share_one_budget_without_affects_collision(code_a
         ),
     }
     items = (
-        _restamp(
-            items[0], worktree="/wt/code", branch="feature/code", repo_stamps={"ui": Stamp("/wt/ui", "feature/ui")}
-        ),
+        _restamp(items[0], worktree="/wt/code", branch="feature/code"),
         *items[1:],
     )
     result = _plan(items, root, item_repos=repos, repo_contexts=contexts)
@@ -529,7 +516,6 @@ def test_live_empty_affects_finish_claims_its_foreign_repository() -> None:
             child_paths=(finishing, ready),
             worktree="/wt/code-epic",
             branch="epic/r",
-            repo_stamps={"ui": Stamp("/wt/ui-epic", "epic/r")},
         ),
         _item(
             finishing,
@@ -738,7 +724,6 @@ def test_shared_git_identity_preserves_each_declared_checkout() -> None:
             items[0],
             worktree="/repo/primary",
             branch="main",
-            repo_stamps={"linked": Stamp("/repo/linked", "feature/linked")},
         ),
         *items[1:],
     )

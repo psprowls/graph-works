@@ -77,19 +77,21 @@ def test_scoped_without_config_refuses(env):
 
 
 def _computed(env):
-    """Clear the legacy stamp so the item's computed placement applies; return (worktree, branch)."""
+    """Remove the item's computed checkout (the fixture creates it); return (worktree, branch)."""
     from gw_pipeline.placement import active_path, branch_name
 
-    env.set_worktree(None)
     branch = branch_name(active_path(env.path), "Feature")
-    return env.layout.worktrees_dir / "code" / branch, branch
+    computed = env.layout.worktrees_dir / "code" / branch
+    git(env.main, "worktree", "remove", "--force", str(computed))
+    git(env.main, "branch", "-D", branch)
+    return computed, branch
 
 
 def test_gate_worktree_missing_when_absent(env):
     computed, branch = _computed(env)
     computed.parent.mkdir(parents=True, exist_ok=True)
-    git(env.repo, "worktree", "add", "-b", branch, str(computed))
-    git(env.repo, "worktree", "remove", str(computed))
+    git(env.main, "worktree", "add", "-b", branch, str(computed))
+    git(env.main, "worktree", "remove", str(computed))
     result = run_gate_run(env.layout, env.path, now=NOW, token="a1b2c3d4", spawn=env.spawn)
     assert result.refusal == "worktree-missing"
     assert result.detail == (
@@ -101,7 +103,7 @@ def test_gate_worktree_missing_when_absent(env):
 def test_gate_worktree_missing_on_other_branch(env):
     computed, branch = _computed(env)
     computed.parent.mkdir(parents=True, exist_ok=True)
-    git(env.repo, "worktree", "add", "-b", branch, str(computed))
+    git(env.main, "worktree", "add", "-b", branch, str(computed))
     git(computed, "switch", "-c", "elsewhere")
     result = run_gate_run(env.layout, env.path, now=NOW, token="a1b2c3d4", spawn=env.spawn)
     assert result.refusal == "worktree-missing"
@@ -115,7 +117,7 @@ def test_gate_measures_computed_worktree(env):
 
     computed, branch = _computed(env)
     computed.parent.mkdir(parents=True, exist_ok=True)
-    git(env.repo, "worktree", "add", "-b", branch, str(computed))
+    git(env.main, "worktree", "add", "-b", branch, str(computed))
     items = load_items(load_work_bundle(env.layout))
     by_path = {i.path: i for i in items}
     expected = item_placement(env.layout, by_path[env.path], by_path).worktree.resolve()
@@ -265,10 +267,8 @@ def test_max_concurrent_refusal_names_the_workflow_file(tmp_path: Path) -> None:
 def test_gate_check_resolves_worktree_via_accessor(env):
     from gw_pipeline.placement import active_path, branch_name
 
-    env.set_worktree(None)
     branch = branch_name(active_path(env.path), "Feature")
     computed = env.layout.worktrees_dir / "code" / branch
-    computed.parent.mkdir(parents=True, exist_ok=True)
-    git(env.repo, "worktree", "add", "-b", branch, str(computed))
+    assert computed == env.repo  # the fixture already created the computed checkout
     result = run_gate_check(env.layout, env.path)
     assert result.refusal != "worktree-missing"

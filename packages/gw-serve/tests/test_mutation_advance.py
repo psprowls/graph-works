@@ -61,7 +61,7 @@ def test_plan_writes_nothing_and_apply_matches_the_cli_projection(
     monkeypatch.setattr(work_cli, "_today", lambda: date(2026, 9, 18))
     cli = CliRunner().invoke(
         app,
-        ["work", "advance", ITEM, "--effort", "small", "--no-infer-worktree", "--workspace", str(twin.root), "--json"],
+        ["work", "advance", ITEM, "--effort", "small", "--workspace", str(twin.root), "--json"],
     )
     assert cli.exit_code == 0, cli.output
     expected = json.loads(cli.stdout)
@@ -231,15 +231,17 @@ def test_orchestrate_route_matches_cli_placement(tmp_path: Path, monkeypatch: py
     )
     owner = "work/epic-lifecycle"
     child = owner + "/children/feature-ui"
-    anchor = tmp_path / "code-anchor"
-    git(repos["code"], "worktree", "add", "-b", "epic/lifecycle", str(anchor))
     owner_page = layout.bundle_dir / (owner + ".md")
     owner_page.parent.mkdir(parents=True, exist_ok=True)
     owner_page.write_text(
         "---\ntype: Epic\ntitle: Lifecycle\nwork_status: in-progress\nphase: execute\naffects: [packages]\nrepo: code\n"
-        f"worktree: {anchor}\nbranch: epic/lifecycle\n---\n",
+        "---\n",
         encoding="utf-8",
     )
+    from gw_pipeline.placement import branch_name
+
+    epic_branch = branch_name(owner, "Epic")
+    git(repos["code"], "worktree", "add", "-b", epic_branch, str(layout.worktrees_dir / "code" / epic_branch))
     child_page = layout.bundle_dir / (child + ".md")
     child_page.parent.mkdir(parents=True)
     child_page.write_text(
@@ -276,10 +278,7 @@ def test_orchestrate_route_matches_cli_placement(tmp_path: Path, monkeypatch: py
     assert "worktree" not in dispatch
     foreign_anchor = Path(placement["parent_worktree"])
     git(repos["ui"], "worktree", "add", "-b", placement["parent_branch"], str(foreign_anchor))
-    # The legacy stamp pins the owner's ui anchor; the resolved child's receipt makes ui a finish target.
-    document = load(owner_page)
-    document.set("repo_stamps", {"ui": {"worktree": str(foreign_anchor), "branch": placement["parent_branch"]}})
-    document.save()
+    # The resolved child's receipt makes ui a finish target.
     git(foreign_anchor, "commit", "--allow-empty", "-m", "child integrated")
     tip = git(foreign_anchor, "rev-parse", "HEAD")
     child_receipt = layout.bundle_dir / child / "references" / "04-finish-receipt.md"
@@ -306,14 +305,14 @@ def test_orchestrate_route_matches_cli_placement(tmp_path: Path, monkeypatch: py
     next_cli = cli("work", "next", owner)
     next_http = client.get("/v1/work/next", params={"path": owner}, headers=headers).json()
     assert next_cli["finish_targets"] == next_http["finish_targets"] == dispatch["finish_targets"]
-    git(repos["code"], "merge", "epic/lifecycle")
+    git(repos["code"], "merge", epic_branch)
     assert run_record_finish(layout, owner, repo_name="code", today=AT.date()).changed
     params = {"path": owner}
     partial = client.post(PLAN, json=params, headers=headers).json()
     assert partial["plan"]["changed"] is False
     assert partial["plan"]["blockers"]
     assert partial["plan"]["refusal"]["reason"] == "finish-incomplete"
-    cli_partial = cli("work", "advance", owner, "--no-infer-worktree")
+    cli_partial = cli("work", "advance", owner)
     assert cli_partial["blockers"] == partial["plan"]["blockers"]
     assert cli_partial["changed"] is False
     assert _apply(client, headers, params, partial).status_code == 422

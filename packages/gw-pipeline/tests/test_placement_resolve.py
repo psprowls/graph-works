@@ -1,4 +1,4 @@
-"""`item_placement` resolves an item's placement in one repository, legacy stamps first."""
+"""`item_placement` resolves an item's placement in one repository."""
 
 import subprocess
 from pathlib import Path
@@ -88,43 +88,6 @@ def test_foreign_repo_name(tmp_path):
 def test_no_repo_is_none(tmp_path):
     layout, items = _setup(tmp_path, repos=(), pages=_pages())
     assert item_placement(layout, items[TOP], items) is None
-
-
-def test_legacy_item_and_owner_win(tmp_path):
-    layout, items = _setup(
-        tmp_path,
-        pages=_pages(
-            epic="worktree: /orca/epic\nbranch: psprowls/epic-orca\n",
-            child="worktree: /orca/child\nbranch: psprowls/child-orca\n",
-        ),
-    )
-    got = item_placement(layout, items[CHILD], items)
-    assert got is not None
-    assert (got.worktree, got.branch) == (Path("/orca/child"), "psprowls/child-orca")
-    assert (got.parent_worktree, got.parent_branch) == (Path("/orca/epic"), "psprowls/epic-orca")
-
-
-def test_legacy_item_and_owner_win_with_repo_name_and_no_declared_repo(tmp_path):
-    layout, items = _setup(
-        tmp_path,
-        pages=_pages(
-            epic="worktree: /orca/epic\nbranch: psprowls/epic-orca\n",
-            child="worktree: /orca/child\nbranch: psprowls/child-orca\n",
-        ),
-    )
-    got = item_placement(layout, items[CHILD], items, repo_name="code")
-    assert got is not None
-    assert (got.worktree, got.branch) == (Path("/orca/child"), "psprowls/child-orca")
-    assert (got.parent_worktree, got.parent_branch) == (Path("/orca/epic"), "psprowls/epic-orca")
-
-
-def test_stampless_child_under_stamped_epic(tmp_path):
-    layout, items = _setup(tmp_path, pages=_pages(epic="worktree: /orca/epic\nbranch: psprowls/epic-orca\n"))
-    got = item_placement(layout, items[CHILD], items)
-    computed = _expected(layout, items[CHILD], items)
-    assert got is not None and computed is not None
-    assert (got.worktree, got.branch) == (computed.worktree, computed.branch)
-    assert (got.parent_worktree, got.parent_branch) == (Path("/orca/epic"), "psprowls/epic-orca")
 
 
 def test_unknown_repo_name_raises(tmp_path):

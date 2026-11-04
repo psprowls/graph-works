@@ -5,8 +5,19 @@ from dataclasses import replace
 import pytest
 from gw_orchestrate import commands
 from gw_pipeline import finish
+from gw_pipeline.placement_resolve import item_placement
 from gw_pipeline.repo_context import RepositoryContext
+from okf_io import load_bundle
 from test_orchestrate_shell import _workspace, _write
+from work_tracker_okf.items import load_items
+
+
+def _placed(layout, path, repo):
+    """Where placement computes *path*'s checkout and branch in the declared repository *repo*."""
+    items = load_items(load_bundle(layout.bundle_dir))
+    placement = item_placement(layout, items.by_path[path], items.by_path, repo_name=repo)
+    assert placement is not None
+    return placement
 
 
 def _setup(tmp_path, monkeypatch, *, nested=False, foreign=False):
@@ -30,13 +41,12 @@ def _setup(tmp_path, monkeypatch, *, nested=False, foreign=False):
             _write(layout, path, phase="finish", work_status="in-progress", affects=(name,))
         page = layout.bundle_dir / f"{path}.md"
         text = page.read_text(encoding="utf-8")
-        stamp = f"repo: core\nworktree: /core/{name}\nbranch: branch/{name}\n"
-        if foreign:
-            stamp += f"repo_stamps:\n  ui: {{worktree: /ui/{name}, branch: branch/{name}}}\n"
-        page.write_text(text.replace("---\n", "---\n" + stamp, 1), encoding="utf-8", newline="")
+        page.write_text(text.replace("---\n", "---\nrepo: core\n", 1), encoding="utf-8", newline="")
     contexts = {}
     for repo in ("/core", "/ui"):
-        inventory = {"main": (repo,), **{f"branch/{n}": (f"{repo}/{n}",) for n in ("a", "b", "epic")}}
+        # Placement is computed: each item's branch is checked out at its computed worktree in both repositories.
+        placements = [_placed(layout, path, repo.strip("/")) for path in (a, b, *([root] if nested else []))]
+        inventory = {"main": (repo,), **{pl.branch: (str(pl.worktree),) for pl in placements}}
         paths = {p: True for values in inventory.values() for p in values}
         contexts[repo] = RepositoryContext(
             repo,
@@ -80,7 +90,7 @@ def test_shell_retains_live_finish_outside_candidate_subtree(tmp_path, monkeypat
             encoding="utf-8",
             newline="",
         )
-    _assert_waits(layout, a, b, "/core/epic" if nested else "/core")
+    _assert_waits(layout, a, b, str(_placed(layout, "work/epic-x", "core").worktree) if nested else "/core")
 
 
 # Foreign repositories no longer come from repo_stamps (targets are placement-derived), so only /core is a target.
@@ -92,14 +102,15 @@ def test_shell_retains_root_targets_after_full_or_partial_revalidation_failure(
     layout, a, b, contexts = _setup(tmp_path, monkeypatch, foreign=True)
     for name in failed_repos:
         context = contexts[name]
-        source = name + "/a"
+        placed_a = _placed(layout, a, name.strip("/"))
+        source = str(placed_a.worktree)
         contexts[name] = replace(
             context,
             checkout_usable_by_path={
                 **context.checkout_usable_by_path,
                 (name if fault == "dirty-target" else source): False,
             },
-            inventory={k: v for k, v in context.inventory.items() if fault != "missing-source" or k != "branch/a"},
+            inventory={k: v for k, v in context.inventory.items() if fault != "missing-source" or k != placed_a.branch},
         )
     _assert_waits(layout, a, b, failed_repos[0])
 
@@ -111,7 +122,7 @@ def test_unproven_live_target_never_authorizes_checkout_reuse(tmp_path, monkeypa
     # assumed disjoint, even though the current pages have disjoint affects.
     page = layout.bundle_dir / f"{b}.md"
     page.write_text(
-        page.read_text(encoding="utf-8").replace("/core/", "/ui/").replace("repo: core", "repo: ui"),
+        page.read_text(encoding="utf-8").replace("repo: core", "repo: ui"),
         encoding="utf-8",
         newline="",
     )
@@ -141,9 +152,6 @@ def test_real_git_shell_keeps_live_root_target_when_source_is_dirty(tmp_path):
     repo.mkdir()
     git(repo, "init", "-b", "main")
     git(repo, "-c", "user.name=Test", "-c", "user.email=test@example.test", "commit", "--allow-empty", "-m", "base")
-    sources = {name: tmp_path / name for name in ("a", "b")}
-    for name, source in sources.items():
-        git(repo, "worktree", "add", "-b", f"feature/{name}", str(source))
     layout = _workspace(tmp_path / "workspace", f"version: 1\nrepositories:\n  code: {{path: {repo}}}\n")
     (layout.root / "workflow.yaml").write_text(
         "pipeline:\n  rules:\n    - match: {stage: finish}\n"
@@ -151,15 +159,15 @@ def test_real_git_shell_keeps_live_root_target_when_source_is_dirty(tmp_path):
         encoding="utf-8",
         newline="",
     )
-    for name, source in sources.items():
+    sources = {}
+    for name in ("a", "b"):
         path = f"work/feature-{name}"
         _write(layout, path, phase="finish", work_status="in-progress", affects=(name,))
-        page = layout.bundle_dir / f"{path}.md"
-        page.write_text(
-            page.read_text(encoding="utf-8").replace("---\n", f"---\nworktree: {source}\nbranch: feature/{name}\n", 1),
-            encoding="utf-8",
-            newline="",
-        )
+        # Each item's computed worktree on its computed branch.
+        placed = _placed(layout, path, "code")
+        placed.worktree.parent.mkdir(parents=True, exist_ok=True)
+        git(repo, "worktree", "add", "-b", placed.branch, str(placed.worktree))
+        sources[name] = placed.worktree
     (sources["a"] / "dirty.txt").write_text("merge in progress\n", encoding="utf-8", newline="")
     _assert_waits(layout, "work/feature-a", "work/feature-b", str(repo))
 
@@ -168,13 +176,11 @@ def test_real_git_shell_keeps_live_root_target_when_source_is_dirty(tmp_path):
 def test_live_finish_revalidation_failure_preserves_independent_work(tmp_path, monkeypatch, phase):
     layout, a, b, contexts = _setup(tmp_path, monkeypatch)
     context = contexts["/core"]
-    contexts["/core"] = replace(context, checkout_usable_by_path={**context.checkout_usable_by_path, "/core/a": False})
+    source = str(_placed(layout, a, "core").worktree)
+    contexts["/core"] = replace(context, checkout_usable_by_path={**context.checkout_usable_by_path, source: False})
     page = layout.bundle_dir / f"{b}.md"
     page.write_text(
-        page.read_text(encoding="utf-8")
-        .replace("/core/", "/ui/")
-        .replace("repo: core", "repo: ui")
-        .replace("phase: finish", f"phase: {phase}"),
+        page.read_text(encoding="utf-8").replace("repo: core", "repo: ui").replace("phase: finish", f"phase: {phase}"),
         encoding="utf-8",
         newline="",
     )
@@ -194,7 +200,7 @@ def test_partial_unknown_evidence_keeps_the_other_proven_target_claim(tmp_path, 
     contexts["/ui"] = replace(contexts["/ui"], inventory_known=False)
     page = layout.bundle_dir / f"{b}.md"
     page.write_text(
-        page.read_text(encoding="utf-8").replace("repo_stamps:\n  ui: {worktree: /ui/b, branch: branch/b}\n", ""),
+        page.read_text(encoding="utf-8"),
         encoding="utf-8",
         newline="",
     )

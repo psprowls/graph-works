@@ -3364,17 +3364,6 @@
           "is_flag": false
         },
         {
-          "name": "no_infer_worktree",
-          "opts": [
-            "--no-infer-worktree"
-          ],
-          "secondary_opts": [],
-          "help": "Retired; accepted and ignored.",
-          "required": false,
-          "default": false,
-          "is_flag": true
-        },
-        {
           "name": "return_",
           "opts": [
             "--return"

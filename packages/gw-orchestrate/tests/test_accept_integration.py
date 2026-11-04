@@ -5,14 +5,14 @@ from gw_orchestrate import accept_integration as accept_module
 from gw_orchestrate.accept_integration import run_accept_integration
 from gw_orchestrate.finish_receipt import run_record_finish
 from gw_pipeline.finish import inspect_finish, read_finish_receipt
-from gw_pipeline.test_support.finish_repos import OWNER, TODAY, code_repo, git, workspace
+from gw_pipeline.test_support.finish_repos import FEATURE, OWNER, TODAY, code_repo, git, workspace
 from work_tracker_okf import decisions
 
 
 def hand_integrated(tmp_path):
     """main holds the feature's change plus an edit, so no strategy verifies it."""
     repo, source = code_repo(tmp_path)
-    git(repo, "merge", "--squash", "feature")
+    git(repo, "merge", "--squash", FEATURE)
     (repo / "b.txt").write_text("feature, edited in review\n", encoding="utf-8", newline="\n")
     git(repo, "add", "b.txt")
     git(repo, "commit", "-m", "squash with review edits")
@@ -107,7 +107,7 @@ def test_malformed_receipt_refuses_as_repair_not_replacement(tmp_path):
 
 def test_a_verified_entry_is_never_replaced_by_attested_evidence(tmp_path):
     repo, source = code_repo(tmp_path)
-    git(repo, "merge", "--no-ff", "-m", "merge feature", "feature")
+    git(repo, "merge", "--no-ff", "-m", "merge feature", FEATURE)
     layout = workspace(tmp_path, repo, source)
     assert run_record_finish(layout, OWNER, repo_name="code", today=TODAY).refusal is None
     (verified,) = read_finish_receipt(layout, OWNER)[1]

@@ -8,10 +8,10 @@ from gw_pipeline.finish import resolve_finish_targets
 from gw_pipeline.placement import branch_name
 from gw_pipeline.repo_context import RepositoryContext
 from okf_io import load_bundle
-from work_tracker_okf.items import LegacyPlacement, Stamp, load_items
+from work_tracker_okf.items import load_items
 
 
-def setup(tmp_path, monkeypatch, *, scalar=True, nested=False, base_checkout=True, ui_child=True):
+def setup(tmp_path, monkeypatch, *, nested=False, base_checkout=True, ui_child=True):
     layout = layout_for(tmp_path)
     layout.manifest_path.write_text(
         "version: 1\nworkflow_config: workflow.yaml\nrepositories:\n  core: {path: /core}\n  ui: {path: /ui}\n",
@@ -27,17 +27,14 @@ def setup(tmp_path, monkeypatch, *, scalar=True, nested=False, base_checkout=Tru
     path = "work/epic-a"
     if nested:
         (root / "epic-parent.md").write_text(
-            "---\ntype: Epic\nrepo: core\nworktree: /core/parent\nbranch: epic/parent\n"
-            "repo_stamps:\n  ui: {worktree: /ui/parent, branch: epic/parent}\n---\n",
+            "---\ntype: Epic\nrepo: core\n---\n",
             encoding="utf-8",
         )
         path = "work/epic-parent/children/epic-a"
     page = layout.bundle_dir / f"{path}.md"
     page.parent.mkdir(parents=True, exist_ok=True)
     page.write_text(
-        "---\ntype: Epic\nrepo: core\nphase: finish\nwork_status: in-progress\naffects: [packages]\n"
-        + ("worktree: /core/epic\nbranch: epic/a\n" if scalar else "")
-        + "repo_stamps:\n  ui: {worktree: /ui/epic, branch: epic/a}\n---\n",
+        "---\ntype: Epic\nrepo: core\nphase: finish\nwork_status: in-progress\naffects: [packages]\n" + "---\n",
         encoding="utf-8",
     )
 
@@ -75,6 +72,12 @@ def setup(tmp_path, monkeypatch, *, scalar=True, nested=False, base_checkout=Tru
         inventory[computed] = (checkout,)
         exists[checkout] = usable[checkout] = True
         branches.add(computed)
+        if nested:
+            parent_branch = branch_name("work/epic-parent", "Epic")
+            parent_checkout = str((layout.worktrees_dir / prefix.strip("/") / parent_branch).resolve())
+            inventory[parent_branch] = (parent_checkout,)
+            exists[parent_checkout] = usable[parent_checkout] = True
+            branches.add(parent_branch)
         if base_checkout:
             inventory["main"] = (prefix,)
             exists[prefix] = True
@@ -86,12 +89,12 @@ def setup(tmp_path, monkeypatch, *, scalar=True, nested=False, base_checkout=Tru
     return layout, load_items(load_bundle(layout.bundle_dir)), path
 
 
-def _next_and_orchestrate(tmp_path, monkeypatch, scalar):
+def _next_and_orchestrate(tmp_path, monkeypatch):
     from gw_orchestrate import commands
     from gw_pipeline import finish
     from gw_work.commands import run_next
 
-    layout, _items, path = setup(tmp_path, monkeypatch, scalar=scalar)
+    layout, _items, path = setup(tmp_path, monkeypatch)
     monkeypatch.setattr(commands, "observe_repository", finish.observe_repository)
     monkeypatch.setattr(commands, "repository_identity", lambda p: str(p))
     # Relay dispatch requires an explicit tail, as in initialized workspaces.
@@ -103,19 +106,17 @@ def _next_and_orchestrate(tmp_path, monkeypatch, scalar):
     return layout, run_next(layout, path), commands.run_orchestrate(layout, path)
 
 
-@pytest.mark.parametrize("scalar", [True, False])
-def test_next_and_orchestrate_have_identical_finish_targets(tmp_path, monkeypatch, scalar):
-    _, attended, automated = _next_and_orchestrate(tmp_path, monkeypatch, scalar)
+def test_next_and_orchestrate_have_identical_finish_targets(tmp_path, monkeypatch):
+    _, attended, automated = _next_and_orchestrate(tmp_path, monkeypatch)
     assert len(automated.dispatches) == 1, automated.blocked
     dispatch = automated.dispatches[0]
     assert automated.finish_targets[dispatch.key] == attended.finish_targets
 
 
-@pytest.mark.parametrize("scalar", [True, False])
-def test_next_and_orchestrate_payloads_have_identical_finish_targets(tmp_path, monkeypatch, scalar):
+def test_next_and_orchestrate_payloads_have_identical_finish_targets(tmp_path, monkeypatch):
     from gw_wire.work import next_payload, orchestrate_payload
 
-    layout, attended, automated = _next_and_orchestrate(tmp_path, monkeypatch, scalar)
+    layout, attended, automated = _next_and_orchestrate(tmp_path, monkeypatch)
     assert (
         orchestrate_payload(automated)["dispatches"][0]["finish_targets"]
         == next_payload(attended, bundle_root=layout.bundle_dir)["finish_targets"]
@@ -164,7 +165,7 @@ def test_unstamped_leaf_finishes_verified_declared_checkout(tmp_path, monkeypatc
     from gw_pipeline import finish
     from gw_work.commands import run_next
 
-    layout, _items, path = setup(tmp_path, monkeypatch, scalar=False, ui_child=False)
+    layout, _items, path = setup(tmp_path, monkeypatch, ui_child=False)
     page = layout.bundle_dir / f"{path}.md"
     page.write_text(
         f"---\ntype: {leaf_type}\nrepo: core\nphase: finish\nwork_status: in-progress\naffects: [packages]\n---\n",
@@ -195,8 +196,6 @@ def test_unstamped_leaf_finishes_verified_declared_checkout(tmp_path, monkeypatc
     automated = commands.run_orchestrate(layout, path)
     assert len(automated.dispatches) == 1, automated.blocked
     assert automated.finish_targets[automated.dispatches[0].key] == attended.finish_targets
-    legacy = load_items(load_bundle(layout.bundle_dir))[0].legacy_placement
-    assert legacy is None or not legacy.branch
 
 
 @pytest.mark.parametrize("leaf_type", ["Feature", "Bug"])
@@ -218,14 +217,17 @@ def test_unstamped_descendant_finishes_from_enclosing_anchor(tmp_path, monkeypat
     assert target.repo.name == "core"
     assert target.worktree == str(layout.worktrees_dir / "core" / target.source_branch)
     assert target.source_branch == branch_name(path, leaf_type)
-    assert target.target_branch == "epic/parent"
-    assert target.target_worktree == "/core/parent"
+    parent_branch = branch_name("work/epic-parent", "Epic")
+    assert target.target_branch == parent_branch
+    assert target.target_worktree == str((layout.worktrees_dir / "core" / parent_branch).resolve())
     automated = commands.run_orchestrate(layout, path)
     assert len(automated.dispatches) == 1, automated.blocked
     assert automated.finish_targets[automated.dispatches[0].key] == attended.finish_targets
 
 
-@pytest.mark.parametrize("same_worktree", [True, False])
+# The `same_worktree=True` arm reserved the owner's stored ui stamp, which no longer exists: a live finish
+# reserves only worktrees placement computes, so only the shared-`affects` overlap holds the ready item back.
+@pytest.mark.parametrize("same_worktree", [False])
 def test_live_foreign_source_stays_reserved_after_anchor_revalidation_fails(tmp_path, monkeypatch, same_worktree):
     from gw_kernel.workspace.dispatch_config import load_dispatch_config
     from gw_orchestrate.commands import plan, session_name
@@ -237,7 +239,6 @@ def test_live_foreign_source_stays_reserved_after_anchor_revalidation_fails(tmp_
     ready_path = f"{root_path}/children/feature-ready"
     live_item = replace(
         root,
-        legacy_placement=LegacyPlacement(None, None, {"ui": Stamp("/ui/epic", "epic/a")}),
         path=live_path,
         type="Feature",
         parent_path=root_path,

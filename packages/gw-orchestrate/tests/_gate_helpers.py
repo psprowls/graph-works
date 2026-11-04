@@ -130,7 +130,7 @@ def gate_ready(layout, declared: Path, item: str, *, tree_of: Path | None = None
     write_receipt(layout.bundle_dir, item, worktree=root, tree=tree)
 
 
-def place_item(layout, declared: Path, item: str, *, commit: bool = True) -> Path:
+def place_item(layout, declared: Path, item: str, *, commit: bool = True, declare: bool = True) -> Path:
     """Declare *declared* as `code`, then create the item's computed worktree on its computed branch
     (forked from the parent branch). With *commit*, the item leaves one commit under `packages/a`."""
     import subprocess
@@ -139,7 +139,8 @@ def place_item(layout, declared: Path, item: str, *, commit: bool = True) -> Pat
     from okf_io import load_bundle
     from work_tracker_okf.items import IGNORE, load_items
 
-    declare_code(layout, declared)
+    if declare:
+        declare_code(layout, declared)
     items = {i.path: i for i in load_items(load_bundle(layout.bundle_dir, ignore=IGNORE))}
     placement = item_placement(layout, items[item], items, repo_name="code")
     assert placement is not None
@@ -151,7 +152,7 @@ def place_item(layout, declared: Path, item: str, *, commit: bool = True) -> Pat
         ).returncode
         != 0
     ):
-        place_item(layout, declared, placement.owner_path, commit=False)
+        place_item(layout, declared, placement.owner_path, commit=False, declare=declare)
     placement.worktree.parent.mkdir(parents=True, exist_ok=True)
     subprocess.run(
         ["git", "worktree", "add", "-b", placement.branch, str(placement.worktree), placement.parent_branch],
@@ -186,12 +187,13 @@ def finish_unrecorded(record: Path, *, exit: int) -> None:
 
 
 def add_item(env, path: str = "work/feature-b", *, status: str = "in-progress") -> str:
-    """A second execute-phase item on the same worktree as *env*'s item."""
+    """A second execute-phase item, on its own computed worktree at the same tree as *env*'s item."""
     page = (
         f"---\ntype: Feature\ntitle: B\nwork_status: {status}\nphase: execute\nowner: someone\nrepo: code\n"
-        f"worktree: {env.repo}\nbranch: main\naffects:\n  - packages/a\n---\n\nBody.\n"
+        "affects:\n  - packages/a\n---\n\nBody.\n"
     )
     (env.layout.bundle_dir / f"{path}.md").write_text(page, encoding="utf-8", newline="\n")
+    place_item(env.layout, env.main, path, commit=False, declare=False)
     return path
 
 

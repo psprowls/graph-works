@@ -16,6 +16,7 @@ from gw_kernel import apply_init, plan_init
 from gw_kernel.workspace.errors import WorkspaceError
 from gw_orchestrate.gate import GateCheckResult, GateRunResult, GateWaitResult, PlannedUnit
 from gw_orchestrate.gate_receipts import UnitEvidence
+from gw_pipeline.placement import branch_name
 from typer.testing import CliRunner
 
 runner = CliRunner()
@@ -55,10 +56,14 @@ def env(tmp_path: Path) -> Env:
     (layout.bundle_dir / "work").mkdir(parents=True, exist_ok=True)
     page = (
         "---\ntype: Feature\ntitle: A\nwork_status: in-progress\nphase: execute\nowner: someone\nrepo: code\n"
-        f"worktree: {repo}\nbranch: main\naffects:\n  - packages/a\n---\n\nBody.\n"
+        "affects:\n  - packages/a\n---\n\nBody.\n"
     )
     (layout.bundle_dir / f"{ITEM}.md").write_text(page, encoding="utf-8", newline="\n")
-    return Env(root, repo, ITEM)
+    branch = branch_name(ITEM, "Feature")  # the item's computed branch and checkout
+    checkout = layout.worktrees_dir / "code" / branch
+    checkout.parent.mkdir(parents=True)
+    _git(repo, "worktree", "add", "-q", "-b", branch, str(checkout))
+    return Env(root, checkout, ITEM)
 
 
 def invoke(args: list[str]):

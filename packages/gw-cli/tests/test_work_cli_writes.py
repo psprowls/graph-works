@@ -796,25 +796,10 @@ def _abs(*parts: str) -> str:
     return str(Path(Path.cwd().anchor, *parts))
 
 
-def test_no_infer_worktree_is_accepted_and_warns(workspace: Path) -> None:
-    path = file_item(workspace, "Opt out")
-    result = runner.invoke(
-        app, ["work", "advance", path, "--no-infer-worktree", "--workspace", str(workspace), "--json"]
-    )
-    assert result.exit_code == 0, result.output
-    assert "--no-infer-worktree is retired and ignored" in result.output
-
-
 def test_advance_rejects_worktree_flag(workspace: Path) -> None:
     path = file_item(workspace, "Flag gone")
     result = runner.invoke(app, ["work", "advance", path, "--worktree", "/x", "--workspace", str(workspace)])
     assert result.exit_code == 2
-
-
-def test_no_infer_worktree_hidden_from_help() -> None:
-    result = runner.invoke(app, ["work", "advance", "--help"])
-    assert "--no-infer-worktree" not in result.output
-    assert "--worktree" not in result.output
 
 
 def test_a_release_only_field_on_another_kind_is_refused(workspace: Path) -> None:

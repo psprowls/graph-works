@@ -18,7 +18,7 @@ from okf_ext.readindex.model import (
     Reconcile,
 )
 from okf_ext.readindex.project import member_row
-from okf_ext.readindex.store import ReadIndex, open_index
+from okf_ext.readindex.store import ReadIndex, identity_key, open_index
 from okf_ext.readindex.sync import reconcile, verify
 from okf_ext.readindex.view import IndexView, read
 
@@ -34,6 +34,7 @@ __all__ = [
     "Reconcile",
     "StoredContent",
     "content_of",
+    "identity_key",
     "member_row",
     "open_index",
     "read",

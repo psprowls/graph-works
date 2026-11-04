@@ -60,7 +60,8 @@ def test_session_format_bump_rebuilds_and_logs(workspace, monkeypatch, caplog) -
     caplog.clear()
     with open_read_session(workspace) as session:
         assert session.backend == "index"
-    assert "rebuilt (fingerprint)" in caplog.text
+    assert "rebuilt (created)" in caplog.text
+    assert len(list(location.database_path(workspace).parent.glob("bundle-*.db"))) == 2
 
 
 def test_a_session_sees_one_generation(workspace) -> None:
@@ -78,7 +79,8 @@ def test_database_follows_a_relocated_cache_dir(workspace, tmp_path: Path) -> No
     moved = layout_for(workspace.root, cache_dir=str(tmp_path / "elsewhere"))
     with open_read_session(moved):
         pass
-    assert (tmp_path / "elsewhere/read-index/bundle.db").exists()
+    assert location.database_path(moved).parent == tmp_path / "elsewhere/read-index"
+    assert location.database_path(moved).exists()
     assert not location.database_path(workspace).exists()
 
 
@@ -205,3 +207,47 @@ def test_reconcile_false_populates_rebuilt_index(workspace, monkeypatch, reset) 
         row = session.member("work/epic-a.md")
         assert row is not None and row.title == "A"
         assert "work/epic-a" in session.work_snapshot().by_path
+
+
+def _epoch(db) -> str:
+    import sqlite3
+
+    with sqlite3.connect(db) as conn:
+        return dict(conn.execute("SELECT key, value FROM meta"))["epoch"]
+
+
+def test_builds_with_different_identities_do_not_reset_each_other(workspace, monkeypatch) -> None:
+    from okf_ext.readindex import store
+
+    base = store.SCHEMA_VERSION
+    paths: dict[int, object] = {}
+    epochs: dict[int, str] = {}
+    for round_ in range(3):
+        for version in (base, base + 1):
+            monkeypatch.setattr(store, "SCHEMA_VERSION", version)
+            with open_read_session(workspace) as session:
+                assert session.backend == "index"
+            db = location.database_path(workspace)
+            paths[version] = db
+            if round_ == 0:
+                epochs[version] = _epoch(db)
+            else:
+                assert _epoch(db) == epochs[version]
+    assert len(set(paths.values())) == 2
+
+
+def test_sibling_identity_files_beyond_three_are_pruned(workspace, monkeypatch) -> None:
+    import os
+
+    from okf_ext.readindex import store
+
+    base = store.SCHEMA_VERSION
+    for i in range(4):
+        monkeypatch.setattr(store, "SCHEMA_VERSION", base + 10 + i)
+        with open_read_session(workspace):
+            pass
+        db = location.database_path(workspace)
+        os.utime(db, ns=(1_000_000_000 * (i + 1),) * 2)
+    remaining = sorted(db.parent.glob("bundle-*.db"))
+    assert len(remaining) == 3 and db in remaining
+    location.prune_siblings(db.parent / "bundle-unreadable.db")  # never raises

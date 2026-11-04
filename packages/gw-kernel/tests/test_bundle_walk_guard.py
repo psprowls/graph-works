@@ -73,6 +73,7 @@ ALLOWLIST = {
     ("packages/gw-kernel/src/gw_kernel/workspace/lane_facts.py", "lane_documents", "glob"): "Shallow lane metadata",
     ("packages/gw-kernel/src/gw_kernel/workspace/lane_facts.py", "has_lane_pages", "glob"): "Shallow lane metadata",
     ("packages/gw-kernel/src/gw_kernel/workspace/schema_read.py", "_read", "glob"): "Schema directory",
+    ("packages/gw-kernel/src/gw_kernel/read_session/location.py", "prune_siblings", "glob"): "Read-index cache files",
     (
         "packages/gw-pipeline/src/gw_pipeline/transactions.py",
         "_fsync_entry",

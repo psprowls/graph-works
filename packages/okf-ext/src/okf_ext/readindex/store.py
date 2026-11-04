@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import sqlite3
 from collections.abc import Sequence
@@ -16,6 +17,26 @@ from okf_ext.readindex.model import IndexBusy, IndexUnavailable, RebuildReason
 
 SCHEMA_VERSION = 2
 PROJECTION_VERSION = 2
+
+
+def expected_identity(
+    *, ignore: Sequence[str] = (), prune: Sequence[str] = (), fingerprint: str = ""
+) -> dict[str, str]:
+    """The five values a database is stamped with; the one copy `open_index` and `identity_key` share."""
+    return {
+        "schema_version": str(SCHEMA_VERSION),
+        "projection_version": str(PROJECTION_VERSION),
+        "okf_io_version": okf_io.__version__,
+        "fingerprint": fingerprint,
+        "patterns": json.dumps({"ignore": list(ignore), "prune": list(prune)}),
+    }
+
+
+def identity_key(*, ignore: Sequence[str] = (), prune: Sequence[str] = (), fingerprint: str = "") -> str:
+    """A short hash of this build's identity, so builds with different identities own different files."""
+    payload = json.dumps(expected_identity(ignore=ignore, prune=prune, fingerprint=fingerprint), sort_keys=True)
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:12]
+
 
 _SCHEMA = """
 CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL) WITHOUT ROWID;
@@ -184,13 +205,7 @@ def open_index(
 ) -> ReadIndex:
     """Open, create, or reset a disposable index, preserving it on contention."""
     ignore_tuple, prune_tuple = tuple(ignore), tuple(prune)
-    expected = {
-        "schema_version": str(SCHEMA_VERSION),
-        "projection_version": str(PROJECTION_VERSION),
-        "okf_io_version": okf_io.__version__,
-        "fingerprint": fingerprint,
-        "patterns": json.dumps({"ignore": list(ignore_tuple), "prune": list(prune_tuple)}),
-    }
+    expected = expected_identity(ignore=ignore_tuple, prune=prune_tuple, fingerprint=fingerprint)
     connection: sqlite3.Connection | None = None
     corrupt = False
     try:

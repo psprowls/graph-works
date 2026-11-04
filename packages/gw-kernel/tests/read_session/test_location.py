@@ -18,7 +18,8 @@ def _layout(tmp_path: Path) -> WorkspaceLayout:
 
 def test_database_lives_under_the_cache_dir(tmp_path: Path) -> None:
     layout = _layout(tmp_path)
-    assert location.database_path(layout) == layout.cache_dir / "read-index" / "bundle.db"
+    path = location.database_path(layout)
+    assert path.parent == layout.cache_dir / "read-index" and path.name.startswith("bundle-") and path.suffix == ".db"
 
 
 def test_fingerprint_is_sha256_of_the_canonical_payload(tmp_path: Path) -> None:
@@ -43,7 +44,7 @@ def test_sidecar_paths(tmp_path: Path) -> None:
 
 def test_database_uses_relocated_cache_without_creating_it(tmp_path: Path) -> None:
     layout = layout_for(tmp_path / "workspace", cache_dir=str(tmp_path / "cache"))
-    assert location.database_path(layout) == tmp_path / "cache" / "read-index" / "bundle.db"
+    assert location.database_path(layout).parent == tmp_path / "cache" / "read-index"
     assert not layout.cache_dir.exists()
 
 

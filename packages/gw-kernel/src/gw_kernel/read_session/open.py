@@ -60,6 +60,7 @@ def _open(layout: WorkspaceLayout, *, reconcile: bool, stack: ExitStack) -> Read
             )
         )
         if index.rebuilt_reason is not None:
+            location.prune_siblings(db_path)
             location.logger.warning("read index rebuilt (%s): %s", index.rebuilt_reason, db_path)
         documents: dict[tuple[str, str], Document] = {}
         inventory = None

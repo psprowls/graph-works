@@ -339,3 +339,14 @@ def test_v1_database_rebuilds_with_refs(tmp_path: Path, monkeypatch: pytest.Monk
         assert index.rebuilt_reason == "schema"
         tables = {r[0] for r in index.connection.execute("SELECT name FROM sqlite_master WHERE type='table'")}
         assert "refs" in tables
+
+
+def test_identity_key_differs_per_identity_and_is_stable(monkeypatch) -> None:
+    from okf_ext.readindex import identity_key, store
+
+    base = identity_key(ignore=("a",), prune=("b",), fingerprint="f")
+    assert base == identity_key(ignore=("a",), prune=("b",), fingerprint="f")
+    assert len(base) == 12
+    assert base != identity_key(ignore=("a",), prune=("c",), fingerprint="f")
+    monkeypatch.setattr(store, "SCHEMA_VERSION", store.SCHEMA_VERSION + 1)
+    assert base != identity_key(ignore=("a",), prune=("b",), fingerprint="f")

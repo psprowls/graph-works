@@ -7,6 +7,7 @@ from typing import Any
 from gw_wiki.util.commands import LineEndingsReport, LogAppendResult, LogRead, TokensUpdate
 from gw_wiki.util.platform import PlatformReport
 from gw_wiki.util.read_index import ReadIndexReport
+from gw_wiki.util.surface_page import SurfacePagePlan
 
 
 def log_payload(result: LogAppendResult) -> dict[str, object]:
@@ -109,4 +110,17 @@ def read_index_payload(report: ReadIndexReport) -> dict[str, Any]:
         "elapsed_s": report.elapsed_s,
         "parsed": report.parsed,
         "error": report.error,
+    }
+
+
+def surface_page_payload(plan: SurfacePagePlan, *, applied: bool) -> dict[str, Any]:
+    """`gw util surface-page --json`: the plan's status and what (if anything) was written."""
+    return {
+        "path": str(plan.path),
+        "status": plan.status,
+        "refusal": plan.refusal,
+        "detail": plan.detail,
+        "added": plan.added,
+        "removed": plan.removed,
+        "applied": applied,
     }

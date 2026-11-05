@@ -14,6 +14,7 @@ from gw_cli.util_cli.line_endings import line_endings
 from gw_cli.util_cli.log import log
 from gw_cli.util_cli.platform import platform
 from gw_cli.util_cli.read_index import read_index
+from gw_cli.util_cli.surface_page import surface_page
 from gw_cli.util_cli.tokens import tokens
 from gw_cli.util_cli.trace import trace
 from gw_cli.work_cli.main import work_app
@@ -28,6 +29,7 @@ util_app.command(name="line-endings")(line_endings)
 util_app.command(name="log")(log)
 util_app.command(name="platform")(platform)
 util_app.command(name="read-index")(read_index)
+util_app.command(name="surface-page")(surface_page)
 util_app.command(name="tokens")(tokens)
 util_app.command(name="trace")(trace)
 

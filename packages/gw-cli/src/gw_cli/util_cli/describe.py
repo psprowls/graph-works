@@ -25,20 +25,31 @@ SCHEMA_VERSION = 1
 CLI_NAME = "gw-cli"
 
 
-def _walk(command: TyperCommand, path: tuple[str, ...]) -> list[dict[str, Any]]:
-    """Every node at or under *command*. The root (empty path) describes no verb, so it
-    is walked into but never emitted."""
+def walk_registered(command: TyperCommand, path: tuple[str, ...] = ()) -> list[dict[str, Any]]:
+    """Every node at or under *command*, depth-first in registration order.
+
+    Each entry's `commands` keeps its subcommand names as registered. The root (empty path)
+    describes no verb, so it is walked into but never emitted.
+    """
     entries: list[dict[str, Any]] = []
     if path:
         entry = command_to_help_entry(command, name=" ".join(("gw", *path)))
         entry["path"] = list(path)
-        entry["commands"] = sorted(str(sub["name"]) for sub in entry["commands"])
+        entry["commands"] = [str(sub["name"]) for sub in entry["commands"]]
         entries.append(entry)
     if isinstance(command, typer.core.TyperGroup):
         for name, sub_command in command.commands.items():
             if sub_command.hidden:
                 continue
-            entries.extend(_walk(cast(TyperCommand, sub_command), (*path, name)))
+            entries.extend(walk_registered(cast(TyperCommand, sub_command), (*path, name)))
+    return entries
+
+
+def _walk(command: TyperCommand, path: tuple[str, ...]) -> list[dict[str, Any]]:
+    """`walk_registered` with each entry's subcommand names sorted, for the byte-stable freeze."""
+    entries = walk_registered(command, path)
+    for entry in entries:
+        entry["commands"] = sorted(entry["commands"])
     return entries
 
 

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from datetime import date
 from pathlib import Path
+from types import SimpleNamespace as ns
 
 from gw_wiki.util.commands import (
     LineEndingFinding,
@@ -14,7 +15,7 @@ from gw_wiki.util.commands import (
     TokensUpdate,
 )
 from gw_wiki.util.platform import Capability, PlatformReport, ProbeResult
-from gw_wire.util import line_endings_payload, log_payload, platform_payload, tokens_payload
+from gw_wire.util import line_endings_payload, log_payload, platform_payload, surface_page_payload, tokens_payload
 
 
 def test_log_payload_isoformats_the_day() -> None:
@@ -108,3 +109,16 @@ def test_read_index_payload_pins_every_field_and_sorted_counts() -> None:
     }
     assert list(payload["tables"]) == ["members", "tags"]
     assert list(payload["kinds"]) == ["a", "z"]
+
+
+def test_surface_page_payload_names_the_plan_and_whether_it_was_applied() -> None:
+    plan = ns(path=Path("/b/p.md"), status="stale", refusal=None, detail="d", added=3, removed=1)
+    assert surface_page_payload(plan, applied=True) == {
+        "path": "/b/p.md",
+        "status": "stale",
+        "refusal": None,
+        "detail": "d",
+        "added": 3,
+        "removed": 1,
+        "applied": True,
+    }

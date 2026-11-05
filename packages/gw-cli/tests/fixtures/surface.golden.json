@@ -1549,6 +1549,7 @@
         "log",
         "platform",
         "read-index",
+        "surface-page",
         "tokens",
         "trace"
       ],
@@ -1810,6 +1811,55 @@
       "path": [
         "util",
         "read-index"
+      ]
+    },
+    {
+      "name": "gw util surface-page",
+      "help": "Report (or with --apply, fix) drift in the generated gw CLI surface reference page.",
+      "short_help": "Report (or with --apply, fix) drift in the generated gw CLI surface reference page.",
+      "usage": [
+        "[OPTIONS]"
+      ],
+      "arguments": [],
+      "options": [
+        {
+          "name": "apply",
+          "opts": [
+            "--apply"
+          ],
+          "secondary_opts": [],
+          "help": "Write the page when it is stale; without it, only report.",
+          "required": false,
+          "default": false,
+          "is_flag": true
+        },
+        {
+          "name": "workspace",
+          "opts": [
+            "--workspace"
+          ],
+          "secondary_opts": [],
+          "help": "Workspace root; defaults to discovery.",
+          "required": false,
+          "default": "",
+          "is_flag": false
+        },
+        {
+          "name": "json_output",
+          "opts": [
+            "--json"
+          ],
+          "secondary_opts": [],
+          "help": "Emit the plan as JSON.",
+          "required": false,
+          "default": false,
+          "is_flag": true
+        }
+      ],
+      "commands": [],
+      "path": [
+        "util",
+        "surface-page"
       ]
     },
     {

@@ -33,6 +33,10 @@ uv run --package gw-cli pytest -k "surface or describe_surface"
 `tests/fixtures/surface.golden.json` — regenerate that fixture deliberately, alongside the command
 change that moved it, never as an incidental side effect.
 
+The reference page `docs/reference/gw-cli-surface.md` is generated from the same tree. After a
+command change merges, run `gw util surface-page --apply` and commit the page by pathspec;
+`gw util surface-page` without `--apply` is the staleness check (exit 1 when stale).
+
 ## Architecture
 
 ### Command surface
@@ -81,7 +85,7 @@ loads everything (the walkers need that). The entries are:
   automatically; `sync` is the manual refresh after a hand edit.
 - `agent_config_cli` — `gw agent-config show`, a read-only report over core's agent configuration
   model. It injects home, environment, and platform; JSON is projected by `gw-wire`.
-- `util_cli` — diagnostics: `gw util describe-surface [--json]`, `platform`, `line-endings`, `log`, `read-index`, `tokens`, `trace`.
+- `util_cli` — diagnostics: `gw util describe-surface [--json]`, `surface-page [--apply]`, `platform`, `line-endings`, `log`, `read-index`, `tokens`, `trace`.
 
 Every workspace-backed sub-app command takes `--workspace PATH` and calls
 `workspace_resolution.resolve_workspace()` first (D-002): explicit path -> `GRAPH_WORKS_DIR` env -> cwd git walk-up, all via

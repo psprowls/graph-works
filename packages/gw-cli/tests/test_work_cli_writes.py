@@ -1023,13 +1023,13 @@ def test_reparent_requires_exactly_one_of_parent_and_top_level(workspace: Path, 
 def test_reparent_top_level_applies_in_one_commit_with_its_own_subject(workspace: Path) -> None:
     parent = file_item(workspace, "Parent", kind="Epic")
     source = file_item(workspace, "Child")
-    moved = runner.invoke(app, ["work", "reparent", source, "--parent", parent, "--workspace", str(workspace), "--json"])
+    moved = runner.invoke(
+        app, ["work", "reparent", source, "--parent", parent, "--workspace", str(workspace), "--json"]
+    )
     assert moved.exit_code == 0, moved.output
     nested = json.loads(moved.stdout)["path_mapping"][source]
     before = _init_workspace_git(workspace)
-    result = runner.invoke(
-        app, ["work", "reparent", nested, "--top-level", "--workspace", str(workspace), "--json"]
-    )
+    result = runner.invoke(app, ["work", "reparent", nested, "--top-level", "--workspace", str(workspace), "--json"])
     assert result.exit_code == 0, result.output
     payload = json.loads(result.stdout)
     assert payload["path_mapping"] == {nested: source}

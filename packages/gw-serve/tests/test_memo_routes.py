@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import subprocess
+
 import pytest
 from conftest import PORT, TOKEN, write_item
 from gw_kernel.read_session import ReadSession, SnapshotSession, materialize
@@ -67,3 +69,19 @@ def test_display_read_rebuilds_after_a_generation_bump(context: ServeContext, bu
     after = client.get(url)
     assert len(builds) == 2
     assert after.headers["X-GW-Generation"] == "2"
+
+
+def test_warm_work_list_starts_no_subprocess(
+    context: ServeContext, builds: list[int], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    client = _client(context)
+    assert client.get("/v1/work/list").status_code == 200
+    spawned: list[object] = []
+
+    def forbidden(*args: object, **kwargs: object) -> None:
+        spawned.append(args)
+        raise AssertionError("a warm /v1/work/list must not start a subprocess")
+
+    monkeypatch.setattr(subprocess.Popen, "__init__", forbidden)
+    assert client.get("/v1/work/list").status_code == 200
+    assert spawned == []

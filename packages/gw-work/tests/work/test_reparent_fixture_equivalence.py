@@ -31,6 +31,7 @@ CASES = [
     (name, {})
     for name in [
         "maps_every_descendant_and_registered_reference",
+        "top_level_moves_a_child_subtree_and_rebases_references",
         "preserves_opaque_bytes_and_warns_only_for_old_paths",
         "refuses_descendant_parent_nested_release_and_leaf_parent",
         "refuses_a_nested_release_destination_parent",

@@ -9,6 +9,7 @@ from collections.abc import Callable, Collection, Iterable, Sequence
 
 from okf_io import Bundle
 
+from work_tracker_okf.hierarchy import declared_repo
 from work_tracker_okf.items import WorkItem, item_index
 from work_tracker_okf.mutation import MutationRefusal, WorkMutationPlan, _plan_path_mutation, _subtree_items
 from work_tracker_okf.paths import child_lane, item_page, parse_item_path
@@ -54,9 +55,9 @@ def plan_reparent(
     bundle: Bundle,
     items: Sequence[WorkItem],
     source_path: str,
-    parent_path: str,
+    parent_path: str | None,
 ) -> WorkMutationPlan:
-    """Move *source_path*'s complete owned subtree below *parent_path*."""
+    """Move *source_path*'s complete owned subtree below *parent_path*, or to the top level when it is None."""
     return plan_reparent_many(bundle, items, (source_path,), parent_path)
 
 
@@ -64,7 +65,7 @@ def _source_refusals_and_mapping(
     items: Sequence[WorkItem],
     source: WorkItem | None,
     source_path: str,
-    parent_path: str,
+    parent_path: str | None,
 ) -> tuple[list[MutationRefusal], dict[str, str]]:
     refusals: list[MutationRefusal] = []
     if source is None:
@@ -74,27 +75,51 @@ def _source_refusals_and_mapping(
     subtree = _subtree_items(items, (source_path,))
     if source.archived:
         refusals.append(MutationRefusal(source.path, "archived-source", "an archived item cannot be reparented"))
-    if source_path == parent_path or parent_path.startswith(f"{source_path}/children/"):
+    if parent_path is not None and (source_path == parent_path or parent_path.startswith(f"{source_path}/children/")):
         refusals.append(
             MutationRefusal(parent_path, "descendant-destination", "a subtree cannot be placed beneath itself")
         )
+    if parent_path is None and source.parent_path is None:
+        refusals.append(MutationRefusal(source_path, "already-top-level", "the item is already a top-level item"))
     for item in subtree:
-        if item.type == "Release":
+        if item.type == "Release" and not (parent_path is None and item.path == source_path):
             refusals.append(MutationRefusal(item.path, "nested-release", "Release items remain root-only"))
+    if parent_path is None:
+        refusals.extend(_repo_lost_refusals(items, subtree, source_path))
 
-    destination = f"{child_lane(parent_path)}/{source.basename}"
+    destination = f"work/{source.basename}" if parent_path is None else f"{child_lane(parent_path)}/{source.basename}"
     return refusals, _subtree_mapping(items, source_path, destination)
+
+
+def _repo_lost_refusals(
+    items: Sequence[WorkItem], subtree: Sequence[WorkItem], source_path: str
+) -> list[MutationRefusal]:
+    """Refuse when promoting would drop a `repo:` a subtree item inherits from outside the subtree."""
+    by_path = item_index(list(items))
+    inside = {item.path for item in subtree}
+    refusals: list[MutationRefusal] = []
+    for item in subtree:
+        repo, setter = declared_repo(item, by_path)
+        if repo is not None and setter is not None and setter not in inside:
+            refusals.append(
+                MutationRefusal(
+                    item.path,
+                    "repo-lost",
+                    f"{item.path} inherits repo {repo!r} from {setter}; add repo: {repo} to {source_path} and retry",
+                )
+            )
+    return refusals
 
 
 def plan_reparent_many(
     bundle: Bundle,
     items: Sequence[WorkItem],
     source_paths: Sequence[str],
-    parent_path: str,
+    parent_path: str | None,
 ) -> WorkMutationPlan:
-    """Plan one all-or-nothing reparenting of complete, disjoint subtrees."""
+    """Plan one all-or-nothing reparenting of complete, disjoint subtrees; None targets the top level."""
     by_path = item_index(list(items))
-    refusals = _parent_refusals(by_path.get(parent_path), parent_path)
+    refusals = [] if parent_path is None else _parent_refusals(by_path.get(parent_path), parent_path)
     if not source_paths:
         refusals.append(MutationRefusal("", "empty-batch", "at least one source path is required"))
     seen: set[str] = set()
@@ -132,7 +157,7 @@ def reparent_load_set(
     inventory: Iterable[str],
     touched: Collection[str],
     source_paths: Sequence[str],
-    parent_path: str,
+    parent_path: str | None,
 ) -> frozenset[str]:
     """Close raw inventory names over the item context needed by reparenting.
 
@@ -173,9 +198,12 @@ def reparent_load_set(
                 add_context(owner, siblings=True)
     for source in source_paths:
         add_context(source, siblings=True)
-    add_context(parent_path, siblings=False)
-    if parse_item_path(parent_path) is not None:
-        lanes.add(child_lane(parent_path))
+    if parent_path is None:
+        lanes.add("work")
+    else:
+        add_context(parent_path, siblings=False)
+        if parse_item_path(parent_path) is not None:
+            lanes.add(child_lane(parent_path))
     for lane in lanes:
         selected.update(lane_members.get(lane, ()))
         index = f"{lane}/index.md"

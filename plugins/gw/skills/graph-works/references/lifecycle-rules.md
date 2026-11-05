@@ -77,7 +77,7 @@ Use canonical paths throughout:
 ```bash
 gw work next <work-path> --json
 gw work advance <work-path>
-gw work reparent <work-path> --parent <new-parent-path>
+gw work reparent <work-path> --parent <new-parent-path>   # or --top-level to make a child a top-level item
 gw work archive --dry-run <work-path>
 gw work regen-index --json
 gw work lint --json

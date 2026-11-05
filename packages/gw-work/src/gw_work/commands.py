@@ -1464,11 +1464,16 @@ def _complete_dependency_context(
     return bundle, (*warnings, "dependency context reaches unloaded members; using a full load from the inventory")
 
 
+def _reparent_lanes(source_paths: Sequence[str], parent_path: str | None) -> set[str]:
+    paths = source_paths if parent_path is None else (*source_paths, parent_path)
+    return {location.lane for path in paths if (location := parse_item_path(path)) is not None}
+
+
 def _plan_reparent_scan(
-    layout: WorkspaceLayout, source_paths: Sequence[str], parent_path: str, warnings: tuple[str, ...]
+    layout: WorkspaceLayout, source_paths: Sequence[str], parent_path: str | None, warnings: tuple[str, ...]
 ) -> tuple[Bundle, WorkMutationPlan]:
     """The touched-scan path: scan names, close context, load once and plan."""
-    lanes = {location.lane for path in (*source_paths, parent_path) if (location := parse_item_path(path)) is not None}
+    lanes = _reparent_lanes(source_paths, parent_path)
     scan = scan_touched(
         layout.bundle_dir,
         source_paths,
@@ -1488,10 +1493,10 @@ def _plan_reparent_scan(
 
 
 def _plan_reparent_partial(
-    layout: WorkspaceLayout, source_paths: Sequence[str], parent_path: str
+    layout: WorkspaceLayout, source_paths: Sequence[str], parent_path: str | None
 ) -> tuple[Bundle, WorkMutationPlan]:
     """Plan from the reconciled read index when usable, else from a touched-set scan."""
-    lanes = {location.lane for path in (*source_paths, parent_path) if (location := parse_item_path(path)) is not None}
+    lanes = _reparent_lanes(source_paths, parent_path)
     with open_read_session(layout) as session:
         selection = move_selection(session, source_paths)
         if isinstance(selection, str):
@@ -1527,10 +1532,11 @@ def _plan_reparent_partial(
 def run_reparent(
     layout: WorkspaceLayout,
     source_paths: str | Sequence[str],
-    parent_path: str,
+    parent_path: str | None,
     *,
     dry_run: bool = True,
 ) -> PathMutationResult:
+    """Plan, and unless *dry_run*, apply a reparent; a *parent_path* of None moves to the top level."""
     sources = (source_paths,) if isinstance(source_paths, str) else tuple(source_paths)
     bundle, plan = _plan_reparent_partial(layout, sources, parent_path)
     if dry_run or not plan.ok:
@@ -1551,8 +1557,10 @@ def run_reparent(
     )
 
 
-def _reparent_subject(sources: Sequence[str], parent_path: str) -> str:
+def _reparent_subject(sources: Sequence[str], parent_path: str | None) -> str:
     names = ", ".join(item_stem(source) for source in sources)
+    if parent_path is None:
+        return f"workspace: reparent {names} to top level"
     return f"workspace: reparent {names} under {item_stem(parent_path)}"
 
 

@@ -104,6 +104,20 @@ def test_unchanged_lane_index_retains_digest_without_naming_itself_as_source(tmp
     assert all(write.member != "work/index.md" for write in plan.writes)
 
 
+def test_reparent_top_level_moves_a_child_subtree_and_rebases_references(tmp_path: Path) -> None:
+    _release, _epic, feature = _tree(tmp_path)
+    referrer = "work/bug-referrer"
+    write_item(tmp_path, referrer, f"type: Bug\nwork_status: open\nsuperseded_by: {feature}\n")
+    bundle = load_bundle(tmp_path)
+
+    plan = plan_reparent(bundle, load_items(bundle), feature, None)
+
+    assert plan.ok, plan.refusals
+    assert plan.path_mapping == {feature: "work/feature-import"}
+    rewritten = next(write.after for write in plan.writes if write.member == f"{referrer}.md").decode()
+    assert "superseded_by: work/feature-import" in rewritten
+
+
 def test_reparent_preserves_opaque_bytes_and_warns_only_for_old_paths(tmp_path: Path) -> None:
     release, epic, _feature = _tree(tmp_path)
     epic_page = tmp_path / f"{epic}.md"

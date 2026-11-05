@@ -5713,8 +5713,8 @@
     },
     {
       "name": "gw work reparent",
-      "help": "Move a complete work subtree beneath PARENT_PATH.",
-      "short_help": "Move a complete work subtree beneath PARENT_PATH.",
+      "help": "Move a complete work subtree beneath --parent, or to the top level with --top-level.",
+      "short_help": "Move a complete work subtree beneath --parent, or to the top level with --top-level.",
       "usage": [
         "[OPTIONS]",
         "{path}..."
@@ -5734,9 +5734,20 @@
           ],
           "secondary_opts": [],
           "help": "Canonical destination parent path.",
-          "required": true,
-          "default": null,
+          "required": false,
+          "default": "",
           "is_flag": false
+        },
+        {
+          "name": "top_level",
+          "opts": [
+            "--top-level"
+          ],
+          "secondary_opts": [],
+          "help": "Move to the top level of work/ instead.",
+          "required": false,
+          "default": false,
+          "is_flag": true
         },
         {
           "name": "dry_run",

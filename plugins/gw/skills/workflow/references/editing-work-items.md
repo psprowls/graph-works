@@ -70,7 +70,7 @@ Tell the user the consequence in your report — they asked for an edit, not nec
 |---|---|---|
 | `type` | The type fixes the basename's prefix (`feature-…`, `bug-…`), so it is part of the canonical path | Re-file with `gw work file`, then mark the old item `superseded` with `superseded_by` pointing at the new one |
 | Basename | The basename *is* the identity | Same: re-file, then supersede |
-| Parent | Physical placement under `children/` is ownership | `gw work reparent <work-path> --parent <new-parent-path>` |
+| Parent | Physical placement under `children/` is ownership | `gw work reparent <work-path> --parent <new-parent-path>` (or `--top-level` to move a child to `work/`) |
 
 ## Body edits
 

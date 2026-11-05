@@ -184,3 +184,82 @@ def test_reserved_alias_inventory_uses_only_virtual_raw_ids(tmp_path: Path, sele
     assert _all_members(virtual) == (aliases[member],)
     assert virtual.member_id(member) == aliases[member]
     assert virtual.member_id(unicodedata.normalize("NFC", member)) == aliases[member]
+
+
+def _top_level_tree(root: Path, *, epic_extra: str = "", child_extra: str = "") -> None:
+    write_item(root, "work/e", f"type: Epic\nwork_status: open\n{epic_extra}")
+    write_item(root, "work/e/children/x", f"type: Bug\nwork_status: open\n{child_extra}")
+    write_item(root, "work/e/children/x/children/y", "type: Bug\nwork_status: open\n")
+
+
+def _plan_top(root: Path, sources: list[str]):  # noqa: ANN202 -- test helper
+    bundle = load_bundle(root)
+    return reparent.plan_reparent_many(bundle, load_items(bundle), sources, None)
+
+
+def test_top_level_moves_a_child_subtree_to_the_root(tmp_path: Path) -> None:
+    _top_level_tree(tmp_path)
+    plan = _plan_top(tmp_path, ["work/e/children/x"])
+    assert plan.ok, plan.refusals
+    assert plan.path_mapping == {
+        "work/e/children/x": "work/x",
+        "work/e/children/x/children/y": "work/x/children/y",
+    }
+
+
+def test_top_level_refuses_a_source_already_at_the_root(tmp_path: Path) -> None:
+    _top_level_tree(tmp_path)
+    plan = _plan_top(tmp_path, ["work/e"])
+    assert "already-top-level" in {r.kind for r in plan.refusals}
+    assert plan.writes == plan.moves == plan.deletes == plan.mkdirs == ()
+
+
+def test_top_level_refuses_a_taken_root_basename_and_a_shared_basename(tmp_path: Path) -> None:
+    _top_level_tree(tmp_path)
+    write_item(tmp_path, "work/x", "type: Bug\nwork_status: open\n")
+    assert not _plan_top(tmp_path, ["work/e/children/x"]).ok
+    write_item(tmp_path, "work/f", "type: Epic\nwork_status: open\n")
+    write_item(tmp_path, "work/f/children/z", "type: Bug\nwork_status: open\n")
+    write_item(tmp_path, "work/e/children/z", "type: Bug\nwork_status: open\n")
+    assert not _plan_top(tmp_path, ["work/e/children/z", "work/f/children/z"]).ok
+
+
+def test_top_level_batch_mixing_a_root_item_refuses_whole(tmp_path: Path) -> None:
+    _top_level_tree(tmp_path)
+    plan = _plan_top(tmp_path, ["work/e/children/x", "work/e"])
+    assert not plan.ok
+    assert plan.writes == plan.moves == plan.deletes == plan.mkdirs == ()
+
+
+def test_top_level_allows_a_release_source_but_refuses_a_deeper_release(tmp_path: Path) -> None:
+    write_item(tmp_path, "work/e", "type: Epic\nwork_status: open\n")
+    write_item(tmp_path, "work/e/children/rel", "type: Release\nwork_status: open\n")
+    assert _plan_top(tmp_path, ["work/e/children/rel"]).ok
+    write_item(tmp_path, "work/e/children/x", "type: Epic\nwork_status: open\n")
+    write_item(tmp_path, "work/e/children/x/children/rel", "type: Release\nwork_status: open\n")
+    plan = _plan_top(tmp_path, ["work/e/children/x"])
+    assert "nested-release" in {r.kind for r in plan.refusals}
+
+
+def test_top_level_refuses_when_an_inherited_repo_would_be_lost(tmp_path: Path) -> None:
+    _top_level_tree(tmp_path, epic_extra="repo: graph-works\n")
+    plan = _plan_top(tmp_path, ["work/e/children/x"])
+    lost = [r for r in plan.refusals if r.kind == "repo-lost"]
+    assert lost
+    assert "work/e" in lost[0].detail
+    assert "graph-works" in lost[0].detail
+
+
+def test_top_level_keeps_a_repo_set_on_the_source_or_absent_everywhere(tmp_path: Path) -> None:
+    _top_level_tree(tmp_path, epic_extra="repo: graph-works\n", child_extra="repo: graph-works\n")
+    assert _plan_top(tmp_path, ["work/e/children/x"]).ok
+    other = tmp_path / "other"
+    other.mkdir()
+    _top_level_tree(other)
+    assert _plan_top(other, ["work/e/children/x"]).ok
+
+
+def test_top_level_load_set_includes_the_root_lane() -> None:
+    inventory = ["work/e.md", "work/e/children/x.md", "work/q.md", "work/index.md"]
+    only = reparent.reparent_load_set(inventory, {"work/e/children/x.md"}, ["work/e/children/x"], None)
+    assert {"work/q.md", "work/e.md"} <= only

@@ -960,15 +960,18 @@ def reparent(
     path: list[str] = typer.Argument(  # noqa: B008 -- Typer declares CLI arguments in defaults
         ..., help="One or more canonical work paths to move."
     ),
-    parent_path: str = typer.Option(..., "--parent", help="Canonical destination parent path."),
+    parent_path: str = typer.Option("", "--parent", help="Canonical destination parent path."),
+    top_level: bool = typer.Option(False, "--top-level", help="Move to the top level of work/ instead."),
     dry_run: bool = typer.Option(False, "--dry-run", help="Print the plan instead of writing."),
     workspace: str = typer.Option("", "--workspace", help="Workspace path."),
     json_output: bool = rendering.json_option("Emit the mutation as JSON."),
 ) -> None:
-    """Move a complete work subtree beneath PARENT_PATH."""
+    """Move a complete work subtree beneath --parent, or to the top level with --top-level."""
+    if bool(parent_path) == top_level:
+        rendering.fail("exactly one of --parent and --top-level is required", reason="usage")
     layout = resolve_workspace(workspace)
     try:
-        result = work.run_reparent(layout, path, parent_path, dry_run=dry_run)
+        result = work.run_reparent(layout, path, parent_path or None, dry_run=dry_run)
     except WorkspaceError as exc:
         rendering.fail(str(exc), reason="workspace", code=exit_codes.SCHEMA_MISMATCH, cause=exc)
     except (OSError, ValueError) as exc:

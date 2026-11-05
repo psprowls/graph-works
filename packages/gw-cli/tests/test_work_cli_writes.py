@@ -1009,3 +1009,37 @@ def _with_frontmatter(workspace: Path, path: str, lines: str) -> None:
     page.write_text(
         text.replace("phase: execute", "phase: execute\n" + lines.rstrip("\n")), encoding="utf-8", newline=""
     )
+
+
+@pytest.mark.parametrize("extra", [[], ["--parent", "work/epic-parent", "--top-level"]])
+def test_reparent_requires_exactly_one_of_parent_and_top_level(workspace: Path, extra: list[str]) -> None:
+    file_item(workspace, "Parent", kind="Epic")
+    source = file_item(workspace, "Child")
+    result = runner.invoke(app, ["work", "reparent", source, *extra, "--workspace", str(workspace), "--json"])
+    assert result.exit_code == 1
+    assert json.loads(result.stdout)["error"]["reason"] == "usage"
+
+
+def test_reparent_top_level_applies_in_one_commit_with_its_own_subject(workspace: Path) -> None:
+    parent = file_item(workspace, "Parent", kind="Epic")
+    source = file_item(workspace, "Child")
+    moved = runner.invoke(app, ["work", "reparent", source, "--parent", parent, "--workspace", str(workspace), "--json"])
+    assert moved.exit_code == 0, moved.output
+    nested = json.loads(moved.stdout)["path_mapping"][source]
+    before = _init_workspace_git(workspace)
+    result = runner.invoke(
+        app, ["work", "reparent", nested, "--top-level", "--workspace", str(workspace), "--json"]
+    )
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.stdout)
+    assert payload["path_mapping"] == {nested: source}
+    assert payload["commit"]["subject"] == "workspace: reparent feature-child to top level"
+    layout = resolve_workspace(str(workspace))
+    assert layout.bundle_dir.joinpath(f"{source}.md").is_file()
+    commits = subprocess.run(
+        ["git", "-C", str(workspace), "rev-list", "--count", f"{before}..HEAD"],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    assert commits.stdout.strip() == "1"

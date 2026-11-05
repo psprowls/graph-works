@@ -438,7 +438,7 @@ context window).
 When `gw work advance <work-path>` refuses with `refusal.reason` `children-open`, either
 finish the children (`gw next <work-path> --descend`) or explicitly move a
 complete child subtree with `gw work reparent <child-path> --parent
-<new-parent-path>`. Physical placement is ownership; do not add a hierarchy
+<new-parent-path>` (or `--top-level` to make it a top-level item). Physical placement is ownership; do not add a hierarchy
 field to frontmatter.
 
 ### Editing an item by hand

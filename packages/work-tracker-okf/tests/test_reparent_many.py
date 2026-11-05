@@ -10,7 +10,7 @@ import pytest
 from okf_io import load_bundle
 from work_helpers import write_item
 from work_tracker_okf import load_items, reparent
-from work_tracker_okf.mutation import _all_members, _reserved_aliases
+from work_tracker_okf.mutation import WorkMutationPlan, _all_members, _reserved_aliases
 
 
 def _tree(root: Path) -> None:
@@ -192,7 +192,7 @@ def _top_level_tree(root: Path, *, epic_extra: str = "", child_extra: str = "") 
     write_item(root, "work/e/children/x/children/y", "type: Bug\nwork_status: open\n")
 
 
-def _plan_top(root: Path, sources: list[str]):  # noqa: ANN202 -- test helper
+def _plan_top(root: Path, sources: list[str]) -> WorkMutationPlan:
     bundle = load_bundle(root)
     return reparent.plan_reparent_many(bundle, load_items(bundle), sources, None)
 

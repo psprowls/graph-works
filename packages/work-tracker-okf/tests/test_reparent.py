@@ -105,7 +105,7 @@ def test_unchanged_lane_index_retains_digest_without_naming_itself_as_source(tmp
 
 
 def test_reparent_top_level_moves_a_child_subtree_and_rebases_references(tmp_path: Path) -> None:
-    _release, epic, feature = _tree(tmp_path)
+    _release, _epic, feature = _tree(tmp_path)
     referrer = "work/bug-referrer"
     write_item(tmp_path, referrer, f"type: Bug\nwork_status: open\nsuperseded_by: {feature}\n")
     bundle = load_bundle(tmp_path)

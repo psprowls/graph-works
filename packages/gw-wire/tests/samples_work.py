@@ -1003,7 +1003,7 @@ WORK: dict[str, tuple[Callable[[], object], ...]] = {
                         parent_path=None,
                         updated="2026-09-01",
                     ),
-                    EffectivePlacement("code", "/w/a", "bug/a", None, "legacy"),
+                    EffectivePlacement("code", "/w/a", "bug/a", None, "computed"),
                 )
             ]
         ),

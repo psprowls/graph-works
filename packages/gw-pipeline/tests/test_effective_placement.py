@@ -19,9 +19,7 @@ def _load(root, pages):
 
 
 def _call(item, items, tmp_path, *, repo, own="code"):
-    return effective_placement(
-        item, items, repo=repo, own_repo_name=own, worktrees_dir=tmp_path / "wt", default_base="main"
-    )
+    return effective_placement(item, repo=repo, own_repo_name=own, worktrees_dir=tmp_path / "wt")
 
 
 def _repo(tmp_path, name="code"):

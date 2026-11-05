@@ -42,7 +42,8 @@ def run_work_affecting(layout: WorkspaceLayout, repo: str, path: str) -> WorkAff
     Repository resolution is `resolve_item_repo`'s; an item it cannot place (several repositories declared,
     none named) belongs to no repository and is skipped. Never writes.
     """
-    if repo not in declared_repositories(layout):
+    repositories = declared_repositories(layout)
+    if repo not in repositories:
         return WorkAffecting(repo, path, (), "unknown-repository")
     board = tuple(row for row in run_work_board(layout) if row.item.work_status not in TERMINAL_STATUSES)
     items = tuple(row.item for row in board)
@@ -51,7 +52,7 @@ def run_work_affecting(layout: WorkspaceLayout, repo: str, path: str) -> WorkAff
     rows: list[AffectingRow] = []
     for item in items:
         try:
-            resolved = resolve_item_repo(layout, item, index).name
+            resolved = resolve_item_repo(layout, item, index, repositories=repositories).name
         except WorkspaceError:
             continue
         if resolved != repo:

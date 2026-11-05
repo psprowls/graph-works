@@ -340,27 +340,27 @@ class BoardRow:
 
 
 def board_rows(layout: WorkspaceLayout, items: Sequence[WorkItem]) -> tuple[BoardRow, ...]:
-    """Attach each item's effective placement. Never writes; `default_base` is probed once per repository path."""
+    """Attach each item's effective placement. Never writes; spawns no subprocess.
+
+    The repository map is read once per call. A malformed manifest leaves every placement `None`.
+    """
     by_path = {item.path: item for item in items}
-    bases: dict[Path, str] = {}
+    try:
+        repositories: dict[str, Path] | None = declared_repositories(layout)
+    except WorkspaceError:
+        repositories = None
     rows: list[BoardRow] = []
     for item in items:
         placement: EffectivePlacement | None = None
-        try:
-            repo = resolve_item_repo(layout, item, by_path)
-        except WorkspaceError:
-            repo = None
-        if repo is not None and repo.name is not None and repo.path is not None:
-            if repo.path not in bases:
-                bases[repo.path] = provenance.default_base(repo.path)
-            placement = effective_placement(
-                item,
-                by_path,
-                repo=repo,
-                own_repo_name=repo.name,
-                worktrees_dir=layout.worktrees_dir,
-                default_base=bases[repo.path],
-            )
+        if repositories is not None:
+            try:
+                repo = resolve_item_repo(layout, item, by_path, repositories=repositories)
+            except WorkspaceError:
+                repo = None
+            if repo is not None and repo.name is not None and repo.path is not None:
+                placement = effective_placement(
+                    item, repo=repo, own_repo_name=repo.name, worktrees_dir=layout.worktrees_dir
+                )
         rows.append(BoardRow(item, placement))
     return tuple(rows)
 

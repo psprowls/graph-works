@@ -123,6 +123,13 @@ $ gw scan --apply --results-dir .works/.gw/cache/scan/results --short-head abc12
   tree — the machine-readable surface freeze used to catch an undocumented or
   accidentally-renamed command.
 
+- `gw util surface-page [--apply] [--workspace PATH] [--json]` reconciles the
+  generated sections of `docs/reference/gw-cli-surface.md` (global options,
+  top-level commands, command reference) against the live command tree.
+  Without `--apply` it only reports and exits 1 when the page is stale; with
+  it, it rewrites the page, leaving the hand-written prose untouched. It does
+  not commit.
+
 - `gw util line-endings [--fix] [--workspace PATH] [--json]` detects (and,
   with `--fix`, repairs) CRLF reaccumulation in the bundle. `.gitattributes`
   declares every tracked bundle member LF-in-worktree, but git enforces that

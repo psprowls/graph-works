@@ -41,6 +41,16 @@ UTIL: dict[str, tuple[Callable[[], object], ...]] = {
         ),
     ),
     "util.platform_payload": (lambda: util.platform_payload(_REPORT),),
+    "util.surface_page_payload": (
+        lambda: util.surface_page_payload(
+            ns(path=Path("/b/page.md"), status="refused", refusal="missing-page", detail="d", added=0, removed=0),
+            applied=False,
+        ),
+        lambda: util.surface_page_payload(
+            ns(path=Path("/b/page.md"), status="stale", refusal=None, detail="d", added=2, removed=1),
+            applied=True,
+        ),
+    ),
     "util.tokens_payload": (
         lambda: util.tokens_payload(
             ns(dry_run=False, updated=(ns(page="a", tokens=1),), unchanged=(), skipped=(ns(page="b", reason="r"),))

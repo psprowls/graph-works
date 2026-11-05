@@ -167,31 +167,22 @@ class EffectivePlacement:
 
 def effective_placement(
     item: WorkItem,
-    items: Mapping[str, WorkItem],
     *,
     repo: ItemRepo,
     own_repo_name: str | None,
     worktrees_dir: Path,
-    default_base: str,
 ) -> EffectivePlacement | None:
-    """Where *item* lives in *repo*: the computed placement."""
+    """Where *item* lives in *repo*: the computed placement.
+
+    Branch and worktree derive from the item's path and type alone, so no base branch is needed.
+    """
     if repo.name is None or repo.path is None:
         return None
-    placement = placement_for(
-        item,
-        items,
-        repo_name=repo.name,
-        repo_root=repo.path,
-        working_checkout=repo.path,
-        worktrees_dir=worktrees_dir,
-        default_base=default_base,
-    )
-    if placement is None:
-        return None
+    branch = branch_name(active_path(item.path), item.type)
     return EffectivePlacement(
         repo.name,
-        str(placement.worktree),
-        placement.branch,
+        str(worktrees_dir / repo.name / branch),
+        branch,
         item.start_sha if repo.name == own_repo_name else None,
         "computed",
     )

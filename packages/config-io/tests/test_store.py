@@ -259,12 +259,37 @@ def test_write_keeps_the_sequence_style_it_found(tmp_path, text):
     assert store.path.read_text(encoding="utf-8") == text + "n: 1\n"
 
 
-def test_write_replaces_a_sequence_whose_length_changed(tmp_path):
+def test_write_resizing_a_sequence_keeps_the_text_around_it(tmp_path):
     store, data = _authored(tmp_path)
     data["ignore"] = ["x"]
     store.write(data)
     assert store.read()["ignore"] == ["x"]
     assert store.path.read_text(encoding="utf-8").startswith(_AUTHORED.split("ignore:")[0])
+
+
+@pytest.mark.parametrize("new", [[1, 2, 3], [1], []], ids=["grown", "shrunk", "emptied"])
+def test_write_resizing_a_flow_sequence_keeps_flow_style_and_comment(tmp_path, new):
+    store = _store(tmp_path, "a: [1, 2]  # c\nb: 1\n")
+    store.write({"a": new, "b": 1})
+    lines = store.path.read_text(encoding="utf-8").splitlines()
+    assert lines[0].startswith("a: [")
+    assert "# c" in lines[0]
+    assert lines[1] == "b: 1"
+    assert store.read()["a"] == new
+
+
+def test_write_resizing_a_block_sequence_keeps_surviving_item_comments(tmp_path):
+    store = _store(tmp_path, "a:\n  - 1  # x\n  - 2  # y\n  - 3  # z\n")
+    store.write({"a": [1, 2]})
+    text = store.path.read_text(encoding="utf-8")
+    assert "# x" in text and "# y" in text
+    assert store.read()["a"] == [1, 2]
+
+
+def test_write_same_length_flow_sequence_is_unchanged(tmp_path):
+    store = _store(tmp_path, "a: [1, 2]  # c\n")
+    store.write({"a": [1, 5]})
+    assert store.path.read_text(encoding="utf-8") == "a: [1, 5]  # c\n"
 
 
 def test_write_replaces_a_node_whose_type_changed(tmp_path):

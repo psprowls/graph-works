@@ -61,9 +61,14 @@ def _merge_node(node: object, value: object) -> object:
     if isinstance(node, CommentedMap) and isinstance(value, Mapping):
         _merge_mapping(node, value)
         return node
-    if isinstance(node, CommentedSeq) and isinstance(value, list) and len(node) == len(value):
+    if isinstance(node, CommentedSeq) and isinstance(value, list):
+        # Resize in place: replacing the node would drop its flow flag and item comments.
+        del node[len(value) :]
         for index, item in enumerate(value):
-            node[index] = _merge_node(node[index], item)
+            if index < len(node):
+                node[index] = _merge_node(node[index], item)
+            else:
+                node.append(item)
         return node
     # An equal value keeps its node, so its quote style and block form survive.
     if type(node).__mro__[-2] is type(value).__mro__[-2] and node == value:
@@ -140,8 +145,9 @@ class PlainYamlStore:
 
         When the file already holds a mapping, it is loaded in ruamel's
         round-trip mode and `data` is merged into that tree, so only the
-        changed keys' lines move. A sequence whose length changed is replaced
-        whole, and inline comments inside it may be lost. A missing, empty or
+        changed keys' lines move. A sequence whose length changed is resized
+        in place, so its flow style and the comments of surviving items are
+        kept. A missing, empty or
         unloadable file gets a plain safe dump: the value contract outranks
         the form.
         """

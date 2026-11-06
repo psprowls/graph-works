@@ -19,7 +19,13 @@ fi
 
 command -v uv >/dev/null 2>&1 || fail "uv not found" "install uv and put it on PATH"
 
+# The pin belongs to this repository, whatever directory the script runs from.
+pin_file="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/.python-version"
+pin=$(tr -d '[:space:]' 2>/dev/null <"$pin_file") || pin=""
+[ -n "$pin" ] || fail "python interpreter" "cannot read a pin from $pin_file"
+
 py_version=$(uv run python -c 'import sys; print("%d.%d" % sys.version_info[:2])' 2>/dev/null) || py_version=""
-if ! uv run python -c 'import sys; sys.exit(sys.version_info < (3, 12))' >/dev/null 2>&1; then
-  fail "python interpreter" "uv resolved Python ${py_version:-unknown}; this workspace requires ≥3.12"
+py_version=${py_version%$'\r'} # Python on Windows prints CRLF; $(...) strips only the LF
+if [ "$py_version" != "$pin" ]; then
+  fail "python interpreter" "uv resolved Python ${py_version:-unknown}; .python-version pins $pin"
 fi

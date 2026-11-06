@@ -85,6 +85,7 @@ _BY_NAME = {u.name: u for u in UNITS}
 SHARED_INPUTS: tuple[str, ...] = (
     "uv.lock",
     "pyproject.toml",
+    ".python-version",
     "conftest.py",
     "justfile",
     "scripts/package_units.py",

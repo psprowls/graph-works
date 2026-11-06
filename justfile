@@ -15,7 +15,8 @@ default: check
 normalization:
     uv run python scripts/check_filename_normalization.py .
 
-# Host toolchain check: git works, uv is present, uv resolves Python >= 3.12.
+# Host toolchain check: git works, uv is present, uv resolves the Python minor in
+# `.python-version`.
 # First dependency of every gate so a broken host fails in one second with one
 # `TOOLCHAIN PREFLIGHT FAILED (host, not code)` line instead of a red suite.
 preflight:

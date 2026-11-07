@@ -8,15 +8,18 @@ change git state ends in `assert_conforms`.
 
 from __future__ import annotations
 
+import importlib
 import json
 import os
 import runpy
 import subprocess
 import sys
+import time
 from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 from conformance_fixture import (
@@ -100,6 +103,9 @@ def faked_orca(monkeypatch: Any, log: RunLog, fx: Fixture) -> Iterator[Any]:
     port = WorkerPort(repos=[{"id": f"repo-{name}", "path": str(path)} for name, path in fx.repos.items()])
     monkeypatch.setattr(work_main, "orca_port", lambda: port)
     monkeypatch.setattr(work_main, "placement_notifier", lambda: RecordingNotifier(log))
+    # `gw work gate wait` polls with a flat 2s sleep; only the poll interval changes, not verb order.
+    gate_cli = importlib.import_module("gw_cli.work_cli.gate")
+    monkeypatch.setattr(gate_cli, "time", SimpleNamespace(sleep=lambda _s: time.sleep(0.05), monotonic=time.monotonic))
     try:
         yield port
     finally:

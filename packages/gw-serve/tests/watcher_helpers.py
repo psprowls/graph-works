@@ -10,6 +10,12 @@ from pathlib import Path
 import watchfiles
 from gw_serve.watch import RawBatch
 
+# watchfiles only checks the timeout on step boundaries, so with the watcher's
+# 300ms step any value from 301ms to 599ms fires at about 600ms. 500ms sits
+# inside that range. The idle wait is a readiness signal only: it proves the
+# watcher exists and has no pending changes, whatever the timeout's length.
+READINESS_RUST_TIMEOUT_MS = 500
+
 
 class PollingBackend:
     """Expose completed idle waits of watchfiles' polling backend.
@@ -41,6 +47,7 @@ class PollingBackend:
             stop_event=stop_event,
             recursive=recursive,
             yield_on_timeout=True,
+            rust_timeout=READINESS_RUST_TIMEOUT_MS,
             force_polling=True,
         ):
             if batch:

@@ -400,3 +400,55 @@ def test_only_the_layered_store_is_a_layered_store(tmp_path):
     assert isinstance(_layered(tmp_path), LayeredStore)
     assert not isinstance(PlainYamlStore(tmp_path / "config.yaml"), LayeredStore)
     assert not isinstance(DictStore(), LayeredStore)
+
+
+def test_identical_bytes_parse_once(tmp_path):
+    from config_io import store as store_mod
+
+    store_mod._safe_load.cache_clear()
+    a = tmp_path / "a.yaml"
+    b = tmp_path / "b.yaml"
+    a.write_text("k: v\n", encoding="utf-8")
+    b.write_text("k: v\n", encoding="utf-8")
+    PlainYamlStore(a).read()
+    PlainYamlStore(b).read()
+    PlainYamlStore(a).read()
+    info = store_mod._safe_load.cache_info()
+    assert (info.misses, info.hits) == (1, 2)
+
+
+def test_changed_bytes_reparse(tmp_path):
+    store = _store(tmp_path, "k: one\n")
+    assert store.read() == {"k": "one"}
+    store.path.write_text("k: two\n", encoding="utf-8")
+    assert store.read() == {"k": "two"}
+
+
+def test_read_result_is_isolated(tmp_path):
+    store = _store(tmp_path, "list: [a]\nnested:\n  x: [1]\n")
+    first = store.read()
+    first["list"].append("x")  # type: ignore[attr-defined]
+    first["nested"]["x"].append(2)  # type: ignore[index]
+    first["new"] = 1
+    assert store.read() == {"list": ["a"], "nested": {"x": [1]}}
+
+
+def test_malformed_then_fixed(tmp_path):
+    store = _store(tmp_path, "a: [unclosed\n")
+    for _ in range(2):
+        with pytest.raises(StoreValidationError, match="is not valid YAML") as info:
+            store.read()
+        assert str(info.value).startswith(f"{store.path} is not valid YAML")
+    store.path.write_text("a: 1\n", encoding="utf-8")
+    assert store.read() == {"a": 1}
+
+
+def test_error_message_names_each_path(tmp_path):
+    one = tmp_path / "one.yaml"
+    two = tmp_path / "two.yaml"
+    for p in (one, two):
+        p.write_text("a: [unclosed\n", encoding="utf-8")
+    for p in (one, two):
+        with pytest.raises(StoreValidationError) as info:
+            PlainYamlStore(p).read()
+        assert str(info.value).startswith(str(p))

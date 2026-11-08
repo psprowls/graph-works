@@ -461,3 +461,64 @@ def test_entries_reached_only_through_a_ref_is_ignored(tmp_path):
 def test_about_mandate_is_frozen():
     with pytest.raises(AttributeError):
         AboutMandate(entries="claims").entries = "decisions"  # type: ignore[misc]
+
+
+def _memo_dir(tmp_path, **files):
+    from okf_ext.schemas import loader as loader_mod
+
+    loader_mod._checked_document.cache_clear()
+    return write_set(tmp_path, **files)
+
+
+def test_unchanged_schema_checked_once(tmp_path, monkeypatch):
+    from okf_ext.schemas import loader as loader_mod
+
+    root = _memo_dir(tmp_path, **{"_base.schema.yaml": BASE, "Metric.schema.yaml": METRIC})
+    calls = []
+    real = loader_mod.validator_for
+
+    def counting(schema):
+        validator = real(schema)
+        calls.append(1)
+        return validator
+
+    monkeypatch.setattr(loader_mod, "validator_for", counting)
+    load_schemas(root)
+    load_schemas(root)
+    info = loader_mod._checked_document.cache_info()
+    assert (info.misses, info.hits) == (2, 2)
+    assert len(calls) == 2
+
+
+def test_changed_schema_reparsed(tmp_path):
+    root = _memo_dir(tmp_path, **{"_base.schema.yaml": BASE, "Metric.schema.yaml": METRIC})
+    first = load_schemas(root)
+    write(root / "Metric.schema.yaml", METRIC.replace("required: [type, title, owner]", "required: [type]"))
+    second = load_schemas(root)
+    assert first.schemas["Metric"]["required"] == ["type", "title", "owner"]
+    assert second.schemas["Metric"]["required"] == ["type"]
+
+
+def test_same_bytes_two_names(tmp_path):
+    root = _memo_dir(tmp_path, **{"A.schema.json": '{"type": "object"}', "B.schema.json": '{"type": "object"}'})
+    assert set(load_schemas(root).schemas) == {"A", "B"}
+    clash = _memo_dir(tmp_path / "clash", **{"A.schema.json": '{"type": "object"}', "A.schema.yaml": "type: object\n"})
+    with pytest.raises(SchemaError, match="already claimed"):
+        load_schemas(clash)
+
+
+def test_documents_isolated(tmp_path):
+    root = _memo_dir(tmp_path, **{"_base.schema.yaml": BASE, "Metric.schema.yaml": METRIC})
+    first = load_schemas(root)
+    first.documents["Metric.schema.yaml"]["required"].append("poison")
+    assert "poison" not in load_schemas(root).documents["Metric.schema.yaml"]["required"]
+
+
+def test_invalid_schema_message_unchanged(tmp_path):
+    root = _memo_dir(tmp_path, **{"Bad.schema.yaml": "type: 12\n"})
+    messages = []
+    for _ in range(2):
+        with pytest.raises(SchemaError, match=r"Bad\.schema\.yaml: not a valid JSONSchema") as info:
+            load_schemas(root)
+        messages.append(str(info.value))
+    assert messages[0] == messages[1]

@@ -30,12 +30,14 @@ came from.
 
 from __future__ import annotations
 
+import copy
+import functools
 import hashlib
 import io
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Protocol, runtime_checkable
+from typing import Protocol, cast, runtime_checkable
 
 from ruamel.yaml import YAML
 from ruamel.yaml.comments import CommentedMap, CommentedSeq
@@ -112,6 +114,12 @@ class ConfigStore(Protocol):
         ...
 
 
+@functools.lru_cache(maxsize=128)
+def _safe_load(raw: bytes) -> object:
+    """Parse YAML bytes; memoized on content, so errors are never cached."""
+    return YAML(typ="safe").load(raw)
+
+
 @dataclass(frozen=True, slots=True)
 class PlainYamlStore:
     """A lossless `ConfigStore` over a single YAML file."""
@@ -125,14 +133,14 @@ class PlainYamlStore:
         if not raw.strip():
             return {}
         try:
-            loaded = YAML(typ="safe").load(raw)
+            loaded = _safe_load(raw)
         except YAMLError as exc:
             raise StoreValidationError(f"{self.path} is not valid YAML: {exc}") from exc
         if loaded is None:
             return {}
         if not isinstance(loaded, dict):
             raise StoreValidationError(f"{self.path} must hold a mapping at the top level, got {type(loaded).__name__}")
-        return dict(loaded)
+        return cast("dict[str, object]", copy.deepcopy(loaded))
 
     def read(self) -> dict[str, object]:
         return self._load()

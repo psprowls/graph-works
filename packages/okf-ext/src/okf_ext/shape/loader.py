@@ -24,6 +24,8 @@ that sorts earlier.
 
 from __future__ import annotations
 
+import copy
+import functools
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 from types import MappingProxyType
@@ -84,15 +86,17 @@ def _type_name(filename: str) -> str | None:
     return None
 
 
-def _read(path: Path) -> Any:  # noqa: ANN401 -- arbitrary parsed YAML document
+@functools.lru_cache(maxsize=128)
+def _parsed(name: str, raw: bytes) -> Any:  # noqa: ANN401 -- arbitrary parsed YAML document
+    """Decode and safe-load one declaration file; memoized on (name, bytes). Errors are never cached."""
     try:
-        text = path.read_bytes().decode("utf-8")
+        text = raw.decode("utf-8")
     except UnicodeDecodeError as exc:
-        raise SectionError(f"{path.name}: not valid UTF-8 at byte offset {exc.start}: {exc.reason}") from exc
+        raise SectionError(f"{name}: not valid UTF-8 at byte offset {exc.start}: {exc.reason}") from exc
     try:
         return YAML(typ="safe").load(text)
     except YAMLError as exc:
-        raise SectionError(f"{path.name}: not valid YAML: {exc}") from exc
+        raise SectionError(f"{name}: not valid YAML: {exc}") from exc
 
 
 def _file_fragments(name: str, data: Mapping[str, Any]) -> dict[str, str]:
@@ -357,7 +361,7 @@ def load_sections(path: str | Path) -> SectionSet:
         name = entry.name
         if _type_name(name) is None or not entry.is_file():
             continue
-        data = _read(entry)
+        data = copy.deepcopy(_parsed(entry.name, entry.read_bytes()))
         if not isinstance(data, Mapping):
             raise SectionError(f"{name}: a declaration must be a mapping, got {type(data).__name__}")
         for key, value in _file_fragments(name, data).items():

@@ -38,6 +38,7 @@ from the very tools meant to catch it.
 from __future__ import annotations
 
 import difflib
+import functools
 from collections.abc import Iterable, Mapping, Sequence
 from pathlib import Path
 from types import MappingProxyType
@@ -129,8 +130,12 @@ def load_vocabulary(path: str | Path) -> Vocabulary:
     exactly once, and no directory is scanned or defaulted to.
     """
     path = Path(path)
-    source = path.name
-    raw_bytes = path.read_bytes()
+    return _vocabulary(path.name, path.read_bytes())
+
+
+@functools.lru_cache(maxsize=128)
+def _vocabulary(source: str, raw_bytes: bytes) -> Vocabulary:
+    """Build the vocabulary for one file's bytes; memoized (frozen result, errors never cached)."""
     try:
         text = raw_bytes.decode("utf-8")
     except UnicodeDecodeError as exc:

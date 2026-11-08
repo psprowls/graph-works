@@ -336,3 +336,17 @@ def test_names_are_compared_exactly_not_normalized(tmp_path):
     text = "version: 1\ntags:\n  - name: Metric\n  - name: metric\n"
     vocab = load_vocabulary(write(tmp_path, text))
     assert vocab.allowed == frozenset({"Metric", "metric"})
+
+
+def test_unchanged_vocabulary_parsed_once(tmp_path):
+    path = write(tmp_path, "version: 1\ntags:\n  - name: a\n")
+    assert load_vocabulary(path) is load_vocabulary(path)
+    write(tmp_path, "version: 1\ntags:\n  - name: b\n")
+    assert load_vocabulary(path).allowed == frozenset({"b"})
+
+
+def test_malformed_vocabulary_raises_each_time(tmp_path):
+    path = write(tmp_path, "tags: [unclosed\n")
+    for _ in range(2):
+        with pytest.raises(VocabularyError, match=r"tags\.yaml: not valid YAML"):
+            load_vocabulary(path)

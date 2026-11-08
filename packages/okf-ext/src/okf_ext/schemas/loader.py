@@ -12,6 +12,8 @@ shared schema set can validate many bundles.
 
 from __future__ import annotations
 
+import copy
+import functools
 import json
 from collections.abc import Mapping
 from pathlib import Path
@@ -60,20 +62,30 @@ def _type_name(filename: str) -> str | None:
     return None
 
 
-def _read(path: Path) -> Any:  # noqa: ANN401 -- arbitrary parsed schema document
+@functools.lru_cache(maxsize=128)
+def _checked_document(name: str, raw: bytes) -> Any:  # noqa: ANN401 -- arbitrary parsed schema document
+    """Parse and meta-validate one schema file; memoized on (name, bytes). Errors are never cached."""
     try:
-        text = path.read_bytes().decode("utf-8")
+        text = raw.decode("utf-8")
     except UnicodeDecodeError as exc:
-        raise SchemaError(f"{path.name}: not valid UTF-8 at byte offset {exc.start}: {exc.reason}") from exc
-    if path.name.endswith(".schema.json"):
+        raise SchemaError(f"{name}: not valid UTF-8 at byte offset {exc.start}: {exc.reason}") from exc
+    if name.endswith(".schema.json"):
         try:
-            return json.loads(text)
+            body = json.loads(text)
         except json.JSONDecodeError as exc:
-            raise SchemaError(f"{path.name}: not valid JSON: {exc}") from exc
+            raise SchemaError(f"{name}: not valid JSON: {exc}") from exc
+    else:
+        try:
+            body = YAML(typ="safe").load(text)
+        except YAMLError as exc:
+            raise SchemaError(f"{name}: not valid YAML: {exc}") from exc
+    if not isinstance(body, Mapping):
+        raise SchemaError(f"{name}: a schema must be a mapping, got {type(body).__name__}")
     try:
-        return YAML(typ="safe").load(text)
-    except YAMLError as exc:
-        raise SchemaError(f"{path.name}: not valid YAML: {exc}") from exc
+        validator_for(dict(body)).check_schema(dict(body))
+    except JsonSchemaError as exc:
+        raise SchemaError(f"{name}: not a valid JSONSchema: {exc.message}") from exc
+    return body
 
 
 def build_registry(documents: Mapping[str, Mapping[str, Any]]) -> Registry[Any]:
@@ -118,13 +130,7 @@ def load_schemas(path: str | Path) -> SchemaSet:
         type_name = _type_name(name)
         if type_name is None or not entry.is_file():
             continue
-        body = _read(entry)
-        if not isinstance(body, Mapping):
-            raise SchemaError(f"{name}: a schema must be a mapping, got {type(body).__name__}")
-        try:
-            validator_for(dict(body)).check_schema(dict(body))
-        except JsonSchemaError as exc:
-            raise SchemaError(f"{name}: not a valid JSONSchema: {exc.message}") from exc
+        body = _checked_document(name, entry.read_bytes())
         # A shallow copy, not `MappingProxyType(dict(body))`: the parser
         # (ruamel's safe loader or `json.loads`) already returns plain,
         # unproxied `dict`/`list`/scalar values all the way down, so this is
@@ -132,7 +138,7 @@ def load_schemas(path: str | Path) -> SchemaSet:
         # and start being ordinary JSON-shaped data -- which is what lets a
         # whole schema document, nested keys included, survive `json.dumps`
         # with no encoder. Proxying here too would break exactly that.
-        documents[name] = dict(body)
+        documents[name] = copy.deepcopy(dict(body))
         # An underscore-prefixed file is a `$ref` target, not a type: it is in
         # `documents` so a `$ref` reaches it, and out of `schemas` so no concept
         # can match `type: _base`.

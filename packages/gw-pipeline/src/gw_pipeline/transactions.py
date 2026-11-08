@@ -2281,6 +2281,26 @@ class _ValidationState:
     conditions: Mapping[tuple[str, str], int]
 
 
+class _SharedRuleSet:
+    """Lazily builds `_extra_rules` once per mutation and shares it with both validation passes.
+
+    A failed build keeps nothing, so the next `get()` rebuilds and re-raises.
+    """
+
+    __slots__ = ("_layout", "_repo_root", "_repo_roots", "_rules")
+
+    def __init__(self, layout: WorkspaceLayout, repo_root: Path | None, repo_roots: tuple[Path, ...]) -> None:
+        self._layout = layout
+        self._repo_root = repo_root
+        self._repo_roots = repo_roots
+        self._rules: tuple[Rule, ...] | None = None
+
+    def get(self) -> tuple[Rule, ...]:
+        if self._rules is None:
+            self._rules = _extra_rules(self._layout, self._repo_root, self._repo_roots)
+        return self._rules
+
+
 def _extra_rules(
     layout: WorkspaceLayout, repo_root: Path | None, repo_roots: tuple[Path, ...] = ()
 ) -> tuple[Rule, ...]:
@@ -2461,6 +2481,7 @@ def _capture_validation_state(
     repo_roots: tuple[Path, ...] = (),
     bundle: Bundle | None = None,
     documents: _FreshDocuments | None = None,
+    rules: _SharedRuleSet | None = None,
 ) -> _ValidationState:
     """Validate the bundle as it stands and key the outcome post-mutation.
 
@@ -2502,7 +2523,7 @@ def _capture_validation_state(
     report = validate(
         bundle,
         today=date.max,
-        extra_rules=_extra_rules(layout, repo_root, repo_roots),
+        extra_rules=rules.get() if rules is not None else _extra_rules(layout, repo_root, repo_roots),
         scope=_baseline_scope(plan),
     )
     _assert_root_identity(validation_root, root)
@@ -2651,6 +2672,7 @@ def _validate_postconditions(
     baseline_bundle: Bundle | None = None,
     excused: list[str] | None = None,
     allowed_new_findings: tuple[tuple[str, str], ...] = (),
+    rules: _SharedRuleSet | None = None,
 ) -> tuple[str, ...]:
     """Fail on what *this* mutation broke, not on what was already broken.
 
@@ -2694,7 +2716,7 @@ def _validate_postconditions(
         report = validate(
             bundle,
             today=date.max,
-            extra_rules=_extra_rules(layout, repo_root, repo_roots),
+            extra_rules=rules.get() if rules is not None else _extra_rules(layout, repo_root, repo_roots),
             scope=gate_scope,
         )
         _assert_root_identity(validation_root, root)
@@ -3077,6 +3099,7 @@ def _apply_mutation_locked(
                     finally:
                         _remove_entry(preflight_final_scratch)
                     _verify_directory_modes(root, directory_modes)
+                    shared_rules = _SharedRuleSet(layout, repo_root, repo_roots)
                     try:
                         baseline = _capture_validation_state(
                             layout,
@@ -3086,6 +3109,7 @@ def _apply_mutation_locked(
                             repo_roots=repo_roots,
                             bundle=baseline_bundle,
                             documents=documents,
+                            rules=shared_rules,
                         )
                     except (OSError, ValueError) as exc:
                         baseline = None
@@ -3184,6 +3208,7 @@ def _apply_mutation_locked(
                         baseline_bundle=baseline_bundle,
                         excused=excused,
                         allowed_new_findings=allowed_new_findings,
+                        rules=shared_rules,
                     )
                     if postcondition_failures:
                         raise ValueError("; ".join(postcondition_failures))

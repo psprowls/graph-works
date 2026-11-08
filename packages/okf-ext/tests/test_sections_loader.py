@@ -226,3 +226,46 @@ def test_a_file_named_exactly_dot_yaml_claims_no_type(tmp_path):
     root = write_set(tmp_path / "sections", **{"feature__yaml": FEATURE, "_common__yaml": COMMON})
     write(root / ".yaml", "sections: []\n")
     assert load_sections(root).type_names == ("feature",)
+
+
+def test_unchanged_declaration_parsed_once(tmp_path):
+    from okf_ext.shape import loader as loader_mod
+
+    loader_mod._parsed.cache_clear()
+    root = write_set(tmp_path, **{"_common.sections.yaml": COMMON, "Feature.sections.yaml": FEATURE})
+    load_sections(root)
+    load_sections(root)
+    info = loader_mod._parsed.cache_info()
+    assert (info.misses, info.hits) == (2, 2)
+
+
+def test_fragment_change_not_masked(tmp_path):
+    root = write_set(
+        tmp_path,
+        **{
+            "_common.sections.yaml": "fragments:\n  x: |\n    old text\n",
+            "Bug.sections.yaml": "sections:\n  - heading: Plan\n    placeholder_ref: x\n",
+        },
+    )
+    first = load_sections(root)
+    write(root / "_common.sections.yaml", "fragments:\n  x: |\n    new text\n")
+    second = load_sections(root)
+    assert first != second
+    assert "new text" in repr(second) and "old text" not in repr(second)
+
+
+def test_parsed_result_not_shared(tmp_path, monkeypatch):
+    from okf_ext.shape import loader as loader_mod
+
+    root = write_set(tmp_path, **{"_common.sections.yaml": COMMON, "Feature.sections.yaml": FEATURE})
+    copies = []
+    real = loader_mod.copy.deepcopy
+
+    def spy(value):
+        copies.append(value)
+        return real(value)
+
+    monkeypatch.setattr(loader_mod.copy, "deepcopy", spy)
+    load_sections(root)
+    cached = loader_mod._parsed("Feature.sections.yaml", (root / "Feature.sections.yaml").read_bytes())
+    assert any(c is cached for c in copies)

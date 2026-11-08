@@ -406,3 +406,38 @@ def test_descend_selects_the_stale_plan_leaf(tmp_path: Path) -> None:
     result = work.run_next(layout, EPIC, descend=True)
     assert result.selected_path == CHILD
     assert result.route.dispatch == Dispatch("plan")
+
+
+def _count_bundle_loads(monkeypatch) -> list[int]:
+    calls: list[int] = []
+    real = work.load_workspace_bundle
+
+    def counting(*args, **kwargs):
+        calls.append(1)
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(work, "load_workspace_bundle", counting)
+    return calls
+
+
+def test_apply_mode_without_a_repair_loads_the_bundle_once(tmp_path: Path, monkeypatch) -> None:
+    layout = _layout(tmp_path)
+    _write(layout, EPIC, type="Epic", phase="execute")
+    _write(layout, CHILD)
+    calls = _count_bundle_loads(monkeypatch)
+    result = work.run_next(layout, CHILD, dry_run=False)
+    assert result.normalizations == ()
+    assert result.selected_path == CHILD
+    assert len(calls) == 1
+
+
+def test_apply_mode_with_a_repair_reloads_the_bundle(tmp_path: Path, monkeypatch) -> None:
+    layout = _layout(tmp_path)
+    _write(layout, EPIC, type="Epic", phase="execute")
+    _write(layout, CHILD)
+    _spec(layout, CHILD)
+    assert work.run_regen_indexes(layout, dry_run=False).application.ok
+    calls = _count_bundle_loads(monkeypatch)
+    result = work.run_next(layout, CHILD, dry_run=False)
+    assert result.application.normalized == (CHILD,)
+    assert len(calls) == 2

@@ -995,7 +995,8 @@ def run_next(
         return replace(result, path=None, artifacts=()) if isinstance(config, WorkspaceError) else result
 
     application, warnings = _apply_normalizations(layout, preview.normalizations, bundle=bundle)
-    persisted_bundle = load_workspace_bundle(layout, ignore=IGNORE)
+    # Reload only when a repair was attempted (even a failed one may have touched disk); otherwise nothing was written.
+    persisted_bundle = load_workspace_bundle(layout, ignore=IGNORE) if preview.normalizations else bundle
     persisted_items = load_items(persisted_bundle)
     persisted_state = state_for(
         persisted_items,

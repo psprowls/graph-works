@@ -9,7 +9,7 @@ import pytest
 from okf_ext.proposals.apply import apply, render_write
 from okf_ext.proposals.model import Proposal
 from okf_ext.proposals.plan import list_proposals, plan_decide, plan_propose
-from okf_ext.proposals.render import HEADER, render_body
+from okf_ext.proposals.render import render_body
 from okf_io import load_bundle
 
 AT = datetime(2026, 8, 8, 12, 0, tzinfo=UTC)
@@ -347,7 +347,7 @@ def _sections(*, description, sources, newline="\n"):
     contract. Local rather than imported -- okf-ext must not know a lane
     vocabulary, so the crossover is proved with a shape, not with
     `doc_wiki_okf.proposals.ReviewRenderer`."""
-    lines = [HEADER, "", "## Summary", "", description, "", "## Entries", ""]
+    lines = ["## Summary", "", description, "", "## Entries", ""]
     lines.extend(f"**{source.get('id')}**" for source in sources)
     return newline.join(lines) + newline
 
@@ -470,7 +470,7 @@ def test_a_crlf_body_is_compared_on_its_own_terminator(tmp_path):
 
 
 def _evidence_body(*, description, sources, newline="\n"):
-    lines = [HEADER, "", "## Review", "", description, ""]
+    lines = ["## Review", "", description, ""]
     for source in sources:
         lines.extend([str(source["resource"]), *source.get("evidence", ())])
     return newline.join(lines) + newline

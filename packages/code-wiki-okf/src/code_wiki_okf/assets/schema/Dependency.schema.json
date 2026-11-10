@@ -1,5 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$comment": "x-okf-directory is relative to code-graph/<repo>/entities/, and Dependency pages sit one <ecosystem>/ level deeper: code-graph/<repo>/entities/dependencies/<ecosystem>/<name>.md.",
   "type": "object",
   "required": ["type", "title", "resource", "ecosystem"],
   "additionalProperties": false,

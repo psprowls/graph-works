@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from okf_ext.proposals.render import HEADER, render_body
+from okf_ext.proposals.render import render_body
 
 SOURCES = (
     {"id": "src-a", "resource": "/sources/a.md", "title": "Claude path skill ingest guidance"},
@@ -14,8 +14,6 @@ def test_the_rendered_body_is_exactly_this():
     """Pinned whole, not by fragments. A body regenerated on every merge is
     worth exactly as much as the reviewer's ability to diff it."""
     assert render_body(description="Two sources argue for one page.", sources=SOURCES) == (
-        f"{HEADER}\n"
-        "\n"
         "Two sources argue for one page.\n"
         "\n"
         "## Sources\n"
@@ -44,13 +42,13 @@ def test_the_newline_is_honoured_throughout():
 
 
 def test_no_sources_still_renders_a_stable_body():
-    assert render_body(description="why", sources=()) == f"{HEADER}\n\nwhy\n\n## Sources\n"
+    assert render_body(description="why", sources=()) == "why\n\n## Sources\n"
     assert render_body(description="why", sources=()) == render_body(description="why", sources=())
 
 
 def test_no_description_omits_the_paragraph_without_a_doubled_blank():
     rendered = render_body(description="   ", sources=SOURCES)
-    assert rendered.startswith(f"{HEADER}\n\n## Sources\n")
+    assert rendered.startswith("## Sources\n")
     assert "\n\n\n" not in rendered
 
 
@@ -71,7 +69,7 @@ def test_nothing_is_rendered_as_an_autolink():
     `<destination>`. A capability that generates bodies must not generate
     findings for the capability that judges them."""
     rendered = render_body(description="d", sources=SOURCES)
-    assert "<" not in rendered.removeprefix(HEADER)
+    assert "<" not in rendered
 
 
 def test_render_body_satisfies_the_body_renderer_protocol():
@@ -113,3 +111,13 @@ def test_the_citation_marker_resolves_to_the_bundle_path_not_a_literal_bracket_s
         if child.type == "link_open"
     ]
     assert hrefs == ["/sources/a.md", "/sources/b.md"]
+
+
+def test_the_body_carries_no_html_comment():
+    assert "<!--" not in render_body(description="d", sources=[{"id": "a", "resource": "/x.md"}])
+
+
+def test_header_is_not_exported():
+    import okf_ext.proposals
+
+    assert not hasattr(okf_ext.proposals, "HEADER")

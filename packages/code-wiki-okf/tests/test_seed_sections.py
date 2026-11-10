@@ -23,7 +23,7 @@ _EXPECTED_OWNED = {
         "versions_in_use",
         "path",
     ),
-    "App": ("package", "path"),
+    "App": ("package", "app_kind", "app_signals", "path"),
     "Dependency": ("ecosystem", "implemented_by", "used_by", "versions_in_use"),
     "TestSuite": ("tested_packages", "suite_kind", "file_count", "path"),
     "Repository": ("package_count",),

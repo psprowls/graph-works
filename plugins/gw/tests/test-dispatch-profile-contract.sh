@@ -84,7 +84,7 @@ if grep -F 'references/launch-worker.py create' <<<"$section_three" >/dev/null; 
   fail "section three must not prescribe primitive task creation"
 fi
 grep -F 'Preflight — confirm the skill resolves.' "$WORKFLOW" >/dev/null || fail "workflow preserves skill preflight"
-grep -F '<!-- rider-table:start -->' "$WORKFLOW" >/dev/null || fail "workflow preserves stage riders"
+grep -Fx '| Skill | Stage | Carries |' "$WORKFLOW" >/dev/null || fail "workflow preserves stage riders"
 grep -F 'One stage per invocation' "$WORKFLOW" >/dev/null || fail "workflow preserves one-stage advancement"
 grep -F 'This is reporting only' "$WORKFLOW" >/dev/null || fail "workflow reports routing without changing session"
 # Every executable advance site carries the phase captured for that action.

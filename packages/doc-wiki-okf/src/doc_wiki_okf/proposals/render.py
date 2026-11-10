@@ -28,7 +28,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
-from okf_ext.proposals import HEADER, Mode
+from okf_ext.proposals import Mode
 
 #: The legacy's explicit "nothing was captured" lines, kept verbatim. An empty
 #: heading tells a reviewer nothing; these tell them the reasoner had nothing.
@@ -106,7 +106,7 @@ class ReviewRenderer:
             for key, collected in gathered.items():
                 collected.extend(_as_list(source.get(key)))
 
-        lines: list[str] = [HEADER, "", "## Suggested Action", "", self._suggested_action()]
+        lines: list[str] = ["## Suggested Action", "", self._suggested_action()]
 
         lines.extend(("", "## Evidence From Source", ""))
         lines.extend([f"- {item}" for item in gathered["evidence"]] or [_NO_EVIDENCE])

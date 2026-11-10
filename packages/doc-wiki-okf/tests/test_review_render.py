@@ -1,7 +1,7 @@
 """The review artifact: seven sections, pinned whole, byte-stable."""
 
 from doc_wiki_okf.proposals.render import ReviewRenderer
-from okf_ext.proposals import HEADER, BodyRenderer
+from okf_ext.proposals import BodyRenderer
 
 SOURCES = (
     {
@@ -26,8 +26,6 @@ def test_the_rendered_body_is_exactly_this():
     """Pinned whole, not by fragments -- a body regenerated on every merge is
     worth exactly as much as the reviewer's ability to diff it."""
     assert _renderer()(description="Two sources argue for one page.", sources=SOURCES) == (
-        f"{HEADER}\n"
-        "\n"
         "## Suggested Action\n"
         "\n"
         "Create new Explanation page `adrs/bulk-write.md`.\n"
@@ -64,8 +62,6 @@ def test_the_rendered_body_is_exactly_this():
 
 def test_every_empty_section_says_so_rather_than_rendering_a_bare_heading():
     assert _renderer()(description="why", sources=()) == (
-        f"{HEADER}\n"
-        "\n"
         "## Suggested Action\n"
         "\n"
         "Create new Explanation page `adrs/bulk-write.md`.\n"

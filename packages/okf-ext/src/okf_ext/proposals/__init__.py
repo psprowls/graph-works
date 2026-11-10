@@ -82,14 +82,13 @@ from okf_ext.proposals.plan import (
     plan_propose,
     proposal_path,
 )
-from okf_ext.proposals.render import HEADER, BodyRenderer, render_body
+from okf_ext.proposals.render import BodyRenderer, render_body
 from okf_ext.writing import ApplyResult, FailureKind, Skipped, SkipReason, WriteFailure
 
 #: Ordered UPPER_SNAKE_CASE constants, then CapWords classes, then lowercase
 #: functions, each group alphabetical -- `RUF022` enforces exactly this, and
 #: `test_ext_boundaries.py` asserts the same invariant independently.
 __all__ = [
-    "HEADER",
     "OWNED_PROVENANCE_KEYS",
     "PAGE_STATUSES",
     "PROPOSAL_TYPE",

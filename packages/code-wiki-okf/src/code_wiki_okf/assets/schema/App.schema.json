@@ -11,6 +11,8 @@
     "description": { "type": "string" },
     "tags": { "type": "array", "items": { "type": "string" } },
     "package": { "type": "string" },
+    "app_kind": { "type": "string", "minLength": 1 },
+    "app_signals": { "type": "array", "items": { "type": "string" } },
     "generated": {
       "type": "object",
       "required": ["by", "at"],

@@ -3,7 +3,10 @@
 The guide (`plugins/gw/skills/workflow/references/editing-work-items.md`) is
 what a model reads before hand-editing a work item, so a value it lists must
 be one `gw work lint` accepts, and a value the code accepts must be listed.
-Equality, not subset. Read only: the plugin tree is never written. A checkout
+Equality, not subset. Maintainer warning: this test parses the guide's
+`## Accepted values` section, so that section must keep one line per key in the
+form ``- `key`: `v1` · `v2` ``, with each value in backticks, or the parse fails.
+Read only: the plugin tree is never written. A checkout
 without the plugin tree skips rather than fails.
 """
 

@@ -56,6 +56,8 @@ from doc_wiki_okf.proposals.migrate import MigrationPlan, migrate_and_move, plan
 from doc_wiki_okf.proposals.pool import PoolError, ProposalPool, proposal_pool
 from doc_wiki_okf.proposals.promote import plan_promotion
 from doc_wiki_okf.proposals.render import ReviewRenderer
+from doc_wiki_okf.proposals.strip_header import StripPlan, plan_strip_header
+from doc_wiki_okf.proposals.strip_header import apply as apply_strip_header
 from doc_wiki_okf.resources import seed_files
 from doc_wiki_okf.sources import SOURCE_TYPE, plan_ingest, seed_source_kinds, source_kinds
 
@@ -544,6 +546,60 @@ def promote(
         typer.echo(f"{found.target}: {exc}", err=True)
         raise typer.Exit(code=1) from exc
     _report(plan, dry_run=dry_run, bundle=bundle, json_output=json_output)
+
+
+def _strip_payload(plan: StripPlan) -> dict[str, Any]:
+    return {
+        "ok": plan.ok,
+        "writes": [write.member for write in plan.writes],
+        "refusals": [
+            {"member": refusal.member, "kind": refusal.kind, "detail": refusal.detail} for refusal in plan.refusals
+        ],
+    }
+
+
+@app.command("strip-proposal-header")
+def strip_proposal_header(
+    root: Path = typer.Argument(..., help="Bundle root to rewrite."),  # noqa: B008
+    apply_changes: bool = typer.Option(False, "--apply", help="Write the stripped bodies."),
+    json_output: bool = typer.Option(False, "--json", help="Emit the plan as JSON."),
+) -> None:
+    """Strip the retired machine-ownership comment from live proposals in ROOT.
+
+    A live proposal (`page_status: proposed`, under `proposals/` but not
+    `proposals/_archive/`) whose body opens with one of the two known header
+    shapes loses those lines and the single blank line after them; every other
+    byte is kept. A body opening with any other comment is refused, not
+    touched. A re-run is an empty plan.
+
+    **Previews by default**, like `migrate`: a bundle-wide rewrite should not
+    happen because someone typed a path. Any refusal exits non-zero, but
+    `--apply` still writes the documents that did not refuse.
+    """
+    bundle = _bundle(root)
+    plan = plan_strip_header(bundle)
+    payload = _strip_payload(plan)
+    result = apply_strip_header(bundle, plan) if apply_changes else None
+    if result is not None:
+        payload["written"] = list(result.written)
+        payload["failed"] = [{"member": f.path, "kind": f.kind, "error": f.error} for f in result.failed]
+    if json_output:
+        _emit(payload)
+    else:
+        if result is None:
+            for write in plan.writes:
+                typer.echo(f"would strip {write.member}")
+        else:
+            for member in result.written:
+                typer.echo(f"stripped {member}")
+            for failure in result.failed:
+                _echo_failure(failure)
+        if plan.is_empty:
+            typer.echo("nothing to do")
+        for refusal in plan.refusals:
+            typer.echo(f"refused {refusal.member} ({refusal.kind}): {refusal.detail}", err=True)
+    if not plan.ok or (result is not None and not result.ok):
+        raise typer.Exit(code=1)
 
 
 def _migration_payload(plan: MigrationPlan) -> dict[str, Any]:

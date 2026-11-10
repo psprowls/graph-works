@@ -14,10 +14,6 @@ There is no `gw work edit` verb, by design. You edit the file directly, then run
 
 ## Accepted values
 
-<!-- packages/work-tracker-okf/tests/test_editing_guide_doc_sync.py parses this
-section and asserts each list equals the code's closed vocabulary. Keep one line
-per key, each value in backticks. -->
-
 - `type`: `Release` · `Epic` · `Feature` · `Bug` · `TechDebt` · `TestGap` · `Spike`
 - `status`: `draft` · `stable` · `deprecated`
 - `work_status`: `open` · `accepted` · `in-progress` · `mitigated` · `resolved` · `wontfix` · `superseded`

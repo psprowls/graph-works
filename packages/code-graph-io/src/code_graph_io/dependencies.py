@@ -27,8 +27,8 @@ class WorkspaceImplementation:
     repo_uri: str
 
 
-def _version_entry(key: _ScopedKey, dependency: ManifestDependency) -> str:
-    return f"{key[2]}{dependency.spec}" if dependency.ecosystem == "pypi" else dependency.spec
+def _version_entry(name: str, dependency: ManifestDependency) -> str:
+    return f"{name}{dependency.spec}" if dependency.ecosystem == "pypi" else dependency.spec
 
 
 def _normalize_name(ecosystem: str, name: str) -> str:
@@ -150,7 +150,7 @@ def reconcile_dependencies(
         declarations.append((key, consumer_uri, is_package_consumer))
         bucket = versions.setdefault(key, set())
         if dependency.spec:
-            bucket.add(_version_entry(key, dependency))
+            bucket.add(_version_entry(key[2], dependency))
 
     for manifest in manifests:
         if not manifest.distributable:

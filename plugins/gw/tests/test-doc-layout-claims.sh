@@ -139,10 +139,11 @@ assert_riders_match() {
         return
     fi
 
-    # Table rows live between the fence markers; a row is  | `name` | ... |
+    # The table starts at its header row and ends at the first line that does
+    # not start with a pipe; a row is  | `name` | ... |
     table_names="$(awk '
-        /^<!-- rider-table:start -->$/ { inside = 1; next }
-        /^<!-- rider-table:end -->$/   { inside = 0; next }
+        /^\| Skill \| Stage \| Carries \|$/ { inside = 1; next }
+        inside && !/^\|/ { inside = 0; next }
         inside && match($0, /^\| `[^`]+`/) {
             row = substr($0, RSTART, RLENGTH)
             gsub(/^\| `/, "", row); gsub(/`$/, "", row)
@@ -154,7 +155,7 @@ assert_riders_match() {
 
     if [[ -z "$table_names" ]]; then
         fail "rider table: SKILL.md names at least one rider"
-        echo "      no rows found between the rider-table fence markers"
+        echo "      no rider rows found under the '| Skill | Stage | Carries |' header row"
         return
     fi
     if [[ -z "$sidecar_names" ]]; then
@@ -182,6 +183,17 @@ assert_riders_match() {
 }
 
 assert_riders_match
+
+# Shipped markdown carries no HTML comments: the rider table is found by its
+# header row, and notes to maintainers live in a visible place.
+for doc in "skills/workflow/SKILL.md" "skills/reconciling-spec/SKILL.md" "skills/workflow/references/editing-work-items.md"; do
+    if [[ -f "$PLUGIN_ROOT/$doc" ]] && grep -Fq -- '<!--' "$PLUGIN_ROOT/$doc"; then
+        fail "$doc carries no HTML comment"
+        echo "      $doc contains: <!--"
+    else
+        pass "$doc carries no HTML comment"
+    fi
+done
 
 # Canonical authoring and retrieval must stay documented as well as retiring
 # the incompatible shape. The executable recipe is exercised separately.

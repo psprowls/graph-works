@@ -1,5 +1,5 @@
 frontmatter:
-  owned: [package, path]
+  owned: [package, app_kind, app_signals, path]
   provenance: [generated, last_updated_commit, tokens, prose_refreshed_commit, prose_refresh_attempts]
 sections:
   - heading: Purpose

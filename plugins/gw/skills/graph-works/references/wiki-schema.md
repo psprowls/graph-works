@@ -118,7 +118,7 @@ keys a declaration does not list are left alone.
 |---|---|
 | `Repository` | `package_count` |
 | `Package` | `language`, `version`, `depends_on`, `test_suites`, `entry_points`, `used_by`, `versions_in_use` |
-| `App` | `package` |
+| `App` | `package`, `app_kind`, `app_signals` |
 | `AgentPlugin` | `ecosystem`, `version`, `package` |
 | `TestSuite` | `tested_packages`, `suite_kind`, `file_count` |
 | `File` | `language`, `package`, `role_flags` |

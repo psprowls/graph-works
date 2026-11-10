@@ -76,9 +76,9 @@ a contradiction it could not resolve.
      rewrite flattens it. Append-only also gives every pass an audit trail for
      free.
    - Make narrow in-place edits only for concrete, mechanically-checkable facts
-     the diff shows are now wrong (a quoted signature, a moved path). Each one
-     carries an inline `<!-- reconciled <date>: was X -->` marker pointing at
-     its `## Reconciled` section.
+     the diff shows are now wrong (a quoted signature, a moved path). List each
+     such edit in the appended `## Reconciled` section, naming where it was
+     made, the old value and the new value. Write no inline marker.
    - Record anything you had to guess:
 
      ```bash

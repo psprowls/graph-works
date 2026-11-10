@@ -63,8 +63,8 @@ Mode = Literal["create", "update"]
 #: honest.
 #: `unrenderable-body` is the second such extension. `plan_propose`'s
 #: changed-merge branch replaces the whole body with the supplied renderer's
-#: output. `HEADER` is shared by every renderer and so cannot identify which
-#: contract wrote a body, and a migration-era body can carry prose no
+#: output. A body carries no marker identifying which renderer wrote it, so it
+#: cannot say which contract wrote it, and a migration-era body can carry prose no
 #: `sources[]` key holds at all -- so a merge that cannot first reproduce the
 #: existing body from the existing ledger would be dropping bytes nothing can
 #: reconstruct. Refusing is the only honest answer available at plan time:

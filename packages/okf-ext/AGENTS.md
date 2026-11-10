@@ -149,7 +149,7 @@ replacement body it asks the supplied renderer to reproduce the live
 proposal's current body from that proposal's own `description` and
 `sources[]`, and refuses with `unrenderable-body` on anything but an exact
 match. This is the one place the capability declines work it could have done,
-and it is deliberate: `HEADER` is shared by every renderer and a body can hold
+and it is deliberate: a body carries no marker identifying its renderer and can hold
 prose no ledger field carries, so a mismatch is the only signal available that
 a replacement would drop bytes. The guard runs *after* the malformed,
 `already-decided` and unchanged/no-op paths, so idempotence and the older

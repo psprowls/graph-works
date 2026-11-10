@@ -274,8 +274,6 @@ another stage, same as the stock skill it replaces.
   The STOP lines live in this table too. Omitting one lets the stage skill
   self-chain into the next stage, collapsing two stages into one session.
 
-<!-- rider-table:start -->
-
 | Skill | Stage | Carries |
 |---|---|---|
 | `brainstorming` | design | `--project-dir <workspace>` for the visual companion, plus the spec STOP line |
@@ -285,8 +283,6 @@ another stage, same as the stock skill it replaces.
 | `subagent-driven-development` | execute | Positive authorization + mandatory isolation |
 | `test-driven-development` | execute | Positive authorization + mandatory isolation |
 | `finishing-a-development-branch` | finish | Merge target, on-target confirmation, and explicit outcome report |
-
-<!-- rider-table:end -->
 
   `reconciling-spec`, `epic-design` and `finishing-relay` have no rider — they
   are ours and carry their behavior in their own files. Whether any other stage

@@ -298,8 +298,8 @@ def plan_propose(
     to verify it can reproduce the current body exactly. A mismatch refuses
     with `unrenderable-body` and plans no writes. This conservatively protects
     body-only prose and renderer/context differences; reconcile the document
-    under a separate reviewed operation before retrying. The shared `HEADER`
-    is not proof that a renderer can reproduce a body.
+    under a separate reviewed operation before retrying. A body carries no marker
+    naming its renderer, so only reproduction proves it machine-reproducible.
     """
     stamp = _require_aware(at)
     wanted_type = (target_type or "").strip() or None

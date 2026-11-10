@@ -95,8 +95,13 @@ def _package_reference(name: str, *, repo_name: str) -> str:
 
 
 def render_app(desc: AppDescription, *, repo_name: str) -> Render:
+    frontmatter: dict[str, object] = {"package": _package_reference(desc.name, repo_name=repo_name)}
+    if desc.app_kind:
+        # An App node missing the attribute yields "", which App.schema.json's minLength would reject.
+        frontmatter["app_kind"] = desc.app_kind
+    frontmatter["app_signals"] = list(desc.app_signals)
     return Render(
-        frontmatter={"package": _package_reference(desc.name, repo_name=repo_name)},
+        frontmatter=frontmatter,
         sections={"Files": _files_section(desc.files, repo_name=repo_name)},
     )
 

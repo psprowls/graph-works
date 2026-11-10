@@ -1132,3 +1132,51 @@ def test_show_json_reports_the_resolved_and_recorded_type(tmp_path) -> None:
     assert record["type"] == "Adr"
     assert record["target_type"] == "Adr"
     assert "lane" not in record
+
+
+def _strip_bundle(tmp_path, *, refusing: bool = True):
+    from doc_wiki_okf.proposals.strip_header import _CURRENT_HEADER
+
+    root = tmp_path / "strip"
+    (root / "proposals").mkdir(parents=True)
+    head = "---\ntype: Proposal\ntitle: T\ndescription: d\ntarget: adrs/x.md\npage_status: proposed\n---\n"
+    (root / "proposals/a.md").write_text(f"{head}{_CURRENT_HEADER}\n\n## S\n", encoding="utf-8")
+    if refusing:
+        (root / "proposals/b.md").write_text(f"{head}<!-- note -->\n\n## S\n", encoding="utf-8")
+    return root
+
+
+def test_strip_proposal_header_previews_by_default(tmp_path) -> None:
+    root = _strip_bundle(tmp_path)
+    before = (root / "proposals/a.md").read_text(encoding="utf-8")
+    result = runner.invoke(app, ["strip-proposal-header", str(root)])
+    assert result.exit_code == 1
+    assert "would strip proposals/a.md" in result.output
+    assert "refused proposals/b.md (unrecognised-header)" in result.output
+    assert (root / "proposals/a.md").read_text(encoding="utf-8") == before
+
+
+def test_strip_proposal_header_apply_writes_what_did_not_refuse(tmp_path) -> None:
+    root = _strip_bundle(tmp_path)
+    result = runner.invoke(app, ["strip-proposal-header", str(root), "--apply"])
+    assert result.exit_code == 1
+    assert "stripped proposals/a.md" in result.output
+    assert "<!--" not in (root / "proposals/a.md").read_text(encoding="utf-8")
+    assert "<!-- note -->" in (root / "proposals/b.md").read_text(encoding="utf-8")
+
+
+def test_strip_proposal_header_clean_run_then_rerun(tmp_path) -> None:
+    root = _strip_bundle(tmp_path, refusing=False)
+    assert runner.invoke(app, ["strip-proposal-header", str(root), "--apply"]).exit_code == 0
+    again = runner.invoke(app, ["strip-proposal-header", str(root), "--apply"])
+    assert again.exit_code == 0 and "nothing to do" in again.output
+
+
+def test_strip_proposal_header_json(tmp_path) -> None:
+    root = _strip_bundle(tmp_path, refusing=False)
+    result = runner.invoke(app, ["strip-proposal-header", str(root), "--json"])
+    assert json.loads(result.output)["writes"] == ["proposals/a.md"]
+
+
+def test_strip_proposal_header_rejects_a_missing_root(tmp_path) -> None:
+    assert runner.invoke(app, ["strip-proposal-header", str(tmp_path / "nope")]).exit_code == 1

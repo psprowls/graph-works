@@ -86,7 +86,7 @@ def test_code_drift_and_related_adrs(code_layout_with_proposal: WorkspaceLayout)
     (layout.bundle_dir / "adrs/2026-01-01-x.md").write_text(ADR, encoding="utf-8")
     checks = _by_id(layout)
     assert checks["code-drift"].status == "fail"
-    assert checks["code-drift"].findings == ("missing: src/gone.py:3 (line 31)",)
+    assert checks["code-drift"].findings == ("missing: src/gone.py:3 (line 29)",)
     assert checks["related-adrs"].status == "warn"
     assert checks["related-adrs"].findings == ("adrs/2026-01-01-x#D1: c",)
 

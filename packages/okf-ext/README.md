@@ -524,8 +524,8 @@ branch renders the live proposal's own `description` and `sources[]` through
 the renderer it was handed and requires the result to equal the body on disk
 byte for byte. Anything else refuses with `unrenderable-body` and plans
 nothing. The check is deliberately blunt, because the two signals that would
-let it be subtler do not exist: `HEADER` is shared by every renderer, so it
-cannot say which contract wrote a body, and a body may carry prose — a
+let it be subtler do not exist: a body carries no marker identifying its
+renderer, so nothing says which contract wrote it, and a body may carry prose — a
 migration-era counterexample, a hand-added qualification — that no `sources[]`
 key holds, so no renderer can reconstruct it from the ledger.
 

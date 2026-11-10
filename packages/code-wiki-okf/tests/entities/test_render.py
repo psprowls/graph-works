@@ -76,7 +76,7 @@ def test_render_package_used_by_and_versions_in_use_default_to_empty_lists() -> 
     assert render.frontmatter["versions_in_use"] == []
 
 
-def test_render_app_frontmatter_drops_packaging_facts_for_a_package_reference() -> None:
+def test_render_app_frontmatter_carries_kind_and_signals_but_drops_packaging_facts() -> None:
     desc = AppDescription(
         name="cli-app",
         language="typescript",
@@ -89,8 +89,39 @@ def test_render_app_frontmatter_drops_packaging_facts_for_a_package_reference() 
         test_suites=[],
     )
     render = render_app(desc, repo_name="agent-workspace")
-    assert render.frontmatter == {"package": "[cli-app](/code-graph/agent-workspace/entities/packages/cli-app.md)"}
+    assert render.frontmatter == {
+        "package": "[cli-app](/code-graph/agent-workspace/entities/packages/cli-app.md)",
+        "app_kind": "cli",
+        "app_signals": ["has-shebang"],
+    }
+    assert list(render.frontmatter) == ["package", "app_kind", "app_signals"]
     assert "/code-graph/agent-workspace/file-system/apps/cli/src/index.ts.md" in render.sections["Files"]
+
+
+def _app(*, app_kind: str, app_signals: list[str]) -> AppDescription:
+    return AppDescription(
+        name="cli-app",
+        language="typescript",
+        version="1.0.0",
+        app_kind=app_kind,
+        app_signals=app_signals,
+        files=[],
+        counts={},
+        entry_points=[],
+        test_suites=[],
+    )
+
+
+def test_render_app_empty_signals_render_as_an_empty_list() -> None:
+    render = render_app(_app(app_kind="server", app_signals=[]), repo_name="agent-workspace")
+    assert render.frontmatter["app_kind"] == "server"
+    assert render.frontmatter["app_signals"] == []
+
+
+def test_render_app_omits_an_empty_app_kind_but_keeps_signals() -> None:
+    render = render_app(_app(app_kind="", app_signals=[]), repo_name="agent-workspace")
+    assert "app_kind" not in render.frontmatter
+    assert render.frontmatter["app_signals"] == []
 
 
 def test_render_test_suite_uses_passed_in_tested_packages() -> None:

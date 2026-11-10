@@ -11,12 +11,12 @@ and the chat model are both caller-supplied.
     pool = SubagentPool(trace_dir=Path("traces"), price_lookup=cost_for_usage)
     result = await pool.run_all(items, task, role="librarian", model_id=mid, max_concurrency=5)
 
-It ships exactly one runtime dependency, `langchain-core`: `runner.py`
-constructs `SystemMessage` and `HumanMessage` for real, and driving an injected
-`BaseChatModel` is the runner's whole contract. That is a third-party package,
-never a workspace one — `packages/subagents-io/tests/test_boundaries.py`
-allowlists that single root and rejects every other, and no module here imports
-`os` or a sibling package.
+It ships zero runtime dependencies: `runner.py` hands the injected chat model
+`(role, content)` tuples, which LangChain models coerce themselves.
+`langchain-core` is a dev-only dependency, for type-checking the two
+`TYPE_CHECKING` annotations — `packages/subagents-io/tests/test_boundaries.py`
+rejects any runtime third-party import, and no module here imports `os` or a
+sibling package.
 
 `adapters`, `roles` and `runner` are the generic run path: an adapter protocol
 generic over a reader it knows only closes, role *resolution* with model
@@ -43,7 +43,7 @@ from __future__ import annotations
 import importlib
 from typing import TYPE_CHECKING, Any
 
-__version__ = "0.3.0"
+__version__ = "0.3.1"
 
 _EXPORTS: dict[str, tuple[str, str]] = {
     "Adapter": ("subagents_io.adapters", "Adapter"),

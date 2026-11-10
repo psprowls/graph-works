@@ -68,7 +68,7 @@ _STUB_VERSIONS: dict[str, tuple[str, ...]] = {
     "plugin-fork-io": ("0.1.0", "0.1.1"),
     "repositories-okf": ("0.1.0", "0.1.1", "0.1.2", "0.1.3"),
     "ruamel-yaml": ("0.18.0",),
-    "subagents-io": ("0.2.0", "0.2.1", "0.3.0"),
+    "subagents-io": ("0.2.0", "0.2.1", "0.3.0", "0.3.1"),
     "typer": ("0.27.0",),
     "workflow-orca": ("0.2.0", "0.2.1", "0.3.0"),
     "work-tracker-okf": (

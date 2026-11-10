@@ -322,5 +322,5 @@ in conftests rather than the installed support module.
 
 Work and archive commands and their integration tests live in `gw-work`. Kernel source and tests never import `gw_work`; the reverse AST guard and import-linter enforce that direction.
 
-`gw_kernel.testing.transactions` and `.seed_copy` provide test-only helpers.
+`gw_kernel.testing.transactions`, `.seed_copy` and `.boundaries` provide test-only helpers; `.boundaries` is the stdlib-only AST mechanism the slice boundary tests share, and policy stays in each test.
 The fixture package preserves the six exports above; application code never imports it.

@@ -4,22 +4,25 @@ build-backend = "hatchling.build"
 
 [project]
 name = "subagents-io"
-version = "0.3.0"
+version = "0.3.1"
 description = "A bounded async fan-out pool for role-bound model dispatch: per-item failure isolation, a JSONL trace record per invocation, and opt-in USD cost accounting."
 authors = [
   { name = "Patrick Sprowls", email = "psprowls@gmail.com" },
 ]
 readme = "README.md"
 requires-python = ">=3.12"
-# One runtime dependency, and no extras. `runner.py` constructs SystemMessage
-# and HumanMessage for real, so langchain-core is declared rather than hidden
-# behind TYPE_CHECKING — it is pure Python and drags in no provider stack, no
-# boto3, and above all no workspace package. There is deliberately no
+# Zero runtime dependencies, and no extras. `runner.py` passes `(role, content)`
+# tuples that LangChain chat models coerce themselves, so nothing imports
+# langchain_core at runtime. It is a dev-only dependency (below), there to let
+# mypy resolve the two TYPE_CHECKING annotations. There is deliberately no
 # `[project.optional-dependencies]`: an optional dependency is still a
 # declared edge, so `subagents-io[bedrock]` is not a thing and cost accounting
 # still arrives as an injected callable. `tests/test_boundaries.py` holds the
 # import side of that, `tests/test_package.py` the packaging side.
-dependencies = ["langchain-core>=1.4"]
+dependencies = []
+
+[dependency-groups]
+dev = ["langchain-core>=1.4"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/subagents_io"]

@@ -373,3 +373,18 @@ async def test_run_loop_empty_trace_dir_yields_none(tmp_path):
     empty.mkdir()
     outcome = await run_loop(_FakeLoopAdapter(), _ctx(tmp_path), "q", binding=_binding(), trace_dir=empty)
     assert outcome.trace_path is None
+
+
+_WIRE = [("system", "s"), ("human", "h")]
+
+
+async def test_stream_hands_the_model_role_tuples_not_message_objects():
+    llm = FakeLLM([_Chunk("x")])
+    await stream_and_parse(llm, system="s", human="h", parse=None, do_parse=False, on_chunk=lambda _t: None)
+    assert llm.invocations == [_WIRE]
+
+
+async def test_run_all_hands_the_model_role_tuples_not_message_objects(tmp_path):
+    llm = FakeLLM([], response=_Resp("answer"))
+    await run_all(_FakeAdapter(items=("a",)), _ctx(tmp_path), binding=_binding(llm), trace_dir=tmp_path / "t")
+    assert llm.invocations == [[("system", "sys:a"), ("human", "hum:a")]]

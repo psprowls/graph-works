@@ -18,8 +18,8 @@ documented" below.
 ## Commands
 
 Run from the repo root (`uv run --package` resolves this package's own
-dependency closure — a plain `uv run` from here will not see `langchain-core`
-correctly wired against the workspace lock):
+dependency closure — a plain `uv run` from here will not see the dev-only
+`langchain-core` correctly wired against the workspace lock):
 
 ```bash
 uv run --package subagents-io pytest packages/subagents-io/tests
@@ -236,8 +236,8 @@ keyword to pass) rather than an `AttributeError` on `None`.
 `runner.py`'s `run_single`/`run_all`/`run_loop` are three entry points that
 all take their model and spec from a `RoleBinding`, never construct one.
 `stream_and_parse` is the one place this package streams a real
-`BaseChatModel` (`llm.astream(...)`, constructing `SystemMessage`/
-`HumanMessage` from `langchain_core.messages`) and it never raises on a
+`BaseChatModel` (`llm.astream(...)`, passing `("system", ...)`/`("human", ...)` role
+tuples that the model coerces itself — no `langchain_core` import) and it never raises on a
 parser failure — a bad parse lands in `RunOutcome.parse_error`, mirroring the
 content-path tolerance pattern used elsewhere in this workspace (see the root
 `AGENTS.MD` on okf-io's "nothing on the content path raises," which this
@@ -253,10 +253,11 @@ per module, with **zero exemptions**:
 2. no module imports another workspace package, including `models_io` —
    siblings are derived from the filesystem (`packages/*/src/*`), not
    hardcoded, so a package added later is covered automatically;
-3. `langchain_core` is the **only** non-stdlib root any module imports, at
-   runtime or under `TYPE_CHECKING` — this is an allowlist subtracted from
-   `sys.stdlib_module_names`, not a watchlist, so a brand-new third-party
-   import fails here before it ever reaches `pyproject.toml`;
+3. runtime imports (outside `if TYPE_CHECKING:`) are stdlib or this package
+   only, and `langchain_core` is the **only** non-stdlib root allowed under
+   `TYPE_CHECKING` — an allowlist subtracted from `sys.stdlib_module_names`, so
+   a brand-new third-party import fails here before it reaches
+   `pyproject.toml`; `tests/test_package.py` backs it by walking `uv.lock`;
 4. the module list (`ALL_MODULES` in that test file) is exactly the files
    under `src/subagents_io` — adding a module without listing it there fails
    loudly.

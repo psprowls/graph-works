@@ -6,13 +6,12 @@ this guard. Fixtures live in throwaway source trees, never shipped modules.
 
 from __future__ import annotations
 
-import ast
 import sys
 import tomllib
-from importlib.util import resolve_name
 from pathlib import Path
 
 import pytest
+from gw_kernel.testing.boundaries import discovery_lookups, manifest_reads, module_name, scan_imports
 
 PACKAGE = Path(__file__).resolve().parents[1]
 SRC = PACKAGE / "src" / "gw_wiki"
@@ -27,27 +26,18 @@ DECLARED = frozenset(
 def _offenders(paths: list[Path], *, tests: bool = False) -> list[str]:
     found: list[str] = []
     for path in paths:
-        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
         source_root = next((parent for parent in path.parents if parent.name == "src"), None)
-        package = ".".join(path.parent.relative_to(source_root).parts) if source_root else "gw_wiki"
-        for node in ast.walk(tree):
-            if isinstance(node, ast.Import):
-                targets = [alias.name for alias in node.names]
-            elif isinstance(node, ast.ImportFrom):
-                module = node.module or ""
-                if node.level:
-                    try:
-                        module = resolve_name("." * node.level + module, package)
-                    except ImportError:
-                        # Invalid relative ancestors must not hide named forbidden roots.
-                        module = node.module or ""
-                targets = [module, *(f"{module}.{alias.name}" if module else alias.name for alias in node.names)]
-            else:
-                continue
-            if any(not _permitted(target, tests=tests) for target in targets):
-                found.append(f"{path}:{node.lineno} import boundary")
+        module = module_name(path, source_root) if source_root else f"gw_wiki.{path.stem}"
+        scan = scan_imports(path.read_text(encoding="utf-8"), module=module)
+        for fact in scan.imports:
+            names = fact.targets if fact.resolved else fact.raw
+            if not fact.resolved or any(not _permitted(name, tests=tests) for name in names):
+                found.append(f"{path}:{fact.line} import boundary")
         if not tests:
-            found.extend(_discovery_offenders(path, tree))
+            found.extend(
+                f"{path}:{finding.line} workspace discovery"
+                for finding in (*discovery_lookups(scan.tree), *manifest_reads(scan.tree, scan.aliases))
+            )
     return found
 
 
@@ -58,70 +48,6 @@ def _permitted(target: str, *, tests: bool) -> bool:
     if root == "gw_kernel":
         return bool(child) and child.split(".", 1)[0] in KERNEL_SEAMS
     return root in sys.stdlib_module_names | {"__future__", "gw_wiki"} | (DECLARED - {"gw_kernel"})
-
-
-def _discovery_offenders(path: Path, tree: ast.AST) -> list[str]:
-    binding_roots = frozenset({"os", "io", "builtins"})
-    aliases = {root: root for root in binding_roots}
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Import):
-            aliases.update(
-                (alias.asname or alias.name, alias.name) for alias in node.names if alias.name in binding_roots
-            )
-        elif isinstance(node, ast.ImportFrom) and node.module in binding_roots and node.level == 0:
-            aliases.update((alias.asname or alias.name, f"{node.module}.{alias.name}") for alias in node.names)
-
-    def symbol(node: ast.AST) -> str:
-        if isinstance(node, ast.Name):
-            return aliases.get(node.id, node.id)
-        if isinstance(node, ast.Attribute):
-            return f"{symbol(node.value)}.{node.attr}"
-        return ""
-
-    def argument(node: ast.Call, keyword: str) -> ast.AST | None:
-        return (
-            node.args[0] if node.args else next((entry.value for entry in node.keywords if entry.arg == keyword), None)
-        )
-
-    manifest_names: set[str] = set()
-
-    def manifest_path(node: ast.AST) -> bool:
-        return any(
-            (
-                isinstance(part, ast.Constant)
-                and isinstance(part.value, str)
-                and Path(part.value).name == "workspace.yaml"
-            )
-            or (isinstance(part, ast.Name) and part.id in manifest_names)
-            for part in ast.walk(node)
-        )
-
-    # Track locally named literal paths; ordinary string data alone is allowed.
-    for node in ast.walk(tree):
-        if isinstance(node, (ast.Assign, ast.AnnAssign)) and node.value is not None and manifest_path(node.value):
-            targets = node.targets if isinstance(node, ast.Assign) else [node.target]
-            manifest_names.update(target.id for target in targets if isinstance(target, ast.Name))
-    found = []
-    for node in ast.walk(tree):
-        discovery = False
-        if isinstance(node, ast.Subscript):
-            discovery = (
-                symbol(node.value) == "os.environ"
-                and isinstance(node.slice, ast.Constant)
-                and node.slice.value == "GRAPH_WORKS_DIR"
-            )
-        elif isinstance(node, ast.Call):
-            if symbol(node.func) in {"os.getenv", "os.environ.get"}:
-                key = argument(node, "key")
-                discovery = isinstance(key, ast.Constant) and key.value == "GRAPH_WORKS_DIR"
-            if isinstance(node.func, ast.Attribute) and node.func.attr in {"read_text", "read_bytes", "open"}:
-                discovery |= manifest_path(node.func.value)
-            if symbol(node.func) in {"open", "io.open", "builtins.open"}:
-                target = argument(node, "file")
-                discovery |= target is not None and manifest_path(target)
-        if discovery:
-            found.append(f"{path}:{node.lineno} workspace discovery")
-    return found
 
 
 def _fixture(tmp_path: Path, source: str, module: str = "gw_wiki/query/injected.py") -> Path:
@@ -175,10 +101,6 @@ def test_source_rejects_forbidden_imports(tmp_path: Path, source: str) -> None:
         "import os\nos.getenv(key='AI_GATEWAY_API_KEY')",
         "from os import getenv as read_env\nread_env(key='AI_GATEWAY_API_KEY')",
         "from os import environ as env\nenv.get(key='AI_GATEWAY_API_KEY')",
-        "import io\nio.open('ordinary.yaml', encoding='utf-8')",
-        "import io as streams\nstreams.open(file='ordinary.yaml', encoding='utf-8')",
-        "from io import open as reader\nreader('ordinary.yaml', encoding='utf-8')",
-        "import builtins as basic\nbasic.open(file='ordinary.yaml', encoding='utf-8')",
         "import io\nname = 'workspace.yaml'",
         "import io as streams\nstreams.open('ordinary.yaml')",
         "import builtins\nbuiltins.open(file='ordinary.yaml')",
@@ -201,16 +123,8 @@ def test_source_accepts_declared_downward_imports_and_data(tmp_path: Path, sourc
         "import os\nx = os.environ.get(key='GRAPH_WORKS_DIR')",
         "from os import environ as env\nx = env.get(key='GRAPH_WORKS_DIR')",
         "from os import environ\nx = environ['GRAPH_WORKS_DIR']",
-        "import io\nx = io.open('workspace.yaml', encoding='utf-8')",
-        "import io as streams\nx = streams.open(file='workspace.yaml', encoding='utf-8')",
-        "from io import open\nx = open('workspace.yaml', encoding='utf-8')",
-        "from io import open as reader\nx = reader(file='workspace.yaml', encoding='utf-8')",
-        "x = open(file='workspace.yaml', encoding='utf-8')",
-        "import builtins as basic\nx = basic.open(file='workspace.yaml', encoding='utf-8')",
-        "from builtins import open as reader\nx = reader('workspace.yaml', encoding='utf-8')",
         "import io as streams\nx = streams.open('workspace.yaml')",
         "from io import open as reader\nx = reader('workspace.yaml')",
-        "import builtins\nx = builtins.open('workspace.yaml')",
         "from builtins import open\nx = open(file='workspace.yaml')",
         "import os as operating\nx = operating.environ.get(key='GRAPH_WORKS_DIR')",
         "from os import environ\nx = environ.get(key='GRAPH_WORKS_DIR')",

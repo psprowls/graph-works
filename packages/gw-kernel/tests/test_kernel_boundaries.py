@@ -16,10 +16,10 @@ this reorg's design spec asks for.
 from __future__ import annotations
 
 import ast
-from importlib.util import resolve_name
 from pathlib import Path
 
 import pytest
+from gw_kernel.testing.boundaries import module_name, scan_imports, under
 
 SRC = Path(__file__).resolve().parents[1] / "src" / "gw_kernel"
 
@@ -86,19 +86,12 @@ def _display_cache_offenders(paths: list[Path]) -> list[str]:
         if path in DISPLAY_CACHE_IMPORTERS:
             continue
         source_root = next(parent for parent in path.parents if parent.name == "src")
-        package = ".".join(path.parent.relative_to(source_root).parts)
-        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"), filename=str(path))):
-            if isinstance(node, ast.Import):
-                targets = [alias.name for alias in node.names]
-            elif isinstance(node, ast.ImportFrom):
-                module = node.module or ""
-                if node.level:
-                    module = resolve_name("." * node.level + module, package)
-                targets = [module, *(f"{module}.{alias.name}" for alias in node.names)]
-            else:
-                continue
-            if any(target == DISPLAY_CACHE or target.startswith(DISPLAY_CACHE + ".") for target in targets):
-                found.append(f"{path}:{node.lineno}")
+        scan = scan_imports(path.read_text(encoding="utf-8"), module=module_name(path, source_root))
+        found.extend(
+            f"{path}:{fact.line}"
+            for fact in scan.imports
+            if not fact.resolved or any(under(target, DISPLAY_CACHE) for target in fact.targets)
+        )
     return found
 
 

@@ -17,9 +17,10 @@ The `os` assertion covers EVERY module, with no exemption, and so does the
 sibling assertion. That is the payoff of injecting the price lookup, the trace
 directory, the graph reader and the model factory instead of importing any of
 them: config-io has to carve out `projection.py` for its atomic write; this
-package carves out nothing. The third-party allowlist is a separate rule with a
-separate reason — `langchain-core` is not a workspace package, and declaring it
-leaves the strict layer exactly where it was.
+package carves out nothing. Third party is a separate rule with a
+separate reason: nothing is imported from outside the stdlib at runtime, and
+`langchain-core` — a dev-only dependency — may appear solely inside an
+`if TYPE_CHECKING:` block, for the two annotations mypy resolves.
 """
 
 from __future__ import annotations
@@ -47,10 +48,10 @@ ALL_MODULES = (
     "trace.py",
 )
 
-#: The one third-party root any module in this package may import — at runtime
-#: or otherwise. It is an ALLOWLIST, not a watchlist; see
-#: `test_langchain_core_is_the_only_third_party_import`.
-THIRD_PARTY_ROOTS = {"langchain_core"}
+#: The one third-party root a module may import, and only under
+#: `if TYPE_CHECKING:`. It is an ALLOWLIST for type-only imports; runtime
+#: imports have none. See `test_third_party_imports_are_type_checking_only`.
+TYPE_ONLY_ROOTS = {"langchain_core"}
 
 
 def modules() -> list[Path]:
@@ -59,16 +60,40 @@ def modules() -> list[Path]:
     return found
 
 
-def import_roots(path: Path) -> set[str]:
-    """The first segment of every module this file imports."""
+def _is_type_checking(test: ast.expr) -> bool:
+    if isinstance(test, ast.Name):
+        return test.id == "TYPE_CHECKING"
+    return isinstance(test, ast.Attribute) and test.attr == "TYPE_CHECKING"
+
+
+def _roots(path: Path, *, type_checking_only: bool | None) -> set[str]:
+    """First segment of every import; `None` = all, True/False = filter by block."""
     tree = ast.parse(path.read_text(encoding="utf-8"))
     roots: set[str] = set()
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Import):
-            roots.update(alias.name.split(".")[0] for alias in node.names)
-        elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
-            roots.add(node.module.split(".")[0])
+
+    def visit(node: ast.AST, guarded: bool) -> None:
+        if isinstance(node, ast.Import | ast.ImportFrom):
+            if type_checking_only is None or guarded == type_checking_only:
+                if isinstance(node, ast.Import):
+                    roots.update(alias.name.split(".")[0] for alias in node.names)
+                elif node.level == 0 and node.module:
+                    roots.add(node.module.split(".")[0])
+            return
+        for field, value in ast.iter_fields(node):
+            children = value if isinstance(value, list) else [value]
+            for child in children:
+                if not isinstance(child, ast.AST):
+                    continue
+                in_guard = isinstance(node, ast.If) and field == "body" and _is_type_checking(node.test)
+                visit(child, guarded or in_guard)
+
+    visit(tree, False)
     return roots
+
+
+def import_roots(path: Path) -> set[str]:
+    """The first segment of every module this file imports."""
+    return _roots(path, type_checking_only=None)
 
 
 def sibling_import_names() -> set[str]:
@@ -116,26 +141,24 @@ def test_no_module_imports_os(module):
 
 
 @pytest.mark.parametrize("module", modules(), ids=lambda p: p.name)
-def test_langchain_core_is_the_only_third_party_import(module):
-    # This replaces an assertion that `langchain_core` stayed behind
-    # `if TYPE_CHECKING:`, which is now false by design: `runner.py`
-    # constructs SystemMessage and HumanMessage, and that is why the package
-    # declares a dependency at all.
-    #
-    # Strictly stronger than what it replaces. The old test intersected each
-    # module's imports with THIRD_PARTY_ROOTS and inspected only what it found
-    # there, so a brand-new third-party import passed it in silence. This one
-    # subtracts the stdlib and this package's own name and asserts what is left
-    # is a subset of the allowlist — a second dependency fails here before it
+def test_runtime_imports_are_stdlib_or_this_package(module):
+    # There is no third-party allowlist at runtime: the package declares zero
+    # runtime dependencies, so a bare third-party import fails here before it
     # can reach `pyproject.toml`.
-    roots = import_roots(module) - set(sys.stdlib_module_names) - {"subagents_io"}
-    assert roots <= THIRD_PARTY_ROOTS, f"{module.name} imports {sorted(roots - THIRD_PARTY_ROOTS)}"
+    roots = _roots(module, type_checking_only=False) - set(sys.stdlib_module_names) - {"subagents_io"}
+    assert not roots, f"{module.name} imports {sorted(roots)} at runtime"
 
 
-def test_langchain_core_is_actually_imported_somewhere():
-    # Guards the guard: if the annotation is ever dropped, the test above would
-    # pass vacuously on every module rather than failing.
-    assert any(import_roots(m) & THIRD_PARTY_ROOTS for m in modules())
+@pytest.mark.parametrize("module", modules(), ids=lambda p: p.name)
+def test_third_party_imports_are_type_checking_only(module):
+    roots = _roots(module, type_checking_only=True) - set(sys.stdlib_module_names) - {"subagents_io"}
+    assert roots <= TYPE_ONLY_ROOTS, f"{module.name} imports {sorted(roots - TYPE_ONLY_ROOTS)} under TYPE_CHECKING"
+
+
+def test_langchain_core_is_imported_under_type_checking_somewhere():
+    # Guards the guard: if the annotations are ever dropped, the test above
+    # would pass vacuously on every module rather than failing.
+    assert any(_roots(m, type_checking_only=True) & TYPE_ONLY_ROOTS for m in modules())
 
 
 def test_the_module_list_is_complete():

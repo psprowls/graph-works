@@ -17,12 +17,12 @@ module imports a sibling workspace package.
 pip install subagents-io
 ```
 
-**One runtime dependency, and no extras.** `runner.py` constructs
-`SystemMessage` and `HumanMessage`, so `langchain-core` is declared rather than
-hidden: it is pure Python, drags in no provider stack and no `boto3`, and above
-all is not a workspace package. `pool.py`'s `RunnableConfig` is still a
-`TypedDict` imported under `TYPE_CHECKING`, because that one really is
-annotation-only.
+**Zero runtime dependencies, and no extras.** `runner.py` hands the model
+`(role, content)` tuples, which LangChain chat models coerce into messages
+themselves, so nothing imports `langchain_core` at runtime. `langchain-core` is
+a dev-only dependency: `roles.py`'s `BaseChatModel` and `pool.py`'s
+`RunnableConfig` are annotation-only imports under `TYPE_CHECKING`, and mypy
+needs it to resolve them.
 
 There is deliberately **no `[project.optional-dependencies]`**. An optional
 dependency is still a declared edge, so there is no `subagents-io[bedrock]`:
@@ -233,13 +233,14 @@ parses without ever raising on a parser failure, which lands in `parse_error`.
 
 ## Boundaries
 
-`tests/test_boundaries.py` walks `src/subagents_io` with `ast` and asserts four
+`tests/test_boundaries.py` walks `src/subagents_io` with `ast` and asserts five
 things: no module imports `os`; no module imports a sibling workspace package
-(siblings derived from the filesystem, not hardcoded); `langchain_core` is the
-*only* non-stdlib root any module imports, at runtime or otherwise; and the
-module list is complete, so adding a module is a decision rather than an
-omission. The third of those is an allowlist, which is what makes a second
-runtime dependency fail a test before it reaches `pyproject.toml`.
+(siblings derived from the filesystem, not hardcoded); no runtime import (one
+outside an `if TYPE_CHECKING:` block) is non-stdlib; `langchain_core` is the
+*only* non-stdlib root allowed under `TYPE_CHECKING`; and the module list is
+complete, so adding a module is a decision rather than an omission.
+`tests/test_package.py` also walks `uv.lock` to prove `langchain-core` is not in
+the runtime closure of gw-kernel, workflow-local or workflow-orca.
 
 The root `[tool.importlinter]` carries the workspace half of the same rule: an
 `independence` contract over the five band-1 packages, which forbids edges in

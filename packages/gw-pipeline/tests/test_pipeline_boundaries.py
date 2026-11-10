@@ -7,13 +7,12 @@ is allowed; transcript_capture is the only production discovery delegation.
 
 from __future__ import annotations
 
-import ast
 import sys
 import tomllib
-from importlib.util import resolve_name
 from pathlib import Path
 
 import pytest
+from gw_kernel.testing.boundaries import discovery_lookups, manifest_reads, module_name, scan_imports, under
 
 PACKAGE = Path(__file__).resolve().parents[1]
 SRC = PACKAGE / "src/gw_pipeline"
@@ -26,49 +25,17 @@ TRANSCRIPT = "gw_pipeline.transcript_capture"
 SUPPORT = ("gw_pipeline.testing", "gw_pipeline.test_support", "gw_kernel.testing")
 
 
-def imports(source: str, *, module: str) -> tuple[ast.Module, list[str], dict[str, str]]:
-    tree = ast.parse(source)
-    targets: list[str] = []
-    aliases: dict[str, str] = {}
-    package = module.removesuffix(".__init__") if module.endswith(".__init__") else module.rpartition(".")[0]
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Import):
-            for alias in node.names:
-                targets.append(alias.name)
-                aliases[alias.asname or alias.name.split(".")[0]] = (
-                    alias.name if alias.asname else alias.name.split(".")[0]
-                )
-        elif isinstance(node, ast.ImportFrom):
-            target = node.module or ""
-            if node.level:
-                targets.extend(
-                    raw
-                    for raw in [target, *(alias.name for alias in node.names)]
-                    if raw.split(".")[0] in SIBLINGS | INTERFACES | {"gw_kernel"}
-                )
-                try:
-                    target = resolve_name("." * node.level + target, package)
-                except ImportError:
-                    targets.append(ast.unparse(node))
-                    continue
-            targets.extend([target, *(f"{target}.{alias.name}" for alias in node.names)])
-            for alias in node.names:
-                aliases[alias.asname or alias.name] = f"{target}.{alias.name}"
-    # Include access through imported ancestors in the same target projection
-    # used by both package admission and the repository-wide support guard.
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Attribute):
-            parts = ast.unparse(node).split(".")
-            if parts[0] in aliases:
-                targets.append(".".join([aliases[parts[0]], *parts[1:]]))
-    return tree, targets, aliases
-
-
 def offenders(source: str, *, module: str, test: bool = False) -> list[str]:
-    tree, targets, aliases = imports(source, module=module)
+    scan = scan_imports(source, module=module)
     found: list[str] = []
     support = module == "gw_pipeline.testing" or module.startswith("gw_pipeline.test_support.")
-    for target in targets:
+    checked = [
+        *scan.targets,
+        *scan.projections,
+        *(name for name in scan.raw if name.split(".")[0] in SIBLINGS | INTERFACES | {"gw_kernel"}),
+        *scan.unresolved,
+    ]
+    for target in checked:
         root = target.split(".")[0]
         if (
             root in SIBLINGS | INTERFACES
@@ -80,175 +47,15 @@ def offenders(source: str, *, module: str, test: bool = False) -> list[str]:
             | ({"pytest"} if test or support else set())
         ):
             found.append(target)
-        if not test and not support and any(target == name or target.startswith(name + ".") for name in SUPPORT):
+        if not test and not support and any(under(target, name) for name in SUPPORT):
             found.append(target)
     if not test:
-        for node in ast.walk(tree):
-            if isinstance(node, (ast.Call, ast.Subscript)) and "GRAPH_WORKS_DIR" in ast.unparse(node):
-                found.append(ast.unparse(node))
+        found.extend(finding.text for finding in discovery_lookups(scan.tree))
         # This exemption covers the imported kernel resolver only, never a new
         # environment lookup or direct manifest reader.
         if module != TRANSCRIPT:
-            found.extend(target for target in targets if target == DISCOVERY or target.startswith(DISCOVERY + "."))
-        found.extend(manifest_reads(tree, aliases))
-    return found
-
-
-def manifest_reads(tree: ast.AST, aliases: dict[str, str]) -> list[str]:
-    """Follow simple assignments within lexical scopes, resolving open aliases."""
-    found: list[str] = []
-    scopes: list[tuple[str, set[str]]] = [("module", set())]
-
-    def is_manifest(expression: ast.AST) -> bool:
-        return any(
-            (isinstance(node, ast.Constant) and isinstance(node.value, str) and "workspace.yaml" in node.value)
-            or (isinstance(node, ast.Name) and node.id in scopes[-1][1])
-            for node in ast.walk(expression)
-        )
-
-    def bind(target: ast.AST, value: ast.AST | None) -> None:
-        paths = scopes[-1][1]
-        if isinstance(target, ast.Name):
-            if value is not None and is_manifest(value):
-                paths.add(target.id)
-            else:
-                paths.discard(target.id)
-
-    def argument_names(args: ast.arguments) -> set[str]:
-        names = {arg.arg for arg in (*args.posonlyargs, *args.args, *args.kwonlyargs)}
-        names.update(arg.arg for arg in (args.vararg, args.kwarg) if arg is not None)
-        return names
-
-    def target_names(target: ast.AST) -> set[str]:
-        return {node.id for node in ast.walk(target) if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store)}
-
-    def function_locals(node: ast.FunctionDef | ast.AsyncFunctionDef) -> set[str]:
-        names = argument_names(node.args)
-        external: set[str] = set()
-        pending: list[ast.AST] = list(node.body)
-        while pending:
-            child = pending.pop()
-            if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
-                names.add(child.name)
-                continue
-            if isinstance(child, (ast.Lambda, ast.ListComp, ast.SetComp, ast.DictComp, ast.GeneratorExp)):
-                continue
-            if isinstance(child, ast.Name) and isinstance(child.ctx, ast.Store):
-                names.add(child.id)
-            elif isinstance(child, (ast.Import, ast.ImportFrom)):
-                names.update(alias.asname or alias.name.split(".")[0] for alias in child.names)
-            elif isinstance(child, (ast.Global, ast.Nonlocal)):
-                external.update(child.names)
-            pending.extend(ast.iter_child_nodes(child))
-        return names - external
-
-    def manifest_defaults(args: ast.arguments) -> set[str]:
-        positional = (*args.posonlyargs, *args.args)
-        defaults = [*zip(positional[-len(args.defaults) :], args.defaults, strict=False)]
-        defaults.extend(zip(args.kwonlyargs, args.kw_defaults, strict=True))
-        return {arg.arg for arg, value in defaults if value is not None and is_manifest(value)}
-
-    class Reads(ast.NodeVisitor):
-        def visit_FunctionDef(self, node: ast.FunctionDef | ast.AsyncFunctionDef) -> None:
-            for child in ast.iter_child_nodes(node):
-                if child not in node.body:
-                    self.visit(child)
-            # Defaults use the defining scope (including a class namespace),
-            # while a method body closes over the enclosing function/module.
-            default_paths = manifest_defaults(node.args)
-            inherited = next(paths for kind, paths in reversed(scopes) if kind != "class")
-            scopes.append(("function", (inherited - function_locals(node)) | default_paths))
-            try:
-                for statement in node.body:
-                    self.visit(statement)
-            finally:
-                scopes.pop()
-            scopes[-1][1].discard(node.name)
-
-        visit_AsyncFunctionDef = visit_FunctionDef
-
-        def visit_Lambda(self, node: ast.Lambda) -> None:
-            self.visit(node.args)  # Defaults are evaluated in the enclosing scope.
-            default_paths = manifest_defaults(node.args)
-            inherited = next(paths for kind, paths in reversed(scopes) if kind != "class")
-            scopes.append(("function", (inherited - argument_names(node.args)) | default_paths))
-            try:
-                self.visit(node.body)
-            finally:
-                scopes.pop()
-
-        def visit_ListComp(self, node: ast.ListComp | ast.SetComp | ast.DictComp | ast.GeneratorExp) -> None:
-            first = node.generators[0]
-            self.visit(first.iter)  # Only the first iterable uses the enclosing scope.
-            first_manifest = is_manifest(first.iter)
-            locals_ = set().union(*(target_names(generator.target) for generator in node.generators))
-            inherited = next(paths for kind, paths in reversed(scopes) if kind != "class")
-            scopes.append(("comprehension", inherited - locals_))
-            try:
-                for index, generator in enumerate(node.generators):
-                    if index:
-                        self.visit(generator.iter)
-                    manifest = is_manifest(generator.iter) if index else first_manifest
-                    names = target_names(generator.target)
-                    if manifest:
-                        scopes[-1][1].update(names)
-                    else:
-                        scopes[-1][1].difference_update(names)
-                    self.visit(generator.target)
-                    for condition in generator.ifs:
-                        self.visit(condition)
-                if isinstance(node, ast.DictComp):
-                    self.visit(node.key)
-                    self.visit(node.value)
-                else:
-                    self.visit(node.elt)
-            finally:
-                scopes.pop()
-
-        visit_SetComp = visit_ListComp
-        visit_DictComp = visit_ListComp
-        visit_GeneratorExp = visit_ListComp
-
-        def visit_ClassDef(self, node: ast.ClassDef) -> None:
-            for child in ast.iter_child_nodes(node):
-                if child not in node.body:
-                    self.visit(child)
-            scopes.append(("class", scopes[-1][1].copy()))
-            try:
-                for statement in node.body:
-                    self.visit(statement)
-            finally:
-                scopes.pop()
-            scopes[-1][1].discard(node.name)
-
-        def visit_Assign(self, node: ast.Assign) -> None:
-            self.visit(node.value)
-            for target in node.targets:
-                bind(target, node.value)
-
-        def visit_AnnAssign(self, node: ast.AnnAssign) -> None:
-            if node.value is not None:
-                self.visit(node.value)
-                bind(node.target, node.value)
-
-        def visit_Call(self, node: ast.Call) -> None:
-            parts = ast.unparse(node.func).split(".")
-            target = ".".join([aliases.get(parts[0], parts[0]), *parts[1:]])
-            if target in {"open", "builtins.open"}:
-                filename = (
-                    node.args[0] if node.args else next((k.value for k in node.keywords if k.arg == "file"), None)
-                )
-                if filename is not None and is_manifest(filename):
-                    found.append(ast.unparse(node))
-            elif (
-                isinstance(node.func, ast.Attribute)
-                and node.func.attr in {"read_text", "read_bytes", "open"}
-                and is_manifest(node.func.value)
-            ):
-                found.append(ast.unparse(node))
-            self.generic_visit(node)
-
-    Reads().visit(tree)
+            found.extend(target for target in checked if under(target, DISCOVERY))
+        found.extend(finding.text for finding in manifest_reads(scan.tree, scan.aliases))
     return found
 
 
@@ -352,7 +159,7 @@ def test_shipped_source_and_tests_obey_the_boundary():
         paths = sorted(root.rglob("*.py"))
         assert paths, f"empty boundary root: {root}"
         for path in paths:
-            module = ".".join(("gw_pipeline", *path.relative_to(root).with_suffix("").parts))
+            module = module_name(path, root, package="gw_pipeline")
             found.extend(
                 f"{path}:{target}" for target in offenders(path.read_text(encoding="utf-8"), module=module, test=test)
             )
@@ -379,47 +186,16 @@ def test_production_packages_do_not_import_migrated_test_support():
     found = []
     for root in sorted(PACKAGE.parent.glob("*/src")):
         for path in sorted(root.rglob("*.py")):
-            relative = path.relative_to(root).with_suffix("")
-            module = ".".join(relative.parts)
+            module = module_name(path, root)
             if module == "gw_pipeline.testing" or module.startswith("gw_pipeline.test_support."):
                 continue
-            _, targets, _ = imports(path.read_text(encoding="utf-8"), module=module)
+            scan = scan_imports(path.read_text(encoding="utf-8"), module=module)
             found.extend(
                 f"{path}:{target}"
-                for target in targets
-                if any(target == support or target.startswith(support + ".") for support in SUPPORT[:2])
+                for target in scan.targets + scan.projections
+                if any(under(target, support) for support in SUPPORT[:2])
             )
     assert found == []
-
-
-@pytest.mark.parametrize(
-    "source",
-    [
-        "from pathlib import Path\ndef read(manifest=Path('workspace.yaml')):\n    return manifest.read_text()",
-        "from pathlib import Path\ndef read(*, manifest=Path('workspace.yaml')):\n    return manifest.read_bytes()",
-        "from pathlib import Path\nmanifest = Path('workspace.yaml')\n"
-        "def read(path=manifest, /):\n    return path.open()",
-        "from pathlib import Path\nasync def read(manifest=Path('workspace.yaml')):\n    return manifest.read_text()",
-        "from pathlib import Path\nclass Reader:\n    manifest = Path('workspace.yaml')\n"
-        "    def read(self, path=manifest):\n        return path.read_text()",
-    ],
-)
-def test_manifest_function_defaults_are_rejected(source):
-    assert offenders(source, module="gw_pipeline.finish")
-
-
-@pytest.mark.parametrize(
-    "source",
-    [
-        "from pathlib import Path\ndef read(manifest=Path('notes.md')):\n    return manifest.read_text()",
-        "from pathlib import Path\ndef read(manifest=Path('workspace.yaml')):\n"
-        "    manifest = Path('notes.md')\n    return manifest.read_text()",
-        "from pathlib import Path\nmanifest = Path('workspace.yaml')\n"
-        "def read(manifest=Path('notes.md')):\n    return manifest.read_text()",
-    ],
-)
-def test_manifest_default_aliases_preserve_normal_shadowing(source):
-    assert offenders(source, module="gw_pipeline.finish") == []
 
 
 @pytest.mark.parametrize(
@@ -444,5 +220,5 @@ def test_ancestor_helper_access_is_test_only(source):
     ],
 )
 def test_shared_import_scan_resolves_ancestor_helper_access(source):
-    _, targets, _ = imports(source, module="consumer.commands")
-    assert any(target == support or target.startswith(support + ".") for target in targets for support in SUPPORT[:2])
+    scan = scan_imports(source, module="consumer.commands")
+    assert any(under(target, support) for target in scan.targets + scan.projections for support in SUPPORT[:2])

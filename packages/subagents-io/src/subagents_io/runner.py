@@ -8,10 +8,10 @@ of what makes this band 1:
     cost_for_usage(...)                     -> price_lookup=
     ws_paths.graph_dir(ctx.workspace)       -> trace_dir=
 
-`langchain_core.messages` is imported at runtime and is the reason this
-package declares a dependency at all: `SystemMessage` and `HumanMessage` are
-constructed here, not merely annotated. `tests/test_boundaries.py` allows
-exactly that one third-party root and nothing else.
+Messages go to the model as `("system", ...)` / `("human", ...)` role tuples;
+a LangChain chat model coerces them itself, so nothing here imports
+`langchain_core` and the package declares no runtime dependency.
+`tests/test_boundaries.py` holds the import side of that.
 """
 
 from __future__ import annotations
@@ -22,8 +22,6 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
-
-from langchain_core.messages import HumanMessage, SystemMessage
 
 from subagents_io.adapters import Adapter, Closeable, LoopAdapter, LoopOutcome, RunContext
 from subagents_io.pool import FanOutResult, SubagentPool, TaskResult
@@ -108,7 +106,7 @@ async def stream_and_parse(
     interrupted = False
     start = time.monotonic()
     try:
-        async for chunk in llm.astream([SystemMessage(content=system), HumanMessage(content=human)]):
+        async for chunk in llm.astream([("system", system), ("human", human)]):
             text = _coerce_content(getattr(chunk, "content", ""))
             raw_parts.append(text)
             on_chunk(text)
@@ -186,7 +184,7 @@ async def run_all[ReaderT: Closeable](
     async def task(item: str) -> TaskResult:
         prepared = await adapter.prepare(ctx, item)
         llm = binding.make_llm()
-        resp = await llm.ainvoke([SystemMessage(content=prepared.system), HumanMessage(content=prepared.human)])
+        resp = await llm.ainvoke([("system", prepared.system), ("human", prepared.human)])
         return TaskResult(value=getattr(resp, "content", ""), response=resp)
 
     pool = SubagentPool(trace_dir=trace_dir, price_lookup=price_lookup)

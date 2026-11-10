@@ -4,45 +4,31 @@ from __future__ import annotations
 
 import ast
 import sys
-from importlib.util import resolve_name
 from pathlib import Path
 
 import pytest
+from gw_kernel.testing.boundaries import discovery_lookups, manifest_reads, module_name, scan_imports, under
 
 SRC = Path(__file__).resolve().parents[1] / "src/gw_orchestrate"
 LOWER = frozenset({"work_tracker_okf", "okf_io", "okf_ext", "subagents_io"})
 
 
 def offenders(source: str, *, module: str) -> list[str]:
-    found = []
-    package = module.rpartition(".")[0]
-    for node in ast.walk(ast.parse(source)):
-        if isinstance(node, ast.Import):
-            targets = [alias.name for alias in node.names]
-        elif isinstance(node, ast.ImportFrom):
-            target = node.module or ""
-            if node.level:
-                try:
-                    target = resolve_name("." * node.level + target, package)
-                except ImportError:
-                    found.append(ast.unparse(node))
-                    continue
-            targets = [target]
-        else:
+    scan = scan_imports(source, module=module)
+    found = list(scan.unresolved)
+    for target in scan.targets:
+        root = target.split(".")[0]
+        if (
+            root in sys.stdlib_module_names
+            or root in LOWER
+            or root == "gw_pipeline"
+            or under(target, "gw_orchestrate")
+            or under(target, "gw_kernel.workspace")
+        ):
             continue
-        for target in targets:
-            root = target.split(".")[0]
-            if (
-                root in sys.stdlib_module_names
-                or root in LOWER
-                or root == "gw_pipeline"
-                or target == "gw_orchestrate"
-                or target.startswith("gw_orchestrate.")
-                or target == "gw_kernel.workspace"
-                or target.startswith("gw_kernel.workspace.")
-            ):
-                continue
-            found.append(target)
+        found.append(target)
+    found.extend(finding.text for finding in discovery_lookups(scan.tree))
+    found.extend(finding.text for finding in manifest_reads(scan.tree, scan.aliases))
     return found
 
 
@@ -69,6 +55,20 @@ def test_rejects_disallowed_imports(source: str) -> None:
 @pytest.mark.parametrize(
     "source",
     [
+        "Path('workspace.yaml').read_text()",
+        "open(root / 'workspace.yaml')",
+        "from pathlib import Path\nmanifest = root / 'workspace.yaml'\nmanifest.read_bytes()",
+        "import os\nos.environ['GRAPH_WORKS_DIR']",
+        "import os\nos.getenv('GRAPH_WORKS_DIR')",
+    ],
+)
+def test_rejects_manifest_reads_and_discovery_lookups(source: str) -> None:
+    assert offenders(source, module="gw_orchestrate.commands")
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
         "import gw_pipeline.transactions as tx",
         "from gw_pipeline import finish",
         "import os",
@@ -79,6 +79,7 @@ def test_rejects_disallowed_imports(source: str) -> None:
         "from .commands import plan",
         "from work_tracker_okf import pipeline",
         "# import gw_kernel\ntext = 'import gw_kernel'",
+        "text = 'workspace.yaml'",
     ],
 )
 def test_accepts_legal_imports(source: str) -> None:
@@ -88,7 +89,7 @@ def test_accepts_legal_imports(source: str) -> None:
 def test_shipped_imports_obey_the_boundary() -> None:
     found = []
     for path in sorted(SRC.rglob("*.py")):
-        module = ".".join(("gw_orchestrate", *path.relative_to(SRC).with_suffix("").parts))
+        module = module_name(path, SRC, package="gw_orchestrate")
         found.extend(f"{path}:{target}" for target in offenders(path.read_text(encoding="utf-8"), module=module))
     assert found == []
 

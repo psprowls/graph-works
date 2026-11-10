@@ -2,11 +2,10 @@
 
 from __future__ import annotations
 
-import ast
-from importlib.util import resolve_name
 from pathlib import Path
 
 import pytest
+from gw_kernel.testing.boundaries import discovery_lookups, manifest_reads, module_name, scan_imports, under
 
 SRC = Path(__file__).resolve().parents[1] / "src/gw_work"
 TESTS = Path(__file__).resolve().parent
@@ -16,235 +15,18 @@ DISCOVERY = "gw_kernel.workspace.discovery"
 
 
 def offenders(source: str, *, module: str, test: bool = False) -> list[str]:
-    tree = ast.parse(source)
-    aliases: dict[str, str] = {}
-    found: list[str] = []
-    package = module if module.endswith(".__init__") else module.rpartition(".")[0]
-    package = package.removesuffix(".__init__")
-    for node in ast.walk(tree):
-        targets: list[str] = []
-        if isinstance(node, ast.Import):
-            for alias in node.names:
-                targets.append(alias.name)
-                aliases[alias.asname or alias.name.split(".")[0]] = (
-                    alias.name if alias.asname else alias.name.split(".")[0]
-                )
-        elif isinstance(node, ast.ImportFrom):
-            target = node.module or ""
-            if node.level:
-                try:
-                    target = resolve_name("." * node.level + target, package)
-                except ImportError:
-                    found.append(ast.unparse(node))
-                    continue
-            targets = [target, *(f"{target}.{alias.name}" for alias in node.names)]
-            for alias in node.names:
-                aliases[alias.asname or alias.name] = f"{target}.{alias.name}"
-        for target in targets:
-            root = target.split(".")[0]
-            if root in SIBLINGS or (
-                not test
-                and (
-                    root in INTERFACES
-                    or target == "gw_kernel"
-                    or target == DISCOVERY
-                    or target.startswith(DISCOVERY + ".")
-                )
-            ):
-                found.append(target)
+    scan = scan_imports(source, module=module)
+    found = list(scan.unresolved)
+    found.extend(target for target in scan.targets if target.split(".")[0] in SIBLINGS)
     if not test:
-        for node in ast.walk(tree):
-            if isinstance(node, ast.Attribute):
-                parts = ast.unparse(node).split(".")
-                target = ".".join([aliases.get(parts[0], parts[0]), *parts[1:]])
-                if target == DISCOVERY or target.startswith(DISCOVERY + "."):
-                    found.append(target)
-            if isinstance(node, (ast.Call, ast.Subscript)):
-                text = ast.unparse(node)
-                if "GRAPH_WORKS_DIR" in text:
-                    found.append(text)
-        found.extend(manifest_reads(tree, aliases))
-    return found
-
-
-def manifest_reads(tree: ast.AST, aliases: dict[str, str]) -> list[str]:
-    """Follow simple assignments within lexical scopes, resolving open aliases."""
-    found: list[str] = []
-    scopes: list[tuple[str, set[str]]] = [("module", set())]
-
-    def is_manifest(expression: ast.AST) -> bool:
-        return any(
-            (isinstance(node, ast.Constant) and isinstance(node.value, str) and "workspace.yaml" in node.value)
-            or (isinstance(node, ast.Name) and node.id in scopes[-1][1])
-            for node in ast.walk(expression)
+        found.extend(
+            target
+            for target in scan.targets
+            if target.split(".")[0] in INTERFACES or target == "gw_kernel" or under(target, DISCOVERY)
         )
-
-    def bind(target: ast.AST, value: ast.AST | None) -> None:
-        paths = scopes[-1][1]
-        if isinstance(target, ast.Name):
-            if value is not None and is_manifest(value):
-                paths.add(target.id)
-            else:
-                paths.discard(target.id)
-
-    def argument_names(args: ast.arguments) -> set[str]:
-        names = {arg.arg for arg in (*args.posonlyargs, *args.args, *args.kwonlyargs)}
-        names.update(arg.arg for arg in (args.vararg, args.kwarg) if arg is not None)
-        return names
-
-    def target_names(target: ast.AST) -> set[str]:
-        return {node.id for node in ast.walk(target) if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store)}
-
-    def tainted(target: ast.AST, values: list[ast.AST] | None) -> set[str]:
-        """Names in ``target`` bound to a manifest; ``values`` are the candidate values, ``None`` when opaque."""
-        if isinstance(target, ast.Name):
-            return {target.id} if values is None or any(is_manifest(value) for value in values) else set()
-        if not isinstance(target, (ast.Tuple, ast.List)):
-            return target_names(target)
-        width = len(target.elts)
-        rows = values
-        if rows is not None and (
-            any(isinstance(element, ast.Starred) for element in target.elts)
-            or not all(
-                isinstance(row, (ast.Tuple, ast.List))
-                and len(row.elts) == width
-                and not any(isinstance(element, ast.Starred) for element in row.elts)
-                for row in rows
-            )
-        ):
-            rows = None
-        names: set[str] = set()
-        for position, element in enumerate(target.elts):
-            column = (
-                None if rows is None else [row.elts[position] for row in rows if isinstance(row, (ast.Tuple, ast.List))]
-            )
-            names |= tainted(element, column)
-        return names
-
-    def function_locals(node: ast.FunctionDef | ast.AsyncFunctionDef) -> set[str]:
-        names = argument_names(node.args)
-        external: set[str] = set()
-        pending: list[ast.AST] = list(node.body)
-        while pending:
-            child = pending.pop()
-            if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
-                names.add(child.name)
-                continue
-            if isinstance(child, (ast.Lambda, ast.ListComp, ast.SetComp, ast.DictComp, ast.GeneratorExp)):
-                continue
-            if isinstance(child, ast.Name) and isinstance(child.ctx, ast.Store):
-                names.add(child.id)
-            elif isinstance(child, (ast.Import, ast.ImportFrom)):
-                names.update(alias.asname or alias.name.split(".")[0] for alias in child.names)
-            elif isinstance(child, (ast.Global, ast.Nonlocal)):
-                external.update(child.names)
-            pending.extend(ast.iter_child_nodes(child))
-        return names - external
-
-    class Reads(ast.NodeVisitor):
-        def visit_FunctionDef(self, node: ast.FunctionDef | ast.AsyncFunctionDef) -> None:
-            for child in ast.iter_child_nodes(node):
-                if child not in node.body:
-                    self.visit(child)
-            # A method closes over the enclosing function/module, not its class namespace.
-            inherited = next(paths for kind, paths in reversed(scopes) if kind != "class")
-            scopes.append(("function", inherited - function_locals(node)))
-            try:
-                for statement in node.body:
-                    self.visit(statement)
-            finally:
-                scopes.pop()
-            scopes[-1][1].discard(node.name)
-
-        visit_AsyncFunctionDef = visit_FunctionDef
-
-        def visit_Lambda(self, node: ast.Lambda) -> None:
-            self.visit(node.args)  # Defaults are evaluated in the enclosing scope.
-            positional = (*node.args.posonlyargs, *node.args.args)
-            defaults = [*zip(positional[-len(node.args.defaults) :], node.args.defaults, strict=False)]
-            defaults.extend(zip(node.args.kwonlyargs, node.args.kw_defaults, strict=True))
-            manifest_defaults = {arg.arg for arg, value in defaults if value is not None and is_manifest(value)}
-            inherited = next(paths for kind, paths in reversed(scopes) if kind != "class")
-            scopes.append(("function", (inherited - argument_names(node.args)) | manifest_defaults))
-            try:
-                self.visit(node.body)
-            finally:
-                scopes.pop()
-
-        def visit_ListComp(self, node: ast.ListComp | ast.SetComp | ast.DictComp | ast.GeneratorExp) -> None:
-            first = node.generators[0]
-            self.visit(first.iter)  # Only the first iterable uses the enclosing scope.
-            first_manifest = is_manifest(first.iter)
-            locals_ = set().union(*(target_names(generator.target) for generator in node.generators))
-            inherited = next(paths for kind, paths in reversed(scopes) if kind != "class")
-            scopes.append(("comprehension", inherited - locals_))
-            try:
-                for index, generator in enumerate(node.generators):
-                    if index:
-                        self.visit(generator.iter)
-                    manifest = is_manifest(generator.iter) if index else first_manifest
-                    names = target_names(generator.target)
-                    scopes[-1][1].difference_update(names)
-                    if manifest:
-                        display = (
-                            generator.iter.elts if isinstance(generator.iter, (ast.List, ast.Tuple, ast.Set)) else None
-                        )
-                        scopes[-1][1].update(tainted(generator.target, display))
-                    self.visit(generator.target)
-                    for condition in generator.ifs:
-                        self.visit(condition)
-                if isinstance(node, ast.DictComp):
-                    self.visit(node.key)
-                    self.visit(node.value)
-                else:
-                    self.visit(node.elt)
-            finally:
-                scopes.pop()
-
-        visit_SetComp = visit_ListComp
-        visit_DictComp = visit_ListComp
-        visit_GeneratorExp = visit_ListComp
-
-        def visit_ClassDef(self, node: ast.ClassDef) -> None:
-            for child in ast.iter_child_nodes(node):
-                if child not in node.body:
-                    self.visit(child)
-            scopes.append(("class", scopes[-1][1].copy()))
-            try:
-                for statement in node.body:
-                    self.visit(statement)
-            finally:
-                scopes.pop()
-            scopes[-1][1].discard(node.name)
-
-        def visit_Assign(self, node: ast.Assign) -> None:
-            self.visit(node.value)
-            for target in node.targets:
-                bind(target, node.value)
-
-        def visit_AnnAssign(self, node: ast.AnnAssign) -> None:
-            if node.value is not None:
-                self.visit(node.value)
-                bind(node.target, node.value)
-
-        def visit_Call(self, node: ast.Call) -> None:
-            parts = ast.unparse(node.func).split(".")
-            target = ".".join([aliases.get(parts[0], parts[0]), *parts[1:]])
-            if target in {"open", "builtins.open"}:
-                filename = (
-                    node.args[0] if node.args else next((k.value for k in node.keywords if k.arg == "file"), None)
-                )
-                if filename is not None and is_manifest(filename):
-                    found.append(ast.unparse(node))
-            elif (
-                isinstance(node.func, ast.Attribute)
-                and node.func.attr in {"read_text", "read_bytes", "open"}
-                and is_manifest(node.func.value)
-            ):
-                found.append(ast.unparse(node))
-            self.generic_visit(node)
-
-    Reads().visit(tree)
+        found.extend(projection for projection in scan.projections if under(projection, DISCOVERY))
+        found.extend(finding.text for finding in discovery_lookups(scan.tree))
+        found.extend(finding.text for finding in manifest_reads(scan.tree, scan.aliases))
     return found
 
 
@@ -325,115 +107,12 @@ def test_accepts_defining_modules(source):
     assert offenders(source, module="gw_work.commands") == []
 
 
-@pytest.mark.parametrize(
-    "expression,forbidden",
-    [
-        ('lambda manifest: manifest.read_text(encoding="utf-8")', False),
-        ("lambda manifest=manifest.read_text(): manifest", True),
-        ("lambda notes: manifest.read_text()", True),
-        ('lambda notes: Path("workspace.yaml").read_text()', True),
-        ('lambda manifest=Path("notes.md"): manifest.read_text()', False),
-        ('lambda manifest=Path("workspace.yaml"): manifest.read_text()', True),
-    ],
-)
-def test_lambda_binding_scope(expression, forbidden):
-    source = 'from pathlib import Path\nmanifest = Path("workspace.yaml")\nread_notes = ' + expression
-    assert bool(offenders(source, module="gw_work.commands")) is forbidden
-
-
-COMPREHENSIONS = (
-    "[{read} for manifest in {items}]",
-    "{{{read} for manifest in {items}}}",
-    "{{manifest: {read} for manifest in {items}}}",
-    "({read} for manifest in {items})",
-)
-
-
-@pytest.mark.parametrize("template", COMPREHENSIONS)
-@pytest.mark.parametrize("scenario", ["notes", "local-manifest", "outer-read", "first-iterable", "restored"])
-def test_comprehension_binding_scope(template, scenario):
-    outer = "notes.md" if scenario == "local-manifest" else "workspace.yaml"
-    items = '[Path("workspace.yaml")]' if scenario == "local-manifest" else '[Path("notes.md")]'
-    read = 'manifest.read_text(encoding="utf-8")'
-    if scenario == "outer-read":
-        template = template.replace("for manifest", "for note")
-    elif scenario == "first-iterable":
-        items = '[Path(manifest.read_text(encoding="utf-8"))]'
-    expression = template.format(read=read, items=items)
-    source = f'from pathlib import Path\nmanifest = Path("{outer}")\nnotes = {expression}\n'
-    if scenario == "restored":
-        source += 'manifest.read_text(encoding="utf-8")\n'
-    assert bool(offenders(source, module="gw_work.commands")) is (scenario != "notes")
-
-
-@pytest.mark.parametrize("template", COMPREHENSIONS)
-@pytest.mark.parametrize("forbidden", [False, True])
-def test_async_comprehension_binding_scope(template, forbidden):
-    read = 'Path("workspace.yaml").read_text()' if forbidden else "manifest.read_text()"
-    expression = template.replace("for manifest", "async for manifest").format(read=read, items="paths")
-    source = (
-        'from pathlib import Path\nmanifest = Path("workspace.yaml")\n'
-        f"async def read_notes(paths):\n    return {expression}\n"
-    )
-    assert bool(offenders(source, module="gw_work.commands")) is forbidden
-
-
-@pytest.mark.parametrize(
-    "body,forbidden",
-    [
-        ("read_notes = lambda: manifest.read_text()", False),
-        ("read_notes = lambda notes=manifest.read_text(): notes", True),
-        ('notes = [manifest.read_text() for note in [Path("notes.md")]]', False),
-        ("notes = [note for note in manifest.read_text().splitlines()]", True),
-    ],
-)
-def test_class_namespace_is_used_for_defaults_and_first_iterable_only(body, forbidden):
-    source = (
-        'from pathlib import Path\nmanifest = Path("notes.md")\n'
-        f'class Manifest:\n    manifest = Path("workspace.yaml")\n    {body}\n'
-    )
-    assert bool(offenders(source, module="gw_work.commands")) is forbidden
-
-
-def test_comprehension_tuple_targets_and_later_iterables_use_local_bindings():
-    source = (
-        'from pathlib import Path\nmanifest = Path("workspace.yaml")\n'
-        'notes = [line for manifest, other in [(Path("notes.md"), 1)]\n'
-        "         for line in manifest.read_text().splitlines() if other]\n"
-    )
-    assert offenders(source, module="gw_work.commands") == []
-    assert offenders(source + "manifest.read_text()\n", module="gw_work.commands") == ["manifest.read_text()"]
-
-
-UNPACKED = (
-    # (target, iterable, read, forbidden)
-    ("manifest, other", '[(Path("workspace.yaml"), Path("notes.md"))]', "other", False),
-    ("manifest, other", '[(Path("workspace.yaml"), Path("notes.md"))]', "manifest", True),
-    ("a, (b, c)", '[(Path("notes.md"), (Path("workspace.yaml"), Path("x.md")))]', "b", True),
-    ("a, (b, c)", '[(Path("notes.md"), (Path("workspace.yaml"), Path("x.md")))]', "a", False),
-    ("a, (b, c)", '[(Path("notes.md"), (Path("workspace.yaml"), Path("x.md")))]', "c", False),
-    ("a, b", "rows", "a", True),
-    ("a, b", "rows", "b", True),
-    ("a, b", '[(Path("workspace.yaml"), Path("n.md"), 1)]', "b", True),
-    ("a, *b", '[(Path("workspace.yaml"), Path("n.md"))]', "b", True),
-    ("a, b", '[(Path("n.md"), Path("workspace.yaml")), x]', "a", True),
-)
-
-
-@pytest.mark.parametrize("template", COMPREHENSIONS)
-@pytest.mark.parametrize("target,items,read,forbidden", UNPACKED)
-def test_unpacked_comprehension_targets_are_attributed_per_position(template, target, items, read, forbidden):
-    expression = template.replace("for manifest", f"for {target}").format(read=f"{read}.read_text()", items=items)
-    source = f"from pathlib import Path\nrows = [Path('workspace.yaml')]\nnotes = {expression}\n"
-    assert bool(offenders(source, module="gw_work.commands")) is forbidden
-
-
 def test_shipped_source_and_tests_obey_boundary():
     assert SRC.is_dir(), "missing work source root"
     found = []
     for root, test in ((SRC, False), (TESTS, True)):
         for path in sorted(root.rglob("*.py")):
-            module = ".".join(("gw_work", *path.relative_to(root).with_suffix("").parts))
+            module = module_name(path, root, package="gw_work")
             found.extend(
                 f"{path}:{target}" for target in offenders(path.read_text(encoding="utf-8"), module=module, test=test)
             )

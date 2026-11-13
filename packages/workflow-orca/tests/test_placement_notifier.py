@@ -138,6 +138,7 @@ def test_default_port_long_polling_has_no_notification_timeout(monkeypatch):
             "--timeout-ms",
             "600000",
             "--json",
+            "--full",
         ]
     ]
 

@@ -150,7 +150,9 @@ def test_one_worker_show_per_worker_and_one_read_per_live_dispatch(tmp_path):
     rows = fixture_result("worker_list")["workers"]
     # workers() shows only the latest row per task, so one show per task with a row.
     assert len(shows) == len({r["taskId"] for r in rows})
-    assert reads == [("orca", "orchestration", "worker-read", "--dispatch", LIVE_HANDLE, "--limit", "1", "--json")]
+    assert reads == [
+        ("orca", "orchestration", "worker-read", "--dispatch", LIVE_HANDLE, "--limit", "1", "--json", "--full")
+    ]
     assert not [c for c in calls if "worktree" in c]  # terminal.worktreePath answered it
 
 

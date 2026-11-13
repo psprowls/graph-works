@@ -59,6 +59,10 @@ class FakeRunner:
                 ),
                 "",
             )
+        if argv[:2] == ("orca", "orchestration") and "--full" not in argv:
+            # Orca >= 1.4.249 prints a concise view unless `--full` is passed,
+            # and every gw parser reads the full record.
+            raise AssertionError(f"orchestration call without --full gets Orca's concise view: {argv!r}")
         for pattern, name in self.routes:
             if _is_subsequence(pattern, argv):
                 return OrcaResult(returncode=0, stdout=fixture(name), stderr=self.stderr)

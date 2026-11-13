@@ -58,6 +58,9 @@ class FakeOrcaCLI:
             return self._ok({})
         if argv[1] == "status":
             return self._ok({"runtime": {"capabilities": ["orchestration.worker-launch-preferences.v1"]}})
+        if "--full" not in argv:
+            # Orca >= 1.4.249 answers with a concise view unless `--full` is passed.
+            raise AssertionError(f"orchestration call without --full gets Orca's concise view: {argv!r}")
         sub = argv[2]
         handler = getattr(self, f"_cmd_{sub.replace('-', '_')}", None)
         if handler is None:

@@ -102,7 +102,7 @@ class OrcaBackend:
                 return None
 
     def _call(self, argv: Sequence[str]) -> dict[str, Any]:
-        full = [*_ORCA, *argv, "--json"]
+        full = [*_ORCA, *argv, "--json", "--full"]
         return unwrap(full, self._run(full))
 
 
@@ -141,12 +141,12 @@ class OrcaSession:
         self._done_by_delivery: dict[str, tuple[WorkerDone, ...]] = {}
 
     def _call(self, argv: Sequence[str]) -> dict[str, Any]:
-        full = [*_ORCA, *argv, "--run", self.run_id, "--json"]
+        full = [*_ORCA, *argv, "--run", self.run_id, "--json", "--full"]
         return unwrap(full, self._run(full))
 
     def _call_unscoped(self, argv: Sequence[str]) -> dict[str, Any]:
         """For the per-dispatch commands, which take no `--run`."""
-        full = [*_ORCA, *argv, "--json"]
+        full = [*_ORCA, *argv, "--json", "--full"]
         return unwrap(full, self._run(full))
 
     def _call_top_level(self, argv: Sequence[str]) -> dict[str, Any]:
@@ -341,7 +341,7 @@ class OrcaSession:
                 or cursor in seen
             ):
                 raise OrcaCliError(
-                    (*_ORCA, *argv, "--run", self.run_id, "--json"),
+                    (*_ORCA, *argv, "--run", self.run_id, "--json", "--full"),
                     returncode=0,
                     stderr="",
                     message="worker-list page has malformed or repeated continuation",

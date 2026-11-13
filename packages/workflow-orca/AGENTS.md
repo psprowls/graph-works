@@ -152,6 +152,13 @@ are public package exports; the protocol remains unchanged.
   subcommand — different argv prefix (`["orca", ...]` vs
   `["orca", "orchestration", ...]`) — see `_call` vs `_call_unscoped` vs
   `_call_top_level` in `backend.py` and don't collapse them.
+- Every `orca orchestration …` argv ends `--json --full`. Orca 1.4.249+
+  prints a concise view unless `--full` is passed, and every parser here
+  reads the full record; older Orca rejects `--full` as an unknown flag, so
+  **Orca ≥ 1.4.249 is the floor** (decision D-001 of
+  `work/bug-gw-s-orca-reads-break-on`). The test fakes refuse an
+  orchestration call without `--full`. Top-level `orca repo|worktree|terminal`
+  calls did not change and take no `--full`.
 - `unwrap()` in `_cli.py` is the single place an `{"id","ok","result"}`
   envelope is opened; a non-zero exit, `ok: false`, and non-JSON stdout all
   become one `OrcaCliError`. Nonzero exits fail even with `ok: true`; the

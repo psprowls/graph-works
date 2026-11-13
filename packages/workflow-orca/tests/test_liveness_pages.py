@@ -68,9 +68,19 @@ def test_complete_current_liveness(pages, observer):
     assert observe(transport, observer) == ["ctx_live"]
     lists = [call for call in transport.calls if "worker-list" in call]
     assert len(lists) == len(pages)
-    assert lists[0] == ("orca", "orchestration", "worker-list", "--run", "run_test", "--json")
+    assert lists[0] == ("orca", "orchestration", "worker-list", "--run", "run_test", "--json", "--full")
     if len(pages) > 1:
-        assert lists[1] == ("orca", "orchestration", "worker-list", "--cursor", CURSOR, "--run", "run_test", "--json")
+        assert lists[1] == (
+            "orca",
+            "orchestration",
+            "worker-list",
+            "--cursor",
+            CURSOR,
+            "--run",
+            "run_test",
+            "--json",
+            "--full",
+        )
     assert all("ctx_old" not in call for call in transport.calls)
     assert {call[2] for call in transport.calls} <= {"task-list", "worker-list", "worker-show", "worker-read"}
 

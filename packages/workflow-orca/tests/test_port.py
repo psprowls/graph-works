@@ -155,7 +155,7 @@ def test_task_list_keeps_full_specs_and_marks_truncation():
     assert len(rows) == 3
     assert rows[0]["spec"] == "Run /graph-wiki:next 2026-08-13-test-gap-code-wiki-smoke-script."
     assert rows[0]["title"] == "2026-08-13-test-gap-code-wiki-smoke-script#execute"
-    assert runner.calls == [("orca", "orchestration", "task-list", "--run", "run_1", "--json")]
+    assert runner.calls == [("orca", "orchestration", "task-list", "--run", "run_1", "--json", "--full")]
 
 
 def test_task_list_truncated_spec_is_unknown():
@@ -200,6 +200,7 @@ def test_task_create_parses_result_task_id():
         "--display-name",
         "w · execute",
         "--json",
+        "--full",
     )
 
 
@@ -232,6 +233,7 @@ def test_task_update_uses_run_and_id():
         "--run",
         "run_1",
         "--json",
+        "--full",
     )
 
 
@@ -263,6 +265,7 @@ def test_worker_start_reports_terminal_worktree_and_receipt():
         "--worktree",
         "path:/w",
         "--json",
+        "--full",
     )
 
 
@@ -285,7 +288,7 @@ def test_worker_start_adds_model_and_effort_together():
     p.worker_start(
         "run_1", "task_1", request={"agent": "claude", "model": "m", "reasoning_effort": "high"}, placement_argv=[]
     )
-    assert runner.calls[-1][-5:] == ("--model", "m", "--effort", "high", "--json")
+    assert runner.calls[-1][-6:] == ("--model", "m", "--effort", "high", "--json", "--full")
 
 
 @pytest.mark.parametrize("retry_of", [None, "d-1"])
@@ -303,7 +306,7 @@ def test_worker_start_passes_retry_of(retry_of):
     if retry_of is None:
         assert "--retry-of" not in argv
     else:
-        assert argv[-3:] == ("--retry-of", "d-1", "--json")
+        assert argv[-4:] == ("--retry-of", "d-1", "--json", "--full")
         assert argv.index("--retry-of") > argv.index("path:/w")
 
 
@@ -349,8 +352,8 @@ def test_worker_list_follows_page_cursor():
     assert [row["dispatch_id"] for row in rows] == ["ctx_1", "ctx_2"]
     assert rows[0]["worktree_id"] == "w"
     assert calls == [
-        ("orca", "orchestration", "worker-list", "--run", "run_1", "--json"),
-        ("orca", "orchestration", "worker-list", "--run", "run_1", "--cursor", "cursor_2", "--json"),
+        ("orca", "orchestration", "worker-list", "--run", "run_1", "--json", "--full"),
+        ("orca", "orchestration", "worker-list", "--run", "run_1", "--cursor", "cursor_2", "--json", "--full"),
     ]
 
 
@@ -371,7 +374,7 @@ def test_worker_list_rejects_incomplete_page_without_usable_cursor(cursor_field)
 
     with pytest.raises(OrcaCliError, match="nextCursor") as caught:
         OrcaCliPort(run=incomplete_page).worker_list("run_1")
-    assert caught.value.argv == ("orca", "orchestration", "worker-list", "--run", "run_1", "--json")
+    assert caught.value.argv == ("orca", "orchestration", "worker-list", "--run", "run_1", "--json", "--full")
     assert calls == [caught.value.argv]
 
 
@@ -382,13 +385,31 @@ def test_worker_show_reads_snake_case_heartbeat():
         "terminal": "term_ff2faacf-db5b-43ad-b05b-c6dfee58eb53",
         "last_heartbeat_at": "2026-08-13T18:38:36Z",
     }
-    assert runner.calls[-1] == ("orca", "orchestration", "worker-show", "--dispatch", "ctx_320c498114b8", "--json")
+    assert runner.calls[-1] == (
+        "orca",
+        "orchestration",
+        "worker-show",
+        "--dispatch",
+        "ctx_320c498114b8",
+        "--json",
+        "--full",
+    )
 
 
 def test_worker_read_counts_messages():
     p, runner = port([(("worker-read",), "worker_read_empty")])
     assert p.worker_read("ctx", limit=5)["message_count"] == 0
-    assert runner.calls[-1] == ("orca", "orchestration", "worker-read", "--dispatch", "ctx", "--limit", "5", "--json")
+    assert runner.calls[-1] == (
+        "orca",
+        "orchestration",
+        "worker-read",
+        "--dispatch",
+        "ctx",
+        "--limit",
+        "5",
+        "--json",
+        "--full",
+    )
     p, _ = port([(("worker-read",), "worker_read_transcript")])
     assert p.worker_read("ctx", limit=5) == {
         "source": "transcript",
@@ -402,7 +423,17 @@ def test_worker_read_counts_messages():
 def test_worker_read_keeps_role_and_text_blocks_only():
     p, runner = port([(("worker-read",), "worker_read_receipt")])
     read = p.worker_read("ctx", limit=200)
-    assert runner.calls[-1] == ("orca", "orchestration", "worker-read", "--dispatch", "ctx", "--limit", "200", "--json")
+    assert runner.calls[-1] == (
+        "orca",
+        "orchestration",
+        "worker-read",
+        "--dispatch",
+        "ctx",
+        "--limit",
+        "200",
+        "--json",
+        "--full",
+    )
     assert read["source"] == "transcript"
     assert read["source_exact"] is True and read["window_complete"] is True
     assert read["message_count"] == 4
@@ -554,6 +585,7 @@ def test_check_wait_argv_without_ack():
             "--timeout-ms",
             "600000",
             "--json",
+            "--full",
         )
     ]
 
@@ -575,6 +607,7 @@ def test_check_wait_argv_with_ack():
         "--ack",
         "dlv_prev",
         "--json",
+        "--full",
     )
 
 
@@ -667,13 +700,13 @@ def test_check_wait_refuses_missing_messages_even_with_delivery_id():
 def test_check_ack_argv():
     p, runner = port([(("check", "--ack"), "terminal_send")])
     p.check_ack("run_1", "dlv_1")
-    assert runner.calls == [("orca", "orchestration", "check", "--run", "run_1", "--ack", "dlv_1", "--json")]
+    assert runner.calls == [("orca", "orchestration", "check", "--run", "run_1", "--ack", "dlv_1", "--json", "--full")]
 
 
 def test_run_use_argv():
     p, runner = port([(("run-use",), "terminal_send")])
     p.run_use("run_1")
-    assert runner.calls == [("orca", "orchestration", "run-use", "--id", "run_1", "--json")]
+    assert runner.calls == [("orca", "orchestration", "run-use", "--id", "run_1", "--json", "--full")]
 
 
 def test_consumer_fenced_surfaces_as_the_error_code():
@@ -763,10 +796,30 @@ def test_pending_questions_reads_run_inbox_workers_then_live_asker_inboxes():
     p, runner = question_port()
     p.pending_questions(RUN_Q)
     assert runner.calls == [
-        ("orca", "orchestration", "inbox", "--terminal", f"run:{RUN_Q}", "--limit", "1000", "--json"),
-        ("orca", "orchestration", "worker-list", "--run", RUN_Q, "--json"),
-        ("orca", "orchestration", "inbox", "--terminal", "dispatch:ctx_aaaaaaaaaaaa", "--limit", "1000", "--json"),
-        ("orca", "orchestration", "inbox", "--terminal", "dispatch:ctx_bbbbbbbbbbbb", "--limit", "1000", "--json"),
+        ("orca", "orchestration", "inbox", "--terminal", f"run:{RUN_Q}", "--limit", "1000", "--json", "--full"),
+        ("orca", "orchestration", "worker-list", "--run", RUN_Q, "--json", "--full"),
+        (
+            "orca",
+            "orchestration",
+            "inbox",
+            "--terminal",
+            "dispatch:ctx_aaaaaaaaaaaa",
+            "--limit",
+            "1000",
+            "--json",
+            "--full",
+        ),
+        (
+            "orca",
+            "orchestration",
+            "inbox",
+            "--terminal",
+            "dispatch:ctx_bbbbbbbbbbbb",
+            "--limit",
+            "1000",
+            "--json",
+            "--full",
+        ),
     ]
     # ctx_dddddddddddd has ended: its inbox is never read.
 
@@ -842,9 +895,29 @@ def test_pending_reads_unknown_state_askers_from_later_worker_pages(state):
 
     result = OrcaCliPort(run=runner).pending_questions(RUN_Q)
     assert [q["dispatch_id"] for q in result["questions"]] == ["ctx_bbbbbbbbbbbb"]
-    assert calls[2] == ("orca", "orchestration", "worker-list", "--run", RUN_Q, "--cursor", "page_2", "--json")
+    assert calls[2] == (
+        "orca",
+        "orchestration",
+        "worker-list",
+        "--run",
+        RUN_Q,
+        "--cursor",
+        "page_2",
+        "--json",
+        "--full",
+    )
     assert calls[3:] == [
-        ("orca", "orchestration", "inbox", "--terminal", "dispatch:ctx_bbbbbbbbbbbb", "--limit", "1000", "--json")
+        (
+            "orca",
+            "orchestration",
+            "inbox",
+            "--terminal",
+            "dispatch:ctx_bbbbbbbbbbbb",
+            "--limit",
+            "1000",
+            "--json",
+            "--full",
+        )
     ]
 
 
@@ -906,7 +979,7 @@ def test_check_nowait_argv_and_string_payload():
         )
 
     result = OrcaCliPort(run=response).check_nowait("r")
-    assert calls == [("orca", "orchestration", "check", "--run", "r", "--json")]
+    assert calls == [("orca", "orchestration", "check", "--run", "r", "--json", "--full")]
     assert result["delivery_id"] == "d"
     assert result["messages"][0]["payload"] == {"taskId": "t"}
 

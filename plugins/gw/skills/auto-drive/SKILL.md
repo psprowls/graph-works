@@ -41,10 +41,15 @@ explanation — no degraded mode, no partial loop:
 
 1. `orca status` — must show a reachable runtime. If unreachable: stop and
    tell the user to run `orca open`, then retry.
-2. `orca orchestration run-current --json` — probes that Orca's
+2. `orca orchestration run-current --json --full` — probes that Orca's
    orchestration layer is available on this install. An "unknown command" or
    feature-disabled error means the Experimental orchestration feature isn't
-   enabled; stop and say so (do not try to work around it).
+   enabled; stop and say so (do not try to work around it). gw requires
+   Orca ≥ 1.4.249: from that release every `orca orchestration` command
+   prints a concise view unless `--full` is passed, so `--full` is mandatory
+   on every orchestration command whose output this skill reads by field
+   name. An older Orca rejects `--full` as an unknown flag; stop and tell the
+   user to upgrade Orca.
 3. `gw` resolvable **as this repo's build**: `gw util describe-surface --json
    >/dev/null 2>&1` exits 0. If it doesn't — absent from PATH, or present but
    naming a different CLI — fall back to `uv run --package gw-cli gw
@@ -65,7 +70,7 @@ The Run's objective string is the stable join key for this path:
 entire resume mechanism. Re-running `/gw:auto-drive <work-path>` always
 re-derives the Run this way; there is no separate `--resume` flag.
 
-1. `orca orchestration run-list --json` and scan for an entry whose
+1. `orca orchestration run-list --json --full` and scan for an entry whose
    `objective` exactly equals `auto-drive:<work-path>`.
 2. Found → `orca orchestration run-use --id <run_id>`.
 3. Not found → `orca orchestration run-create --objective "auto-drive:<work-path>"`
@@ -87,14 +92,14 @@ cards in §5 before ending.
 
 ### 2.1 Derive live keys
 
-1. `orca orchestration task-list --run <run_id> --json`. Every task's
+1. `orca orchestration task-list --run <run_id> --json --full`. Every task's
    `--task-title` was copied exactly from `dispatches[].key` at creation (§3).
    The key is the planner's session name, `gw-<phase>-<stem>` (maximum 64
    characters, retaining the phase and eight-hex path hash). Copy that same
    value back for dedupe and `--live`; never reconstruct a key from a path.
    This task mirror is the dedupe ledger for the whole loop and the §2.6
    dispatch-diff source.
-2. Start with `orca orchestration worker-list --run <run_id> --json`, then
+2. Start with `orca orchestration worker-list --run <run_id> --json --full`, then
    follow each opaque `result.page.nextCursor` with another `worker-list`
    call using `--cursor <nextCursor>` until `result.page.hasMore` is false.
    Require every page's `total` to be the same exact non-negative integer,
@@ -502,7 +507,7 @@ For every live key whose resolved path has a `holds[]` entry with
 1. This dispatch has already stopped working (it followed
    `references/grace-period-protocol.md`) but its Dispatch is still live in
    Orca's model — nothing else in this cycle reflects that yet.
-2. `orca orchestration worker-stop --dispatch <dispatch_id> --json`, using the
+2. `orca orchestration worker-stop --dispatch <dispatch_id> --json --full`, using the
    `dispatch_id` §2.1's live-derivation already bound to this key. This is the
    coordinator's exclusive authority: `worker-stop --help` takes no `--from`/
    `--dispatch-capability`, unlike `ask`/`send`, so a dispatched worker's own
@@ -599,7 +604,7 @@ classification is an ordinary fresh dispatch — run §3 unmodified.
 1. Read the checkpoint §2.1 joined to this key: its frontmatter (`item`,
    `phase`, `dispatch_key`, `decision`, `created`) and its `## Question`
    section.
-2. Find the checkpointed attempt's Task/Dispatch: refresh `task-list --run <run_id> --json`, find the Task whose title equals the checkpoint's `dispatch_key`, and save its full untruncated `spec` text to a temp file (step 6's `--spec`). The checkpointed attempt is the Task's newest Dispatch created before the checkpoint's `created:` instant: every Dispatch on this Task is already in §2.1's worker-list snapshot (rows joined by `taskId`); for each, read `orca orchestration worker-show --dispatch <id> --json` → `result.dispatch.createdAt`. Normalize both to UTC first — Orca renders some of these as `YYYY-MM-DD HH:MM:SS` with no zone suffix, and those are UTC. The parked attempt necessarily started *before* it wrote its own checkpoint, so pick that one, never simply the latest attempt: a resume that already ran is a later Dispatch on the same Task.
+2. Find the checkpointed attempt's Task/Dispatch: refresh `task-list --run <run_id> --json --full`, find the Task whose title equals the checkpoint's `dispatch_key`, and save its full untruncated `spec` text to a temp file (step 6's `--spec`). The checkpointed attempt is the Task's newest Dispatch created before the checkpoint's `created:` instant: every Dispatch on this Task is already in §2.1's worker-list snapshot (rows joined by `taskId`); for each, read `orca orchestration worker-show --dispatch <id> --json --full` → `result.dispatch.createdAt`. Normalize both to UTC first — Orca renders some of these as `YYYY-MM-DD HH:MM:SS` with no zone suffix, and those are UTC. The parked attempt necessarily started *before* it wrote its own checkpoint, so pick that one, never simply the latest attempt: a resume that already ran is a later Dispatch on the same Task.
 3. Read the decision named by the checkpoint's `decision:` key:
    `gw work decision list <owner-path> --json`. **Still `open` → stop here and
    leave the key alone**; the park is still waiting and §2.5's hold line
@@ -713,14 +718,14 @@ timeout preserves the entire probe delivery unacked, including heartbeats.
 - **Missing delivery question: prove disposition before ack.** Use the original
   delivered message id and sender `dispatch:<dispatch_id>`, not a label or a
   guessed current attempt. Read
-  `orca orchestration worker-show --dispatch <dispatch_id> --json` successfully.
+  `orca orchestration worker-show --dispatch <dispatch_id> --json --full` successfully.
   Match `result.dispatch.id`, `runId`, and `taskId` to the delivered
   question's Dispatch, this Run, and its Task (join through §2.1's complete
   worker-list when the payload lacks `taskId`). Conflicting or unprovable
   identities mean inspection and deferral, never acknowledgment.
   With those identities proved, either of these is positive evidence:
   - **Already answered:** read
-    `orca orchestration inbox --terminal dispatch:<dispatch_id> --limit 1000 --json`.
+    `orca orchestration inbox --terminal dispatch:<dispatch_id> --limit 1000 --json --full`.
     Require an actual reply row with
     `thread_id == <message_id>`, `from_handle == run:<run_id>`,
     `to_handle == dispatch:<dispatch_id>`, and `type == status`
@@ -883,7 +888,7 @@ failed. Run the manual probe below; the result alone never authorizes Enter.
 For the affected dispatch, allow a short settle interval after launch and run
 these checks in order. Stop at the first decisive submitted signal:
 
-1. Run `orca orchestration worker-show --dispatch <dispatch_id> --json`.
+1. Run `orca orchestration worker-show --dispatch <dispatch_id> --json --full`.
    Require a successful response for this dispatch and read
    `result.dispatch.lastHeartbeatAt`. Any non-null heartbeat proves submission:
    never nudge. A failed read, missing field, or uncertain identity enters
@@ -891,7 +896,7 @@ these checks in order. Stop at the first decisive submitted signal:
    saved worker-list or worker-show response before considering terminal
    commands; absence of a handle means report and inspect, not a guessed
    terminal.
-2. Run `orca orchestration worker-read --dispatch <dispatch_id> --limit 5 --json`.
+2. Run `orca orchestration worker-read --dispatch <dispatch_id> --limit 5 --json --full`.
    Require a successful structured response. Non-empty
    `result.transcript.messages` proves submission: never nudge. An empty
    transcript with `result.source == "transcript"` supports one Enter nudge.
@@ -903,7 +908,7 @@ these checks in order. Stop at the first decisive submitted signal:
    enters inspection.
 3. Immediately before either allowed Enter branch, run a fresh successful
    `worker-show` with
-   `orca orchestration worker-show --dispatch <dispatch_id> --json`.
+   `orca orchestration worker-show --dispatch <dispatch_id> --json --full`.
    Require the same dispatch and an explicitly null
    `result.dispatch.lastHeartbeatAt`. If that read fails or its heartbeat is
    unknown, enter inspection without nudging.
@@ -922,7 +927,7 @@ these checks in order. Stop at the first decisive submitted signal:
 
 ### Missing delivery receipt
 
-- Read the worker's transcript (`orca orchestration worker-read --dispatch <id> --limit 200 --json`) and inspect actual UserPromptSubmit hook output or its attachment for recovery context (`The submitted Orca dispatch was truncated…`) or a refusal (`Dispatch recovery was not verified: <reason>`), including its `(guard: gw <version> at <root>)` stamp. Actual hook output is positive execution evidence; a stamp quoted in a prompt or echoed by an assistant is not. Absence in a missing, limited or clipped transcript cannot prove the hook did not run, even when the first prompt is truncated. Hook execution alone does not prove the model consumed its context or received the complete brief.
+- Read the worker's transcript (`orca orchestration worker-read --dispatch <id> --limit 200 --json --full`) and inspect actual UserPromptSubmit hook output or its attachment for recovery context (`The submitted Orca dispatch was truncated…`) or a refusal (`Dispatch recovery was not verified: <reason>`), including its `(guard: gw <version> at <root>)` stamp. Actual hook output is positive execution evidence; a stamp quoted in a prompt or echoed by an assistant is not. Absence in a missing, limited or clipped transcript cannot prove the hook did not run, even when the first prompt is truncated. Hook execution alone does not prove the model consumed its context or received the complete brief.
 - Hook registration is separate evidence: confirm the installed `gw` plugin's root and version (Claude Code's plugin listing, `<root>/.claude-plugin/plugin.json`) and that `<root>/hooks/hooks.json` registers `dispatch-prompt-guard` under `UserPromptSubmit`. Registration is not execution or delivery proof; if the plugin or registration is missing, correct installation and decide recovery through the normal question path.
 - Suspected stale plugin: compare the observed stamp's root/version and effective registration with the installed `<root>/hooks/dispatch-prompt-guard.py` source or revision, checking its recognition of the exact observed Orca wrapper sentence. Copies with the same unreleased version may contain different implementations, so version alone cannot establish stale or current code. If installed code lacks wrapper recognition, update the plugin, then decide recovery through the normal question path.
 - Lookup refusal: an actual hook diagnostic `Dispatch recovery was not verified: <reason>` names why; answer the worker's question with the frozen brief from the Task spec (`orca orchestration task-list`/`dispatch-show --task <id> --preamble`) as the coordinator, never by typing into its terminal.
@@ -987,7 +992,7 @@ It reads `payload` (`taskId`, `dispatchId`, `outcome`) and checks Orca's
   release it. A valid `worker_done` already settles its Task and Dispatch;
   never issue `task-update completed` (§4.1.1 step 5 is the single recorded
   coordinator exception). Then run
-  `orca orchestration worker-release --dispatch <dispatch_id> --json` (no
+  `orca orchestration worker-release --dispatch <dispatch_id> --json --full` (no
   `--run` flag), save its output, and branch on
   `classify-lifecycle --op release` (**Release and stop receipts**).
   The coordinator commits nothing in the workspace.
@@ -1134,7 +1139,7 @@ until it proves exit this helper cannot verify a recovery checkpoint.
       exists.
    2. If the latest attempt is not already positively settled:
       Before invoking worker-stop, persist its intent at `stop-requested` using the operation journal below.
-      Run `orca orchestration worker-stop --dispatch <dispatch_id> --json`.
+      Run `orca orchestration worker-stop --dispatch <dispatch_id> --json --full`.
       After worker-stop returns, append its original request ID and sanitized receipt reference using the operation journal below.
       Branch on `classify-lifecycle --op stop --authority <recorded stop authority>`
       (**Release and stop receipts**): `exit-evidence` / `user-authorized` map
@@ -1150,7 +1155,7 @@ until it proves exit this helper cannot verify a recovery checkpoint.
       alone is not settlement — `stop_unknown` is the named case. Require
       positive fresh readback before recording this checkpoint.
    4. Before invoking worker-release, persist its intent at `release-requested` using the operation journal below.
-      Run `orca orchestration worker-release --dispatch <dispatch_id> --json`.
+      Run `orca orchestration worker-release --dispatch <dispatch_id> --json --full`.
       After worker-release returns, append its original request ID and sanitized receipt reference using the operation journal below.
       Branch on `classify-lifecycle --op release` (**Release and stop receipts**)
       and journal its `action` in history beside the receipt. `done` can record
@@ -1163,7 +1168,7 @@ until it proves exit this helper cannot verify a recovery checkpoint.
       There is no automatic abandon fallback.
    5. Before invoking task-update, persist its intent at `completion-requested` using the operation journal below.
       Then run
-      `orca orchestration task-update --id <task_id> --status completed --run <run_id> --json`
+      `orca orchestration task-update --id <task_id> --status completed --run <run_id> --json --full`
       — the one recorded coordinator exception to "never issue
       `task-update completed`", not a second `worker_done`.
       After task-update returns, append its original request ID and sanitized receipt reference using the operation journal below.
@@ -1201,7 +1206,7 @@ until it proves exit this helper cannot verify a recovery checkpoint.
    and block unknown IDs; the coordinator must establish receipt provenance.
    Never invent a request ID or pass a new ID as a first-use `--retry-request`; the current public guide/help establishes retries of existing identities, not request preallocation.
    With the original ID recovered and durably appended, use
-   `orca orchestration request-show --request <original_request_id> --json`:
+   `orca orchestration request-show --request <original_request_id> --json --full`:
    `completed` means inspect its recorded receipt and fresh state without
    rerunning; `pending` means wait for a still-running original command, or
    follow the runtime's recovery direction with the original command and
@@ -1244,7 +1249,7 @@ authority: omit `--mode` and inspect/report retention without closing.
 | `--op release` action | Receipt | Do |
 |---|---|---|
 | `done` | `released`, `already_released` | nothing more |
-| `close-terminal` | `retained` / `user_takeover`, attend dispatch | read `orca orchestration worker-show --dispatch <dispatch_id> --json`; take its exact `result.worker.agentTerminalHandle`; close and verify as below, then print `closed joined attend terminal <handle> (<key>)`. No handle → print `retained, no handle: <dispatch_id> (<key>)` and close nothing. No question: the human was told to answer in that terminal and the stage is settled. |
+| `close-terminal` | `retained` / `user_takeover`, attend dispatch | read `orca orchestration worker-show --dispatch <dispatch_id> --json --full`; take its exact `result.worker.agentTerminalHandle`; close and verify as below, then print `closed joined attend terminal <handle> (<key>)`. No handle → print `retained, no handle: <dispatch_id> (<key>)` and close nothing. No question: the human was told to answer in that terminal and the stage is settled. |
 | `report-retained` | `retained`, any other reason or mode | print `retained (<reason>): <handle> (<key>) — the human's terminal`; act on nothing |
 | `follow-receipt` | `release_pending`, `release_unknown` | follow the receipt's literal next action; never `terminal close` for `release_pending` or `release_unknown` |
 | `inspect` | anything else | print the receipt; act on nothing |
@@ -1282,8 +1287,8 @@ accepted settlements still use the receipt branches above.
 | `--op stop` action | Receipt | Do |
 |---|---|---|
 | `done` | `stopped`, or `alreadySettled` with a terminal worker state | continue the call site's existing path |
-| `abandon-then-close` | `stop_unknown` under park, `user-authorized` or `exit-evidence` authority | run `orca orchestration worker-abandon --dispatch <dispatch_id> --json`, save and verify the abandon receipt, then close the exact `result.worker.agentTerminalHandle` from worker-show under the checks above. Only after positive close confirmation print `stopped by close: <handle> (<key>)`; missing handle or failed abandon/close remains unresolved |
-| `abandon-report` | `stop_unknown`, no such authority | run `orca orchestration worker-abandon --dispatch <dispatch_id> --json`, save and verify the receipt, then print `live and muted: <handle> (<key>) — orca #21688` and leave the terminal alone |
+| `abandon-then-close` | `stop_unknown` under park, `user-authorized` or `exit-evidence` authority | run `orca orchestration worker-abandon --dispatch <dispatch_id> --json --full`, save and verify the abandon receipt, then close the exact `result.worker.agentTerminalHandle` from worker-show under the checks above. Only after positive close confirmation print `stopped by close: <handle> (<key>)`; missing handle or failed abandon/close remains unresolved |
+| `abandon-report` | `stop_unknown`, no such authority | run `orca orchestration worker-abandon --dispatch <dispatch_id> --json --full`, save and verify the receipt, then print `live and muted: <handle> (<key>) — orca #21688` and leave the terminal alone |
 | `inspect` | `stopping` or anything else | print the receipt; act on nothing |
 
 `stop_unknown` never records `stopped-verified`, even after an authorized
@@ -1420,7 +1425,7 @@ One `AskUserQuestion` with exactly four options — *retry* / *reroute* /
   in the Run, so §2.6 never re-proposes the key.
 - **Stop the run**: exit the loop. Report run state (what's done, what's
   live, what's blocked). For each still-live dispatch, ask (plain text) if
-  the user wants `orca orchestration worker-stop --dispatch <id> --json`.
+  the user wants `orca orchestration worker-stop --dispatch <id> --json --full`.
   Only after yes, save the output and branch on
   `classify-lifecycle --op stop --authority user-authorized`
   (**Release and stop receipts**). Refresh §2.1, reconcile §2.5.3, report any
@@ -1730,7 +1735,7 @@ plan only when the record permits replay; `recovery-inspection` and
    Join the worker row by both `task_id`/`taskId` and
    `dispatch_id`/`dispatchId`; a missing or ambiguous match requires inspection.
    For each eligible dispatch, run
-   `orca orchestration worker-release --dispatch <id> --json` (no `--run` flag)
+   `orca orchestration worker-release --dispatch <id> --json --full` (no `--run` flag)
    for that exact dispatch, save its output and branch on
    `classify-lifecycle --op release` (**Release and stop receipts**).
    Failed/stopped superseded workers never enter this
@@ -1839,7 +1844,7 @@ plan only when the record permits replay; `recovery-inspection` and
 
 **User stop** (mid-run, on explicit instruction): exit the loop between
 cycles — never mid-dispatch. Live workers keep running independently; offer
-`orca orchestration worker-stop --dispatch <id> --json` for each one.
+`orca orchestration worker-stop --dispatch <id> --json --full` for each one.
 Only after yes, save its output and branch on
 `classify-lifecycle --op stop --authority user-authorized`
 (**Release and stop receipts**), as in §4.1's Stop branch. Refresh §2.1 and

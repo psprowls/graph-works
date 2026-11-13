@@ -434,7 +434,7 @@ class RestartProofTests(unittest.TestCase):
                 def show(argv, **kwargs):
                     self.assertEqual(argv, [
                         "fixture-orca", "orchestration", "worker-show", "--dispatch",
-                        "ctx_817ed5bf5986", "--json",
+                        "ctx_817ed5bf5986", "--json", "--full",
                     ])
                     if case == "show-os-error":
                         raise OSError("worker-show unavailable")

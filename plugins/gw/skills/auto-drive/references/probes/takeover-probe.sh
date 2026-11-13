@@ -68,7 +68,7 @@ trap 'printf "Probe ended. Run: %s Dispatch: %s Evidence: %s\nNo automatic stop,
 orca --version > "$out/orca-version.txt"
 printf '%s\n' "$trigger" > "$out/case.txt"
 date -u +%Y-%m-%dT%H:%M:%SZ > "$out/started-at.txt"
-capture run-create orca orchestration run-create --objective "gw manual takeover probe $trigger" --json
+capture run-create orca orchestration run-create --objective "gw manual takeover probe $trigger" --json --full
 run=$(field "$out/run-create.json" result.run.id)
 # Files are barriers, not recorded receipts. The worker stamps its exact Dispatch
 # ID so a stale/wrong marker cannot authorize either stop or settlement.
@@ -79,17 +79,17 @@ printf -v spec '%s\n' \
   "Then wait for $out/settle containing that same dispatch ID. Poll using bounded waits of at most 30 seconds; obey preamble heartbeats and coordinator checks. Do not send worker_done before this barrier exists and matches." \
   'On that exact settlement permission, send worker_done once using the injected preamble authority, outcome succeeded, with a three-sentence summary of readiness, trigger observation limits, and completion; then idle.' \
   'The operator may deliberately stop this probe instead; do not restart or recover yourself. Human pane input is a test stimulus, not permission to settle.'
-capture task-create orca orchestration task-create --run "$run" --task-title "probe-$trigger" --spec "$spec" --json
+capture task-create orca orchestration task-create --run "$run" --task-title "probe-$trigger" --spec "$spec" --json --full
 task=$(field "$out/task-create.json" result.task.id)
 if [[ "$trigger" == keystroke-before-ready ]]; then
   confirm 'Prepare to type one key in the NEW probe pane during launch, BEFORE agent readiness. If that window is missed, record invalid timing and stop this case for manual cleanup.'
-  capture start orca orchestration worker-start --task "$task" --run "$run" --worktree "path:$worktree" --agent "$agent" --json &
+  capture start orca orchestration worker-start --task "$task" --run "$run" --worktree "path:$worktree" --agent "$agent" --json --full &
   start_pid=$!
   echo 'Launch in progress: perform early input now. Do not touch any other worker.'
   # Always collect launch result before permitting cancellation; never retry it.
   wait "$start_pid" || die 'launch failed/unknown; inspect start receipt and residualResources, never relaunch blindly'
 else
-  capture start orca orchestration worker-start --task "$task" --run "$run" --worktree "path:$worktree" --agent "$agent" --json \
+  capture start orca orchestration worker-start --task "$task" --run "$run" --worktree "path:$worktree" --agent "$agent" --json --full \
     || die 'launch failed/unknown; inspect start receipt and residualResources, never relaunch blindly'
 fi
 dispatch=$(field "$out/start.json" result.dispatchId)
@@ -101,7 +101,7 @@ until [[ -f "$out/ready" ]] && [[ "$(cat "$out/ready")" == "$dispatch" ]]; do
   (( SECONDS < deadline )) || die 'readiness barrier timed out; inspect worker, do not stop from absence'
   sleep 2
 done
-capture ready-show orca orchestration worker-show --dispatch "$dispatch" --json
+capture ready-show orca orchestration worker-show --dispatch "$dispatch" --json --full
 [[ "$(field "$out/ready-show.json" result.worker.state)" == ready ]] \
   || die 'worker not ready; inspect evidence before any trigger'
 uv run --no-project --python 3.12 python - "$out/ready-show.json" <<'PYTERMINAL'
@@ -121,11 +121,11 @@ case "$trigger" in
 esac
 confirm "$instruction Trigger completed with known timing?"
 printf 'Operator confirmed trigger %s at %s\n' "$trigger" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$out/trigger-observation.txt"
-capture triggered-show orca orchestration worker-show --dispatch "$dispatch" --json
+capture triggered-show orca orchestration worker-show --dispatch "$dispatch" --json --full
 case "$trigger" in
   stop-clean|stop-joined)
     confirm "Explicitly stop ONLY scratch Dispatch $dispatch while its settlement barrier is closed?"
-    capture stop orca orchestration worker-stop --dispatch "$dispatch" --json \
+    capture stop orca orchestration worker-stop --dispatch "$dispatch" --json --full \
       || die 'stop uncertain; inspect receipt, no abandon or repeated stop'
     # User-owned/unknown results require an operator recovery decision. Never
     # abandon automatically just to make a desired fixture appear.
@@ -135,7 +135,7 @@ esac
 # Require authoritative settlement, not a pane prompt, readiness or user input.
 deadline=$((SECONDS + 180))
 while :; do
-  capture settled-show orca orchestration worker-show --dispatch "$dispatch" --json
+  capture settled-show orca orchestration worker-show --dispatch "$dispatch" --json --full
   state=$(field "$out/settled-show.json" result.worker.state)
   case "$state" in succeeded|failed) break ;; esac
   case "$trigger" in stop-*) die 'stop did not produce releasable settlement; inspect stop receipt and decide recovery manually' ;; esac
@@ -143,17 +143,17 @@ while :; do
   sleep 2
 done
 confirm "Worker state is $state. Inspect $out/settled-show.json and its completion evidence; accept settlement and release ONLY $dispatch?"
-capture release orca orchestration worker-release --dispatch "$dispatch" --json \
+capture release orca orchestration worker-release --dispatch "$dispatch" --json --full \
   || die 'release uncertain; follow receipt recovery, do not blindly retry'
 release_state=$(field "$out/release.json" result.state)
 case "$release_state" in
   released|already_released)
-    capture release-again orca orchestration worker-release --dispatch "$dispatch" --json
+    capture release-again orca orchestration worker-release --dispatch "$dispatch" --json --full
     case "$trigger" in
-      stop-clean|stop-joined) capture stop-again orca orchestration worker-stop --dispatch "$dispatch" --json ;;
+      stop-clean|stop-joined) capture stop-again orca orchestration worker-stop --dispatch "$dispatch" --json --full ;;
     esac
     ;;
   *) die "cleanup $release_state; preserve retained/pending resources and decide manually before another case" ;;
 esac
-capture final-show orca orchestration worker-show --dispatch "$dispatch" --json
+capture final-show orca orchestration worker-show --dispatch "$dispatch" --json --full
 echo 'Case recorded. Inspect raw receipts and actual state/reason before copying fixtures; never rename an expectation into evidence.'

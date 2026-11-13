@@ -38,10 +38,17 @@ def test_every_error_fixture_is_a_complete_refusal(name):
 def test_the_fake_runner_refuses_an_unrouted_call():
     runner = FakeRunner([(("run-list",), "run_list")])
     with pytest.raises(AssertionError, match="no route"):
-        runner(["orca", "orchestration", "task-list", "--json"])
+        runner(["orca", "orchestration", "task-list", "--json", "--full"])
+
+
+def test_the_fake_runner_refuses_a_concise_orchestration_call():
+    """Orca 1.4.249+ answers without `--full` in a concise shape no gw parser reads."""
+    runner = FakeRunner([(("run-list",), "run_list")])
+    with pytest.raises(AssertionError, match="without --full"):
+        runner(["orca", "orchestration", "run-list", "--json"])
 
 
 def test_the_fake_runner_matches_a_subsequence_and_records_the_call():
     runner = FakeRunner([(("run-list",), "run_list")])
-    runner(["orca", "orchestration", "run-list", "--limit", "50", "--json"])
+    runner(["orca", "orchestration", "run-list", "--limit", "50", "--json", "--full"])
     assert runner.calls_matching("run-list", "--limit")

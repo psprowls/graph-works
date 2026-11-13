@@ -229,7 +229,7 @@ def verified_success(task: dict[str, object], dispatch_id: object, *, orca: str)
         if envelope["dispatch_key"] != task.get("task_title"):
             return False
         completed = subprocess.run(
-            [orca, "orchestration", "worker-show", "--dispatch", dispatch_id, "--json"],
+            [orca, "orchestration", "worker-show", "--dispatch", dispatch_id, "--json", "--full"],
             check=False,
             capture_output=True,
             text=True,
@@ -252,7 +252,7 @@ def verified_success(task: dict[str, object], dispatch_id: object, *, orca: str)
 def orca_json(orca: str, *argv: str) -> dict[str, Any]:
     try:
         completed = subprocess.run(
-            [orca, "orchestration", *argv, "--json"],
+            [orca, "orchestration", *argv, "--json", "--full"],
             check=False,
             capture_output=True,
             text=True,

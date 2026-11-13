@@ -199,6 +199,16 @@ def _result(value: object) -> dict[str, Any] | None:
     return decoded if isinstance(decoded, dict) else None
 
 
+def _orchestration_argv(argv: Sequence[str]) -> tuple[str, ...]:
+    """An `orca orchestration` argv asking for the full JSON record.
+
+    Orca 1.4.249+ prints a concise view unless `--full` is passed, and every
+    parser here reads the full record. Older Orca rejects `--full` as an
+    unknown flag, so 1.4.249 is the floor (D-001).
+    """
+    return ("orca", "orchestration", *argv, "--json", "--full")
+
+
 def _worktree(row: dict[str, Any]) -> OrcaWorktree:
     branch = _string(row.get("branch"))
     is_main = row.get("isMainWorktree")
@@ -226,7 +236,7 @@ class OrcaCliPort:
         self._run = run
 
     def _call(self, argv: Sequence[str]) -> dict[str, Any]:
-        full = ("orca", "orchestration", *argv, "--json")
+        full = _orchestration_argv(argv)
         return unwrap(full, self._run(full))
 
     def _call_top(self, argv: Sequence[str]) -> dict[str, Any]:
@@ -318,7 +328,7 @@ class OrcaCliPort:
         task_id = _string(task.get("id"))
         if not task_id:
             raise OrcaCliError(
-                ("orca", "orchestration", *argv, "--json"),
+                _orchestration_argv(argv),
                 returncode=0,
                 stderr="",
                 message="task-create returned no id",
@@ -411,7 +421,7 @@ class OrcaCliPort:
             cursor = _string(page.get("nextCursor"))
             if cursor is None or not cursor.strip():
                 raise OrcaCliError(
-                    ("orca", "orchestration", *argv, "--json"),
+                    _orchestration_argv(argv),
                     returncode=0,
                     stderr="",
                     message="worker-list page hasMore is true without a usable nextCursor",
@@ -429,7 +439,7 @@ class OrcaCliPort:
             for name in heartbeat_fields
         ):
             raise OrcaCliError(
-                ("orca", "orchestration", "worker-show", "--dispatch", dispatch_id, "--json"),
+                _orchestration_argv(("worker-show", "--dispatch", dispatch_id)),
                 returncode=0,
                 stderr="",
                 message="worker-show has no usable explicit heartbeat evidence",
@@ -451,7 +461,7 @@ class OrcaCliPort:
             isinstance(messages, list) and any(not _valid_transcript_message(message) for message in messages)
         ):
             raise OrcaCliError(
-                ("orca", "orchestration", "worker-read", "--dispatch", dispatch_id, "--limit", str(limit), "--json"),
+                _orchestration_argv(("worker-read", "--dispatch", dispatch_id, "--limit", str(limit))),
                 returncode=0,
                 stderr="",
                 message="worker-read has no complete transcript message array",
@@ -519,7 +529,7 @@ class OrcaCliPort:
         rows = result.get("messages")
         if not isinstance(rows, list) or any(not isinstance(row, dict) for row in rows):
             raise OrcaCliError(
-                ("orca", "orchestration", *argv, "--json"),
+                _orchestration_argv(argv),
                 returncode=0,
                 stderr="",
                 message="malformed check messages",

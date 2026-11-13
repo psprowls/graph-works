@@ -406,6 +406,9 @@ class FakeOrca:
         if argv[0] == "git":
             found = argv[-1].removesuffix("^{commit}") in self.commits
             return subprocess.CompletedProcess(argv, 0 if found else 1, "", "")
+        if argv[1] == "orchestration" and "--full" not in argv:
+            # Orca >= 1.4.249 answers with a concise view unless `--full` is passed.
+            raise AssertionError(f"orchestration call without --full gets Orca's concise view: {argv}")
         verb = argv[2]
         if verb == "task-list":
             payload: dict[str, object] = self.tasks()
@@ -1089,7 +1092,7 @@ class VerifiedCheckpointTests(RecoveryFixture):
         self.refused(self.record("stopped-verified"), "newer-attempt")
         worker_calls = [call for call in self.orca.calls if call[2] == "worker-list"]
         self.assertEqual(len(worker_calls), 2)
-        self.assertEqual(worker_calls[1][-3:], ["--cursor", "cursor-1", "--json"])
+        self.assertEqual(worker_calls[1][-4:], ["--cursor", "cursor-1", "--json", "--full"])
 
     def test_worker_list_rejects_untrustworthy_pagination_and_scope(self):
         cases = (

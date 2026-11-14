@@ -140,7 +140,7 @@ def recover(prompt):
     worker = worker_identity(before)
     try:
         result = subprocess.run(
-            [orca_executable(), "orchestration", "dispatch-show", "--task", task_id, "--preamble", "--json"],
+            [orca_executable(), "orchestration", "dispatch-show", "--task", task_id, "--preamble", "--json", "--full"],
             capture_output=True,
             timeout=5,
         )

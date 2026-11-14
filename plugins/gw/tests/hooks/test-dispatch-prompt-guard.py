@@ -54,7 +54,8 @@ class GuardTest(unittest.TestCase):
             "with open(os.environ['GUARD_CALLS'], 'a', encoding='utf-8', newline='') as f:\n"
             " f.write(json.dumps(sys.argv[1:]) + '\\n')\n"
             "time.sleep(float(os.environ.get('GUARD_DELAY', '0')))\n"
-            "sys.stdout.buffer.write(b'invalid json' if os.environ.get('GUARD_BAD_JSON') else pathlib.Path(os.environ['GUARD_RESPONSE']).read_bytes())\n"
+            "concise = b'{\"ok\": true, \"result\": {}}'\n"
+            "sys.stdout.buffer.write(b'invalid json' if os.environ.get('GUARD_BAD_JSON') else pathlib.Path(os.environ['GUARD_RESPONSE']).read_bytes() if '--full' in sys.argv else concise)\n"
             "sys.stderr.write('PRIVATE STDERR MUST NOT BE INJECTED')\n"
             "sys.exit(int(os.environ.get('GUARD_EXIT', '0')))\n",
             encoding="utf-8",
@@ -105,7 +106,7 @@ class GuardTest(unittest.TestCase):
         calls = self.calls.read_text(encoding="utf-8").splitlines() if self.calls.exists() else []
         self.assertEqual(
             [json.loads(line) for line in calls],
-            [["orchestration", "dispatch-show", "--task", TASK, "--preamble", "--json"]] * count,
+            [["orchestration", "dispatch-show", "--task", TASK, "--preamble", "--json", "--full"]] * count,
         )
         self.calls.unlink(missing_ok=True)
 

@@ -282,3 +282,28 @@ def test_tuple_assignment_targets_are_tainted_per_position(assignment, read, for
 
 def test_attribute_assignment_targets_are_not_tracked():
     assert reads("a, b = 1, 2\nobj.attr = 3\n") == []
+
+
+STATEMENT_BINDINGS = (
+    # (source, forbidden)
+    ('for m in [Path("workspace.yaml")]:\n    m.read_text()', True),
+    ('for m in [Path("n.md")]:\n    m.read_text()', False),
+    ('for a, b in [(Path("workspace.yaml"), x)]:\n    a.read_text()', True),
+    ('for a, b in [(Path("workspace.yaml"), x)]:\n    b.read_text()', False),
+    ("for m in rows:\n    m.read_text()", True),
+    ('m = Path("workspace.yaml")\nfor m in [Path("n.md")]:\n    pass\nm.read_text()', False),
+    ('async def f():\n    async for m in [Path("workspace.yaml")]:\n        m.read_text()', True),
+    ('with Path("workspace.yaml") as m:\n    m.read_text()', True),
+    ('with Path("n.md") as m:\n    m.read_text()', False),
+    ('with Path("n.md") as a, Path("workspace.yaml") as b:\n    b.read_text()', True),
+    ('with Path("n.md") as a, Path("workspace.yaml") as b:\n    a.read_text()', False),
+    ('async def f():\n    async with Path("workspace.yaml") as m:\n        m.read_text()', True),
+    ('if (m := Path("workspace.yaml")):\n    m.read_text()', True),
+    ('if (m := Path("n.md")):\n    m.read_text()', False),
+    ('(m := Path("workspace.yaml")).read_text()', True),
+)
+
+
+@pytest.mark.parametrize("source,forbidden", STATEMENT_BINDINGS)
+def test_for_with_and_walrus_bindings_are_tainted(source, forbidden):
+    assert bool(reads(f"from pathlib import Path\nrows = [Path('workspace.yaml')]\n{source}\n")) is forbidden

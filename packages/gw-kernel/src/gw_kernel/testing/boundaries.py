@@ -214,6 +214,13 @@ def manifest_reads(tree: ast.AST, aliases: Mapping[str, str]) -> list[Finding]:
         defaults.extend(zip(args.kwonlyargs, args.kw_defaults, strict=True))
         return {arg.arg for arg, value in defaults if value is not None and is_manifest(value)}
 
+    def bind_iteration(target: ast.AST, iterable: ast.expr) -> None:
+        paths = scopes[-1][1]
+        paths.difference_update(target_names(target))
+        if is_manifest(iterable):
+            display = iterable.elts if isinstance(iterable, (ast.List, ast.Tuple, ast.Set)) else None
+            paths.update(tainted(target, display))
+
     class Reads(ast.NodeVisitor):
         def visit_FunctionDef(self, node: ast.FunctionDef | ast.AsyncFunctionDef) -> None:
             for child in ast.iter_child_nodes(node):
@@ -298,6 +305,35 @@ def manifest_reads(tree: ast.AST, aliases: Mapping[str, str]) -> list[Finding]:
             if node.value is not None:
                 self.visit(node.value)
                 bind(node.target, node.value)
+
+        def visit_For(self, node: ast.For | ast.AsyncFor) -> None:
+            self.visit(node.iter)
+            bind_iteration(node.target, node.iter)
+            self.visit(node.target)
+            for statement in (*node.body, *node.orelse):
+                self.visit(statement)
+
+        visit_AsyncFor = visit_For
+
+        def visit_With(self, node: ast.With | ast.AsyncWith) -> None:
+            for item in node.items:
+                self.visit(item.context_expr)
+                if item.optional_vars is not None:
+                    bind(item.optional_vars, item.context_expr)
+                    self.visit(item.optional_vars)
+            for statement in node.body:
+                self.visit(statement)
+
+        visit_AsyncWith = visit_With
+
+        def visit_NamedExpr(self, node: ast.NamedExpr) -> None:
+            self.visit(node.value)
+            # A walrus inside a comprehension binds in the enclosing non-comprehension scope.
+            paths = next(paths for kind, paths in reversed(scopes) if kind != "comprehension")
+            if is_manifest(node.value):
+                paths.add(node.target.id)
+            else:
+                paths.discard(node.target.id)
 
         def visit_Call(self, node: ast.Call) -> None:
             parts = ast.unparse(node.func).split(".")

@@ -26,8 +26,8 @@ Coverage is gated at 95% (`just cov`), same floor as `okf-io`/`okf-ext`.
 
 ## Layout
 
-- `src/doc_wiki_okf/reading/` — substrate-neutral file and format inspection. Five modules, each answering one question: `slug` normalizes text to an identifier, `extract` turns one file into text plus a title guess, `files` reports on a directory, `links` finds markdown link targets, `skills` assembles a skill directory into one blob.
-- `src/doc_wiki_okf/reading/__init__.py` — the re-export surface. `links`' two functions are deliberately **not** on it: `reading/` is an internal subpackage and its `__init__` exports what the rest of the lane consumes.
+- `src/doc_wiki_okf/reading/` — substrate-neutral file and format inspection. Three modules, each answering one question: `slug` normalizes text to an identifier, `extract` turns one file into text plus a title guess, `files` reports on a directory.
+- `src/doc_wiki_okf/reading/__init__.py` — the re-export surface. `reading/` is an internal subpackage and its `__init__` exports what the rest of the lane consumes.
 - `src/doc_wiki_okf/ingest/` — ingest briefs: `document.py` (`plan_document_brief`), `folder.py` (`plan_folder_brief`), `batch.py` (`plan_batch_brief`), `layout.py` (`IngestLayout`, `GRAPH_WIKI_LAYOUT`, `resolve_source_path`), `seams.py` (the two optional-callable protocols below).
 - `src/doc_wiki_okf/sources/` — `plan.py` builds the `Source`-page-plus-copy write plan (`plan_ingest`, `preflight_ingest`, `page_target`, `copy_target`, `source_kinds`). A sibling of `ingest/`, not a member of it: `ingest/` is boundary-locked to stdlib + `reading/`, and a writer needs `okf_io`/`okf_ext`. The dependency is one-way — `sources/` imports `ingest.layout` for the page template; nothing in `ingest/` imports `sources/`.
 - `src/doc_wiki_okf/assets/` — the fifteen files this package installs into a bundle: eight `schema/` JSON schemas (a `_base-diataxis` `$ref` target plus `Adr`, the four Diátaxis types and `Source`, plus `Proposal`) and seven `sections/` declarations (`_fragments.doc_wiki.yaml` plus the same six). Read through `importlib.resources`; installed by `okf_ext.bundle.plan_install`.
@@ -65,9 +65,9 @@ Coverage is gated at 95% (`just cov`), same floor as `okf-io`/`okf-ext`.
 
 ## `reading/`
 
-`reading/` is the substrate-neutral half of ingest: file and format inspection, with no knowledge of briefs, lanes, or Diátaxis. `iter_link_targets` and `resolve_companion` are public rather than underscore-prefixed because they cross a module boundary. `SkillBundle` is frozen and its two file lists are tuples.
+`reading/` is the substrate-neutral half of ingest: file and format inspection, with no knowledge of briefs, lanes, or Diátaxis.
 
-There is no skill-ingest brief here — chunking a skill directory into guidance pages is a layer above this one, and the substrate-neutral half it would need already lives in `reading/skills`.
+There is no skill-ingest brief here — chunking a skill directory into guidance pages is a layer above this one.
 
 ## Conventions
 

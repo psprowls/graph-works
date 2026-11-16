@@ -109,10 +109,10 @@ def test_the_checker_flags_a_planted_import(source: str) -> None:
         "import html.parser\n",
         "from pathlib import Path\n",
         "from dataclasses import dataclass\n",
-        "from doc_wiki_okf.reading.links import iter_link_targets\n",
+        "from doc_wiki_okf.reading.files import list_folder_files\n",
         "import doc_wiki_okf.reading.slug\n",
         "from . import slug\n",
-        "from .links import resolve_companion\n",
+        "from .files import list_folder_files\n",
     ],
 )
 def test_the_checker_accepts_stdlib_and_intra_package_imports(source: str) -> None:

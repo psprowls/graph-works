@@ -6,7 +6,7 @@ depends on this package.
 Five subpackages. `doc_wiki_okf.reading` is substrate-neutral file and format
 inspection that knows nothing of OKF, wikis or workspaces:
 
-    from doc_wiki_okf.reading import extract, gather_skill_sources, slugify
+    from doc_wiki_okf.reading import extract, slugify
 
 `doc_wiki_okf.diataxis` provides a classifier that validates a decision rather than making one, placement read off
 each type's `x-okf-directory`, and retyping as a move:

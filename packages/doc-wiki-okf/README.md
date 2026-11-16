@@ -13,8 +13,6 @@ The documentation-wiki lane over OKF v0.2 — see `.works/okf/work/_archive/epic
 | `language_for(path)` | extension → language name, `"unknown"` when unmapped |
 | `list_folder_files(root)` | sorted `(rel_path, size)` for every regular file under `root` |
 | `pick_representative(root, entries)` | `README.md` → `index.*` → largest |
-| `resolve_skill_anchor(path)` | the `SKILL.md` a skill ingest anchors on, or `None` |
-| `gather_skill_sources(anchor)` | one `SkillBundle` — `SKILL.md` plus transitively linked companion markdown |
 
 ## Boundaries
 
@@ -86,7 +84,7 @@ The code graph arrives as two optional callables behind narrow protocols, `State
 
 ### What is declined
 
-The legacy `build_skill_ingest_brief` does not port. It builds a guidance-shaped brief — chunking a skill directory into `wiki/guidance/<topic>/<slug>.md` — and that is the guidance flow, a layer above this one. The substrate-neutral half already lives in `doc_wiki_okf.reading.skills` (`gather_skill_sources`, `SkillBundle`, `resolve_skill_anchor`) and is ready for whoever claims that layer. Folder-based inference is gone along with `raw/`: a skill directory briefs as an ordinary folder, like any other directory, unless the caller passes `--kind skills` explicitly. `skill` is still a valid `--source-kind` value and `skills` is still a valid `--kind` value — both just have to be named, never inferred from a path.
+The legacy `build_skill_ingest_brief` does not port. It builds a guidance-shaped brief — chunking a skill directory into `wiki/guidance/<topic>/<slug>.md` — and that is the guidance flow, a layer above this one. Folder-based inference is gone along with `raw/`: a skill directory briefs as an ordinary folder, like any other directory, unless the caller passes `--kind skills` explicitly. `skill` is still a valid `--source-kind` value and `skills` is still a valid `--kind` value — both just have to be named, never inferred from a path.
 
 No brief carries a Diátaxis type, and `ingest/` does not import `diataxis/`. An ingested document produces a source page — a record of a document, not a document *of a type* — and the type is chosen when a proposal is filed for a type in the schema-defined proposal pool.
 

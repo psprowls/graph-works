@@ -15,8 +15,7 @@ plugin be repointed without an argument about behaviour.
 
 There is deliberately no skill brief here. A guidance-shaped brief -- chunking
 a skill directory into `wiki/guidance/<topic>/<slug>.md` -- which is the guidance
-flow, a layer above this one. `reading.gather_skill_sources` is the
-substrate-neutral half, and it is ready for whoever claims that layer.
+flow, a layer above this one.
 
 This subpackage imports the standard library and `doc_wiki_okf.reading`, and
 nothing else -- not `diataxis/`, not `proposals/`. No Diátaxis type touches a

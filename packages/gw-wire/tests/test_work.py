@@ -18,6 +18,7 @@ from gw_pipeline.placement import EffectivePlacement
 from gw_wire import config as wire_config
 from gw_wire import work
 from gw_wire._jsonable import commit_payload
+from gw_work.ahead_behind import AheadBehindRow
 from gw_work.commands import BoardRow, DispatchExplanation, OpenDecision
 from gw_work.reconcile import CitedDecision, CommitRef, LandedSibling, ReconcileContext
 from samples_work import (
@@ -1198,3 +1199,20 @@ def test_orchestrate_payload_has_no_preparations_or_advance_pair() -> None:
     payload = work.orchestrate_payload(_orchestration_with({}))
     assert "preparations" not in payload
     assert payload["advances"] == [{"path": "work/b", "reason": "done", "mode": "return"}]
+
+
+def test_work_ahead_behind_payload_shape():
+    row = AheadBehindRow("work/a", "code", "feature/a-1", "main", None, None, "branch-missing")
+    assert work.work_ahead_behind_payload([row]) == {
+        "items": [
+            {
+                "path": "work/a",
+                "repo": "code",
+                "branch": "feature/a-1",
+                "merge_target": "main",
+                "ahead": None,
+                "behind": None,
+                "status": "branch-missing",
+            }
+        ]
+    }

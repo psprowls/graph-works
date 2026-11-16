@@ -116,6 +116,7 @@ EXPECTED: set[str] = {
     "work.touch_active_work_payload",
     "work.wait_payload",
     "work.work_affecting_payload",
+    "work.work_ahead_behind_payload",
     "work.work_list_payload",
     "work.work_queue_payload",
 }

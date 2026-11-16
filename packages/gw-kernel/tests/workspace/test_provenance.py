@@ -698,3 +698,46 @@ def test_strict_is_ancestor(repo):
     head = provenance.strict_commit(repo, "HEAD", git=git)
     assert isinstance(head, str)
     assert provenance.strict_is_ancestor(repo, head, head, git=git) is True
+
+
+def test_ahead_behind_counts_both_sides(repo):
+    _git(repo, "checkout", "-q", "-b", "feature/x")
+    for n in range(2):
+        (repo / f"f{n}.txt").write_text("x\n", encoding="utf-8")
+        _git(repo, "add", ".")
+        _git(repo, "commit", "-m", f"f{n}")
+    _git(repo, "checkout", "-q", "main")
+    (repo / "m.txt").write_text("m\n", encoding="utf-8")
+    _git(repo, "add", ".")
+    _git(repo, "commit", "-m", "m")
+    assert provenance.ahead_behind(repo, "main", "feature/x") == (2, 1)
+
+
+def test_ahead_behind_of_a_branch_against_itself_is_zero(repo):
+    assert provenance.ahead_behind(repo, "main", "main") == (0, 0)
+
+
+def test_ahead_behind_with_a_missing_branch_is_none(repo):
+    assert provenance.ahead_behind(repo, "main", "nope") is None
+
+
+def test_ahead_behind_outside_a_repo_is_none(tmp_path):
+    assert provenance.ahead_behind(tmp_path, "main", "x") is None
+
+
+def test_local_branch_exists(repo, tmp_path):
+    assert provenance.local_branch_exists(repo, "main") is True
+    assert provenance.local_branch_exists(repo, "nope") is False
+    assert provenance.local_branch_exists(tmp_path, "main") is False
+
+
+def test_local_branch_exists_is_none_when_git_cannot_run(repo, monkeypatch):
+    monkeypatch.setattr(provenance, "probe_git", lambda *a, **k: provenance.GitOutcome(None, "", "missing"))
+    assert provenance.local_branch_exists(repo, "main") is None
+
+
+def test_ahead_behind_tolerates_unparsable_output(repo, monkeypatch):
+    monkeypatch.setattr(provenance, "run_git", lambda *a: "garbage\n")
+    assert provenance.ahead_behind(repo, "main", "main") is None
+    monkeypatch.setattr(provenance, "run_git", lambda *a: "x\ty\n")
+    assert provenance.ahead_behind(repo, "main", "main") is None

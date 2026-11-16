@@ -741,6 +741,22 @@
       "response": "json"
     },
     {
+      "method": "GET",
+      "path": "/v1/work/ahead-behind",
+      "summary": "Commits each placed active item's branch is ahead of and behind its merge target, counted live.",
+      "params": [
+        {
+          "name": "path",
+          "type": "str",
+          "required": false,
+          "default": null,
+          "location": "query",
+          "summary": "One item's canonical path; omit for every placed item."
+        }
+      ],
+      "response": "json"
+    },
+    {
       "method": "POST",
       "path": "/v1/work/archive/apply",
       "summary": "Archive terminal work items (named, or a sweep): apply the plan whose digest is echoed; 409 if it went stale.",

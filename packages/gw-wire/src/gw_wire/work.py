@@ -32,6 +32,7 @@ from gw_pipeline.guidance.assembly import Guidance
 from gw_pipeline.place import PlaceResult, PruneReport
 from gw_pipeline.placement import EffectivePlacement
 from gw_work.affecting import WorkAffecting
+from gw_work.ahead_behind import AheadBehindRow
 from gw_work.archive.commands import ArchiveRun
 from gw_work.carried import CarriedContext
 from gw_work.commands import (
@@ -859,6 +860,24 @@ def work_affecting_payload(result: WorkAffecting) -> dict[str, Any]:
             for row in result.rows
         ],
         "refusal": result.refusal,
+    }
+
+
+def work_ahead_behind_payload(rows: Sequence[AheadBehindRow]) -> dict[str, Any]:
+    """`/v1/work/ahead-behind`: each placed item's branch, merge target and live ahead/behind counts."""
+    return {
+        "items": [
+            {
+                "path": row.path,
+                "repo": row.repo,
+                "branch": row.branch,
+                "merge_target": row.merge_target,
+                "ahead": row.ahead,
+                "behind": row.behind,
+                "status": row.status,
+            }
+            for row in rows
+        ]
     }
 
 

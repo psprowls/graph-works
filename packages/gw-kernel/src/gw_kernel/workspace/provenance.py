@@ -504,6 +504,36 @@ def merge_base(repo: Path, a: str, b: str) -> str | None:
     return sha or None
 
 
+def local_branch_exists(repo: Path, branch: str) -> bool | None:
+    """Whether `refs/heads/<branch>` resolves in *repo*.
+
+    `False` when git ran and the ref does not resolve (a directory that is not a
+    repository included); `None` when git could not be run. Never raises.
+    """
+    outcome = probe_git(repo, "rev-parse", "--verify", "--quiet", f"refs/heads/{branch}")
+    if outcome.returncode is None:
+        return None
+    return outcome.returncode == 0
+
+
+def ahead_behind(repo: Path, base: str, head: str) -> tuple[int, int] | None:
+    """`(ahead, behind)` of local branch *head* against local branch *base*, or `None`.
+
+    Counts `refs/heads/<base>...refs/heads/<head>` with `rev-list --left-right`:
+    the left number is how far *head* is behind, the right how far it is ahead.
+    Any failure or unparsable output answers `None`; never raises.
+    """
+    out = run_git(repo, "rev-list", "--left-right", "--count", f"refs/heads/{base}...refs/heads/{head}")
+    parts = (out or "").split()
+    if len(parts) != 2:
+        return None
+    try:
+        behind, ahead = int(parts[0]), int(parts[1])
+    except ValueError:
+        return None
+    return ahead, behind
+
+
 def spec_anchor_commit(repo: Path, spec_path: Path) -> str | None:
     """The most recent commit in *repo* touching *spec_path*.
 
@@ -694,12 +724,14 @@ __all__ = [
     "ACTIVE_WORK_FILENAME",
     "FALLBACK_BASE",
     "GitOutcome",
+    "ahead_behind",
     "clear_active_work",
     "commit_exists",
     "commits_touching",
     "default_base",
     "dirty_paths",
     "head_sha",
+    "local_branch_exists",
     "merge_base",
     "probe_git",
     "repository_of",

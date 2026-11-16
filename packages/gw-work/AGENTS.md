@@ -14,7 +14,7 @@ Application slice over resolved kernel primitives. May import the declared `gw_p
 - `place`: `run_place`, item and repository resolution for `gw work place` over the gw-pipeline engine.
 - `carried`, `epic_brief`: inherited epic guidance.
 - `reconcile`, `obligations`: artifact and obligation operations.
-- `path_report`, `affecting`, `artifact_bodies`: path, target and body projections.
+- `path_report`, `affecting`, `ahead_behind`, `artifact_bodies`: path, target and body projections.
 - `transactions`: delegation to pipeline transaction APIs; preserve monkeypatch seams.
 - `archive.commands`: archival plans and execution.
 

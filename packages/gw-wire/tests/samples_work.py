@@ -26,6 +26,7 @@ from gw_pipeline.placement import EffectivePlacement, Placement
 from gw_pipeline.transactions import MutationApplication
 from gw_wire import work
 from gw_work.affecting import AffectingRow, WorkAffecting
+from gw_work.ahead_behind import AheadBehindRow
 from gw_work.carried import CarriedContext, FilledSlot, SlotFill
 from gw_work.commands import BoardRow, DispatchExplanation, ItemRead, ItemSource
 from gw_work.migrate_placement import (
@@ -1034,6 +1035,15 @@ WORK: dict[str, tuple[Callable[[], object], ...]] = {
             )
         ),
         lambda: work.work_affecting_payload(WorkAffecting("nope", "x", (), "unknown-repository")),
+    ),
+    "work.work_ahead_behind_payload": (
+        lambda: work.work_ahead_behind_payload(
+            [
+                AheadBehindRow("work/a", "code", "feature/a", "main", 3, 0, "ok"),
+                AheadBehindRow("work/b", "code", "feature/b", "main", None, None, "branch-missing"),
+            ]
+        ),
+        lambda: work.work_ahead_behind_payload([]),
     ),
     "work.work_queue_payload": (
         lambda: work.work_queue_payload(

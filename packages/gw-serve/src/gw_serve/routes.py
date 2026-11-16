@@ -45,6 +45,7 @@ from gw_wire import wiki as wire_wiki
 from gw_wire import work as wire_work
 from gw_work import commands as work
 from gw_work.affecting import run_work_affecting
+from gw_work.ahead_behind import run_work_ahead_behind
 
 from gw_serve import mutations, sse
 from gw_serve.context import Reply, ServeContext
@@ -306,6 +307,17 @@ def _work_affecting(context: ServeContext, args: Mapping[str, object]) -> Reply:
         return Reply(200, payload)
 
     return call("/v1/work/affecting", run, _READ)
+
+
+def _work_ahead_behind(context: ServeContext, args: Mapping[str, object]) -> Reply:
+    def run() -> Reply:
+        layout = context.layout()
+        with context.read_state.session(layout) as (generation, session):
+            items = work.run_work_list(layout, session=session)
+        rows = run_work_ahead_behind(layout, items, path=_str(args, "path"))
+        return Reply(200, wire_work.work_ahead_behind_payload(rows), generation=generation)
+
+    return call("/v1/work/ahead-behind", run, _READ)
 
 
 def _proposals(context: ServeContext, args: Mapping[str, object]) -> Reply:
@@ -613,6 +625,13 @@ ROUTES: tuple[RouteSpec, ...] = (
             Param("path", "str", required=True, summary="Repo-relative POSIX path, file or directory."),
         ),
         _work_affecting,
+    ),
+    RouteSpec(
+        "GET",
+        "/v1/work/ahead-behind",
+        "Commits each placed active item's branch is ahead of and behind its merge target, counted live.",
+        (Param("path", "str", summary="One item's canonical path; omit for every placed item."),),
+        _work_ahead_behind,
     ),
     RouteSpec("GET", "/v1/work/list", "Every active work item as a board row, sorted by path.", (), _work_list),
     RouteSpec(

@@ -63,6 +63,17 @@ def _globs(layout: WorkspaceLayout, key: str) -> tuple[str, ...]:
     return tuple(items)
 
 
+def worktree_setup(layout: WorkspaceLayout, repo_name: str) -> tuple[str, ...]:
+    """The commands `repositories.<name>.worktree.setup` runs in a freshly placed worktree; empty when unset."""
+    key = f"repositories.{repo_name}.worktree.setup"
+    value = resolve_checked_key(layout, key, environ={}).value
+    if value is None:
+        return ()
+    if not isinstance(value, list) or any(not isinstance(item, str) or not item.strip() for item in value):
+        raise WorkspaceError(f"{layout.manifest_path}: {key}: must be a list of non-empty shell commands")
+    return tuple(value)
+
+
 def unit_jobs(layout: WorkspaceLayout) -> int | None:
     resolved = resolve_checked_key(layout, "workflow.gate.unit_jobs", environ={})
     value = resolved.value
@@ -98,4 +109,4 @@ def repo_gate(layout: WorkspaceLayout, repo_name: str) -> RepoGate:
     return RepoGate(full, ScopedGate(roots, command), units, extra)
 
 
-__all__ = ["RepoGate", "ScopedGate", "is_repository_relative_glob", "repo_gate", "unit_jobs"]
+__all__ = ["RepoGate", "ScopedGate", "is_repository_relative_glob", "repo_gate", "unit_jobs", "worktree_setup"]

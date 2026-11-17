@@ -13,6 +13,7 @@ from gw_kernel.workspace.layout import WorkspaceLayout
 from gw_kernel.workspace.provenance import GitExecutable, GitFailure, default_base, gate_git
 from gw_kernel.workspace.repos import ItemRepo, resolve_item_repo
 from gw_pipeline import place as engine
+from gw_pipeline.gate_config import worktree_setup
 from gw_pipeline.place import PlaceContext, PlaceMode, PlaceRefusal, PlaceResult, PruneCandidate
 from gw_pipeline.placement import Placement, PlacementNotifier, active_path, placement_chain
 from gw_pipeline.placement_resolve import item_placement
@@ -60,6 +61,10 @@ def _no_repo(item: WorkItem, own: ItemRepo) -> str:
     return "no-repo: " + (
         own.note or f"{item.path} resolves to no code repository; it runs in the workspace primary checkout"
     )
+
+
+def _setup_for(layout: WorkspaceLayout) -> Callable[[str], tuple[str, ...]]:
+    return lambda repo_name: worktree_setup(layout, repo_name)
 
 
 def _prune(ctx: PlaceContext, path: str | None, items: Mapping[str, WorkItem], repo_name: str | None) -> PlaceResult:
@@ -127,7 +132,7 @@ def run_place(
     git = gate_git(layout, environ=environ)
     if isinstance(git, GitFailure):
         return _empty(path, mode, dry_run, refusal=PlaceRefusal("git-unavailable", f"{git.cause}: {git.detail}"))
-    ctx = PlaceContext(layout, git, notifier, today, dry_run, occupied)
+    ctx = PlaceContext(layout, git, notifier, today, dry_run, occupied, _setup_for(layout))
     if mode == "prune":
         return _prune(ctx, path, items, repo_name)
     assert item is not None

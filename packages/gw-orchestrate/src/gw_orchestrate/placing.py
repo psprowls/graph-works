@@ -20,6 +20,7 @@ from gw_kernel.workspace.provenance import GitExecutable, GitFailure, gate_git
 from gw_kernel.workspace.provenance import default_base as _default_base
 from gw_kernel.workspace.repos import ItemRepo, resolve_item_repo
 from gw_pipeline import place as engine
+from gw_pipeline.gate_config import worktree_setup
 from gw_pipeline.place import PlaceContext, PlaceRefusal, PlaceResult
 from gw_pipeline.placement import Placement, PlacementNotifier, placement_chain, placement_for
 from work_tracker_okf.affects import code_affects, touches_workspace
@@ -187,6 +188,7 @@ def realize(
         today or date.today(),
         False,
         lambda p: occupied(str(p)),
+        lambda repo_name: worktree_setup(layout, repo_name),
     )
     if phase == "execute" and not verify_only:
         result = engine.start(ctx, resolved.chain)

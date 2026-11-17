@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import subprocess
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, replace
 from datetime import date
@@ -31,6 +32,9 @@ from gw_pipeline.repo_context import RepositoryContext, observe_branch_tips, obs
 from gw_pipeline.transactions import MutationApplication, apply_mutation
 
 PLACE_TIMEOUT_SECONDS = 120
+SETUP_TIMEOUT_SECONDS = 1800
+SETUP_MARKER = "gw-setup-failed"
+SUBMODULE_SETUP = "git submodule update --init --recursive"
 PlaceMode = Literal["ensure", "start", "remove", "prune"]
 StepAction = Literal["created", "adopted", "reattached", "verified", "removed", "kept", "skipped"]
 PruneReason = Literal["dirty", "unmerged", "open", "no-receipt", "not-archived", "occupied"]
@@ -46,6 +50,7 @@ RefusalKind = Literal[
     "wrong-phase",
     "already-started",
     "not-finished",
+    "setup-failed",
 ]
 
 
@@ -121,6 +126,7 @@ class PlaceContext:
     today: date
     dry_run: bool = False
     occupied: Callable[[Path], str | None] | None = None
+    setup: Callable[[str], tuple[str, ...]] | None = None
 
 
 class _GitReadFailure(Exception):
@@ -426,6 +432,66 @@ def _occupied(ctx: PlaceContext, path: Path) -> str | None:
     return ctx.occupied(path) if ctx.occupied is not None else None
 
 
+def _run_setup_command(worktree: Path, command: str) -> str | None:
+    """Run one setup command with `sh -c` in *worktree*; a failure description, or None on success."""
+    try:
+        done = subprocess.run(
+            ["sh", "-c", command],
+            cwd=worktree,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=SETUP_TIMEOUT_SECONDS,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return f"`{command}` could not run: {exc}"
+    if done.returncode == 0:
+        return None
+    tail = "\n".join((done.stderr or done.stdout).strip().splitlines()[-10:])
+    return f"`{command}` exited {done.returncode}: {tail}"
+
+
+def _setup_commands(ctx: PlaceContext, worktree: Path, repo_name: str, *, submodules: bool) -> tuple[str, ...]:
+    configured = ctx.setup(repo_name) if ctx.setup is not None else ()
+    return (SUBMODULE_SETUP, *configured) if submodules else configured
+
+
+def _setup_marker(ctx: PlaceContext, worktree: Path) -> Path | None:
+    git_dir = strict_git(worktree, "rev-parse", "--path-format=absolute", "--git-dir", git=ctx.git)
+    return None if isinstance(git_dir, GitFailure) else Path(git_dir.strip()) / SETUP_MARKER
+
+
+def _prepare(
+    ctx: PlaceContext, placement: Placement, action: StepAction, *, verify_only: bool
+) -> PlaceRefusal | str | None:
+    """Run worktree setup after a creation, or after an earlier failed setup; never on verify-only or refresh."""
+    if verify_only:
+        return None
+    submodules = (
+        (placement.repo_root / ".gitmodules").exists() if ctx.dry_run else (placement.worktree / ".gitmodules").exists()
+    )
+    commands = _setup_commands(ctx, placement.worktree, placement.repo_name, submodules=submodules)
+    if ctx.dry_run:
+        return "setup: " + "; ".join(commands) if commands and action != "verified" else None
+    marker = _setup_marker(ctx, placement.worktree) if placement.worktree.exists() else None
+    pending = action != "verified" or (marker is not None and marker.exists())
+    if not pending or not commands:
+        return None
+    for command in commands:
+        failure = _run_setup_command(placement.worktree, command)
+        if failure is not None:
+            if marker is not None:
+                marker.write_text(failure + "\n", encoding="utf-8", newline="\n")
+            return PlaceRefusal(
+                "setup-failed", f"{placement.worktree}: setup failed; {failure}; fix it and rerun gw work place"
+            )
+    if marker is not None:
+        marker.unlink(missing_ok=True)
+    return None
+
+
 def _ensure_step(
     ctx: PlaceContext,
     placement: Placement,
@@ -484,6 +550,9 @@ def _ensure_step(
         return PlaceStep(placement, "skipped", None, None, refusal.detail), refusal
     if tip is not None:
         tips[placement.branch] = tip
+    prepared = _prepare(ctx, placement, action, verify_only=verify_only)
+    if isinstance(prepared, PlaceRefusal):
+        return PlaceStep(placement, action, None, None, prepared.detail), prepared
     note = None
     if action != "verified" and not ctx.dry_run:
         try:
@@ -499,7 +568,7 @@ def _ensure_step(
         except Exception as exc:
             note = f"orca: notifier failed ({exc})"
     sha = tip.commit if tip is not None else None
-    return PlaceStep(placement, action, Refresh("none", sha, sha), note), None
+    return PlaceStep(placement, action, Refresh("none", sha, sha), note, prepared), None
 
 
 def _predict_step_refresh(

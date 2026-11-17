@@ -211,6 +211,16 @@ CATALOG: tuple[ConfigEntry, ...] = (
         description="Repository-relative globs folded into every gate unit's input hash.",
     ),
     ConfigEntry(
+        key="repositories.*.worktree.setup",
+        type="list[str]",
+        default=None,
+        description=(
+            "Shell commands `gw work place` runs in order (`sh -c`) in a freshly placed worktree, after the "
+            "built-in `git submodule update --init --recursive` when the repository has a `.gitmodules`. "
+            "The first non-zero exit refuses the placement as `setup-failed`; commands must be idempotent."
+        ),
+    ),
+    ConfigEntry(
         key="ignore",
         type="list[str]",
         default=[],

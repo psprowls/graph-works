@@ -54,6 +54,7 @@ def test_the_catalog_carries_exactly_the_documented_keys():
         "repositories.*.gate.scoped.command",
         "repositories.*.gate.units",
         "repositories.*.gate.extra_inputs",
+        "repositories.*.worktree.setup",
         "ignore",
         "state_gate.enabled",
         "state_gate.branches",

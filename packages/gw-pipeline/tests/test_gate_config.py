@@ -149,3 +149,19 @@ def test_unit_jobs_refusal_names_the_local_workflow_file(tmp_path: Path) -> None
         WorkspaceError, match=r"workflow\.local\.yaml: workflow\.gate\.unit_jobs: must be a positive integer"
     ):
         gate_config.unit_jobs(layout_for(tmp_path))
+
+
+def test_worktree_setup_defaults_to_empty(tmp_path: Path) -> None:
+    assert gate_config.worktree_setup(_layout(tmp_path, ""), "code") == ()
+
+
+def test_worktree_setup_reads_an_ordered_command_list(tmp_path: Path) -> None:
+    layout = _layout(tmp_path, "    worktree:\n      setup: [pnpm install, pnpm orca:install]\n")
+    assert gate_config.worktree_setup(layout, "code") == ("pnpm install", "pnpm orca:install")
+
+
+@pytest.mark.parametrize("value", ["'not-a-list'", "[1]", "['']", "true"])
+def test_worktree_setup_refuses_wrong_shapes(tmp_path: Path, value: str) -> None:
+    layout = _layout(tmp_path, f"    worktree:\n      setup: {value}\n")
+    with pytest.raises(WorkspaceError, match=r"worktree\.setup"):
+        gate_config.worktree_setup(layout, "code")
